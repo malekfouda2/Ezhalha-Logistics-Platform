@@ -1,0 +1,287 @@
+You are a senior enterprise software engineering team.
+
+Your task is to design and build a PRODUCTION-READY logistics management platform called "ezhalha".
+
+DO NOT simplify.
+DO NOT skip features.
+DO NOT assume anything is “out of scope”.
+This system must be secure, scalable, auditable, and enterprise-grade.
+
+----------------------------------
+0. PRODUCT IDENTITY & BRANDING (MANDATORY)
+----------------------------------
+Application Name: ezhalha
+
+Branding Rules:
+- Official product name is "ezhalha"
+- Primary brand color: #fe5200
+- No placeholder names or colors
+- Branding must be consistent across:
+  - API responses
+  - System configuration
+  - Documentation
+
+Logo Handling:
+- A PNG logo will be provided
+- Store at: /assets/branding/logo.png
+
+Branding Config Endpoint:
+GET /config/branding
+Returns:
+- appName
+- primaryColor
+- logoUrl
+
+----------------------------------
+1. TECH STACK (MANDATORY)
+----------------------------------
+- Backend: Node.js + TypeScript
+- Framework: NestJS
+- ORM: Prisma
+- Database: PostgreSQL
+- Auth: JWT + Refresh Tokens
+- RBAC: Dynamic Role-Based Access Control
+- API Style: REST
+- Validation: class-validator
+- Logging: Winston
+- Auditing: Database + File logs
+- Deployment target: Linux server (aaPanel)
+- Environment variables ONLY
+
+----------------------------------
+2. CORE SYSTEM MODULES
+----------------------------------
+You MUST implement:
+
+1) Authentication & Security
+2) Users & Roles
+3) Permissions Engine
+4) Clients & Client Profiles
+5) Shipments
+6) Pricing & Profit Engine
+7) Payments
+8) Invoices
+9) External Integrations (FedEx, Zoho)
+10) System Logs & Audit Trail
+11) Admin Panel APIs
+12) Webhooks Handler
+13) Branding Config Module
+
+----------------------------------
+3. USER TYPES & ACCESS MODEL (CRITICAL)
+----------------------------------
+
+### User Types:
+1) Admin
+2) Client User (belongs to a Client Account)
+
+RULES:
+- Client accounts are CREATED ONLY by Admins
+- Clients CANNOT self-register
+- Each client belongs to ONE client account
+- Client users inherit permissions from assigned roles
+
+----------------------------------
+4. CLIENT PROFILES & PRICING TIERS (MANDATORY)
+----------------------------------
+Client profiles:
+- Regular
+- Mid-Level
+- VIP
+
+Rules:
+- Each profile has its own profit margin configuration
+- Margins are managed ONLY by Admins
+- Margins are dynamic and editable at any time
+- Admin can change a client’s profile after account creation
+- Margin changes apply to NEW shipments only (not retroactive)
+
+----------------------------------
+5. CLIENT ACCOUNT MANAGEMENT (ADMIN)
+----------------------------------
+Admins can:
+- Create client accounts
+- Assign client profile (Regular / Mid / VIP)
+- Update client profile at any time
+- Activate / deactivate client accounts
+- View client shipment history
+- View client invoices & payments
+
+----------------------------------
+6. CLIENT PORTAL (FUNCTIONAL REQUIREMENTS)
+----------------------------------
+Client users can:
+
+Dashboard:
+- View shipment summary
+- View account profile (Regular / Mid / VIP)
+- View pricing tier name (NOT margin values)
+
+Shipments:
+- Create shipment
+- View shipment status
+- Track shipment
+- Cancel shipment (if allowed)
+- View shipment history
+
+Finance:
+- View invoices
+- View payments
+- Download invoices (PDF-ready)
+
+Account:
+- View account details
+- Manage their own user profile
+- NO access to margin or base rates
+
+----------------------------------
+7. CLIENT APPLICATION FLOW (NO AUTO-REGISTRATION)
+----------------------------------
+Client login page MUST include:
+Button: "Apply for an account"
+
+Flow:
+1. Client fills application form:
+   - Name
+   - Country
+   - Phone number
+   - Email
+2. Form creates a ClientApplication record
+3. Admin is notified
+4. Admin reviews application
+5. Admin may:
+   - Approve → create client account
+   - Reject → mark as rejected
+6. Approved clients receive login credentials via email
+
+NO automatic access is granted.
+
+----------------------------------
+8. DATA MODELS (MANDATORY)
+----------------------------------
+Create Prisma schemas for:
+
+- User
+- Role
+- Permission
+- UserRole
+- RolePermission
+- ClientAccount
+- ClientProfile
+- ClientApplication
+- Shipment
+- PricingRule
+- Invoice
+- Payment
+- IntegrationLog
+- AuditLog
+- WebhookEvent
+
+Rules:
+- UUID primary keys
+- createdAt / updatedAt
+- Soft deletes where applicable
+- Foreign keys enforced
+
+----------------------------------
+9. PRICING & PROFIT ENGINE
+----------------------------------
+Pricing flow:
+1. Fetch base rate from carrier
+2. Identify client profile
+3. Apply margin for that profile
+4. Store:
+   - Base rate
+   - Margin
+   - Final price
+
+Client sees:
+- Final price only
+
+Internal system stores:
+- Base rate
+- Margin
+- Profit
+
+----------------------------------
+10. SHIPMENTS MODULE
+----------------------------------
+Architecture:
+Controller → Service → Carrier Adapter → External API
+
+Support:
+- Create shipment
+- Update shipment
+- Cancel shipment
+- Track shipment
+- Shipment events via webhooks
+
+----------------------------------
+11. PAYMENTS & MONEY FLOW
+----------------------------------
+- Stripe-ready integration
+- ezhalha collects 100% of payments
+- Carriers are paid later via corporate billing
+- Margin tracked internally
+
+----------------------------------
+12. INVOICES & ZOHO BOOKS
+----------------------------------
+- Internal invoice with margin separation
+- Client invoice shows total only
+- Sync invoices to Zoho Books
+- Store Zoho invoice ID
+
+----------------------------------
+13. SECURITY REQUIREMENTS (STRICT)
+----------------------------------
+Implement ALL:
+- bcrypt password hashing
+- JWT + refresh token rotation
+- Rate limiting
+- Brute-force protection
+- SQL injection prevention
+- XSS & CSRF protection
+- Input validation everywhere
+- Helmet headers
+- Webhook signature validation
+- API idempotency
+- Permission guards
+
+----------------------------------
+14. LOGGING & AUDITING
+----------------------------------
+Log EVERYTHING:
+- Admin actions
+- Client actions
+- Pricing changes
+- Profile changes
+- Integrations
+- Webhooks
+- Failures
+
+----------------------------------
+15. DEPLOYMENT (aaPanel)
+----------------------------------
+Include:
+- Build scripts
+- PM2 config
+- Nginx config
+- .env.example
+- PostgreSQL config
+- Log directories
+
+----------------------------------
+16. OUTPUT REQUIREMENTS
+----------------------------------
+You MUST:
+- Generate full NestJS project
+- Provide real production-ready code
+- Provide deployment steps
+- Provide environment setup
+- Provide sample API calls
+- NOT leave TODOs
+
+Failure to implement ANY requirement is NOT acceptable.
+
+Build ezhalha as a secure enterprise logistics SaaS.
