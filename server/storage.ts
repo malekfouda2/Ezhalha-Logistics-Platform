@@ -1,38 +1,376 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import {
+  type User,
+  type InsertUser,
+  type ClientAccount,
+  type InsertClientAccount,
+  type ClientApplication,
+  type InsertClientApplication,
+  type Shipment,
+  type InsertShipment,
+  type Invoice,
+  type InsertInvoice,
+  type Payment,
+  type InsertPayment,
+  type PricingRule,
+  type InsertPricingRule,
+  type AuditLog,
+  type InsertAuditLog,
+  users,
+  clientAccounts,
+  clientApplications,
+  shipments,
+  invoices,
+  payments,
+  pricingRules,
+  auditLogs,
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
+  // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+
+  // Client Accounts
+  getClientAccounts(): Promise<ClientAccount[]>;
+  getClientAccount(id: string): Promise<ClientAccount | undefined>;
+  createClientAccount(account: InsertClientAccount): Promise<ClientAccount>;
+  updateClientAccount(id: string, updates: Partial<ClientAccount>): Promise<ClientAccount | undefined>;
+
+  // Client Applications
+  getClientApplications(): Promise<ClientApplication[]>;
+  getClientApplication(id: string): Promise<ClientApplication | undefined>;
+  createClientApplication(application: InsertClientApplication): Promise<ClientApplication>;
+  updateClientApplication(id: string, updates: Partial<ClientApplication>): Promise<ClientApplication | undefined>;
+
+  // Shipments
+  getShipments(): Promise<Shipment[]>;
+  getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
+  getShipment(id: string): Promise<Shipment | undefined>;
+  createShipment(shipment: InsertShipment): Promise<Shipment>;
+  updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
+
+  // Invoices
+  getInvoices(): Promise<Invoice[]>;
+  getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]>;
+  getInvoice(id: string): Promise<Invoice | undefined>;
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | undefined>;
+
+  // Payments
+  getPayments(): Promise<Payment[]>;
+  getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
+  createPayment(payment: InsertPayment): Promise<Payment>;
+
+  // Pricing Rules
+  getPricingRules(): Promise<PricingRule[]>;
+  getPricingRuleByProfile(profile: string): Promise<PricingRule | undefined>;
+  updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined>;
+
+  // Audit Logs
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+
+  // Initialization
+  initializeDefaults(): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+function generateTrackingNumber(): string {
+  const prefix = "EZH";
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}${timestamp}${random}`;
+}
 
-  constructor() {
-    this.users = new Map();
-  }
+function generateInvoiceNumber(): string {
+  const prefix = "INV";
+  const year = new Date().getFullYear();
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `${prefix}-${year}-${random}`;
+}
 
+// DatabaseStorage implementation using Drizzle ORM
+export class DatabaseStorage implements IStorage {
+  // Users
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
+  }
+
+  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    const [user] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return user || undefined;
+  }
+
+  // Client Accounts
+  async getClientAccounts(): Promise<ClientAccount[]> {
+    return db.select().from(clientAccounts).orderBy(desc(clientAccounts.createdAt));
+  }
+
+  async getClientAccount(id: string): Promise<ClientAccount | undefined> {
+    const [account] = await db.select().from(clientAccounts).where(eq(clientAccounts.id, id));
+    return account || undefined;
+  }
+
+  async createClientAccount(account: InsertClientAccount): Promise<ClientAccount> {
+    const [newAccount] = await db.insert(clientAccounts).values(account).returning();
+    return newAccount;
+  }
+
+  async updateClientAccount(id: string, updates: Partial<ClientAccount>): Promise<ClientAccount | undefined> {
+    const [account] = await db.update(clientAccounts).set(updates).where(eq(clientAccounts.id, id)).returning();
+    return account || undefined;
+  }
+
+  // Client Applications
+  async getClientApplications(): Promise<ClientApplication[]> {
+    return db.select().from(clientApplications).orderBy(desc(clientApplications.createdAt));
+  }
+
+  async getClientApplication(id: string): Promise<ClientApplication | undefined> {
+    const [application] = await db.select().from(clientApplications).where(eq(clientApplications.id, id));
+    return application || undefined;
+  }
+
+  async createClientApplication(application: InsertClientApplication): Promise<ClientApplication> {
+    const [newApplication] = await db.insert(clientApplications).values(application).returning();
+    return newApplication;
+  }
+
+  async updateClientApplication(id: string, updates: Partial<ClientApplication>): Promise<ClientApplication | undefined> {
+    const [application] = await db.update(clientApplications).set(updates).where(eq(clientApplications.id, id)).returning();
+    return application || undefined;
+  }
+
+  // Shipments
+  async getShipments(): Promise<Shipment[]> {
+    return db.select().from(shipments).orderBy(desc(shipments.createdAt));
+  }
+
+  async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {
+    return db.select().from(shipments).where(eq(shipments.clientAccountId, clientAccountId)).orderBy(desc(shipments.createdAt));
+  }
+
+  async getShipment(id: string): Promise<Shipment | undefined> {
+    const [shipment] = await db.select().from(shipments).where(eq(shipments.id, id));
+    return shipment || undefined;
+  }
+
+  async createShipment(shipment: InsertShipment): Promise<Shipment> {
+    const [newShipment] = await db.insert(shipments).values({
+      ...shipment,
+      trackingNumber: generateTrackingNumber(),
+    }).returning();
+    return newShipment;
+  }
+
+  async updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined> {
+    const [shipment] = await db.update(shipments).set({
+      ...updates,
+      updatedAt: new Date(),
+    }).where(eq(shipments.id, id)).returning();
+    return shipment || undefined;
+  }
+
+  // Invoices
+  async getInvoices(): Promise<Invoice[]> {
+    return db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  async getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]> {
+    return db.select().from(invoices).where(eq(invoices.clientAccountId, clientAccountId)).orderBy(desc(invoices.createdAt));
+  }
+
+  async getInvoice(id: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return invoice || undefined;
+  }
+
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    const [newInvoice] = await db.insert(invoices).values({
+      ...invoice,
+      invoiceNumber: generateInvoiceNumber(),
+    }).returning();
+    return newInvoice;
+  }
+
+  async updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | undefined> {
+    const [invoice] = await db.update(invoices).set(updates).where(eq(invoices.id, id)).returning();
+    return invoice || undefined;
+  }
+
+  // Payments
+  async getPayments(): Promise<Payment[]> {
+    return db.select().from(payments).orderBy(desc(payments.createdAt));
+  }
+
+  async getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]> {
+    return db.select().from(payments).where(eq(payments.clientAccountId, clientAccountId)).orderBy(desc(payments.createdAt));
+  }
+
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const [newPayment] = await db.insert(payments).values(payment).returning();
+    return newPayment;
+  }
+
+  // Pricing Rules
+  async getPricingRules(): Promise<PricingRule[]> {
+    return db.select().from(pricingRules);
+  }
+
+  async getPricingRuleByProfile(profile: string): Promise<PricingRule | undefined> {
+    const [rule] = await db.select().from(pricingRules).where(eq(pricingRules.profile, profile));
+    return rule || undefined;
+  }
+
+  async updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined> {
+    const [rule] = await db.update(pricingRules).set({
+      ...updates,
+      updatedAt: new Date(),
+    }).where(eq(pricingRules.id, id)).returning();
+    return rule || undefined;
+  }
+
+  // Audit Logs
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [auditLog] = await db.insert(auditLogs).values(log).returning();
+    return auditLog;
+  }
+
+  // Initialize default data if database is empty
+  async initializeDefaults(): Promise<void> {
+    // Check if admin user already exists
+    const existingAdmin = await this.getUserByUsername("admin");
+    if (existingAdmin) {
+      console.log("Database already initialized");
+      return;
+    }
+
+    console.log("Initializing database with default data...");
+
+    // Create admin user (password should be hashed in production)
+    await db.insert(users).values({
+      username: "admin",
+      email: "admin@ezhalha.com",
+      password: "admin123",
+      userType: "admin",
+      isActive: true,
+    });
+
+    // Create default pricing rules
+    const pricingData = [
+      { profile: "regular", marginPercentage: "20.00" },
+      { profile: "mid_level", marginPercentage: "15.00" },
+      { profile: "vip", marginPercentage: "10.00" },
+    ];
+
+    for (const rule of pricingData) {
+      await db.insert(pricingRules).values(rule);
+    }
+
+    // Create sample client account
+    const [clientAccount] = await db.insert(clientAccounts).values({
+      name: "Demo Company",
+      email: "demo@company.com",
+      phone: "+1 555 123 4567",
+      country: "United States",
+      profile: "regular",
+      isActive: true,
+    }).returning();
+
+    // Create client user
+    await db.insert(users).values({
+      username: "client",
+      email: "demo@company.com",
+      password: "client123",
+      userType: "client",
+      clientAccountId: clientAccount.id,
+      isActive: true,
+    });
+
+    // Create sample shipments
+    const shipmentData = [
+      { status: "delivered", recipientCity: "New York", recipientCountry: "United States", senderCity: "Los Angeles", senderCountry: "United States" },
+      { status: "in_transit", recipientCity: "London", recipientCountry: "United Kingdom", senderCity: "Dubai", senderCountry: "United Arab Emirates" },
+      { status: "processing", recipientCity: "Tokyo", recipientCountry: "Japan", senderCity: "Singapore", senderCountry: "Singapore" },
+    ];
+
+    for (const data of shipmentData) {
+      const baseRate = 50 + Math.random() * 100;
+      const margin = baseRate * 0.2;
+      await db.insert(shipments).values({
+        trackingNumber: generateTrackingNumber(),
+        clientAccountId: clientAccount.id,
+        senderName: "John Sender",
+        senderAddress: "123 Main St",
+        senderCity: data.senderCity,
+        senderCountry: data.senderCountry,
+        senderPhone: "+1 555 000 0001",
+        recipientName: "Jane Recipient",
+        recipientAddress: "456 Oak Ave",
+        recipientCity: data.recipientCity,
+        recipientCountry: data.recipientCountry,
+        recipientPhone: "+1 555 000 0002",
+        weight: String((1 + Math.random() * 10).toFixed(2)),
+        dimensions: "30x20x15",
+        packageType: "parcel",
+        status: data.status,
+        baseRate: baseRate.toFixed(2),
+        margin: margin.toFixed(2),
+        finalPrice: (baseRate + margin).toFixed(2),
+        carrierName: "FedEx",
+        estimatedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+    }
+
+    // Create sample invoices
+    const invoiceData = [
+      { status: "completed", amount: "125.50" },
+      { status: "pending", amount: "89.00" },
+    ];
+
+    for (const data of invoiceData) {
+      await db.insert(invoices).values({
+        invoiceNumber: generateInvoiceNumber(),
+        clientAccountId: clientAccount.id,
+        amount: data.amount,
+        status: data.status,
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        paidAt: data.status === "completed" ? new Date() : null,
+      });
+    }
+
+    // Create sample pending applications
+    const applicationData = [
+      { name: "Sarah Johnson", email: "sarah@techcorp.com", country: "United States", companyName: "TechCorp Inc" },
+      { name: "Mohammed Al-Rashid", email: "mohammed@tradeco.ae", country: "United Arab Emirates", companyName: "TradeCo" },
+    ];
+
+    for (const data of applicationData) {
+      await db.insert(clientApplications).values({
+        name: data.name,
+        email: data.email,
+        phone: "+1 555 999 0000",
+        country: data.country,
+        companyName: data.companyName,
+        status: "pending",
+      });
+    }
+
+    console.log("Database initialization complete!");
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
