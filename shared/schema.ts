@@ -262,14 +262,7 @@ export const applicationFormSchema = z.object({
   email: z.string().email("Invalid email address"),
   phone: z.string().min(8, "Phone number must be at least 8 digits"),
   country: z.string().min(2, "Country is required"),
-  companyName: z.string().min(2, "Company name is required"),
-  crNumber: z.string().min(5, "Commercial Registration number is required"),
-  taxNumber: z.string().min(5, "Tax number is required"),
-  nationalAddressStreet: z.string().min(3, "Street address is required"),
-  nationalAddressBuilding: z.string().min(1, "Building number is required"),
-  nationalAddressDistrict: z.string().min(2, "District is required"),
-  nationalAddressCity: z.string().min(2, "City is required"),
-  nationalAddressPostalCode: z.string().min(4, "Postal code is required"),
+  companyName: z.string().optional(),
   documents: z.array(z.string()).optional(),
 });
 
