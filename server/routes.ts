@@ -12,6 +12,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import MemoryStore from "memorystore";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 
 // Extend express-session types
 declare module "express-session" {
@@ -245,6 +246,7 @@ export async function registerRoutes(
           nationalAddressDistrict: application.nationalAddressDistrict,
           nationalAddressCity: application.nationalAddressCity,
           nationalAddressPostalCode: application.nationalAddressPostalCode,
+          documents: application.documents,
           profile: profile || "regular",
           isActive: true,
         });
@@ -500,6 +502,9 @@ export async function registerRoutes(
     const payments = await storage.getPaymentsByClientAccount(user.clientAccountId);
     res.json(payments);
   });
+
+  // Register object storage routes for file uploads
+  registerObjectStorageRoutes(app);
 
   return httpServer;
 }

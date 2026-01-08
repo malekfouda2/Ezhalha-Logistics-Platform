@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, MoreVertical, Eye, Edit, Power, Package } from "lucide-react";
+import { Search, MoreVertical, Eye, Edit, Power, Package, FileText, Download } from "lucide-react";
 import { Link } from "wouter";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
@@ -49,6 +49,7 @@ export default function AdminClients() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClient, setSelectedClient] = useState<ClientAccount | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [editProfile, setEditProfile] = useState("");
 
   const { data: clients, isLoading } = useQuery<ClientAccount[]>({
@@ -101,6 +102,11 @@ export default function AdminClients() {
       client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       client.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleViewDocs = (client: ClientAccount) => {
+    setSelectedClient(client);
+    setIsDocsOpen(true);
+  };
 
   const handleEditProfile = (client: ClientAccount) => {
     setSelectedClient(client);
@@ -222,6 +228,12 @@ export default function AdminClients() {
                               <Edit className="mr-2 h-4 w-4" />
                               Edit Profile
                             </DropdownMenuItem>
+                            {client.documents && client.documents.length > 0 && (
+                              <DropdownMenuItem onClick={() => handleViewDocs(client)}>
+                                <FileText className="mr-2 h-4 w-4" />
+                                View Documents ({client.documents.length})
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => handleToggleStatus(client)}>
                               <Power className="mr-2 h-4 w-4" />
@@ -273,6 +285,45 @@ export default function AdminClients() {
             >
               Save Changes
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Documents Dialog */}
+      <Dialog open={isDocsOpen} onOpenChange={setIsDocsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Client Documents</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Documents for <strong>{selectedClient?.name}</strong>
+            </p>
+            {selectedClient?.documents && selectedClient.documents.length > 0 ? (
+              <div className="space-y-2">
+                {selectedClient.documents.map((docPath, index) => (
+                  <a
+                    key={docPath}
+                    href={docPath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-2 p-3 rounded-md border hover:bg-muted/50 transition-colors"
+                    data-testid={`link-client-document-${index}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                      <span className="text-sm truncate">Document {index + 1}</span>
+                    </div>
+                    <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No documents available</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setIsDocsOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

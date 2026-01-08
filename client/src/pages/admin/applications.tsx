@@ -34,7 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, Check, X, Building2, Mail, Phone, MapPin, FileText, Hash } from "lucide-react";
+import { Search, Check, X, Building2, Mail, Phone, MapPin, FileText, Hash, Download } from "lucide-react";
 import type { ClientApplication } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -339,6 +339,34 @@ export default function AdminApplications() {
                   <p className="text-muted-foreground">
                     {selectedApp.nationalAddressCity}, {selectedApp.nationalAddressPostalCode}
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* Uploaded Documents */}
+            {selectedApp?.documents && selectedApp.documents.length > 0 && (
+              <div className="p-4 rounded-lg border space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <FileText className="h-4 w-4" />
+                  Uploaded Documents ({selectedApp.documents.length})
+                </div>
+                <div className="space-y-2">
+                  {selectedApp.documents.map((docPath, index) => (
+                    <a
+                      key={docPath}
+                      href={docPath}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
+                      data-testid={`link-document-${index}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                        <span className="text-sm truncate">Document {index + 1}</span>
+                      </div>
+                      <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    </a>
+                  ))}
                 </div>
               </div>
             )}

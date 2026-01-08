@@ -83,6 +83,7 @@ export const clientAccounts = pgTable("client_accounts", {
   nationalAddressDistrict: text("national_address_district"),
   nationalAddressCity: text("national_address_city"),
   nationalAddressPostalCode: text("national_address_postal_code"),
+  documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -111,6 +112,7 @@ export const clientApplications = pgTable("client_applications", {
   nationalAddressDistrict: text("national_address_district"),
   nationalAddressCity: text("national_address_city"),
   nationalAddressPostalCode: text("national_address_postal_code"),
+  documents: text("documents").array(), // Array of document object paths
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
