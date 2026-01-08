@@ -8,6 +8,7 @@ import { NoClients } from "@/components/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -24,6 +25,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -39,8 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, MoreVertical, Eye, Edit, Power, Package, FileText, Download } from "lucide-react";
-import { Link } from "wouter";
+import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar } from "lucide-react";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -48,6 +54,7 @@ export default function AdminClients() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClient, setSelectedClient] = useState<ClientAccount | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [editProfile, setEditProfile] = useState("");
@@ -102,6 +109,11 @@ export default function AdminClients() {
       client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       client.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleViewDetails = (client: ClientAccount) => {
+    setSelectedClient(client);
+    setIsDetailsOpen(true);
+  };
 
   const handleViewDocs = (client: ClientAccount) => {
     setSelectedClient(client);
@@ -218,11 +230,9 @@ export default function AdminClients() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
-                              <Link href={`/admin/clients/${client.id}`}>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Details
-                              </Link>
+                            <DropdownMenuItem onClick={() => handleViewDetails(client)}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              View Details
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleEditProfile(client)}>
                               <Edit className="mr-2 h-4 w-4" />
@@ -325,6 +335,131 @@ export default function AdminClients() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Client Details Sheet */}
+      <Sheet open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <SheetContent className="sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Client Details</SheetTitle>
+          </SheetHeader>
+          {selectedClient && (
+            <div className="mt-6 space-y-6">
+              <div className="flex items-center gap-4">
+                <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center text-2xl font-bold">
+                  {selectedClient.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-lg truncate">{selectedClient.name}</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <ProfileBadge profile={selectedClient.profile} />
+                    <StatusBadge status={selectedClient.isActive ? "active" : "inactive"} />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground">Contact Information</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Mail className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm truncate">{selectedClient.email}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm">{selectedClient.phone}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm">{selectedClient.country}</span>
+                  </div>
+                  {selectedClient.companyName && (
+                    <div className="flex items-center gap-3">
+                      <Building className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <span className="text-sm">{selectedClient.companyName}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground">Account Information</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Client ID</span>
+                    <span className="text-sm font-mono">{selectedClient.id.slice(0, 8)}...</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Joined</span>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm">{format(new Date(selectedClient.createdAt), "MMM d, yyyy")}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground">Documents</h4>
+                {selectedClient.documents && selectedClient.documents.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedClient.documents.map((docPath, index) => (
+                      <a
+                        key={docPath}
+                        href={docPath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between gap-2 p-3 rounded-md border hover:bg-muted/50 transition-colors"
+                        data-testid={`link-detail-document-${index}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                          <span className="text-sm truncate">Document {index + 1}</span>
+                        </div>
+                        <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No documents uploaded</p>
+                )}
+              </div>
+
+              <Separator />
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsDetailsOpen(false);
+                    handleEditProfile(selectedClient);
+                  }}
+                  data-testid="button-edit-from-details"
+                >
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Profile
+                </Button>
+                <Button
+                  variant={selectedClient.isActive ? "destructive" : "default"}
+                  onClick={() => {
+                    handleToggleStatus(selectedClient);
+                    setIsDetailsOpen(false);
+                  }}
+                  data-testid="button-toggle-from-details"
+                >
+                  <Power className="mr-2 h-4 w-4" />
+                  {selectedClient.isActive ? "Deactivate Client" : "Activate Client"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </AdminLayout>
   );
 }
