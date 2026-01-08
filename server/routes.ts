@@ -292,6 +292,41 @@ export async function registerRoutes(
     res.json(clients);
   });
 
+  // Admin - Create Client
+  app.post("/api/admin/clients", requireAdmin, async (req, res) => {
+    try {
+      const { name, email, phone, country, companyName } = req.body;
+      
+      if (!name || !email || !phone || !country) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const client = await storage.createClientAccount({
+        name,
+        email,
+        phone,
+        country,
+        companyName: companyName || null,
+        profile: "regular",
+        isActive: true,
+      });
+      res.status(201).json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Delete Client
+  app.delete("/api/admin/clients/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteClientAccount(id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - Update Client Profile
   app.patch("/api/admin/clients/:id/profile", requireAdmin, async (req, res) => {
     try {

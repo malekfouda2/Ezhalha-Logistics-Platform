@@ -46,7 +46,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar } from "lucide-react";
+import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -57,7 +68,16 @@ export default function AdminClients() {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editProfile, setEditProfile] = useState("");
+  const [newClient, setNewClient] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    country: "",
+    companyName: "",
+  });
 
   const { data: clients, isLoading } = useQuery<ClientAccount[]>({
     queryKey: ["/api/admin/clients"],
@@ -104,6 +124,51 @@ export default function AdminClients() {
     },
   });
 
+  const createClientMutation = useMutation({
+    mutationFn: async (data: typeof newClient) => {
+      await apiRequest("POST", "/api/admin/clients", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
+      setIsCreateOpen(false);
+      setNewClient({ name: "", email: "", phone: "", country: "", companyName: "" });
+      toast({
+        title: "Client created",
+        description: "New client has been created successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Creation failed",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteClientMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/admin/clients/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
+      setIsDeleteOpen(false);
+      setIsDetailsOpen(false);
+      setSelectedClient(null);
+      toast({
+        title: "Client deleted",
+        description: "Client has been permanently deleted.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Deletion failed",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
   const filteredClients = clients?.filter(
     (client) =>
       client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -136,6 +201,23 @@ export default function AdminClients() {
     toggleStatusMutation.mutate({ id: client.id, isActive: !client.isActive });
   };
 
+  const handleDeleteClient = (client: ClientAccount) => {
+    setSelectedClient(client);
+    setIsDeleteOpen(true);
+  };
+
+  const handleCreateClient = () => {
+    if (!newClient.name || !newClient.email || !newClient.phone || !newClient.country) {
+      toast({
+        title: "Missing fields",
+        description: "Please fill in all required fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+    createClientMutation.mutate(newClient);
+  };
+
   if (isLoading) {
     return (
       <AdminLayout>
@@ -155,6 +237,10 @@ export default function AdminClients() {
               Manage client accounts and their profiles
             </p>
           </div>
+          <Button onClick={() => setIsCreateOpen(true)} data-testid="button-create-client">
+            <Plus className="mr-2 h-4 w-4" />
+            Create Client
+          </Button>
         </div>
 
         {/* Filters */}
@@ -246,6 +332,13 @@ export default function AdminClients() {
                             <DropdownMenuItem onClick={() => handleToggleStatus(client)}>
                               <Power className="mr-2 h-4 w-4" />
                               {client.isActive ? "Deactivate" : "Activate"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleDeleteClient(client)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete Client
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -445,7 +538,7 @@ export default function AdminClients() {
                   Edit Profile
                 </Button>
                 <Button
-                  variant={selectedClient.isActive ? "destructive" : "default"}
+                  variant="outline"
                   onClick={() => {
                     handleToggleStatus(selectedClient);
                     setIsDetailsOpen(false);
@@ -455,11 +548,116 @@ export default function AdminClients() {
                   <Power className="mr-2 h-4 w-4" />
                   {selectedClient.isActive ? "Deactivate Client" : "Activate Client"}
                 </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => handleDeleteClient(selectedClient)}
+                  data-testid="button-delete-from-details"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Client
+                </Button>
               </div>
             </div>
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Create Client Dialog */}
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Client</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Full Name *</Label>
+              <Input
+                id="name"
+                placeholder="Enter client name"
+                value={newClient.name}
+                onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+                data-testid="input-new-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email *</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="client@example.com"
+                value={newClient.email}
+                onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                data-testid="input-new-email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone *</Label>
+              <Input
+                id="phone"
+                placeholder="+1 234 567 890"
+                value={newClient.phone}
+                onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+                data-testid="input-new-phone"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="country">Country *</Label>
+              <Input
+                id="country"
+                placeholder="Enter country"
+                value={newClient.country}
+                onChange={(e) => setNewClient({ ...newClient, country: e.target.value })}
+                data-testid="input-new-country"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="companyName">Company Name (Optional)</Label>
+              <Input
+                id="companyName"
+                placeholder="Enter company name"
+                value={newClient.companyName}
+                onChange={(e) => setNewClient({ ...newClient, companyName: e.target.value })}
+                data-testid="input-new-company"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateClient}
+              disabled={createClientMutation.isPending}
+              data-testid="button-save-new-client"
+            >
+              Create Client
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Client</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete <strong>{selectedClient?.name}</strong>?
+              This action cannot be undone and will remove all associated data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => selectedClient && deleteClientMutation.mutate(selectedClient.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminLayout>
   );
 }
