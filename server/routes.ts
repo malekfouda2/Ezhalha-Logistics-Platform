@@ -295,7 +295,7 @@ export async function registerRoutes(
   // Admin - Create Client
   app.post("/api/admin/clients", requireAdmin, async (req, res) => {
     try {
-      const { name, email, phone, country, companyName } = req.body;
+      const { name, email, phone, country, companyName, documents } = req.body;
       
       if (!name || !email || !phone || !country) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -307,6 +307,7 @@ export async function registerRoutes(
         phone,
         country,
         companyName: companyName || null,
+        documents: documents || null,
         profile: "regular",
         isActive: true,
       });

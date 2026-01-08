@@ -46,8 +46,31 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2 } from "lucide-react";
+import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2, Upload, X } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { useUpload } from "@/hooks/use-upload";
+
+const countries = [
+  "Saudi Arabia",
+  "United Arab Emirates",
+  "Qatar",
+  "Kuwait",
+  "Bahrain",
+  "Oman",
+  "Egypt",
+  "Jordan",
+  "Lebanon",
+  "United States",
+  "United Kingdom",
+  "Germany",
+  "France",
+  "Other",
+];
+
+interface UploadedDocument {
+  name: string;
+  path: string;
+}
 import {
   AlertDialog,
   AlertDialogAction,
@@ -78,6 +101,40 @@ export default function AdminClients() {
     country: "",
     companyName: "",
   });
+  const [createUploadedDocs, setCreateUploadedDocs] = useState<UploadedDocument[]>([]);
+  
+  const { uploadFile, isUploading } = useUpload({
+    onSuccess: (response) => {
+      setCreateUploadedDocs((prev) => [
+        ...prev,
+        { name: response.metadata.name, path: response.objectPath },
+      ]);
+      toast({
+        title: "Document uploaded",
+        description: response.metadata.name,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Upload failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (let i = 0; i < files.length; i++) {
+      await uploadFile(files[i]);
+    }
+    e.target.value = "";
+  };
+
+  const removeCreateDocument = (path: string) => {
+    setCreateUploadedDocs((prev) => prev.filter((doc) => doc.path !== path));
+  };
 
   const { data: clients, isLoading } = useQuery<ClientAccount[]>({
     queryKey: ["/api/admin/clients"],
@@ -125,13 +182,14 @@ export default function AdminClients() {
   });
 
   const createClientMutation = useMutation({
-    mutationFn: async (data: typeof newClient) => {
+    mutationFn: async (data: typeof newClient & { documents?: string[] }) => {
       await apiRequest("POST", "/api/admin/clients", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
       setIsCreateOpen(false);
       setNewClient({ name: "", email: "", phone: "", country: "", companyName: "" });
+      setCreateUploadedDocs([]);
       toast({
         title: "Client created",
         description: "New client has been created successfully.",
@@ -215,7 +273,10 @@ export default function AdminClients() {
       });
       return;
     }
-    createClientMutation.mutate(newClient);
+    createClientMutation.mutate({
+      ...newClient,
+      documents: createUploadedDocs.length > 0 ? createUploadedDocs.map((doc) => doc.path) : undefined,
+    });
   };
 
   if (isLoading) {
@@ -564,7 +625,7 @@ export default function AdminClients() {
 
       {/* Create Client Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create New Client</DialogTitle>
           </DialogHeader>
@@ -590,25 +651,35 @@ export default function AdminClients() {
                 data-testid="input-new-email"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone *</Label>
-              <Input
-                id="phone"
-                placeholder="+1 234 567 890"
-                value={newClient.phone}
-                onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
-                data-testid="input-new-phone"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="country">Country *</Label>
-              <Input
-                id="country"
-                placeholder="Enter country"
-                value={newClient.country}
-                onChange={(e) => setNewClient({ ...newClient, country: e.target.value })}
-                data-testid="input-new-country"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone *</Label>
+                <Input
+                  id="phone"
+                  placeholder="+1 234 567 890"
+                  value={newClient.phone}
+                  onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+                  data-testid="input-new-phone"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Country *</Label>
+                <Select
+                  value={newClient.country}
+                  onValueChange={(value) => setNewClient({ ...newClient, country: value })}
+                >
+                  <SelectTrigger data-testid="select-new-country">
+                    <SelectValue placeholder="Select country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {countries.map((country) => (
+                      <SelectItem key={country} value={country}>
+                        {country}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="companyName">Company Name (Optional)</Label>
@@ -620,6 +691,70 @@ export default function AdminClients() {
                 data-testid="input-new-company"
               />
             </div>
+            
+            <div className="pt-4 border-t">
+              <h3 className="text-sm font-medium mb-3">Upload Company Documents</h3>
+              <p className="text-sm text-muted-foreground mb-3">
+                Upload Commercial Registration, Tax Certificate, and other business documents.
+              </p>
+              
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="create-document-upload" className="cursor-pointer">
+                    <div className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-muted/50 transition-colors">
+                      <Upload className="h-4 w-4" />
+                      <span className="text-sm">
+                        {isUploading ? "Uploading..." : "Choose Files"}
+                      </span>
+                    </div>
+                    <input
+                      id="create-document-upload"
+                      type="file"
+                      multiple
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                      className="hidden"
+                      onChange={handleCreateFileSelect}
+                      disabled={isUploading}
+                      data-testid="input-new-documents"
+                    />
+                  </label>
+                  <span className="text-xs text-muted-foreground">
+                    PDF, DOC, DOCX, JPG, PNG
+                  </span>
+                </div>
+                
+                {createUploadedDocs.length > 0 && (
+                  <div className="space-y-2">
+                    {createUploadedDocs.map((doc) => (
+                      <div
+                        key={doc.path}
+                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                          <span className="text-sm truncate">{doc.name}</span>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => removeCreateDocument(doc.path)}
+                          data-testid={`button-remove-create-doc-${doc.path}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {createUploadedDocs.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No documents uploaded yet
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
@@ -627,7 +762,7 @@ export default function AdminClients() {
             </Button>
             <Button
               onClick={handleCreateClient}
-              disabled={createClientMutation.isPending}
+              disabled={createClientMutation.isPending || isUploading}
               data-testid="button-save-new-client"
             >
               Create Client
