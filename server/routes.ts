@@ -233,6 +233,12 @@ export async function registerRoutes(
       }
 
       if (action === "approve") {
+        // Check if a user with this email already exists
+        const existingUser = await storage.getUserByEmail(application.email);
+        if (existingUser) {
+          return res.status(400).json({ error: "A user with this email already exists" });
+        }
+
         // Create client account with all company document fields
         const clientAccount = await storage.createClientAccount({
           name: application.name,
@@ -252,8 +258,16 @@ export async function registerRoutes(
           isActive: true,
         });
 
-        // Create user for client
-        const username = application.email.split("@")[0];
+        // Create user for client - generate unique username if needed
+        let username = application.email.split("@")[0];
+        let existingUsername = await storage.getUserByUsername(username);
+        let counter = 1;
+        while (existingUsername) {
+          username = `${application.email.split("@")[0]}${counter}`;
+          existingUsername = await storage.getUserByUsername(username);
+          counter++;
+        }
+        
         await storage.createUser({
           username,
           email: application.email,
@@ -282,6 +296,7 @@ export async function registerRoutes(
         res.status(400).json({ error: "Invalid action" });
       }
     } catch (error) {
+      console.error("Error reviewing application:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
