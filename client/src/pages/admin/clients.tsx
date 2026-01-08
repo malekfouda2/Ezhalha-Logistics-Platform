@@ -228,12 +228,10 @@ export default function AdminClients() {
                               <Edit className="mr-2 h-4 w-4" />
                               Edit Profile
                             </DropdownMenuItem>
-                            {client.documents && client.documents.length > 0 && (
-                              <DropdownMenuItem onClick={() => handleViewDocs(client)}>
-                                <FileText className="mr-2 h-4 w-4" />
-                                View Documents ({client.documents.length})
-                              </DropdownMenuItem>
-                            )}
+                            <DropdownMenuItem onClick={() => handleViewDocs(client)}>
+                              <FileText className="mr-2 h-4 w-4" />
+                              View Documents {client.documents?.length ? `(${client.documents.length})` : ''}
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => handleToggleStatus(client)}>
                               <Power className="mr-2 h-4 w-4" />

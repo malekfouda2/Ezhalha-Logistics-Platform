@@ -344,12 +344,12 @@ export default function AdminApplications() {
             )}
 
             {/* Uploaded Documents */}
-            {selectedApp?.documents && selectedApp.documents.length > 0 && (
-              <div className="p-4 rounded-lg border space-y-2">
-                <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                  <FileText className="h-4 w-4" />
-                  Uploaded Documents ({selectedApp.documents.length})
-                </div>
+            <div className="p-4 rounded-lg border space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                <FileText className="h-4 w-4" />
+                Uploaded Documents {selectedApp?.documents?.length ? `(${selectedApp.documents.length})` : ''}
+              </div>
+              {selectedApp?.documents && selectedApp.documents.length > 0 ? (
                 <div className="space-y-2">
                   {selectedApp.documents.map((docPath, index) => (
                     <a
@@ -368,8 +368,10 @@ export default function AdminApplications() {
                     </a>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-muted-foreground">No documents uploaded</p>
+              )}
+            </div>
 
             {reviewAction === "approve" && (
               <div>
