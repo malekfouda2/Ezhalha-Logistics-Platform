@@ -148,6 +148,7 @@ export async function registerRoutes(
       const data = applicationFormSchema.parse(req.body);
       const application = await storage.createClientApplication({
         ...data,
+        documents: data.documents || null,
         status: "pending",
       });
       res.status(201).json(application);

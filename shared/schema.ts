@@ -270,6 +270,7 @@ export const applicationFormSchema = z.object({
   nationalAddressDistrict: z.string().min(2, "District is required"),
   nationalAddressCity: z.string().min(2, "City is required"),
   nationalAddressPostalCode: z.string().min(4, "Postal code is required"),
+  documents: z.array(z.string()).optional(),
 });
 
 export type ApplicationFormData = z.infer<typeof applicationFormSchema>;
