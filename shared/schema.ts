@@ -75,6 +75,14 @@ export const clientAccounts = pgTable("client_accounts", {
   email: text("email").notNull().unique(),
   phone: text("phone").notNull(),
   country: text("country").notNull(),
+  companyName: text("company_name"),
+  crNumber: text("cr_number"), // Commercial Registration number
+  taxNumber: text("tax_number"), // Tax Number
+  nationalAddressStreet: text("national_address_street"),
+  nationalAddressBuilding: text("national_address_building"),
+  nationalAddressDistrict: text("national_address_district"),
+  nationalAddressCity: text("national_address_city"),
+  nationalAddressPostalCode: text("national_address_postal_code"),
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -96,6 +104,13 @@ export const clientApplications = pgTable("client_applications", {
   phone: text("phone").notNull(),
   country: text("country").notNull(),
   companyName: text("company_name"),
+  crNumber: text("cr_number"), // Commercial Registration number
+  taxNumber: text("tax_number"), // Tax Number
+  nationalAddressStreet: text("national_address_street"),
+  nationalAddressBuilding: text("national_address_building"),
+  nationalAddressDistrict: text("national_address_district"),
+  nationalAddressCity: text("national_address_city"),
+  nationalAddressPostalCode: text("national_address_postal_code"),
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
@@ -245,7 +260,14 @@ export const applicationFormSchema = z.object({
   email: z.string().email("Invalid email address"),
   phone: z.string().min(8, "Phone number must be at least 8 digits"),
   country: z.string().min(2, "Country is required"),
-  companyName: z.string().optional(),
+  companyName: z.string().min(2, "Company name is required"),
+  crNumber: z.string().min(5, "Commercial Registration number is required"),
+  taxNumber: z.string().min(5, "Tax number is required"),
+  nationalAddressStreet: z.string().min(3, "Street address is required"),
+  nationalAddressBuilding: z.string().min(1, "Building number is required"),
+  nationalAddressDistrict: z.string().min(2, "District is required"),
+  nationalAddressCity: z.string().min(2, "City is required"),
+  nationalAddressPostalCode: z.string().min(4, "Postal code is required"),
 });
 
 export type ApplicationFormData = z.infer<typeof applicationFormSchema>;

@@ -34,7 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, Check, X, Eye, Building2, Mail, Phone, MapPin } from "lucide-react";
+import { Search, Check, X, Building2, Mail, Phone, MapPin, FileText, Hash } from "lucide-react";
 import type { ClientApplication } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -289,7 +289,7 @@ export default function AdminApplications() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-4 space-y-4">
+          <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
             {/* Applicant Info */}
             <div className="p-4 rounded-lg bg-muted/50 space-y-2">
               <p className="font-medium">{selectedApp?.name}</p>
@@ -299,6 +299,49 @@ export default function AdminApplications() {
                 {selectedApp?.companyName && ` - ${selectedApp.companyName}`}
               </p>
             </div>
+
+            {/* Company Documents */}
+            {(selectedApp?.crNumber || selectedApp?.taxNumber) && (
+              <div className="p-4 rounded-lg border space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <FileText className="h-4 w-4" />
+                  Company Documents
+                </div>
+                {selectedApp?.crNumber && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Hash className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">CR Number:</span>
+                    <span>{selectedApp.crNumber}</span>
+                  </div>
+                )}
+                {selectedApp?.taxNumber && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Hash className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Tax Number:</span>
+                    <span>{selectedApp.taxNumber}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* National Address */}
+            {selectedApp?.nationalAddressStreet && (
+              <div className="p-4 rounded-lg border space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <MapPin className="h-4 w-4" />
+                  National Address
+                </div>
+                <div className="text-sm space-y-1">
+                  <p>{selectedApp.nationalAddressStreet}</p>
+                  <p className="text-muted-foreground">
+                    Building: {selectedApp.nationalAddressBuilding}, District: {selectedApp.nationalAddressDistrict}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {selectedApp.nationalAddressCity}, {selectedApp.nationalAddressPostalCode}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {reviewAction === "approve" && (
               <div>

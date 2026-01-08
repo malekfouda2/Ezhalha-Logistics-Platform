@@ -59,6 +59,13 @@ export default function ApplyPage() {
       phone: "",
       country: "",
       companyName: "",
+      crNumber: "",
+      taxNumber: "",
+      nationalAddressStreet: "",
+      nationalAddressBuilding: "",
+      nationalAddressDistrict: "",
+      nationalAddressCity: "",
+      nationalAddressPostalCode: "",
     },
   });
 
@@ -235,7 +242,7 @@ export default function ApplyPage() {
                   name="companyName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Company Name (Optional)</FormLabel>
+                      <FormLabel>Company Name</FormLabel>
                       <FormControl>
                         <Input
                           placeholder="Your company name"
@@ -243,13 +250,152 @@ export default function ApplyPage() {
                           {...field}
                         />
                       </FormControl>
-                      <FormDescription>
-                        Leave blank if you're an individual
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                <div className="pt-4 border-t">
+                  <h3 className="text-sm font-medium mb-3">Company Documents</h3>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="crNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Commercial Registration (CR) Number</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., 1010123456"
+                                data-testid="input-cr-number"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="taxNumber"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Tax Number (VAT)</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., 300012345678903"
+                                data-testid="input-tax-number"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <h3 className="text-sm font-medium mb-3">National Address</h3>
+                  <div className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressStreet"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Street Name</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="e.g., King Fahd Road"
+                              data-testid="input-address-street"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="nationalAddressBuilding"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Building Number</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., 1234"
+                                data-testid="input-address-building"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="nationalAddressDistrict"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>District</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., Al Olaya"
+                                data-testid="input-address-district"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="nationalAddressCity"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>City</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., Riyadh"
+                                data-testid="input-address-city"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="nationalAddressPostalCode"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Postal Code</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g., 12345"
+                                data-testid="input-address-postal"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 <Button
                   type="submit"
@@ -270,7 +416,7 @@ export default function ApplyPage() {
 
           <CardFooter className="justify-center pt-2">
             <Link href="/">
-              <Button variant="link" data-testid="link-back-login">
+              <Button variant="ghost" data-testid="link-back-login">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Login
               </Button>

@@ -231,12 +231,20 @@ export async function registerRoutes(
       }
 
       if (action === "approve") {
-        // Create client account
+        // Create client account with all company document fields
         const clientAccount = await storage.createClientAccount({
           name: application.name,
           email: application.email,
           phone: application.phone,
           country: application.country,
+          companyName: application.companyName,
+          crNumber: application.crNumber,
+          taxNumber: application.taxNumber,
+          nationalAddressStreet: application.nationalAddressStreet,
+          nationalAddressBuilding: application.nationalAddressBuilding,
+          nationalAddressDistrict: application.nationalAddressDistrict,
+          nationalAddressCity: application.nationalAddressCity,
+          nationalAddressPostalCode: application.nationalAddressPostalCode,
           profile: profile || "regular",
           isActive: true,
         });
