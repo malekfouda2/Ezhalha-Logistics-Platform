@@ -6,12 +6,18 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 
 **Key Features:**
 - Dual portal system (Admin and Client)
-- Shipment tracking and management
+- Shipment tracking and management with status updates and cancellation
 - Client application and onboarding workflow
-- Invoice and payment processing
-- Tiered client profiles (Regular, Mid-Level, VIP)
-- Dynamic pricing rules
-- Audit logging
+- Invoice and payment processing with PDF generation
+- Tiered client profiles (Regular, Mid-Level, VIP) with discount benefits
+- Dynamic pricing rules with profile-based margins
+- Comprehensive audit logging with admin viewing
+
+**Security:**
+- Bcrypt password hashing (10 salt rounds)
+- RBAC tables prepared for future granular permissions
+- Session-based authentication with secure cookies
+- Audit trail for all admin/client actions
 
 ## User Preferences
 
