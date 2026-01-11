@@ -2,9 +2,73 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
 import bcrypt from "bcrypt";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 
 const SALT_ROUNDS = 10;
+
+// Rate limiter for general API requests
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per window
+  message: { error: "Too many requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter rate limiter for auth endpoints (brute-force protection)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 login attempts per window
+  message: { error: "Too many login attempts, please try again in 15 minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // Only count failed attempts
+});
+
+// Track failed login attempts for additional brute-force protection
+const failedLoginAttempts = new Map<string, { count: number; lastAttempt: number }>();
+
+function checkBruteForce(identifier: string): { blocked: boolean; remainingTime?: number } {
+  const now = Date.now();
+  const maxAttempts = 5;
+  const lockoutTime = 15 * 60 * 1000; // 15 minutes
+  
+  const attempts = failedLoginAttempts.get(identifier);
+  if (!attempts) return { blocked: false };
+  
+  // Reset if lockout period has passed
+  if (now - attempts.lastAttempt > lockoutTime) {
+    failedLoginAttempts.delete(identifier);
+    return { blocked: false };
+  }
+  
+  if (attempts.count >= maxAttempts) {
+    return { 
+      blocked: true, 
+      remainingTime: Math.ceil((lockoutTime - (now - attempts.lastAttempt)) / 1000) 
+    };
+  }
+  
+  return { blocked: false };
+}
+
+function recordFailedLogin(identifier: string) {
+  const now = Date.now();
+  const attempts = failedLoginAttempts.get(identifier);
+  
+  if (attempts) {
+    attempts.count++;
+    attempts.lastAttempt = now;
+  } else {
+    failedLoginAttempts.set(identifier, { count: 1, lastAttempt: now });
+  }
+}
+
+function clearFailedLogins(identifier: string) {
+  failedLoginAttempts.delete(identifier);
+}
 import {
   loginSchema,
   applicationFormSchema,
@@ -85,6 +149,26 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Security headers with Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:", "https:"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'", "https:"],
+        },
+      },
+      crossOriginEmbedderPolicy: false, // Allow embedding for development
+    })
+  );
+
+  // General rate limiting
+  app.use("/api/", generalLimiter);
+
   // Session middleware
   app.use(
     session({
@@ -95,9 +179,10 @@ export async function registerRoutes(
         checkPeriod: 86400000, // prune expired entries every 24h
       }),
       cookie: {
-        secure: false, // Set to true in production with HTTPS
+        secure: process.env.NODE_ENV === "production",
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: "lax", // CSRF protection
       },
     })
   );
@@ -117,17 +202,35 @@ export async function registerRoutes(
   // ============================================
   // AUTH ROUTES
   // ============================================
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", authLimiter, async (req, res) => {
     try {
       const data = loginSchema.parse(req.body);
+      const identifier = req.ip || data.username;
+      
+      // Check brute-force protection
+      const bruteForceCheck = checkBruteForce(identifier);
+      if (bruteForceCheck.blocked) {
+        await logAudit(undefined, "login_blocked", "security", undefined, 
+          `Login blocked for ${identifier} due to brute-force protection`, req.ip);
+        return res.status(429).json({ 
+          error: `Too many failed attempts. Try again in ${bruteForceCheck.remainingTime} seconds.` 
+        });
+      }
+      
       const user = await storage.getUserByUsername(data.username);
 
       if (!user) {
+        recordFailedLogin(identifier);
+        await logAudit(undefined, "login_failed", "security", undefined, 
+          `Failed login attempt for username: ${data.username}`, req.ip);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       const passwordMatch = await bcrypt.compare(data.password, user.password);
       if (!passwordMatch) {
+        recordFailedLogin(identifier);
+        await logAudit(user.id, "login_failed", "security", user.id, 
+          `Failed login attempt for user: ${user.username}`, req.ip);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
@@ -135,6 +238,9 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Account is deactivated" });
       }
 
+      // Clear failed login attempts on successful login
+      clearFailedLogins(identifier);
+      
       req.session.userId = user.id;
       
       // Log successful login
@@ -604,6 +710,40 @@ export async function registerRoutes(
     res.json(account);
   });
 
+  // Client - Update Account Profile
+  const clientProfileUpdateSchema = z.object({
+    name: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().min(1).optional(),
+    companyName: z.string().optional(),
+  });
+
+  app.patch("/api/client/account", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const data = clientProfileUpdateSchema.parse(req.body);
+      
+      const updated = await storage.updateClientAccount(user.clientAccountId, data);
+      if (!updated) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      await logAudit(req.session.userId, "update_profile", "client_account", user.clientAccountId,
+        `Client updated their profile`, req.ip);
+
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Client - Dashboard Stats
   app.get("/api/client/stats", requireClient, async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
@@ -834,7 +974,7 @@ export async function registerRoutes(
     <div class="party">
       <h3>Bill To</h3>
       <p><strong>${clientAccount?.companyName || 'Client'}</strong></p>
-      <p>${clientAccount?.contactName || ''}</p>
+      <p>${clientAccount?.name || ''}</p>
       <p>${clientAccount?.country || ''}</p>
     </div>
     <div class="party" style="text-align: right;">

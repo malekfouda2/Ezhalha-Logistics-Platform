@@ -105,10 +105,12 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem data-testid="menu-profile">
-                <User className="mr-2 h-4 w-4" />
-                Profile
-              </DropdownMenuItem>
+              <Link href="/client/settings">
+                <DropdownMenuItem data-testid="menu-profile">
+                  <User className="mr-2 h-4 w-4" />
+                  Account Settings
+                </DropdownMenuItem>
+              </Link>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
                 <LogOut className="mr-2 h-4 w-4" />
