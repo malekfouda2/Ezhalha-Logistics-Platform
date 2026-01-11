@@ -149,6 +149,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Trust proxy for rate limiting behind reverse proxy
+  app.set("trust proxy", 1);
+
   // Security headers with Helmet
   app.use(
     helmet({
@@ -186,6 +189,18 @@ export async function registerRoutes(
       },
     })
   );
+
+  // ============================================
+  // HEALTH CHECK
+  // ============================================
+  app.get("/api/health", (_req, res) => {
+    res.json({ 
+      status: "healthy", 
+      timestamp: new Date().toISOString(),
+      version: "1.0.0",
+      service: "ezhalha"
+    });
+  });
 
   // ============================================
   // BRANDING CONFIG
@@ -1058,6 +1073,218 @@ export async function registerRoutes(
 
   // Register object storage routes for file uploads
   registerObjectStorageRoutes(app);
+
+  // ============================================
+  // WEBHOOK HANDLERS
+  // ============================================
+
+  // Webhook signature validation helper with safe comparison
+  function validateWebhookSignature(payload: string, signature: string | undefined, secret: string): boolean {
+    if (!signature) return false;
+    const crypto = require("crypto");
+    const expectedSignature = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+    
+    // Safe comparison that handles length mismatches
+    if (signature.length !== expectedSignature.length) {
+      return false;
+    }
+    
+    try {
+      return crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expectedSignature, "utf8"));
+    } catch {
+      return false;
+    }
+  }
+
+  // FedEx Webhook Handler
+  app.post("/api/webhooks/fedex", async (req, res) => {
+    try {
+      // Use raw body for signature validation if available
+      const rawBody = (req as any).rawBody;
+      const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
+      const signature = req.headers["x-fedex-signature"] as string | undefined;
+      const webhookSecret = process.env.FEDEX_WEBHOOK_SECRET;
+
+      // Validate signature if secret is configured
+      if (webhookSecret && !validateWebhookSignature(payload, signature, webhookSecret)) {
+        await storage.createWebhookEvent({
+          source: "fedex",
+          eventType: "signature_validation_failed",
+          payload,
+          signature: signature || null,
+          processed: false,
+          retryCount: 0,
+          errorMessage: "Invalid webhook signature",
+        });
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+
+      const event = req.body;
+      const eventType = event.eventType || "unknown";
+
+      // Store webhook event
+      const webhookEvent = await storage.createWebhookEvent({
+        source: "fedex",
+        eventType,
+        payload,
+        signature: signature || null,
+        processed: false,
+        retryCount: 0,
+      });
+
+      // Process shipment status updates
+      if (eventType === "shipment.status_update" && event.trackingNumber) {
+        const shipments = await storage.getShipments();
+        const shipment = shipments.find(s => s.trackingNumber === event.trackingNumber);
+        
+        if (shipment && event.status) {
+          const statusMap: Record<string, string> = {
+            "IN_TRANSIT": "in_transit",
+            "DELIVERED": "delivered",
+            "PROCESSING": "processing",
+          };
+          
+          const newStatus = statusMap[event.status] || shipment.status;
+          if (newStatus !== shipment.status) {
+            await storage.updateShipment(shipment.id, { status: newStatus });
+            await logAudit(undefined, "webhook_status_update", "shipment", shipment.id,
+              `FedEx webhook updated status to ${newStatus}`, req.ip);
+          }
+        }
+        
+        await storage.updateWebhookEvent(webhookEvent.id, { processed: true, processedAt: new Date() });
+      }
+
+      res.json({ received: true, eventId: webhookEvent.id });
+    } catch (error) {
+      console.error("FedEx webhook error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // Stripe-specific signature validation
+  // Stripe uses format: t=timestamp,v1=signature,v0=signature
+  function validateStripeSignature(payload: string, signatureHeader: string | undefined, secret: string): boolean {
+    if (!signatureHeader) return false;
+    
+    try {
+      const crypto = require("crypto");
+      
+      // Parse the signature header
+      const elements = signatureHeader.split(",");
+      const sigMap: Record<string, string> = {};
+      
+      for (const element of elements) {
+        const [key, value] = element.split("=");
+        sigMap[key] = value;
+      }
+      
+      const timestamp = sigMap["t"];
+      const v1Signature = sigMap["v1"];
+      
+      if (!timestamp || !v1Signature) return false;
+      
+      // Construct signed payload as per Stripe docs
+      const signedPayload = `${timestamp}.${payload}`;
+      const expectedSignature = crypto.createHmac("sha256", secret).update(signedPayload).digest("hex");
+      
+      // Safe comparison
+      if (v1Signature.length !== expectedSignature.length) return false;
+      
+      return crypto.timingSafeEqual(Buffer.from(v1Signature, "utf8"), Buffer.from(expectedSignature, "utf8"));
+    } catch {
+      return false;
+    }
+  }
+
+  // Stripe Webhook Handler
+  app.post("/api/webhooks/stripe", async (req, res) => {
+    try {
+      // Use raw body for signature validation if available
+      const rawBody = (req as any).rawBody;
+      const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
+      const signature = req.headers["stripe-signature"] as string | undefined;
+      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+      // Validate signature if secret is configured using Stripe's format
+      if (webhookSecret && !validateStripeSignature(payload, signature, webhookSecret)) {
+        await storage.createWebhookEvent({
+          source: "stripe",
+          eventType: "signature_validation_failed",
+          payload,
+          signature: signature || null,
+          processed: false,
+          retryCount: 0,
+          errorMessage: "Invalid webhook signature",
+        });
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+
+      const event = req.body;
+      const eventType = event.type || "unknown";
+
+      // Store webhook event
+      const webhookEvent = await storage.createWebhookEvent({
+        source: "stripe",
+        eventType,
+        payload,
+        signature: signature || null,
+        processed: false,
+        retryCount: 0,
+      });
+
+      // Process payment events
+      if (eventType === "payment_intent.succeeded" && event.data?.object) {
+        const paymentIntent = event.data.object;
+        const invoiceId = paymentIntent.metadata?.invoiceId;
+        
+        if (invoiceId) {
+          // Update invoice status
+          await storage.updateInvoice(invoiceId, { status: "completed" });
+          
+          // Create payment record
+          const invoice = await storage.getInvoice(invoiceId);
+          if (invoice) {
+            await storage.createPayment({
+              clientAccountId: invoice.clientAccountId,
+              invoiceId: invoice.id,
+              amount: String(paymentIntent.amount / 100),
+              paymentMethod: "stripe",
+              transactionId: paymentIntent.id,
+              status: "completed",
+            });
+          }
+          
+          await logAudit(undefined, "webhook_payment", "payment", paymentIntent.id,
+            `Stripe webhook processed payment for invoice ${invoiceId}`, req.ip);
+        }
+        
+        await storage.updateWebhookEvent(webhookEvent.id, { processed: true, processedAt: new Date() });
+      }
+
+      res.json({ received: true, eventId: webhookEvent.id });
+    } catch (error) {
+      console.error("Stripe webhook error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // Generic webhook status endpoint
+  app.get("/api/webhooks/status", requireAdmin, async (_req, res) => {
+    try {
+      const events = await storage.getWebhookEvents();
+      const recentEvents = events.slice(0, 50);
+      const stats = {
+        total: events.length,
+        processed: events.filter(e => e.processed).length,
+        pending: events.filter(e => !e.processed).length,
+        failed: events.filter(e => e.errorMessage).length,
+      };
+      res.json({ stats, recentEvents });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch webhook status" });
+    }
+  });
 
   return httpServer;
 }
