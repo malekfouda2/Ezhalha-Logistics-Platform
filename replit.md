@@ -28,11 +28,30 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Stripe payment service stub (ready for SDK configuration)
 - Zoho Books invoice sync stub (ready for API configuration)
 
+**Logging & Monitoring:**
+- Winston logger with daily rotating file transports
+- Application logs: ./logs/combined-YYYY-MM-DD.log (14 days retention)
+- Error logs: ./logs/error-YYYY-MM-DD.log (30 days retention)
+- Audit logs: ./logs/audit-YYYY-MM-DD.log (90 days retention)
+- All audit actions logged to both database and files
+
+**Email Notifications:**
+- Credentials email on client approval (with temporary password)
+- Application received confirmation
+- Rejection notifications with reason
+- Graceful degradation when SMTP unconfigured
+
+**API Features:**
+- Idempotency support for POST endpoints (database-backed, works with PM2 cluster)
+- 24-hour TTL for idempotency records
+- Use Idempotency-Key header for duplicate prevention
+
 **Deployment:**
 - PM2 ecosystem config with cluster mode
 - Nginx config with SSL and rate limiting
 - Health check endpoint at /api/health
 - .env.example with all required variables
+- Log directories auto-created at startup
 
 ## User Preferences
 
