@@ -6,7 +6,10 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
-import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected } from "./services/email";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication } from "./services/email";
+import { fedexAdapter } from "./integrations/fedex";
+import { zohoService } from "./integrations/zoho";
+import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 
 const SALT_ROUNDS = 10;
@@ -330,8 +333,16 @@ export async function registerRoutes(
         status: "pending",
       });
       
-      // Send confirmation email
+      // Send confirmation email to applicant
       await sendApplicationReceived(data.email, data.name, application.id);
+      
+      // Notify admin of new application
+      await notifyAdminNewApplication(
+        application.id, 
+        data.name, 
+        data.email, 
+        data.companyName || undefined
+      );
       
       // Log the application
       logInfo("New client application received", { 
@@ -518,6 +529,24 @@ export async function registerRoutes(
           isActive: true,
         });
 
+        // Create Zoho Books customer (if configured)
+        if (zohoService.isConfigured()) {
+          try {
+            const zohoCustomerId = await zohoService.createCustomer({
+              name: application.name,
+              email: application.email,
+              phone: application.phone,
+              companyName: application.companyName || undefined,
+              country: application.country,
+            });
+            if (zohoCustomerId) {
+              await storage.updateClientAccount(clientAccount.id, { zohoCustomerId });
+            }
+          } catch (error) {
+            logError("Failed to create Zoho customer", error);
+          }
+        }
+
         // Create user for client - generate unique username if needed
         let username = application.email.split("@")[0];
         let existingUsername = await storage.getUserByUsername(username);
@@ -616,6 +645,24 @@ export async function registerRoutes(
         profile: profile || "regular",
         isActive: true,
       });
+
+      // Create Zoho Books customer (if configured)
+      if (zohoService.isConfigured()) {
+        try {
+          const zohoCustomerId = await zohoService.createCustomer({
+            name,
+            email,
+            phone,
+            companyName: companyName || undefined,
+            country,
+          });
+          if (zohoCustomerId) {
+            await storage.updateClientAccount(client.id, { zohoCustomerId });
+          }
+        } catch (error) {
+          logError("Failed to create Zoho customer", error);
+        }
+      }
 
       // Create user for the client with a hashed password
       let username = email.split("@")[0];
@@ -902,13 +949,46 @@ export async function registerRoutes(
       });
 
       // Create invoice for shipment
-      await storage.createInvoice({
+      const invoice = await storage.createInvoice({
         clientAccountId: user.clientAccountId,
         shipmentId: shipment.id,
         amount: finalPrice.toFixed(2),
         status: "pending",
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
+
+      // Sync invoice to Zoho Books (if configured)
+      if (zohoService.isConfigured()) {
+        try {
+          const clientAccount = await storage.getClientAccount(user.clientAccountId);
+          if (clientAccount) {
+            const zohoResult = await zohoService.syncInvoice(invoice.id, {
+              customerId: clientAccount.zohoCustomerId || undefined,
+              customerName: clientAccount.name,
+              customerEmail: clientAccount.email,
+              invoiceNumber: invoice.invoiceNumber,
+              date: new Date().toISOString().split('T')[0],
+              dueDate: invoice.dueDate.toISOString().split('T')[0],
+              lineItems: [{
+                name: `Shipment ${shipment.trackingNumber}`,
+                description: `${data.senderCity} to ${data.recipientCity}`,
+                quantity: 1,
+                rate: Number(finalPrice),
+              }],
+            });
+            
+            if (zohoResult.zohoInvoiceId) {
+              await storage.updateInvoice(invoice.id, {
+                zohoInvoiceId: zohoResult.zohoInvoiceId,
+                zohoInvoiceUrl: zohoResult.invoiceUrl,
+              });
+            }
+          }
+        } catch (error) {
+          logError("Failed to sync invoice to Zoho", error);
+          // Don't fail the shipment creation if Zoho sync fails
+        }
+      }
 
       // Log shipment creation
       await logAudit(req.session.userId, "create_shipment", "shipment", shipment.id,
@@ -1139,6 +1219,196 @@ export async function registerRoutes(
     res.json(payments);
   });
 
+  // Client - Create Payment Intent (Stripe checkout)
+  const createPaymentSchema = z.object({
+    invoiceId: z.string().min(1, "Invoice ID is required"),
+  });
+
+  app.post("/api/client/payments/create-intent", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const { invoiceId } = createPaymentSchema.parse(req.body);
+      
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      
+      if (invoice.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied to this invoice" });
+      }
+      
+      if (invoice.status === "paid") {
+        return res.status(400).json({ error: "Invoice already paid" });
+      }
+
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecretKey) {
+        return res.status(503).json({ 
+          error: "Payment processing is not configured. Please contact support.",
+          code: "STRIPE_NOT_CONFIGURED"
+        });
+      }
+
+      // Check if there's already a pending payment for this invoice
+      const existingPayments = await storage.getPaymentsByClientAccount(user.clientAccountId);
+      const existingPendingPayment = existingPayments.find(
+        p => p.invoiceId === invoice.id && p.status === "pending" && p.stripePaymentIntentId
+      );
+      
+      if (existingPendingPayment && existingPendingPayment.stripePaymentIntentId) {
+        // Return existing payment intent's client secret
+        const stripe = new Stripe(stripeSecretKey);
+        try {
+          const existingIntent = await stripe.paymentIntents.retrieve(existingPendingPayment.stripePaymentIntentId);
+          if (existingIntent.status === "requires_payment_method" || existingIntent.status === "requires_confirmation") {
+            return res.json({
+              clientSecret: existingIntent.client_secret,
+              paymentIntentId: existingIntent.id,
+              amount: invoice.amount,
+              invoiceNumber: invoice.invoiceNumber,
+            });
+          }
+        } catch (error) {
+          // If intent doesn't exist or is expired, create a new one
+          logError("Failed to retrieve existing payment intent, creating new one", error);
+        }
+      }
+
+      // Create Stripe payment intent
+      const stripe = new Stripe(stripeSecretKey);
+      const amountInCents = Math.round(Number(invoice.amount) * 100);
+      
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amountInCents,
+        currency: "usd",
+        metadata: {
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          clientAccountId: user.clientAccountId,
+        },
+        description: `Invoice ${invoice.invoiceNumber}`,
+      });
+
+      // Create pending payment record
+      await storage.createPayment({
+        invoiceId: invoice.id,
+        clientAccountId: user.clientAccountId,
+        amount: invoice.amount,
+        paymentMethod: "stripe",
+        status: "pending",
+        stripePaymentIntentId: paymentIntent.id,
+      });
+
+      await logAudit(req.session.userId, "create_payment_intent", "payment", paymentIntent.id,
+        `Created payment intent for invoice ${invoice.invoiceNumber}`, req.ip);
+
+      res.json({
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+        amount: invoice.amount,
+        invoiceNumber: invoice.invoiceNumber,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create payment intent", error);
+      res.status(500).json({ error: "Failed to create payment" });
+    }
+  });
+
+  // Client - Track Shipment
+  app.get("/api/client/shipments/:id/track", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied to this shipment" });
+      }
+
+      // Get tracking from carrier
+      const trackingNumber = shipment.carrierTrackingNumber || shipment.trackingNumber;
+      const tracking = await fedexAdapter.trackShipment(trackingNumber);
+
+      res.json({
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        carrierTrackingNumber: shipment.carrierTrackingNumber,
+        status: shipment.status,
+        carrier: shipment.carrierName || "FedEx",
+        estimatedDelivery: shipment.estimatedDelivery,
+        actualDelivery: shipment.actualDelivery,
+        tracking,
+      });
+    } catch (error) {
+      logError("Failed to get shipment tracking", error);
+      res.status(500).json({ error: "Failed to get tracking information" });
+    }
+  });
+
+  // Admin - Get Shipping Rates
+  app.post("/api/admin/shipping/rates", requireAdmin, async (req, res) => {
+    try {
+      const rateRequestSchema = z.object({
+        senderCity: z.string(),
+        senderCountry: z.string(),
+        senderPostalCode: z.string().optional(),
+        recipientCity: z.string(),
+        recipientCountry: z.string(),
+        recipientPostalCode: z.string().optional(),
+        weight: z.number().positive(),
+        packageType: z.string(),
+      });
+
+      const data = rateRequestSchema.parse(req.body);
+
+      const rates = await fedexAdapter.getRates({
+        shipper: {
+          name: "Origin",
+          streetLine1: "",
+          city: data.senderCity,
+          postalCode: data.senderPostalCode || "00000",
+          countryCode: data.senderCountry,
+          phone: "",
+        },
+        recipient: {
+          name: "Destination",
+          streetLine1: "",
+          city: data.recipientCity,
+          postalCode: data.recipientPostalCode || "00000",
+          countryCode: data.recipientCountry,
+          phone: "",
+        },
+        packages: [{
+          weight: data.weight,
+          weightUnit: "LB",
+          packageType: data.packageType,
+        }],
+      });
+
+      res.json({ rates, carrier: "FedEx", isConfigured: fedexAdapter.isConfigured() });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get shipping rates", error);
+      res.status(500).json({ error: "Failed to get shipping rates" });
+    }
+  });
+
   // Register object storage routes for file uploads
   registerObjectStorageRoutes(app);
 
@@ -1203,20 +1473,37 @@ export async function registerRoutes(
       // Process shipment status updates
       if (eventType === "shipment.status_update" && event.trackingNumber) {
         const shipments = await storage.getShipments();
-        const shipment = shipments.find(s => s.trackingNumber === event.trackingNumber);
+        // Find by our tracking number OR carrier tracking number
+        const shipment = shipments.find(s => 
+          s.trackingNumber === event.trackingNumber || 
+          s.carrierTrackingNumber === event.trackingNumber
+        );
         
         if (shipment && event.status) {
           const statusMap: Record<string, string> = {
             "IN_TRANSIT": "in_transit",
             "DELIVERED": "delivered",
             "PROCESSING": "processing",
+            "PICKED_UP": "in_transit",
+            "OUT_FOR_DELIVERY": "in_transit",
           };
           
           const newStatus = statusMap[event.status] || shipment.status;
+          const updates: Record<string, any> = {};
+          
           if (newStatus !== shipment.status) {
-            await storage.updateShipment(shipment.id, { status: newStatus });
+            updates.status = newStatus;
+          }
+          
+          // Set actual delivery date if delivered
+          if (newStatus === "delivered" && !shipment.actualDelivery) {
+            updates.actualDelivery = event.deliveryDate ? new Date(event.deliveryDate) : new Date();
+          }
+          
+          if (Object.keys(updates).length > 0) {
+            await storage.updateShipment(shipment.id, updates);
             await logAudit(undefined, "webhook_status_update", "shipment", shipment.id,
-              `FedEx webhook updated status to ${newStatus}`, req.ip);
+              `FedEx webhook updated: ${JSON.stringify(updates)}`, req.ip);
           }
         }
         
@@ -1307,20 +1594,34 @@ export async function registerRoutes(
         const invoiceId = paymentIntent.metadata?.invoiceId;
         
         if (invoiceId) {
-          // Update invoice status
-          await storage.updateInvoice(invoiceId, { status: "completed" });
+          // Update invoice status to paid
+          await storage.updateInvoice(invoiceId, { status: "paid", paidAt: new Date() });
           
-          // Create payment record
+          // Find and update existing payment record (created when payment intent was created)
           const invoice = await storage.getInvoice(invoiceId);
           if (invoice) {
-            await storage.createPayment({
-              clientAccountId: invoice.clientAccountId,
-              invoiceId: invoice.id,
-              amount: String(paymentIntent.amount / 100),
-              paymentMethod: "stripe",
-              transactionId: paymentIntent.id,
-              status: "completed",
-            });
+            const payments = await storage.getPaymentsByClientAccount(invoice.clientAccountId);
+            const pendingPayment = payments.find(p => 
+              p.stripePaymentIntentId === paymentIntent.id && p.status === "pending"
+            );
+            
+            if (pendingPayment) {
+              // Update existing payment record
+              await storage.updatePayment(pendingPayment.id, { 
+                status: "completed",
+                transactionId: paymentIntent.id,
+              });
+            } else {
+              // Create new payment record if not found (fallback)
+              await storage.createPayment({
+                clientAccountId: invoice.clientAccountId,
+                invoiceId: invoice.id,
+                amount: String(paymentIntent.amount / 100),
+                paymentMethod: "stripe",
+                transactionId: paymentIntent.id,
+                status: "completed",
+              });
+            }
           }
           
           await logAudit(undefined, "webhook_payment", "payment", paymentIntent.id,

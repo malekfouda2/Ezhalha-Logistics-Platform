@@ -62,9 +62,9 @@ export class ZohoService {
     return !!(this.clientId && this.clientSecret && this.refreshToken && this.organizationId);
   }
 
-  private async refreshAccessToken(): Promise<string> {
+  private async refreshAccessToken(): Promise<string | null> {
     if (!this.isConfigured()) {
-      throw new Error("Zoho is not configured. Set ZOHO_* environment variables.");
+      return null;
     }
 
     // Check if current token is still valid
@@ -72,7 +72,8 @@ export class ZohoService {
       return this.accessToken;
     }
 
-    // Zoho integration stub - implement OAuth refresh
+    // Zoho integration stub - full OAuth refresh implementation would go here
+    // To enable Zoho integration, uncomment and configure:
     // const response = await fetch('https://accounts.zoho.com/oauth/v2/token', {
     //   method: 'POST',
     //   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -86,20 +87,27 @@ export class ZohoService {
     // 
     // const data = await response.json();
     // this.accessToken = data.access_token;
-    // this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000; // Refresh 1 min early
+    // this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
     // return this.accessToken;
 
-    throw new Error("Zoho integration not fully implemented.");
+    console.log("Zoho OAuth not fully configured - skipping token refresh");
+    return null;
   }
 
-  async createInvoice(params: ZohoInvoiceParams): Promise<ZohoInvoiceResult> {
+  async createInvoice(params: ZohoInvoiceParams): Promise<ZohoInvoiceResult | null> {
     if (!this.isConfigured()) {
-      throw new Error("Zoho is not configured. Set ZOHO_* environment variables.");
+      console.log("Zoho not configured, skipping invoice creation");
+      return null;
     }
 
-    // Zoho integration stub
-    // const accessToken = await this.refreshAccessToken();
-    // 
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) {
+      console.log("Zoho access token not available, skipping invoice creation");
+      return null;
+    }
+
+    // Zoho invoice creation stub - full implementation would go here
+    // To enable, uncomment and configure:
     // const response = await fetch(
     //   `https://www.zohoapis.com/books/v3/invoices?organization_id=${this.organizationId}`,
     //   {
@@ -130,17 +138,24 @@ export class ZohoService {
     //   invoiceUrl: data.invoice.invoice_url,
     // };
 
-    throw new Error("Zoho integration not fully implemented.");
+    console.log("Zoho invoice API not fully implemented - returning empty result");
+    return null;
   }
 
-  async createCustomer(params: ZohoCustomerParams): Promise<string> {
+  async createCustomer(params: ZohoCustomerParams): Promise<string | null> {
     if (!this.isConfigured()) {
-      throw new Error("Zoho is not configured. Set ZOHO_* environment variables.");
+      console.log("Zoho not configured, skipping customer creation");
+      return null;
     }
 
-    // Zoho integration stub
-    // const accessToken = await this.refreshAccessToken();
-    // 
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) {
+      console.log("Zoho access token not available, skipping customer creation");
+      return null;
+    }
+
+    // Zoho customer creation stub - full implementation would go here
+    // To enable, uncomment and configure:
     // const response = await fetch(
     //   `https://www.zohoapis.com/books/v3/contacts?organization_id=${this.organizationId}`,
     //   {
@@ -162,19 +177,28 @@ export class ZohoService {
     // const data = await response.json();
     // return data.contact.contact_id;
 
-    throw new Error("Zoho integration not fully implemented.");
+    console.log("Zoho customer API not fully implemented - returning empty result");
+    return null;
   }
 
   async syncInvoice(invoiceId: string, params: ZohoInvoiceParams): Promise<ZohoInvoiceResult> {
-    // This is the main sync function that would be called when an invoice is created
-    // It creates the invoice in Zoho Books and returns the Zoho invoice ID
-    
     if (!this.isConfigured()) {
       console.log("Zoho not configured, skipping invoice sync");
       return { zohoInvoiceId: "", invoiceUrl: "" };
     }
 
-    return this.createInvoice(params);
+    const result = await this.createInvoice(params);
+    return result || { zohoInvoiceId: "", invoiceUrl: "" };
+  }
+  
+  async syncCustomer(params: ZohoCustomerParams): Promise<string> {
+    if (!this.isConfigured()) {
+      console.log("Zoho not configured, skipping customer sync");
+      return "";
+    }
+
+    const result = await this.createCustomer(params);
+    return result || "";
   }
 }
 

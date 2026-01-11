@@ -86,7 +86,9 @@ export const clientAccounts = pgTable("client_accounts", {
   documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
+  zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"), // Soft delete
 });
 
 export const insertClientAccountSchema = createInsertSchema(clientAccounts).omit({
@@ -165,14 +167,19 @@ export const shipments = pgTable("shipments", {
   weight: decimal("weight", { precision: 10, scale: 2 }).notNull(),
   dimensions: text("dimensions"),
   packageType: text("package_type").notNull(),
+  serviceType: text("service_type"), // FedEx service type (e.g., FEDEX_GROUND, FEDEX_2_DAY)
   status: text("status").notNull().default("processing"),
   baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
   margin: decimal("margin", { precision: 10, scale: 2 }).notNull(),
   finalPrice: decimal("final_price", { precision: 10, scale: 2 }).notNull(),
   carrierName: text("carrier_name"),
+  carrierTrackingNumber: text("carrier_tracking_number"), // Carrier's own tracking number
+  labelUrl: text("label_url"), // Shipping label URL
   estimatedDelivery: timestamp("estimated_delivery"),
+  actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"), // Soft delete
 });
 
 export const insertShipmentSchema = createInsertSchema(shipments).omit({
@@ -195,7 +202,10 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull().default("pending"),
   dueDate: timestamp("due_date").notNull(),
   paidAt: timestamp("paid_at"),
+  zohoInvoiceId: text("zoho_invoice_id"), // Zoho Books invoice ID
+  zohoInvoiceUrl: text("zoho_invoice_url"), // Link to Zoho invoice
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"), // Soft delete
 });
 
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({
@@ -217,6 +227,7 @@ export const payments = pgTable("payments", {
   paymentMethod: text("payment_method").notNull(),
   status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

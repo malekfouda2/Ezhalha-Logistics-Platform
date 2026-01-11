@@ -176,6 +176,70 @@ export async function sendApplicationReceived(
   });
 }
 
+export async function notifyAdminNewApplication(
+  applicationId: string,
+  applicantName: string,
+  applicantEmail: string,
+  companyName?: string
+): Promise<boolean> {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) {
+    logInfo("Admin email not configured, skipping notification");
+    return false;
+  }
+
+  const appUrl = process.env.APP_URL || "https://ezhalha.com";
+  
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>New Client Application</h1>
+    </div>
+    <div class="content">
+      <p>A new client application has been submitted and requires your review.</p>
+      
+      <div class="details">
+        <h3>Application Details</h3>
+        <p><strong>Application ID:</strong> ${applicationId}</p>
+        <p><strong>Name:</strong> ${applicantName}</p>
+        <p><strong>Email:</strong> ${applicantEmail}</p>
+        ${companyName ? `<p><strong>Company:</strong> ${companyName}</p>` : ""}
+      </div>
+      
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="${appUrl}/admin/applications" class="button">Review Application</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  return sendEmail({
+    to: adminEmail,
+    subject: `New Client Application: ${applicantName}`,
+    html,
+  });
+}
+
 export async function sendApplicationRejected(
   email: string,
   name: string,

@@ -87,6 +87,7 @@ export interface IStorage {
   getPayments(): Promise<Payment[]>;
   getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
+  updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined>;
 
   // Pricing Rules
   getPricingRules(): Promise<PricingRule[]>;
@@ -265,6 +266,11 @@ export class DatabaseStorage implements IStorage {
   async createPayment(payment: InsertPayment): Promise<Payment> {
     const [newPayment] = await db.insert(payments).values(payment).returning();
     return newPayment;
+  }
+
+  async updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined> {
+    const [payment] = await db.update(payments).set(updates).where(eq(payments.id, id)).returning();
+    return payment || undefined;
   }
 
   // Pricing Rules
