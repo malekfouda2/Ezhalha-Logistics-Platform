@@ -248,6 +248,128 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 
+// ============================================
+// RBAC TABLES (Role-Based Access Control)
+// ============================================
+
+// Roles table
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+// Permissions table
+export const permissions = pgTable("permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  resource: text("resource").notNull(), // e.g., "shipments", "clients", "invoices"
+  action: text("action").notNull(), // e.g., "create", "read", "update", "delete"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPermissionSchema = createInsertSchema(permissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+// UserRoles junction table
+export const userRoles = pgTable("user_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  roleId: varchar("role_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertUserRoleSchema = createInsertSchema(userRoles).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
+export type UserRole = typeof userRoles.$inferSelect;
+
+// RolePermissions junction table
+export const rolePermissions = pgTable("role_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull(),
+  permissionId: varchar("permission_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRolePermissionSchema = createInsertSchema(rolePermissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
+// ============================================
+// INTEGRATION AND WEBHOOK TABLES
+// ============================================
+
+// Integration Logs table (for FedEx, Zoho, etc.)
+export const integrationLogs = pgTable("integration_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  serviceName: text("service_name").notNull(), // e.g., "fedex", "zoho"
+  operation: text("operation").notNull(), // e.g., "create_shipment", "sync_invoice"
+  requestPayload: text("request_payload"),
+  responsePayload: text("response_payload"),
+  statusCode: integer("status_code"),
+  success: boolean("success").notNull().default(false),
+  errorMessage: text("error_message"),
+  duration: integer("duration"), // in milliseconds
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertIntegrationLogSchema = createInsertSchema(integrationLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertIntegrationLog = z.infer<typeof insertIntegrationLogSchema>;
+export type IntegrationLog = typeof integrationLogs.$inferSelect;
+
+// Webhook Events table
+export const webhookEvents = pgTable("webhook_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  source: text("source").notNull(), // e.g., "fedex", "stripe"
+  eventType: text("event_type").notNull(), // e.g., "shipment.status_update", "payment.completed"
+  payload: text("payload").notNull(),
+  signature: text("signature"),
+  processed: boolean("processed").notNull().default(false),
+  processedAt: timestamp("processed_at"),
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertWebhookEventSchema = createInsertSchema(webhookEvents).omit({
+  id: true,
+  createdAt: true,
+  processedAt: true,
+});
+
+export type InsertWebhookEvent = z.infer<typeof insertWebhookEventSchema>;
+export type WebhookEvent = typeof webhookEvents.$inferSelect;
+
 // Login schema for validation
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),

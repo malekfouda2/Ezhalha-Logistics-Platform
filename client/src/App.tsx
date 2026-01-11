@@ -19,6 +19,7 @@ import AdminApplications from "@/pages/admin/applications";
 import AdminShipments from "@/pages/admin/shipments";
 import AdminInvoices from "@/pages/admin/invoices";
 import AdminPricing from "@/pages/admin/pricing";
+import AdminAuditLogs from "@/pages/admin/audit-logs";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -93,6 +94,9 @@ function Router() {
       </Route>
       <Route path="/admin/pricing">
         <ProtectedRoute component={AdminPricing} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/audit-logs">
+        <ProtectedRoute component={AdminAuditLogs} requiredUserType="admin" />
       </Route>
 
       {/* Client routes */}

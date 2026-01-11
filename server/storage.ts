@@ -15,6 +15,18 @@ import {
   type InsertPricingRule,
   type AuditLog,
   type InsertAuditLog,
+  type Role,
+  type InsertRole,
+  type Permission,
+  type InsertPermission,
+  type UserRole,
+  type InsertUserRole,
+  type RolePermission,
+  type InsertRolePermission,
+  type IntegrationLog,
+  type InsertIntegrationLog,
+  type WebhookEvent,
+  type InsertWebhookEvent,
   users,
   clientAccounts,
   clientApplications,
@@ -23,9 +35,18 @@ import {
   payments,
   pricingRules,
   auditLogs,
+  roles,
+  permissions,
+  userRoles,
+  rolePermissions,
+  integrationLogs,
+  webhookEvents,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc } from "drizzle-orm";
+import bcrypt from "bcrypt";
+
+const SALT_ROUNDS = 10;
 
 export interface IStorage {
   // Users
@@ -73,7 +94,17 @@ export interface IStorage {
   updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined>;
 
   // Audit Logs
+  getAuditLogs(): Promise<AuditLog[]>;
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+
+  // Integration Logs
+  getIntegrationLogs(): Promise<IntegrationLog[]>;
+  createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog>;
+
+  // Webhook Events
+  getWebhookEvents(): Promise<WebhookEvent[]>;
+  createWebhookEvent(event: InsertWebhookEvent): Promise<WebhookEvent>;
+  updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -255,9 +286,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Audit Logs
+  async getAuditLogs(): Promise<AuditLog[]> {
+    return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  }
+
   async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
     const [auditLog] = await db.insert(auditLogs).values(log).returning();
     return auditLog;
+  }
+
+  // Integration Logs
+  async getIntegrationLogs(): Promise<IntegrationLog[]> {
+    return db.select().from(integrationLogs).orderBy(desc(integrationLogs.createdAt));
+  }
+
+  async createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog> {
+    const [integrationLog] = await db.insert(integrationLogs).values(log).returning();
+    return integrationLog;
+  }
+
+  // Webhook Events
+  async getWebhookEvents(): Promise<WebhookEvent[]> {
+    return db.select().from(webhookEvents).orderBy(desc(webhookEvents.createdAt));
+  }
+
+  async createWebhookEvent(event: InsertWebhookEvent): Promise<WebhookEvent> {
+    const [webhookEvent] = await db.insert(webhookEvents).values(event).returning();
+    return webhookEvent;
+  }
+
+  async updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined> {
+    const [event] = await db.update(webhookEvents).set(updates).where(eq(webhookEvents.id, id)).returning();
+    return event || undefined;
   }
 
   // Initialize default data if database is empty
@@ -271,113 +331,127 @@ export class DatabaseStorage implements IStorage {
 
     console.log("Initializing database with default data...");
 
-    // Create admin user (password should be hashed in production)
+    // Create admin user with hashed password
+    const adminHashedPassword = await bcrypt.hash("admin123", SALT_ROUNDS);
     await db.insert(users).values({
       username: "admin",
       email: "admin@ezhalha.com",
-      password: "admin123",
+      password: adminHashedPassword,
       userType: "admin",
       isActive: true,
     });
 
-    // Create default pricing rules
-    const pricingData = [
-      { profile: "regular", marginPercentage: "20.00" },
-      { profile: "mid_level", marginPercentage: "15.00" },
-      { profile: "vip", marginPercentage: "10.00" },
-    ];
+    // Create default pricing rules (only if they don't exist)
+    const existingRules = await this.getPricingRules();
+    if (existingRules.length === 0) {
+      const pricingData = [
+        { profile: "regular", marginPercentage: "20.00" },
+        { profile: "mid_level", marginPercentage: "15.00" },
+        { profile: "vip", marginPercentage: "10.00" },
+      ];
 
-    for (const rule of pricingData) {
-      await db.insert(pricingRules).values(rule);
+      for (const rule of pricingData) {
+        await db.insert(pricingRules).values(rule);
+      }
     }
 
-    // Create sample client account
-    const [clientAccount] = await db.insert(clientAccounts).values({
-      name: "Demo Company",
-      email: "demo@company.com",
-      phone: "+1 555 123 4567",
-      country: "United States",
-      profile: "regular",
-      isActive: true,
-    }).returning();
+    // Create sample client account (if it doesn't exist)
+    const existingClients = await this.getClientAccounts();
+    let demoClientAccount = existingClients.find(c => c.email === "demo@company.com");
+    
+    if (!demoClientAccount) {
+      const [clientAccount] = await db.insert(clientAccounts).values({
+        name: "Demo Company",
+        email: "demo@company.com",
+        phone: "+1 555 123 4567",
+        country: "United States",
+        profile: "regular",
+        isActive: true,
+      }).returning();
+      demoClientAccount = clientAccount;
 
-    // Create client user
+      // Create sample shipments for new client account
+      const shipmentData = [
+        { status: "delivered", recipientCity: "New York", recipientCountry: "United States", senderCity: "Los Angeles", senderCountry: "United States" },
+        { status: "in_transit", recipientCity: "London", recipientCountry: "United Kingdom", senderCity: "Dubai", senderCountry: "United Arab Emirates" },
+        { status: "processing", recipientCity: "Tokyo", recipientCountry: "Japan", senderCity: "Singapore", senderCountry: "Singapore" },
+      ];
+
+      for (const data of shipmentData) {
+        const baseRate = 50 + Math.random() * 100;
+        const margin = baseRate * 0.2;
+        await db.insert(shipments).values({
+          trackingNumber: generateTrackingNumber(),
+          clientAccountId: demoClientAccount.id,
+          senderName: "John Sender",
+          senderAddress: "123 Main St",
+          senderCity: data.senderCity,
+          senderCountry: data.senderCountry,
+          senderPhone: "+1 555 000 0001",
+          recipientName: "Jane Recipient",
+          recipientAddress: "456 Oak Ave",
+          recipientCity: data.recipientCity,
+          recipientCountry: data.recipientCountry,
+          recipientPhone: "+1 555 000 0002",
+          weight: String((1 + Math.random() * 10).toFixed(2)),
+          dimensions: "30x20x15",
+          packageType: "parcel",
+          status: data.status,
+          baseRate: baseRate.toFixed(2),
+          margin: margin.toFixed(2),
+          finalPrice: (baseRate + margin).toFixed(2),
+          carrierName: "FedEx",
+          estimatedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        });
+      }
+
+      // Create sample invoices for new client account
+      const invoiceData = [
+        { status: "completed", amount: "125.50" },
+        { status: "pending", amount: "89.00" },
+      ];
+
+      for (const data of invoiceData) {
+        await db.insert(invoices).values({
+          invoiceNumber: generateInvoiceNumber(),
+          clientAccountId: demoClientAccount.id,
+          amount: data.amount,
+          status: data.status,
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          paidAt: data.status === "completed" ? new Date() : null,
+        });
+      }
+    }
+
+    // Create client user with hashed password (linked to existing or new demo account)
+    const clientHashedPassword = await bcrypt.hash("client123", SALT_ROUNDS);
     await db.insert(users).values({
       username: "client",
       email: "demo@company.com",
-      password: "client123",
+      password: clientHashedPassword,
       userType: "client",
-      clientAccountId: clientAccount.id,
+      clientAccountId: demoClientAccount.id,
       isActive: true,
     });
 
-    // Create sample shipments
-    const shipmentData = [
-      { status: "delivered", recipientCity: "New York", recipientCountry: "United States", senderCity: "Los Angeles", senderCountry: "United States" },
-      { status: "in_transit", recipientCity: "London", recipientCountry: "United Kingdom", senderCity: "Dubai", senderCountry: "United Arab Emirates" },
-      { status: "processing", recipientCity: "Tokyo", recipientCountry: "Japan", senderCity: "Singapore", senderCountry: "Singapore" },
-    ];
+    // Create sample pending applications (only if none exist)
+    const existingApplications = await this.getClientApplications();
+    if (existingApplications.length === 0) {
+      const applicationData = [
+        { name: "Sarah Johnson", email: "sarah@techcorp.com", country: "United States", companyName: "TechCorp Inc" },
+        { name: "Mohammed Al-Rashid", email: "mohammed@tradeco.ae", country: "United Arab Emirates", companyName: "TradeCo" },
+      ];
 
-    for (const data of shipmentData) {
-      const baseRate = 50 + Math.random() * 100;
-      const margin = baseRate * 0.2;
-      await db.insert(shipments).values({
-        trackingNumber: generateTrackingNumber(),
-        clientAccountId: clientAccount.id,
-        senderName: "John Sender",
-        senderAddress: "123 Main St",
-        senderCity: data.senderCity,
-        senderCountry: data.senderCountry,
-        senderPhone: "+1 555 000 0001",
-        recipientName: "Jane Recipient",
-        recipientAddress: "456 Oak Ave",
-        recipientCity: data.recipientCity,
-        recipientCountry: data.recipientCountry,
-        recipientPhone: "+1 555 000 0002",
-        weight: String((1 + Math.random() * 10).toFixed(2)),
-        dimensions: "30x20x15",
-        packageType: "parcel",
-        status: data.status,
-        baseRate: baseRate.toFixed(2),
-        margin: margin.toFixed(2),
-        finalPrice: (baseRate + margin).toFixed(2),
-        carrierName: "FedEx",
-        estimatedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      });
-    }
-
-    // Create sample invoices
-    const invoiceData = [
-      { status: "completed", amount: "125.50" },
-      { status: "pending", amount: "89.00" },
-    ];
-
-    for (const data of invoiceData) {
-      await db.insert(invoices).values({
-        invoiceNumber: generateInvoiceNumber(),
-        clientAccountId: clientAccount.id,
-        amount: data.amount,
-        status: data.status,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        paidAt: data.status === "completed" ? new Date() : null,
-      });
-    }
-
-    // Create sample pending applications
-    const applicationData = [
-      { name: "Sarah Johnson", email: "sarah@techcorp.com", country: "United States", companyName: "TechCorp Inc" },
-      { name: "Mohammed Al-Rashid", email: "mohammed@tradeco.ae", country: "United Arab Emirates", companyName: "TradeCo" },
-    ];
-
-    for (const data of applicationData) {
-      await db.insert(clientApplications).values({
-        name: data.name,
-        email: data.email,
-        phone: "+1 555 999 0000",
-        country: data.country,
-        companyName: data.companyName,
-        status: "pending",
-      });
+      for (const data of applicationData) {
+        await db.insert(clientApplications).values({
+          name: data.name,
+          email: data.email,
+          phone: "+1 555 999 0000",
+          country: data.country,
+          companyName: data.companyName,
+          status: "pending",
+        });
+      }
     }
 
     console.log("Database initialization complete!");

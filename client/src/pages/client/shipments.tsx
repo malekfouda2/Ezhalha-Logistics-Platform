@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
 import { StatusBadge } from "@/components/status-badge";
@@ -23,7 +23,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Plus, Eye, MapPin, Package, Calendar } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -32,6 +34,7 @@ export default function ClientShipments() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const { toast } = useToast();
 
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
@@ -39,6 +42,30 @@ export default function ClientShipments() {
 
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/client/shipments"],
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/client/shipments/${id}/cancel`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      setSelectedShipment(null);
+      toast({
+        title: "Shipment Cancelled",
+        description: "Your shipment has been cancelled successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
   const filteredShipments = shipments?.filter((shipment) => {
@@ -249,6 +276,24 @@ export default function ClientShipments() {
                 <Calendar className="h-4 w-4" />
                 Created {format(new Date(selectedShipment.createdAt), "MMM d, yyyy 'at' h:mm a")}
               </div>
+
+              {/* Cancel Button - Only for processing shipments */}
+              {selectedShipment.status === "processing" && (
+                <Button
+                  variant="destructive"
+                  className="w-full"
+                  onClick={() => cancelMutation.mutate(selectedShipment.id)}
+                  disabled={cancelMutation.isPending}
+                  data-testid="button-cancel-shipment"
+                >
+                  {cancelMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Ban className="mr-2 h-4 w-4" />
+                  )}
+                  Cancel Shipment
+                </Button>
+              )}
             </div>
           )}
         </SheetContent>

@@ -138,6 +138,8 @@ export default function ClientInvoices() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            onClick={() => window.open(`/api/client/invoices/${invoice.id}/pdf`, '_blank')}
+                            title="View Invoice"
                             data-testid={`button-view-${invoice.id}`}
                           >
                             <Eye className="h-4 w-4" />
@@ -145,6 +147,13 @@ export default function ClientInvoices() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            onClick={() => {
+                              const win = window.open(`/api/client/invoices/${invoice.id}/pdf`, '_blank');
+                              if (win) {
+                                win.onload = () => win.print();
+                              }
+                            }}
+                            title="Download/Print Invoice"
                             data-testid={`button-download-${invoice.id}`}
                           >
                             <Download className="h-4 w-4" />

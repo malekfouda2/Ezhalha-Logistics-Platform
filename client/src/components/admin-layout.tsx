@@ -21,6 +21,7 @@ import {
   ChevronDown,
   DollarSign,
   ClipboardList,
+  Shield,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -34,6 +35,7 @@ const navItems = [
   { href: "/admin/shipments", label: "Shipments", icon: Package },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
   { href: "/admin/pricing", label: "Pricing", icon: DollarSign },
+  { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },
 ];
 
 export function AdminLayout({ children }: AdminLayoutProps) {

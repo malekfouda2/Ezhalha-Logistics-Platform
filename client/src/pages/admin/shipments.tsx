@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
@@ -21,8 +21,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MapPin, Package, Calendar, DollarSign } from "lucide-react";
+import { Search, Eye, MapPin, Package, Calendar, DollarSign, Ban, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -30,9 +39,60 @@ export default function AdminShipments() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const { toast } = useToast();
 
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/admin/shipments"],
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const res = await apiRequest("PATCH", `/api/admin/shipments/${id}/status`, { status });
+      return res.json();
+    },
+    onSuccess: (_data: Shipment, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/shipments"] });
+      // Update selectedShipment with the new status directly to avoid refetch delay
+      if (selectedShipment) {
+        setSelectedShipment({ ...selectedShipment, status: variables.status as "processing" | "in_transit" | "delivered" | "cancelled" });
+      }
+      toast({
+        title: "Status Updated",
+        description: "Shipment status has been updated successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/admin/shipments/${id}/cancel`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/shipments"] });
+      // Update selected shipment status to cancelled
+      if (selectedShipment) {
+        setSelectedShipment({ ...selectedShipment, status: "cancelled" });
+      }
+      toast({
+        title: "Shipment Cancelled",
+        description: "Shipment has been cancelled successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
   const filteredShipments = shipments?.filter((shipment) => {
@@ -264,6 +324,47 @@ export default function AdminShipments() {
                 <Calendar className="h-4 w-4" />
                 Created {format(new Date(selectedShipment.createdAt), "MMM d, yyyy 'at' h:mm a")}
               </div>
+
+              {/* Admin Actions */}
+              {selectedShipment.status !== "cancelled" && selectedShipment.status !== "delivered" && (
+                <div className="p-4 rounded-lg border space-y-4">
+                  <p className="text-sm font-medium">Update Status</p>
+                  <div className="flex items-center gap-3">
+                    <Select
+                      value={selectedShipment.status}
+                      onValueChange={(status) => updateStatusMutation.mutate({ id: selectedShipment.id, status })}
+                      disabled={updateStatusMutation.isPending}
+                    >
+                      <SelectTrigger className="flex-1" data-testid="select-status">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="processing">Processing</SelectItem>
+                        <SelectItem value="in_transit">In Transit</SelectItem>
+                        <SelectItem value="delivered">Delivered</SelectItem>
+                      </SelectContent>
+                      {/* Note: Cancelled status is set via the dedicated cancel button below */}
+                    </Select>
+                    {updateStatusMutation.isPending && (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    onClick={() => cancelMutation.mutate(selectedShipment.id)}
+                    disabled={cancelMutation.isPending}
+                    data-testid="button-cancel-shipment"
+                  >
+                    {cancelMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="mr-2 h-4 w-4" />
+                    )}
+                    Cancel Shipment
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </SheetContent>

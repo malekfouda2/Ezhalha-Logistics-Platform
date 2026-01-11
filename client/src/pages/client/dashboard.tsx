@@ -14,10 +14,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight } from "lucide-react";
+import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users } from "lucide-react";
 import { Link } from "wouter";
+import { ProfileBadge } from "@/components/profile-badge";
 import type { ClientDashboardStats, Shipment, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
+
+const profileTierInfo: Record<string, { name: string; icon: typeof Crown; benefit: string; color: string }> = {
+  regular: {
+    name: "Regular",
+    icon: Users,
+    benefit: "Standard shipping rates",
+    color: "text-muted-foreground",
+  },
+  mid_level: {
+    name: "Mid-Level",
+    icon: Star,
+    benefit: "15% discount on shipping rates",
+    color: "text-blue-500",
+  },
+  vip: {
+    name: "VIP",
+    icon: Crown,
+    benefit: "25% discount on shipping rates",
+    color: "text-amber-500",
+  },
+};
 
 export default function ClientDashboard() {
   const [, navigate] = useLocation();
@@ -45,13 +67,37 @@ export default function ClientDashboard() {
   return (
     <ClientLayout clientProfile={account?.profile}>
       <div className="p-6 space-y-6 max-w-7xl mx-auto">
-        {/* Page Header */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold">Welcome back!</h1>
-            <p className="text-muted-foreground">
-              Here's an overview of your shipping activity
-            </p>
+        {/* Page Header with Profile */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-4">
+            <div>
+              <h1 className="text-2xl font-bold">Welcome back!</h1>
+              <p className="text-muted-foreground">
+                Here's an overview of your shipping activity
+              </p>
+            </div>
+            {account?.profile && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border" data-testid="profile-tier-display">
+                {(() => {
+                  const tierInfo = profileTierInfo[account.profile] || profileTierInfo.regular;
+                  const TierIcon = tierInfo.icon;
+                  return (
+                    <>
+                      <div className={`p-2 rounded-full bg-background ${tierInfo.color}`}>
+                        <TierIcon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{tierInfo.name} Tier</span>
+                          <ProfileBadge profile={account.profile} />
+                        </div>
+                        <p className="text-sm text-muted-foreground">{tierInfo.benefit}</p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </div>
           <Button onClick={() => navigate("/client/shipments/new")} data-testid="button-create-shipment">
             <Plus className="mr-2 h-4 w-4" />
