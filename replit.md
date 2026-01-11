@@ -16,8 +16,23 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 **Security:**
 - Bcrypt password hashing (10 salt rounds)
 - RBAC tables prepared for future granular permissions
-- Session-based authentication with secure cookies
+- Session-based authentication with secure cookies (sameSite: lax for CSRF protection)
+- Helmet security headers with Content Security Policy
+- Rate limiting: 100 req/15min general, 5 req/15min for auth endpoints
+- Brute-force protection: 5 max login attempts, 15min lockout per IP/username
 - Audit trail for all admin/client actions
+
+**Webhooks & Integrations:**
+- FedEx webhook handler with HMAC signature validation
+- Stripe webhook handler with proper signature verification (t=timestamp,v1=signature format)
+- Stripe payment service stub (ready for SDK configuration)
+- Zoho Books invoice sync stub (ready for API configuration)
+
+**Deployment:**
+- PM2 ecosystem config with cluster mode
+- Nginx config with SSL and rate limiting
+- Health check endpoint at /api/health
+- .env.example with all required variables
 
 ## User Preferences
 
