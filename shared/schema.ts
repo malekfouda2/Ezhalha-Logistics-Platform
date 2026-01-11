@@ -409,6 +409,23 @@ export const createShipmentSchema = z.object({
 
 export type CreateShipmentData = z.infer<typeof createShipmentSchema>;
 
+// Idempotency records table for API idempotency
+export const idempotencyRecords = pgTable("idempotency_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  response: text("response").notNull(),
+  statusCode: integer("status_code").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export const insertIdempotencyRecordSchema = createInsertSchema(idempotencyRecords).omit({
+  id: true,
+});
+
+export type InsertIdempotencyRecord = z.infer<typeof insertIdempotencyRecordSchema>;
+export type IdempotencyRecord = typeof idempotencyRecords.$inferSelect;
+
 // Branding config type
 export interface BrandingConfig {
   appName: string;

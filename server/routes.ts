@@ -5,6 +5,9 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
+import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected } from "./services/email";
+import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 
 const SALT_ROUNDS = 10;
 
@@ -122,7 +125,7 @@ async function requireClient(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Audit logging helper
+// Audit logging helper - writes to both database and file
 async function logAudit(
   userId: string | undefined,
   action: string,
@@ -132,6 +135,7 @@ async function logAudit(
   ipAddress?: string
 ) {
   try {
+    // Write to database
     await storage.createAuditLog({
       userId: userId || null,
       action,
@@ -140,8 +144,18 @@ async function logAudit(
       details: details || null,
       ipAddress: ipAddress || null,
     });
+    
+    // Write to file for persistent storage
+    logAuditToFile({
+      userId: userId || "system",
+      action,
+      resource: entityType,
+      resourceId: entityId,
+      details,
+      ipAddress,
+    });
   } catch (error) {
-    console.error("Failed to create audit log:", error);
+    logError("Failed to create audit log", error);
   }
 }
 
@@ -300,17 +314,45 @@ export async function registerRoutes(
   // ============================================
   app.post("/api/applications", async (req, res) => {
     try {
+      // Check idempotency
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) {
+          return res.status(cached.statusCode).json(cached.response);
+        }
+      }
+      
       const data = applicationFormSchema.parse(req.body);
       const application = await storage.createClientApplication({
         ...data,
         documents: data.documents || null,
         status: "pending",
       });
-      res.status(201).json(application);
+      
+      // Send confirmation email
+      await sendApplicationReceived(data.email, data.name, application.id);
+      
+      // Log the application
+      logInfo("New client application received", { 
+        applicationId: application.id, 
+        email: data.email,
+        name: data.name 
+      });
+      
+      const response = application;
+      
+      // Store idempotency record
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, response, 201);
+      }
+      
+      res.status(201).json(response);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
+      logError("Failed to create application", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -509,6 +551,15 @@ export async function registerRoutes(
         await logAudit(req.session.userId, "approve_application", "client_application", id, 
           `Approved application for ${application.email}, created client account`, req.ip);
         
+        // Send email with credentials
+        const temporaryPassword = "welcome123";
+        await sendAccountCredentials(
+          application.email,
+          application.name,
+          username,
+          temporaryPassword
+        );
+        
         res.json({ success: true, clientAccount });
       } else if (action === "reject") {
         await storage.updateClientApplication(id, {
@@ -520,6 +571,9 @@ export async function registerRoutes(
         // Log application rejection
         await logAudit(req.session.userId, "reject_application", "client_application", id,
           `Rejected application for ${application.email}`, req.ip);
+        
+        // Send rejection email
+        await sendApplicationRejected(application.email, application.name, notes);
         
         res.json({ success: true });
       } else {
@@ -805,6 +859,15 @@ export async function registerRoutes(
   // Client - Create Shipment
   app.post("/api/client/shipments", requireClient, async (req, res) => {
     try {
+      // Check idempotency
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) {
+          return res.status(cached.statusCode).json(cached.response);
+        }
+      }
+      
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
         return res.status(404).json({ error: "Client account not found" });
@@ -850,6 +913,11 @@ export async function registerRoutes(
       // Log shipment creation
       await logAudit(req.session.userId, "create_shipment", "shipment", shipment.id,
         `Created shipment ${shipment.trackingNumber} for $${finalPrice.toFixed(2)}`, req.ip);
+
+      // Store idempotency record
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, shipment, 201);
+      }
 
       res.status(201).json(shipment);
     } catch (error) {
