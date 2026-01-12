@@ -97,7 +97,11 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
   - RBAC: GET/POST /roles, GET/POST /permissions, POST/DELETE user-role assignments
 - `/api/client/*` - Client-facing endpoints
   - Account: GET/PATCH /account
-  - Shipments: GET /shipments, GET /shipments/:id, POST /shipments
+  - Shipments: GET /shipments, GET /shipments/:id, POST /shipments (legacy)
+  - New Shipment Flow:
+    - POST /shipments/rates - Rate discovery (returns quotes with final prices, no base rates shown)
+    - POST /shipments/checkout - Create payment intent with selected quote
+    - POST /shipments/confirm - Create carrier shipment after payment
   - Invoices: GET /invoices, GET /invoices/:id/pdf
   - Payments: GET/POST /payments
 - `/api/shipments/*` - Carrier integration endpoints
@@ -119,7 +123,8 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
 - Users (admin/client roles, with updatedAt tracking)
 - Client Accounts (with soft deletes via deletedAt)
 - Client Applications (onboarding workflow)
-- Shipments (with FedEx carrier info, tracking numbers)
+- Shipments (with carrier info, tracking numbers, payment status)
+- Shipment Rate Quotes (for rate discovery, with expiration)
 - Invoices (with Zoho sync IDs)
 - Payments (with Stripe payment intents)
 - Pricing Rules (profile-based margins)
