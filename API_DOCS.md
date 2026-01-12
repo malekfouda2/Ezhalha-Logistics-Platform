@@ -200,6 +200,182 @@ GET /api/client/payments
 
 ---
 
+## Shipment Creation Flow
+
+The shipment creation follows a multi-step flow with integrated Moyasar payment processing.
+
+### Step 1: Rate Discovery
+Get shipping quotes from carriers with final prices (margins applied server-side).
+
+```http
+POST /api/client/shipments/rates
+Content-Type: application/json
+
+{
+  "senderName": "Sender Inc",
+  "senderAddress": "123 Sender St",
+  "senderCity": "Riyadh",
+  "senderPostalCode": "12345",
+  "senderCountry": "SA",
+  "senderPhone": "+966123456789",
+  "recipientName": "Recipient LLC",
+  "recipientAddress": "456 Recipient Ave",
+  "recipientCity": "Dubai",
+  "recipientPostalCode": "54321",
+  "recipientCountry": "AE",
+  "recipientPhone": "+971987654321",
+  "weight": "5.5",
+  "weightUnit": "KG",
+  "length": "30",
+  "width": "20",
+  "height": "15",
+  "dimensionUnit": "CM",
+  "packageType": "YOUR_PACKAGING",
+  "description": "Electronic equipment"
+}
+```
+
+**Response:**
+```json
+{
+  "quotes": [
+    {
+      "id": "uuid",
+      "carrier": "FedEx",
+      "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
+      "serviceName": "FedEx International Priority",
+      "finalPrice": "125.50",
+      "currency": "SAR",
+      "estimatedDays": 3,
+      "expiresAt": "2026-01-11T12:30:00.000Z"
+    }
+  ]
+}
+```
+
+**Note:** Quotes expire after 30 minutes. Base carrier rates are never exposed to clients.
+
+### Step 2: Checkout
+Create a payment intent with the selected quote.
+
+```http
+POST /api/client/shipments/checkout
+Content-Type: application/json
+Idempotency-Key: unique-request-id (optional)
+
+{
+  "quoteId": "uuid"
+}
+```
+
+**Response (Moyasar configured):**
+```json
+{
+  "shipmentId": "uuid",
+  "paymentIntentId": "mpy_abc123",
+  "transactionUrl": "https://api.moyasar.com/v1/payments/mpy_abc123/form",
+  "amount": 12550,
+  "currency": "SAR"
+}
+```
+
+**Response (Demo mode):**
+```json
+{
+  "shipmentId": "uuid",
+  "paymentIntentId": "mpy_mock_abc123",
+  "transactionUrl": null,
+  "amount": 12550,
+  "currency": "SAR",
+  "demoMode": true
+}
+```
+
+### Step 3: Payment
+For production: User is redirected to Moyasar's secure payment page.
+For demo mode: Payment can be confirmed directly.
+
+### Step 4: Confirmation
+After payment, confirm the shipment to create the carrier booking.
+
+```http
+POST /api/client/shipments/confirm
+Content-Type: application/json
+
+{
+  "shipmentId": "uuid",
+  "paymentIntentId": "mpy_abc123"
+}
+```
+
+**Note:** If `paymentIntentId` is omitted, the server uses the stored payment ID from the shipment record.
+
+**Response:**
+```json
+{
+  "shipment": {
+    "id": "uuid",
+    "trackingNumber": "EZH-20260111-XXXX",
+    "carrierTrackingNumber": "FEDEX123456789",
+    "status": "created",
+    "paymentStatus": "paid",
+    "labelUrl": "https://..."
+  }
+}
+```
+
+---
+
+## Moyasar Payment Endpoints
+
+### Payment Callback
+Handles redirect after user completes payment on Moyasar's page.
+
+```http
+GET /api/payments/moyasar/callback?id=mpy_abc123&status=paid
+```
+
+This endpoint:
+1. Verifies payment status with Moyasar API (never trusts URL parameters)
+2. Redirects user to appropriate page based on verified status
+
+**Redirect Destinations:**
+- Success: `/client/create-shipment?shipmentId=uuid&paymentStatus=success`
+- Failed: `/client/create-shipment?shipmentId=uuid&paymentStatus=failed&message=...`
+- Pending: `/client/create-shipment?shipmentId=uuid&paymentStatus=pending`
+
+### Moyasar Webhook
+Receives server-to-server payment notifications from Moyasar.
+
+```http
+POST /api/webhooks/moyasar
+X-Moyasar-Signature: <hmac-sha256-signature>
+Content-Type: application/json
+
+{
+  "id": "mpy_abc123",
+  "type": "payment_paid",
+  "data": {
+    "id": "mpy_abc123",
+    "status": "paid",
+    "amount": 12550,
+    "currency": "SAR"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "received": true,
+  "eventId": "uuid"
+}
+```
+
+**Security:** Webhook signature is validated using HMAC-SHA256 with `MOYASAR_WEBHOOK_SECRET`. In development, signature validation is skipped if the secret is not configured.
+
+---
+
 ## Admin Endpoints
 
 All admin endpoints require authentication with an admin user account.
@@ -373,7 +549,30 @@ Content-Type: application/json
 }
 ```
 
-### Stripe Webhooks
+### Moyasar Webhooks
+```http
+POST /api/webhooks/moyasar
+X-Moyasar-Signature: <hmac-sha256-signature>
+Content-Type: application/json
+
+{
+  "id": "evt_abc123",
+  "type": "payment_paid",
+  "data": {
+    "id": "mpy_abc123",
+    "status": "paid",
+    "amount": 12550,
+    "currency": "SAR",
+    "description": "Shipment payment"
+  }
+}
+```
+
+**Signature Validation:** The webhook handler validates the `X-Moyasar-Signature` header using HMAC-SHA256 with the `MOYASAR_WEBHOOK_SECRET` environment variable.
+
+### Stripe Webhooks (Legacy)
+Kept for backwards compatibility with existing integrations.
+
 ```http
 POST /api/webhooks/stripe
 Stripe-Signature: t=timestamp,v1=signature
@@ -435,3 +634,53 @@ Rate limit headers are included in responses:
 - `X-RateLimit-Limit`
 - `X-RateLimit-Remaining`
 - `X-RateLimit-Reset`
+
+---
+
+## Environment Variables
+
+### Required
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SESSION_SECRET` | Secret for session encryption |
+
+### Payment Gateway (Moyasar)
+| Variable | Description |
+|----------|-------------|
+| `MOYASAR_SECRET_KEY` | Moyasar API secret key (required for production) |
+| `MOYASAR_PUBLISHABLE_KEY` | Moyasar publishable key (for frontend display) |
+| `MOYASAR_WEBHOOK_SECRET` | Webhook signature secret (required for production) |
+
+**Note:** If Moyasar keys are not configured, the system runs in demo mode with mock payments.
+
+### Email (SMTP)
+| Variable | Description |
+|----------|-------------|
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port (default: 587) |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password |
+| `SMTP_FROM` | From email address |
+
+### Carrier Integrations
+| Variable | Description |
+|----------|-------------|
+| `FEDEX_API_KEY` | FedEx API key |
+| `FEDEX_SECRET_KEY` | FedEx secret key |
+| `FEDEX_ACCOUNT_NUMBER` | FedEx account number |
+| `FEDEX_WEBHOOK_SECRET` | FedEx webhook signature secret |
+
+### Invoice Sync
+| Variable | Description |
+|----------|-------------|
+| `ZOHO_CLIENT_ID` | Zoho Books OAuth client ID |
+| `ZOHO_CLIENT_SECRET` | Zoho Books OAuth client secret |
+| `ZOHO_REFRESH_TOKEN` | Zoho Books OAuth refresh token |
+| `ZOHO_ORGANIZATION_ID` | Zoho Books organization ID |
+
+### Legacy (Backwards Compatibility)
+| Variable | Description |
+|----------|-------------|
+| `STRIPE_SECRET_KEY` | Stripe API secret key |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |

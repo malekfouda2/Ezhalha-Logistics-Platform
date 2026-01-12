@@ -48,7 +48,10 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Payment flow: Redirect-based with 3DS support
 - Callback URL: /api/payments/moyasar/callback
 - Webhook URL: /api/webhooks/moyasar
-- Environment variables: MOYASAR_SECRET_KEY, MOYASAR_PUBLISHABLE_KEY
+- Webhook signature validation: HMAC-SHA256
+- Environment variables: MOYASAR_SECRET_KEY, MOYASAR_PUBLISHABLE_KEY, MOYASAR_WEBHOOK_SECRET
+- Demo mode: Works without Moyasar configuration (uses mock payments with mpy_mock_ prefix)
+- Security: Payment status always verified server-side via Moyasar API (never trusts client-side status)
 
 **Logging & Monitoring:**
 - Winston logger with daily rotating file transports
@@ -130,7 +133,8 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
   - POST /rates - Get shipping rates
   - GET /:id/track - Track shipment via carrier API
 - `/api/config/branding` - Branding configuration
-- `/api/webhooks/*` - External webhook handlers (FedEx, Stripe, Zoho)
+- `/api/payments/moyasar/callback` - Moyasar payment callback handler
+- `/api/webhooks/*` - External webhook handlers (FedEx, Moyasar, Stripe legacy, Zoho)
 
 ### Data Layer
 - **ORM**: Drizzle ORM
@@ -145,7 +149,7 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
 - Shipments (with carrier info, tracking numbers, payment status)
 - Shipment Rate Quotes (for rate discovery, with expiration)
 - Invoices (with Zoho sync IDs)
-- Payments (with Stripe payment intents)
+- Payments (with Moyasar payment IDs, Stripe legacy support)
 - Pricing Rules (profile-based margins)
 - Audit Logs (database + file logging)
 - Integration Logs (API call tracking)
