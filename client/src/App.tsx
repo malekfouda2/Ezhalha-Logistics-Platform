@@ -18,8 +18,12 @@ import AdminClients from "@/pages/admin/clients";
 import AdminApplications from "@/pages/admin/applications";
 import AdminShipments from "@/pages/admin/shipments";
 import AdminInvoices from "@/pages/admin/invoices";
+import AdminPayments from "@/pages/admin/payments";
 import AdminPricing from "@/pages/admin/pricing";
 import AdminAuditLogs from "@/pages/admin/audit-logs";
+import AdminIntegrationLogs from "@/pages/admin/integration-logs";
+import AdminWebhookEvents from "@/pages/admin/webhook-events";
+import AdminRBAC from "@/pages/admin/rbac";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -98,6 +102,18 @@ function Router() {
       </Route>
       <Route path="/admin/audit-logs">
         <ProtectedRoute component={AdminAuditLogs} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/payments">
+        <ProtectedRoute component={AdminPayments} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/integration-logs">
+        <ProtectedRoute component={AdminIntegrationLogs} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/webhook-events">
+        <ProtectedRoute component={AdminWebhookEvents} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/rbac">
+        <ProtectedRoute component={AdminRBAC} requiredUserType="admin" />
       </Route>
 
       {/* Client routes */}

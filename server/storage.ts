@@ -53,6 +53,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUsersByClientAccount(clientAccountId: string): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
 
@@ -107,6 +108,29 @@ export interface IStorage {
   createWebhookEvent(event: InsertWebhookEvent): Promise<WebhookEvent>;
   updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined>;
 
+  // RBAC - Roles
+  getRoles(): Promise<Role[]>;
+  getRole(id: string): Promise<Role | undefined>;
+  createRole(role: InsertRole): Promise<Role>;
+  updateRole(id: string, updates: Partial<Role>): Promise<Role | undefined>;
+  deleteRole(id: string): Promise<void>;
+
+  // RBAC - Permissions
+  getPermissions(): Promise<Permission[]>;
+  getPermission(id: string): Promise<Permission | undefined>;
+  createPermission(permission: InsertPermission): Promise<Permission>;
+  deletePermission(id: string): Promise<void>;
+
+  // RBAC - User Roles
+  getUserRoles(userId: string): Promise<UserRole[]>;
+  assignUserRole(userRole: InsertUserRole): Promise<UserRole>;
+  removeUserRole(userId: string, roleId: string): Promise<void>;
+
+  // RBAC - Role Permissions
+  getRolePermissions(roleId: string): Promise<RolePermission[]>;
+  assignRolePermission(rolePermission: InsertRolePermission): Promise<RolePermission>;
+  removeRolePermission(roleId: string, permissionId: string): Promise<void>;
+
   // Initialization
   initializeDefaults(): Promise<void>;
 }
@@ -141,6 +165,10 @@ export class DatabaseStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
     return user || undefined;
+  }
+
+  async getUsersByClientAccount(clientAccountId: string): Promise<User[]> {
+    return db.select().from(users).where(eq(users.clientAccountId, clientAccountId));
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -324,6 +352,77 @@ export class DatabaseStorage implements IStorage {
   async updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined> {
     const [event] = await db.update(webhookEvents).set(updates).where(eq(webhookEvents.id, id)).returning();
     return event || undefined;
+  }
+
+  // RBAC - Roles
+  async getRoles(): Promise<Role[]> {
+    return db.select().from(roles).orderBy(desc(roles.createdAt));
+  }
+
+  async getRole(id: string): Promise<Role | undefined> {
+    const [role] = await db.select().from(roles).where(eq(roles.id, id));
+    return role || undefined;
+  }
+
+  async createRole(role: InsertRole): Promise<Role> {
+    const [newRole] = await db.insert(roles).values(role).returning();
+    return newRole;
+  }
+
+  async updateRole(id: string, updates: Partial<Role>): Promise<Role | undefined> {
+    const [role] = await db.update(roles).set({ ...updates, updatedAt: new Date() }).where(eq(roles.id, id)).returning();
+    return role || undefined;
+  }
+
+  async deleteRole(id: string): Promise<void> {
+    await db.delete(roles).where(eq(roles.id, id));
+  }
+
+  // RBAC - Permissions
+  async getPermissions(): Promise<Permission[]> {
+    return db.select().from(permissions).orderBy(desc(permissions.createdAt));
+  }
+
+  async getPermission(id: string): Promise<Permission | undefined> {
+    const [permission] = await db.select().from(permissions).where(eq(permissions.id, id));
+    return permission || undefined;
+  }
+
+  async createPermission(permission: InsertPermission): Promise<Permission> {
+    const [newPermission] = await db.insert(permissions).values(permission).returning();
+    return newPermission;
+  }
+
+  async deletePermission(id: string): Promise<void> {
+    await db.delete(permissions).where(eq(permissions.id, id));
+  }
+
+  // RBAC - User Roles
+  async getUserRoles(userId: string): Promise<UserRole[]> {
+    return db.select().from(userRoles).where(eq(userRoles.userId, userId));
+  }
+
+  async assignUserRole(userRole: InsertUserRole): Promise<UserRole> {
+    const [newUserRole] = await db.insert(userRoles).values(userRole).returning();
+    return newUserRole;
+  }
+
+  async removeUserRole(userId: string, roleId: string): Promise<void> {
+    await db.delete(userRoles).where(eq(userRoles.userId, userId));
+  }
+
+  // RBAC - Role Permissions
+  async getRolePermissions(roleId: string): Promise<RolePermission[]> {
+    return db.select().from(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+  }
+
+  async assignRolePermission(rolePermission: InsertRolePermission): Promise<RolePermission> {
+    const [newRolePermission] = await db.insert(rolePermissions).values(rolePermission).returning();
+    return newRolePermission;
+  }
+
+  async removeRolePermission(roleId: string, permissionId: string): Promise<void> {
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
   }
 
   // Initialize default data if database is empty

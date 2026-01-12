@@ -12,10 +12,13 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Tiered client profiles (Regular, Mid-Level, VIP) with discount benefits
 - Dynamic pricing rules with profile-based margins
 - Comprehensive audit logging with admin viewing
+- RBAC management (roles, permissions, user-role assignments)
+- Integration monitoring dashboard (FedEx, Stripe, Zoho)
+- Webhook event tracking and status
 
 **Security:**
 - Bcrypt password hashing (10 salt rounds)
-- RBAC tables prepared for future granular permissions
+- Full RBAC implementation with roles, permissions, user-roles, role-permissions
 - Session-based authentication with secure cookies (sameSite: lax for CSRF protection)
 - Helmet security headers with Content Security Policy
 - Rate limiting: 100 req/15min general, 5 req/15min for auth endpoints
@@ -81,10 +84,24 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
 - **Session Management**: Express-session with MemoryStore (development) or PostgreSQL session store (production)
 
 **Route Structure:**
-- `/api/auth/*` - Authentication endpoints
+- `/api/auth/*` - Authentication endpoints (login, logout, check, change-password)
 - `/api/admin/*` - Admin-only endpoints
+  - Clients: GET/POST /clients, GET/PATCH /clients/:id, GET /clients/:id/users
+  - Applications: GET /applications, PATCH /applications/:id
+  - Shipments: GET/POST /shipments, PATCH /shipments/:id/status
+  - Invoices: GET /invoices, POST /invoices/:id/generate-pdf
+  - Payments: GET /payments (with filtering)
+  - Pricing: GET/POST/PATCH/DELETE /pricing-rules
+  - Audit: GET /audit-logs
+  - Integrations: GET /integration-logs, GET /webhook-events
+  - RBAC: GET/POST /roles, GET/POST /permissions, POST/DELETE user-role assignments
 - `/api/client/*` - Client-facing endpoints
+  - Account: GET/PATCH /account
+  - Shipments: GET /shipments, GET /shipments/:id, POST /shipments
+  - Invoices: GET /invoices, GET /invoices/:id/pdf
+  - Payments: GET/POST /payments
 - `/api/config/branding` - Branding configuration
+- `/api/webhooks/*` - External webhook handlers (FedEx, Stripe, Zoho)
 
 ### Data Layer
 - **ORM**: Drizzle ORM
@@ -93,14 +110,17 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
 - **Migrations**: Managed via Drizzle Kit (`drizzle-kit push`)
 
 **Key Entities:**
-- Users (admin/client roles)
-- Client Accounts
+- Users (admin/client roles, with updatedAt tracking)
+- Client Accounts (with soft deletes via deletedAt)
 - Client Applications (onboarding workflow)
-- Shipments
-- Invoices
-- Payments
-- Pricing Rules
-- Audit Logs
+- Shipments (with FedEx carrier info, tracking numbers)
+- Invoices (with Zoho sync IDs)
+- Payments (with Stripe payment intents)
+- Pricing Rules (profile-based margins)
+- Audit Logs (database + file logging)
+- Integration Logs (API call tracking)
+- Webhook Events (external webhook processing)
+- RBAC: Roles, Permissions, UserRoles, RolePermissions
 
 ### Authentication & Authorization
 - Session-based authentication with cookies

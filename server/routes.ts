@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
+import type { ClientAccount } from "@shared/schema";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication } from "./services/email";
 import { fedexAdapter } from "./integrations/fedex";
@@ -620,6 +621,37 @@ export async function registerRoutes(
     res.json(clients);
   });
 
+  // Admin - Get Single Client
+  app.get("/api/admin/clients/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const client = await storage.getClientAccount(id);
+      
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      
+      // Get client's user accounts
+      const users = await storage.getUsersByClientAccount(id);
+      
+      // Get client's shipment count
+      const shipments = await storage.getShipmentsByClientAccount(id);
+      
+      // Get client's invoice count
+      const invoices = await storage.getInvoicesByClientAccount(id);
+      
+      res.json({
+        ...client,
+        users: users.map(u => ({ id: u.id, username: u.username, email: u.email, isActive: u.isActive })),
+        shipmentCount: shipments.length,
+        invoiceCount: invoices.length,
+      });
+    } catch (error) {
+      logError("Error getting client details", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - Create Client
   app.post("/api/admin/clients", requireAdmin, async (req, res) => {
     try {
@@ -757,10 +789,54 @@ export async function registerRoutes(
     }
   });
 
+  // Admin - Full Update Client
+  app.patch("/api/admin/clients/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, phone, country, companyName, crNumber, taxNumber, 
+              nationalAddressStreet, nationalAddressBuilding, nationalAddressDistrict,
+              nationalAddressCity, nationalAddressPostalCode, profile, isActive } = req.body;
+
+      const updates: Partial<ClientAccount> = {};
+      if (name !== undefined) updates.name = name;
+      if (phone !== undefined) updates.phone = phone;
+      if (country !== undefined) updates.country = country;
+      if (companyName !== undefined) updates.companyName = companyName;
+      if (crNumber !== undefined) updates.crNumber = crNumber;
+      if (taxNumber !== undefined) updates.taxNumber = taxNumber;
+      if (nationalAddressStreet !== undefined) updates.nationalAddressStreet = nationalAddressStreet;
+      if (nationalAddressBuilding !== undefined) updates.nationalAddressBuilding = nationalAddressBuilding;
+      if (nationalAddressDistrict !== undefined) updates.nationalAddressDistrict = nationalAddressDistrict;
+      if (nationalAddressCity !== undefined) updates.nationalAddressCity = nationalAddressCity;
+      if (nationalAddressPostalCode !== undefined) updates.nationalAddressPostalCode = nationalAddressPostalCode;
+      if (profile !== undefined && ["regular", "mid_level", "vip"].includes(profile)) updates.profile = profile;
+      if (isActive !== undefined) updates.isActive = isActive;
+
+      const updated = await storage.updateClientAccount(id, updates);
+      if (!updated) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+
+      await logAudit(req.session.userId, "update_client", "client_account", id,
+        `Updated client account ${updated.name}`, req.ip);
+
+      res.json(updated);
+    } catch (error) {
+      logError("Error updating client", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - All Invoices
   app.get("/api/admin/invoices", requireAdmin, async (_req, res) => {
     const invoices = await storage.getInvoices();
     res.json(invoices);
+  });
+
+  // Admin - All Payments
+  app.get("/api/admin/payments", requireAdmin, async (_req, res) => {
+    const payments = await storage.getPayments();
+    res.json(payments);
   });
 
   // Admin - Pricing Rules
@@ -803,6 +879,262 @@ export async function registerRoutes(
       const logs = await storage.getAuditLogs();
       res.json(logs);
     } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Integration Logs
+  app.get("/api/admin/integration-logs", requireAdmin, async (_req, res) => {
+    try {
+      const logs = await storage.getIntegrationLogs();
+      res.json(logs);
+    } catch (error) {
+      logError("Error fetching integration logs", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Webhook Events
+  app.get("/api/admin/webhook-events", requireAdmin, async (_req, res) => {
+    try {
+      const events = await storage.getWebhookEvents();
+      res.json(events);
+    } catch (error) {
+      logError("Error fetching webhook events", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // RBAC MANAGEMENT ROUTES
+  // ============================================
+
+  // Roles CRUD
+  app.get("/api/admin/roles", requireAdmin, async (_req, res) => {
+    try {
+      const allRoles = await storage.getRoles();
+      res.json(allRoles);
+    } catch (error) {
+      logError("Error fetching roles", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/roles/:id", requireAdmin, async (req, res) => {
+    try {
+      const role = await storage.getRole(req.params.id);
+      if (!role) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+      
+      // Get permissions assigned to this role
+      const rolePermissions = await storage.getRolePermissions(role.id);
+      const allPermissions = await storage.getPermissions();
+      const assignedPermissions = allPermissions.filter(p => 
+        rolePermissions.some(rp => rp.permissionId === p.id)
+      );
+      
+      res.json({ ...role, permissions: assignedPermissions });
+    } catch (error) {
+      logError("Error fetching role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/roles", requireAdmin, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: "Role name is required" });
+      }
+
+      const role = await storage.createRole({ name, description });
+      await logAudit(req.session.userId, "create_role", "role", role.id,
+        `Created role: ${name}`, req.ip);
+      
+      res.status(201).json(role);
+    } catch (error) {
+      logError("Error creating role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/roles/:id", requireAdmin, async (req, res) => {
+    try {
+      const { name, description, isActive } = req.body;
+      const updates: { name?: string; description?: string; isActive?: boolean } = {};
+      if (name !== undefined) updates.name = name;
+      if (description !== undefined) updates.description = description;
+      if (isActive !== undefined) updates.isActive = isActive;
+
+      const role = await storage.updateRole(req.params.id, updates);
+      if (!role) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+
+      await logAudit(req.session.userId, "update_role", "role", role.id,
+        `Updated role: ${role.name}`, req.ip);
+      
+      res.json(role);
+    } catch (error) {
+      logError("Error updating role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/roles/:id", requireAdmin, async (req, res) => {
+    try {
+      const role = await storage.getRole(req.params.id);
+      if (!role) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+
+      await storage.deleteRole(req.params.id);
+      await logAudit(req.session.userId, "delete_role", "role", req.params.id,
+        `Deleted role: ${role.name}`, req.ip);
+      
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Permissions CRUD
+  app.get("/api/admin/permissions", requireAdmin, async (_req, res) => {
+    try {
+      const allPermissions = await storage.getPermissions();
+      res.json(allPermissions);
+    } catch (error) {
+      logError("Error fetching permissions", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/permissions", requireAdmin, async (req, res) => {
+    try {
+      const { name, description, resource, action } = req.body;
+      if (!resource || !action) {
+        return res.status(400).json({ error: "Resource and action are required" });
+      }
+
+      const permissionName = name || `${resource}:${action}`;
+      const permission = await storage.createPermission({ name: permissionName, description, resource, action });
+      await logAudit(req.session.userId, "create_permission", "permission", permission.id,
+        `Created permission: ${permissionName}`, req.ip);
+      
+      res.status(201).json(permission);
+    } catch (error) {
+      logError("Error creating permission", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/permissions/:id", requireAdmin, async (req, res) => {
+    try {
+      const permission = await storage.getPermission(req.params.id);
+      if (!permission) {
+        return res.status(404).json({ error: "Permission not found" });
+      }
+
+      await storage.deletePermission(req.params.id);
+      await logAudit(req.session.userId, "delete_permission", "permission", req.params.id,
+        `Deleted permission: ${permission.name}`, req.ip);
+      
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting permission", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Role Permissions Management
+  app.post("/api/admin/roles/:roleId/permissions/:permissionId", requireAdmin, async (req, res) => {
+    try {
+      const { roleId, permissionId } = req.params;
+      
+      const role = await storage.getRole(roleId);
+      const permission = await storage.getPermission(permissionId);
+      
+      if (!role || !permission) {
+        return res.status(404).json({ error: "Role or permission not found" });
+      }
+
+      const rolePermission = await storage.assignRolePermission({ roleId, permissionId });
+      await logAudit(req.session.userId, "assign_permission", "role_permission", rolePermission.id,
+        `Assigned permission ${permission.name} to role ${role.name}`, req.ip);
+      
+      res.status(201).json(rolePermission);
+    } catch (error) {
+      logError("Error assigning permission to role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/roles/:roleId/permissions/:permissionId", requireAdmin, async (req, res) => {
+    try {
+      const { roleId, permissionId } = req.params;
+      await storage.removeRolePermission(roleId, permissionId);
+      
+      await logAudit(req.session.userId, "remove_permission", "role_permission", undefined,
+        `Removed permission ${permissionId} from role ${roleId}`, req.ip);
+      
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error removing permission from role", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // User Roles Management
+  app.get("/api/admin/users/:userId/roles", requireAdmin, async (req, res) => {
+    try {
+      const userRolesList = await storage.getUserRoles(req.params.userId);
+      const allRoles = await storage.getRoles();
+      const assignedRoles = allRoles.filter(r => 
+        userRolesList.some(ur => ur.roleId === r.id)
+      );
+      
+      res.json(assignedRoles);
+    } catch (error) {
+      logError("Error fetching user roles", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/users/:userId/roles/:roleId", requireAdmin, async (req, res) => {
+    try {
+      const { userId, roleId } = req.params;
+      
+      const user = await storage.getUser(userId);
+      const role = await storage.getRole(roleId);
+      
+      if (!user || !role) {
+        return res.status(404).json({ error: "User or role not found" });
+      }
+
+      const userRole = await storage.assignUserRole({ userId, roleId });
+      await logAudit(req.session.userId, "assign_role", "user_role", userRole.id,
+        `Assigned role ${role.name} to user ${user.username}`, req.ip);
+      
+      res.status(201).json(userRole);
+    } catch (error) {
+      logError("Error assigning role to user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/users/:userId/roles/:roleId", requireAdmin, async (req, res) => {
+    try {
+      const { userId, roleId } = req.params;
+      await storage.removeUserRole(userId, roleId);
+      
+      await logAudit(req.session.userId, "remove_role", "user_role", undefined,
+        `Removed role ${roleId} from user ${userId}`, req.ip);
+      
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error removing role from user", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -901,6 +1233,45 @@ export async function registerRoutes(
 
     const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
     res.json(shipments);
+  });
+
+  // Client - Get Single Shipment Details
+  app.get("/api/client/shipments/:id", requireClient, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const shipment = await storage.getShipment(id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      // Verify shipment belongs to this client
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Get associated invoice if exists
+      const invoices = await storage.getInvoicesByClientAccount(user.clientAccountId);
+      const invoice = invoices.find(inv => inv.shipmentId === shipment.id);
+
+      res.json({
+        ...shipment,
+        invoice: invoice ? {
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          amount: invoice.amount,
+          status: invoice.status,
+          dueDate: invoice.dueDate,
+        } : null,
+      });
+    } catch (error) {
+      logError("Error fetching shipment details", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Client - Create Shipment

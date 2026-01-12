@@ -22,6 +22,9 @@ import {
   DollarSign,
   ClipboardList,
   Shield,
+  CreditCard,
+  Plug,
+  Webhook,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -34,8 +37,12 @@ const navItems = [
   { href: "/admin/applications", label: "Applications", icon: ClipboardList },
   { href: "/admin/shipments", label: "Shipments", icon: Package },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
+  { href: "/admin/payments", label: "Payments", icon: CreditCard },
   { href: "/admin/pricing", label: "Pricing", icon: DollarSign },
   { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },
+  { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
+  { href: "/admin/webhook-events", label: "Webhooks", icon: Webhook },
+  { href: "/admin/rbac", label: "Access Control", icon: Shield },
 ];
 
 export function AdminLayout({ children }: AdminLayoutProps) {
