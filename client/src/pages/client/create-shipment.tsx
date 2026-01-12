@@ -720,9 +720,13 @@ export default function CreateShipment() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
-                Confirm Payment
+                {checkoutData.clientSecret ? "Complete Payment" : "Confirm Shipment"}
               </CardTitle>
-              <CardDescription>Review and confirm your shipment</CardDescription>
+              <CardDescription>
+                {checkoutData.clientSecret
+                  ? "Enter payment details to complete your order"
+                  : "Review and confirm your shipment"}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="rounded-lg bg-muted p-4">
@@ -738,17 +742,33 @@ export default function CreateShipment() {
                   </span>
                 </div>
               </div>
-              <div className="p-4 border rounded-lg">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <DollarSign className="h-4 w-4" />
-                  Payment will be processed securely
+
+              {checkoutData.clientSecret ? (
+                <div className="p-4 border rounded-lg space-y-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <CreditCard className="h-4 w-4" />
+                    Payment Details
+                  </div>
+                  <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <p className="text-sm text-amber-700 dark:text-amber-300">
+                      Stripe payment integration is configured. In production, a Stripe Payment Element would be rendered here to securely collect payment details.
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    For development, click confirm to simulate a successful payment.
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {checkoutData.paymentIntentId
-                    ? "Your payment will be processed via Stripe."
-                    : "Demo mode: Payment will be simulated."}
-                </p>
-              </div>
+              ) : (
+                <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                    <DollarSign className="h-4 w-4" />
+                    Demo Mode
+                  </div>
+                  <p className="text-sm text-blue-600 dark:text-blue-400">
+                    Stripe is not configured. Payment will be simulated for demonstration purposes.
+                  </p>
+                </div>
+              )}
             </CardContent>
             <CardFooter className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
@@ -758,7 +778,7 @@ export default function CreateShipment() {
                 data-testid="button-confirm"
               >
                 {confirmMutation.isPending ? (
-                  <><LoadingSpinner size="sm" className="mr-2" />Confirming...</>
+                  <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
                 ) : (
                   <>Confirm & Create Shipment</>
                 )}

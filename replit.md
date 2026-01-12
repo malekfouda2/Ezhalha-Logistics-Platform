@@ -28,8 +28,17 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 **Webhooks & Integrations:**
 - FedEx webhook handler with HMAC signature validation
 - Stripe webhook handler with proper signature verification (t=timestamp,v1=signature format)
-- Stripe payment service stub (ready for SDK configuration)
+- Stripe payment service with payment intent creation and verification
 - Zoho Books invoice sync stub (ready for API configuration)
+
+**Shipment Creation Flow:**
+1. Rate Discovery: Client submits shipment details, receives carrier quotes with final prices (margins applied server-side)
+2. Checkout: Client selects a quote, server creates payment intent and pending shipment
+3. Payment: Client pays via Stripe (or demo mode simulation)
+4. Confirmation: Server verifies payment and creates carrier shipment
+- Quote expiration: 30 minutes from creation, enforced server-side
+- Clients never see base carrier rates, only final prices with margin
+- Demo mode: Works without Stripe configuration for development/testing
 
 **Logging & Monitoring:**
 - Winston logger with daily rotating file transports
