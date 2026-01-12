@@ -77,6 +77,7 @@ export interface IStorage {
   getShipments(): Promise<Shipment[]>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
+  getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
 
@@ -255,6 +256,12 @@ export class DatabaseStorage implements IStorage {
   async getShipment(id: string): Promise<Shipment | undefined> {
     const [shipment] = await db.select().from(shipments)
       .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
+    return shipment || undefined;
+  }
+
+  async getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined> {
+    const [shipment] = await db.select().from(shipments)
+      .where(and(eq(shipments.paymentIntentId, paymentId), isNull(shipments.deletedAt)));
     return shipment || undefined;
   }
 

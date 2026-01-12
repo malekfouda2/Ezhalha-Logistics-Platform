@@ -11,6 +11,7 @@ import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejecte
 import { fedexAdapter } from "./integrations/fedex";
 import { zohoService } from "./integrations/zoho";
 import { stripeService } from "./integrations/stripe";
+import { moyasarService } from "./integrations/moyasar";
 import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 
@@ -1575,22 +1576,38 @@ export async function registerRoutes(
         estimatedDelivery: quote.estimatedDelivery,
       });
 
-      // Create payment intent via Stripe
-      let paymentIntent: { id: string; clientSecret: string } | null = null;
+      // Create payment via Moyasar
+      let paymentResult: { paymentId: string; transactionUrl?: string } | null = null;
       
-      if (stripeService.isConfigured()) {
-        paymentIntent = await stripeService.createPaymentIntent(
-          Math.round(Number(quote.finalPrice) * 100), // Convert to cents
-          quote.currency.toLowerCase(),
-          {
+      // Construct callback URL for payment completion
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const callbackUrl = `${protocol}://${host}/api/payments/moyasar/callback`;
+      
+      if (moyasarService.isConfigured()) {
+        paymentResult = await moyasarService.createPayment({
+          amount: Math.round(Number(quote.finalPrice) * 100), // Convert to smallest currency unit
+          currency: quote.currency.toUpperCase(),
+          description: `Shipment ${shipment.trackingNumber}`,
+          callbackUrl: callbackUrl,
+          metadata: {
             shipmentId: shipment.id,
             clientAccountId: user.clientAccountId,
-          }
-        );
+          },
+        });
 
-        // Update shipment with payment intent
+        // Update shipment with payment ID
         await storage.updateShipment(shipment.id, {
-          paymentIntentId: paymentIntent.id,
+          paymentIntentId: paymentResult.paymentId,
+        });
+      } else {
+        // Demo mode - create mock payment
+        paymentResult = {
+          paymentId: `mpy_mock_${Date.now()}`,
+          transactionUrl: undefined,
+        };
+        await storage.updateShipment(shipment.id, {
+          paymentIntentId: paymentResult.paymentId,
         });
       }
 
@@ -1600,8 +1617,8 @@ export async function registerRoutes(
       const response = {
         shipmentId: shipment.id,
         trackingNumber: shipment.trackingNumber,
-        paymentIntentId: paymentIntent?.id,
-        clientSecret: paymentIntent?.clientSecret,
+        paymentId: paymentResult?.paymentId,
+        transactionUrl: paymentResult?.transactionUrl,
         amount: Number(quote.finalPrice),
         currency: quote.currency,
       };
@@ -1661,12 +1678,20 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Shipment cannot be confirmed in current state" });
       }
 
-      // Verify payment if Stripe is configured
-      if (stripeService.isConfigured() && paymentIntentId) {
-        const paymentStatus = await stripeService.verifyPayment(paymentIntentId);
-        if (paymentStatus !== "succeeded") {
+      // Use the stored payment ID from shipment if not provided
+      const effectivePaymentId = paymentIntentId || shipment.paymentIntentId;
+
+      // Verify payment if Moyasar is configured
+      if (moyasarService.isConfigured() && effectivePaymentId) {
+        const paymentStatus = await moyasarService.verifyPayment(effectivePaymentId);
+        if (paymentStatus !== "paid") {
           return res.status(400).json({ error: "Payment not confirmed" });
         }
+      } else if (effectivePaymentId && effectivePaymentId.startsWith("mpy_mock_")) {
+        // Demo mode - accept mock payments
+      } else if (!effectivePaymentId) {
+        // No payment ID available - this shouldn't happen in normal flow
+        logError("Confirm shipment: No payment ID available", { shipmentId });
       }
 
       // Create shipment with carrier
@@ -2646,6 +2671,112 @@ export async function registerRoutes(
       res.json({ received: true, eventId: webhookEvent.id });
     } catch (error) {
       console.error("Stripe webhook error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // Moyasar Payment Callback Handler
+  // This handles the redirect after user completes payment on Moyasar's page
+  app.get("/api/payments/moyasar/callback", async (req, res) => {
+    try {
+      const { id: paymentId, status, message } = req.query as { id?: string; status?: string; message?: string };
+
+      if (!paymentId) {
+        return res.redirect("/client/shipments?error=missing_payment_id");
+      }
+
+      // Log the callback event
+      await storage.createWebhookEvent({
+        source: "moyasar",
+        eventType: "payment_callback",
+        payload: JSON.stringify({ paymentId, status, message }),
+        processed: false,
+        retryCount: 0,
+      });
+
+      // Find shipment by payment ID (indexed lookup)
+      const shipment = await storage.getShipmentByPaymentId(paymentId);
+
+      if (!shipment) {
+        logError("Moyasar callback: Shipment not found for payment", { paymentId });
+        return res.redirect("/client/shipments?error=shipment_not_found");
+      }
+
+      // Verify payment status with Moyasar
+      const verifiedStatus = await moyasarService.verifyPayment(paymentId);
+
+      if (verifiedStatus === "paid") {
+        // Redirect to the create shipment page to complete the flow
+        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=success`);
+      } else if (verifiedStatus === "failed") {
+        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=failed&message=${encodeURIComponent(message || "Payment failed")}`);
+      } else {
+        // Payment still pending or in another state
+        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=pending`);
+      }
+    } catch (error) {
+      logError("Moyasar callback error:", error);
+      return res.redirect("/client/shipments?error=callback_error");
+    }
+  });
+
+  // Moyasar Webhook Handler (for server-to-server notifications)
+  app.post("/api/webhooks/moyasar", async (req, res) => {
+    try {
+      const rawBody = (req as any).rawBody;
+      const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
+      const signature = req.headers["x-moyasar-signature"] as string | undefined;
+      const event = req.body;
+
+      // Validate webhook signature
+      if (!moyasarService.validateWebhookSignature(payload, signature)) {
+        await storage.createWebhookEvent({
+          source: "moyasar",
+          eventType: "signature_validation_failed",
+          payload,
+          signature: signature || null,
+          processed: false,
+          retryCount: 0,
+          errorMessage: "Invalid webhook signature",
+        });
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+
+      // Store webhook event
+      const webhookEvent = await storage.createWebhookEvent({
+        source: "moyasar",
+        eventType: event.type || "payment_update",
+        payload,
+        signature: signature || null,
+        processed: false,
+        retryCount: 0,
+      });
+
+      // Process payment events
+      const payment = event.data || event;
+      const paymentId = payment.id;
+      const paymentStatus = payment.status;
+
+      if (paymentId) {
+        // Find shipment by payment ID (indexed lookup)
+        const shipment = await storage.getShipmentByPaymentId(paymentId);
+
+        if (shipment && paymentStatus === "paid") {
+          // Update shipment payment status
+          await storage.updateShipment(shipment.id, {
+            paymentStatus: "paid",
+          });
+
+          await logAudit(undefined, "webhook_payment", "payment", paymentId,
+            `Moyasar webhook confirmed payment for shipment ${shipment.trackingNumber}`, req.ip);
+        }
+
+        await storage.updateWebhookEvent(webhookEvent.id, { processed: true, processedAt: new Date() });
+      }
+
+      res.json({ received: true, eventId: webhookEvent.id });
+    } catch (error) {
+      logError("Moyasar webhook error:", error);
       res.status(500).json({ error: "Webhook processing failed" });
     }
   });

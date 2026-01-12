@@ -13,7 +13,7 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Dynamic pricing rules with profile-based margins
 - Comprehensive audit logging with admin viewing
 - RBAC management (roles, permissions, user-role assignments)
-- Integration monitoring dashboard (FedEx, Stripe, Zoho)
+- Integration monitoring dashboard (FedEx, Moyasar, Zoho)
 - Webhook event tracking and status
 
 **Security:**
@@ -27,18 +27,28 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 
 **Webhooks & Integrations:**
 - FedEx webhook handler with HMAC signature validation
-- Stripe webhook handler with proper signature verification (t=timestamp,v1=signature format)
-- Stripe payment service with payment intent creation and verification
+- Moyasar payment gateway with redirect-based payment flow
+- Moyasar webhook handler for payment status updates
+- Stripe webhook handler (legacy, kept for backwards compatibility)
 - Zoho Books invoice sync stub (ready for API configuration)
 
 **Shipment Creation Flow:**
 1. Rate Discovery: Client submits shipment details, receives carrier quotes with final prices (margins applied server-side)
-2. Checkout: Client selects a quote, server creates payment intent and pending shipment
-3. Payment: Client pays via Stripe (or demo mode simulation)
-4. Confirmation: Server verifies payment and creates carrier shipment
+2. Checkout: Client selects a quote, server creates Moyasar payment and pending shipment
+3. Payment: Client is redirected to Moyasar's secure payment page (or demo mode simulation)
+4. Callback: After payment, user is redirected back with payment status
+5. Confirmation: Server verifies payment and creates carrier shipment
 - Quote expiration: 30 minutes from creation, enforced server-side
 - Clients never see base carrier rates, only final prices with margin
-- Demo mode: Works without Stripe configuration for development/testing
+- Demo mode: Works without Moyasar configuration for development/testing
+
+**Moyasar Integration:**
+- API Base URL: https://api.moyasar.com/v1
+- Authentication: HTTP Basic Auth (secret key as username, empty password)
+- Payment flow: Redirect-based with 3DS support
+- Callback URL: /api/payments/moyasar/callback
+- Webhook URL: /api/webhooks/moyasar
+- Environment variables: MOYASAR_SECRET_KEY, MOYASAR_PUBLISHABLE_KEY
 
 **Logging & Monitoring:**
 - Winston logger with daily rotating file transports

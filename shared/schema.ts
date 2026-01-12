@@ -271,7 +271,8 @@ export const payments = pgTable("payments", {
   paymentMethod: text("payment_method").notNull(),
   status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
-  stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID
+  stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID (legacy)
+  moyasarPaymentId: text("moyasar_payment_id"), // Moyasar payment ID
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

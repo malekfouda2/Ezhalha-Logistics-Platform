@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
 import { LoadingSpinner } from "@/components/loading-spinner";
@@ -75,8 +75,8 @@ interface RatesResponse {
 interface CheckoutResponse {
   shipmentId: string;
   trackingNumber: string;
-  paymentIntentId?: string;
-  clientSecret?: string;
+  paymentId?: string;
+  transactionUrl?: string;
   amount: number;
   currency: string;
 }
@@ -114,12 +114,14 @@ const packageTypes = [
 
 export default function CreateShipment() {
   const [, navigate] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
   const [rates, setRates] = useState<RatesResponse | null>(null);
   const [checkoutData, setCheckoutData] = useState<CheckoutResponse | null>(null);
   const [confirmData, setConfirmData] = useState<ConfirmResponse | null>(null);
+  const [isProcessingCallback, setIsProcessingCallback] = useState(false);
 
   const [formData, setFormData] = useState<ShipmentFormData>({
     shipper: {
@@ -158,6 +160,45 @@ export default function CreateShipment() {
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
   });
+
+  // Handle Moyasar payment callback
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const shipmentId = params.get("shipmentId");
+    const paymentStatus = params.get("paymentStatus");
+    const message = params.get("message");
+
+    if (shipmentId && paymentStatus && !isProcessingCallback) {
+      setIsProcessingCallback(true);
+
+      if (paymentStatus === "success") {
+        // Payment was successful, confirm the shipment
+        toast({
+          title: "Payment Successful",
+          description: "Completing your shipment...",
+        });
+        
+        // Trigger the confirm mutation - navigation happens in onSuccess/onError
+        confirmMutation.mutate({
+          shipmentId,
+          paymentIntentId: undefined,
+        });
+      } else if (paymentStatus === "failed") {
+        toast({
+          title: "Payment Failed",
+          description: message || "Your payment could not be processed. Please try again.",
+          variant: "destructive",
+        });
+        navigate("/client/shipments", { replace: true });
+      } else if (paymentStatus === "pending") {
+        toast({
+          title: "Payment Pending",
+          description: "Your payment is being processed. Please wait.",
+        });
+        navigate("/client/shipments", { replace: true });
+      }
+    }
+  }, [searchString, isProcessingCallback, toast]);
 
   const getRatesMutation = useMutation({
     mutationFn: async (data: ShipmentFormData) => {
@@ -205,6 +246,8 @@ export default function CreateShipment() {
       setStep(6);
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      // Clear URL params after successful confirmation
+      navigate("/client/create-shipment", { replace: true });
     },
     onError: (error) => {
       toast({
@@ -212,8 +255,18 @@ export default function CreateShipment() {
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
+      // Clear URL params on error too
+      navigate("/client/shipments", { replace: true });
     },
   });
+
+  const handlePayment = () => {
+    if (checkoutData?.transactionUrl) {
+      window.location.href = checkoutData.transactionUrl;
+    } else {
+      handleConfirmPayment();
+    }
+  };
 
   const updateShipper = (field: string, value: string) => {
     setFormData(prev => ({
@@ -284,7 +337,7 @@ export default function CreateShipment() {
     if (checkoutData) {
       confirmMutation.mutate({
         shipmentId: checkoutData.shipmentId,
-        paymentIntentId: checkoutData.paymentIntentId,
+        paymentIntentId: checkoutData.paymentId,
       });
     }
   };
@@ -720,11 +773,11 @@ export default function CreateShipment() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
-                {checkoutData.clientSecret ? "Complete Payment" : "Confirm Shipment"}
+                {checkoutData.transactionUrl ? "Complete Payment" : "Confirm Shipment"}
               </CardTitle>
               <CardDescription>
-                {checkoutData.clientSecret
-                  ? "Enter payment details to complete your order"
+                {checkoutData.transactionUrl
+                  ? "You will be redirected to complete payment securely"
                   : "Review and confirm your shipment"}
               </CardDescription>
             </CardHeader>
@@ -743,19 +796,19 @@ export default function CreateShipment() {
                 </div>
               </div>
 
-              {checkoutData.clientSecret ? (
+              {checkoutData.transactionUrl ? (
                 <div className="p-4 border rounded-lg space-y-4">
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <CreditCard className="h-4 w-4" />
-                    Payment Details
+                    Moyasar Payment
                   </div>
-                  <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    <p className="text-sm text-amber-700 dark:text-amber-300">
-                      Stripe payment integration is configured. In production, a Stripe Payment Element would be rendered here to securely collect payment details.
+                  <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Click the button below to securely complete your payment via Moyasar. You will be redirected to enter your card details.
                     </p>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    For development, click confirm to simulate a successful payment.
+                    After payment, you will be redirected back to complete your shipment.
                   </p>
                 </div>
               ) : (
@@ -765,7 +818,7 @@ export default function CreateShipment() {
                     Demo Mode
                   </div>
                   <p className="text-sm text-blue-600 dark:text-blue-400">
-                    Stripe is not configured. Payment will be simulated for demonstration purposes.
+                    Moyasar is not configured. Payment will be simulated for demonstration purposes.
                   </p>
                 </div>
               )}
@@ -773,12 +826,14 @@ export default function CreateShipment() {
             <CardFooter className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
               <Button
-                onClick={handleConfirmPayment}
+                onClick={handlePayment}
                 disabled={confirmMutation.isPending}
                 data-testid="button-confirm"
               >
                 {confirmMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
+                ) : checkoutData.transactionUrl ? (
+                  <>Proceed to Payment</>
                 ) : (
                   <>Confirm & Create Shipment</>
                 )}
