@@ -144,6 +144,9 @@ export default function AdminShipments() {
                   <TabsTrigger value="all" data-testid="tab-all">
                     All
                   </TabsTrigger>
+                  <TabsTrigger value="created" data-testid="tab-created">
+                    Created
+                  </TabsTrigger>
                   <TabsTrigger value="processing" data-testid="tab-processing">
                     Processing
                   </TabsTrigger>
@@ -339,11 +342,11 @@ export default function AdminShipments() {
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="created">Created</SelectItem>
                         <SelectItem value="processing">Processing</SelectItem>
                         <SelectItem value="in_transit">In Transit</SelectItem>
                         <SelectItem value="delivered">Delivered</SelectItem>
                       </SelectContent>
-                      {/* Note: Cancelled status is set via the dedicated cancel button below */}
                     </Select>
                     {updateStatusMutation.isPending && (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

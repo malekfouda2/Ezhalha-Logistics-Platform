@@ -7,6 +7,9 @@ interface StatusBadgeProps {
 }
 
 const statusStyles: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+  payment_pending: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+  created: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
   processing: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
   in_transit: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   delivered: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
@@ -18,9 +21,13 @@ const statusStyles: Record<string, string> = {
   failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   inactive: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+  paid: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
 };
 
 const statusLabels: Record<string, string> = {
+  draft: "Draft",
+  payment_pending: "Payment Pending",
+  created: "Created",
   processing: "Processing",
   in_transit: "In Transit",
   delivered: "Delivered",
@@ -32,6 +39,7 @@ const statusLabels: Record<string, string> = {
   failed: "Failed",
   active: "Active",
   inactive: "Inactive",
+  paid: "Paid",
 };
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {

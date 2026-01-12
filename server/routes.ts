@@ -470,7 +470,7 @@ export async function registerRoutes(
 
   // Admin - Update Shipment Status (cancelled is handled by dedicated cancel endpoint)
   const statusUpdateSchema = z.object({
-    status: z.enum(["processing", "in_transit", "delivered"]),
+    status: z.enum(["created", "processing", "in_transit", "delivered"]),
   });
 
   app.patch("/api/admin/shipments/:id/status", requireAdmin, async (req, res) => {
