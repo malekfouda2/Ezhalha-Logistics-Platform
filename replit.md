@@ -100,6 +100,12 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
   - Shipments: GET /shipments, GET /shipments/:id, POST /shipments
   - Invoices: GET /invoices, GET /invoices/:id/pdf
   - Payments: GET/POST /payments
+- `/api/shipments/*` - Carrier integration endpoints
+  - POST /validate-address - FedEx address validation
+  - POST /validate-postal-code - FedEx postal code validation
+  - POST /check-service - FedEx service availability check
+  - POST /rates - Get shipping rates
+  - GET /:id/track - Track shipment via carrier API
 - `/api/config/branding` - Branding configuration
 - `/api/webhooks/*` - External webhook handlers (FedEx, Stripe, Zoho)
 
