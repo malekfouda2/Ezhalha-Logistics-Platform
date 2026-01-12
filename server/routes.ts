@@ -1833,6 +1833,171 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================
+  // SHIPMENT CARRIER API ENDPOINTS
+  // ============================================
+
+  // Validate Address
+  app.post("/api/shipments/validate-address", requireAuth, async (req, res) => {
+    try {
+      const addressSchema = z.object({
+        streetLine1: z.string().min(1),
+        streetLine2: z.string().optional(),
+        city: z.string().optional(),
+        stateOrProvince: z.string().optional(),
+        postalCode: z.string().optional(),
+        countryCode: z.string().min(2).max(2),
+      });
+
+      const address = addressSchema.parse(req.body);
+      const result = await fedexAdapter.validateAddress({ address });
+      
+      await logAudit(req.session.userId!, "validate_address", "shipment", undefined, 
+        `Address validation: ${address.streetLine1}, ${address.city || 'N/A'}`, req.ip);
+      
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to validate address", error);
+      res.status(500).json({ error: "Failed to validate address" });
+    }
+  });
+
+  // Validate Postal Code
+  app.post("/api/shipments/validate-postal-code", requireAuth, async (req, res) => {
+    try {
+      const postalCodeSchema = z.object({
+        postalCode: z.string().min(1),
+        countryCode: z.string().min(2).max(2),
+        stateOrProvince: z.string().optional(),
+      });
+
+      const data = postalCodeSchema.parse(req.body);
+      const result = await fedexAdapter.validatePostalCode(data);
+      
+      await logAudit(req.session.userId!, "validate_postal_code", "shipment", undefined, 
+        `Postal code validation: ${data.postalCode}, ${data.countryCode}`, req.ip);
+      
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to validate postal code", error);
+      res.status(500).json({ error: "Failed to validate postal code" });
+    }
+  });
+
+  // Check Service Availability
+  app.post("/api/shipments/check-service", requireAuth, async (req, res) => {
+    try {
+      const serviceSchema = z.object({
+        origin: z.object({
+          postalCode: z.string().min(1),
+          countryCode: z.string().min(2).max(2),
+          stateOrProvince: z.string().optional(),
+        }),
+        destination: z.object({
+          postalCode: z.string().min(1),
+          countryCode: z.string().min(2).max(2),
+          stateOrProvince: z.string().optional(),
+        }),
+        shipDate: z.string().optional(),
+      });
+
+      const data = serviceSchema.parse(req.body);
+      const result = await fedexAdapter.checkServiceAvailability(data);
+      
+      await logAudit(req.session.userId!, "check_service_availability", "shipment", undefined, 
+        `Service check: ${data.origin.postalCode} -> ${data.destination.postalCode}`, req.ip);
+      
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to check service availability", error);
+      res.status(500).json({ error: "Failed to check service availability" });
+    }
+  });
+
+  // Get Shipping Rates (public for authenticated users)
+  app.post("/api/shipments/rates", requireAuth, async (req, res) => {
+    try {
+      const rateSchema = z.object({
+        shipper: z.object({
+          name: z.string(),
+          streetLine1: z.string(),
+          streetLine2: z.string().optional(),
+          city: z.string(),
+          stateOrProvince: z.string().optional(),
+          postalCode: z.string(),
+          countryCode: z.string().min(2).max(2),
+          phone: z.string(),
+        }),
+        recipient: z.object({
+          name: z.string(),
+          streetLine1: z.string(),
+          streetLine2: z.string().optional(),
+          city: z.string(),
+          stateOrProvince: z.string().optional(),
+          postalCode: z.string(),
+          countryCode: z.string().min(2).max(2),
+          phone: z.string(),
+        }),
+        packages: z.array(z.object({
+          weight: z.number().positive(),
+          weightUnit: z.enum(["LB", "KG"]),
+          dimensions: z.object({
+            length: z.number().positive(),
+            width: z.number().positive(),
+            height: z.number().positive(),
+            unit: z.enum(["IN", "CM"]),
+          }).optional(),
+          packageType: z.string(),
+        })),
+        serviceType: z.string().optional(),
+      });
+
+      const data = rateSchema.parse(req.body);
+      const rates = await fedexAdapter.getRates(data);
+      
+      await logAudit(req.session.userId!, "get_rates", "shipment", undefined, 
+        `Rate request: ${data.shipper.city} -> ${data.recipient.city}`, req.ip);
+      
+      res.json({ rates, carrier: "FedEx", isConfigured: fedexAdapter.isConfigured() });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get rates", error);
+      res.status(500).json({ error: "Failed to get rates" });
+    }
+  });
+
+  // Track Shipment
+  app.get("/api/shipments/:id/track", requireAuth, async (req, res) => {
+    try {
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const trackingNumber = shipment.carrierTrackingNumber || shipment.trackingNumber;
+      const tracking = await fedexAdapter.trackShipment(trackingNumber);
+      
+      await logAudit(req.session.userId!, "track_shipment", "shipment", shipment.id, 
+        `Tracked shipment: ${trackingNumber}`, req.ip);
+      
+      res.json({ ...tracking, shipment });
+    } catch (error) {
+      logError("Failed to track shipment", error);
+      res.status(500).json({ error: "Failed to track shipment" });
+    }
+  });
+
   // Register object storage routes for file uploads
   registerObjectStorageRoutes(app);
 
