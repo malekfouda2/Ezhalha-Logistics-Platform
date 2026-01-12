@@ -43,7 +43,7 @@ import {
   webhookEvents,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, isNull, and } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 const SALT_ROUNDS = 10;
@@ -183,11 +183,14 @@ export class DatabaseStorage implements IStorage {
 
   // Client Accounts
   async getClientAccounts(): Promise<ClientAccount[]> {
-    return db.select().from(clientAccounts).orderBy(desc(clientAccounts.createdAt));
+    return db.select().from(clientAccounts)
+      .where(isNull(clientAccounts.deletedAt))
+      .orderBy(desc(clientAccounts.createdAt));
   }
 
   async getClientAccount(id: string): Promise<ClientAccount | undefined> {
-    const [account] = await db.select().from(clientAccounts).where(eq(clientAccounts.id, id));
+    const [account] = await db.select().from(clientAccounts)
+      .where(and(eq(clientAccounts.id, id), isNull(clientAccounts.deletedAt)));
     return account || undefined;
   }
 
@@ -197,12 +200,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateClientAccount(id: string, updates: Partial<ClientAccount>): Promise<ClientAccount | undefined> {
-    const [account] = await db.update(clientAccounts).set(updates).where(eq(clientAccounts.id, id)).returning();
+    const [account] = await db.update(clientAccounts).set(updates)
+      .where(and(eq(clientAccounts.id, id), isNull(clientAccounts.deletedAt)))
+      .returning();
     return account || undefined;
   }
 
   async deleteClientAccount(id: string): Promise<void> {
-    await db.delete(clientAccounts).where(eq(clientAccounts.id, id));
+    await db.update(clientAccounts).set({ deletedAt: new Date() }).where(eq(clientAccounts.id, id));
   }
 
   // Client Applications
@@ -227,15 +232,20 @@ export class DatabaseStorage implements IStorage {
 
   // Shipments
   async getShipments(): Promise<Shipment[]> {
-    return db.select().from(shipments).orderBy(desc(shipments.createdAt));
+    return db.select().from(shipments)
+      .where(isNull(shipments.deletedAt))
+      .orderBy(desc(shipments.createdAt));
   }
 
   async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {
-    return db.select().from(shipments).where(eq(shipments.clientAccountId, clientAccountId)).orderBy(desc(shipments.createdAt));
+    return db.select().from(shipments)
+      .where(and(eq(shipments.clientAccountId, clientAccountId), isNull(shipments.deletedAt)))
+      .orderBy(desc(shipments.createdAt));
   }
 
   async getShipment(id: string): Promise<Shipment | undefined> {
-    const [shipment] = await db.select().from(shipments).where(eq(shipments.id, id));
+    const [shipment] = await db.select().from(shipments)
+      .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
     return shipment || undefined;
   }
 
@@ -251,21 +261,26 @@ export class DatabaseStorage implements IStorage {
     const [shipment] = await db.update(shipments).set({
       ...updates,
       updatedAt: new Date(),
-    }).where(eq(shipments.id, id)).returning();
+    }).where(and(eq(shipments.id, id), isNull(shipments.deletedAt))).returning();
     return shipment || undefined;
   }
 
   // Invoices
   async getInvoices(): Promise<Invoice[]> {
-    return db.select().from(invoices).orderBy(desc(invoices.createdAt));
+    return db.select().from(invoices)
+      .where(isNull(invoices.deletedAt))
+      .orderBy(desc(invoices.createdAt));
   }
 
   async getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]> {
-    return db.select().from(invoices).where(eq(invoices.clientAccountId, clientAccountId)).orderBy(desc(invoices.createdAt));
+    return db.select().from(invoices)
+      .where(and(eq(invoices.clientAccountId, clientAccountId), isNull(invoices.deletedAt)))
+      .orderBy(desc(invoices.createdAt));
   }
 
   async getInvoice(id: string): Promise<Invoice | undefined> {
-    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    const [invoice] = await db.select().from(invoices)
+      .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)));
     return invoice || undefined;
   }
 
@@ -278,7 +293,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | undefined> {
-    const [invoice] = await db.update(invoices).set(updates).where(eq(invoices.id, id)).returning();
+    const [invoice] = await db.update(invoices).set(updates)
+      .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
+      .returning();
     return invoice || undefined;
   }
 

@@ -85,6 +85,12 @@ import {
   type ClientDashboardStats,
 } from "@shared/schema";
 import { z } from "zod";
+
+// Password change validation schema
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(8, "New password must be at least 8 characters"),
+});
 import MemoryStore from "memorystore";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 
@@ -316,15 +322,13 @@ export async function registerRoutes(
   // Change Password (requires authentication)
   app.post("/api/auth/change-password", requireAuth, async (req, res) => {
     try {
-      const { currentPassword, newPassword } = req.body;
-      
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ error: "Current password and new password are required" });
+      // Validate request body with Zod schema
+      const validationResult = changePasswordSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ error: validationResult.error.errors[0].message });
       }
       
-      if (newPassword.length < 8) {
-        return res.status(400).json({ error: "New password must be at least 8 characters" });
-      }
+      const { currentPassword, newPassword } = validationResult.data;
       
       const user = await storage.getUser(req.session.userId!);
       if (!user) {
@@ -337,15 +341,26 @@ export async function registerRoutes(
       }
       
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await storage.updateUser(user.id, { password: hashedPassword });
+      await storage.updateUser(user.id, { password: hashedPassword, updatedAt: new Date() });
       
-      // Log the password change
+      // Clear brute-force tracking for this user on successful password change
+      if (user.username) {
+        clearFailedLogins(user.username);
+      }
+      if (user.email) {
+        clearFailedLogins(user.email);
+      }
+      
+      // Log the password change to audit log
       await logAudit(user.id, "change_password", "user", user.id, 
         `User changed their password`, req.ip);
       
       logInfo("User changed password", { userId: user.id });
       res.json({ success: true, message: "Password changed successfully" });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
       logError("Failed to change password", error);
       res.status(500).json({ error: "Failed to change password" });
     }
