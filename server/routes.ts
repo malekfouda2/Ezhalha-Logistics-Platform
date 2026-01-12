@@ -10,6 +10,7 @@ import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricin
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication } from "./services/email";
 import { fedexAdapter } from "./integrations/fedex";
 import { zohoService } from "./integrations/zoho";
+import { stripeService } from "./integrations/stripe";
 import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 
@@ -1327,7 +1328,429 @@ export async function registerRoutes(
     }
   });
 
-  // Client - Create Shipment
+  // ============================================
+  // NEW SHIPMENT FLOW: RATE DISCOVERY -> CHECKOUT -> CONFIRM
+  // ============================================
+
+  // Canonical Shipment Input Schema
+  const shipmentInputSchema = z.object({
+    shipper: z.object({
+      name: z.string().min(1, "Shipper name is required"),
+      phone: z.string().min(1, "Shipper phone is required"),
+      countryCode: z.string().length(2, "Country code must be 2 characters"),
+      city: z.string().min(1, "Shipper city is required"),
+      postalCode: z.string().min(1, "Shipper postal code is required"),
+      addressLine1: z.string().min(1, "Shipper address is required"),
+      addressLine2: z.string().optional(),
+      stateOrProvince: z.string().optional(),
+    }),
+    recipient: z.object({
+      name: z.string().min(1, "Recipient name is required"),
+      phone: z.string().min(1, "Recipient phone is required"),
+      countryCode: z.string().length(2, "Country code must be 2 characters"),
+      city: z.string().min(1, "Recipient city is required"),
+      postalCode: z.string().min(1, "Recipient postal code is required"),
+      addressLine1: z.string().min(1, "Recipient address is required"),
+      addressLine2: z.string().optional(),
+      stateOrProvince: z.string().optional(),
+    }),
+    package: z.object({
+      weight: z.number().positive("Weight must be positive"),
+      weightUnit: z.enum(["LB", "KG"]),
+      length: z.number().positive("Length must be positive"),
+      width: z.number().positive("Width must be positive"),
+      height: z.number().positive("Height must be positive"),
+      dimensionUnit: z.enum(["IN", "CM"]),
+      packageType: z.string().default("YOUR_PACKAGING"),
+    }),
+    shipmentType: z.enum(["domestic", "international"]),
+    serviceType: z.string().optional(),
+    currency: z.string().default("USD"),
+  });
+
+  // STEP 1: Rate Discovery - Get rates from all carriers
+  app.post("/api/client/shipments/rates", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const data = shipmentInputSchema.parse(req.body);
+
+      // Get client account for pricing
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      // Get pricing rule for client profile
+      const pricingRule = await storage.getPricingRuleByProfile(account.profile);
+      const marginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+
+      // Map to carrier adapter format
+      const rateRequest = {
+        shipper: {
+          name: data.shipper.name,
+          streetLine1: data.shipper.addressLine1,
+          streetLine2: data.shipper.addressLine2,
+          city: data.shipper.city,
+          stateOrProvince: data.shipper.stateOrProvince,
+          postalCode: data.shipper.postalCode,
+          countryCode: data.shipper.countryCode,
+          phone: data.shipper.phone,
+        },
+        recipient: {
+          name: data.recipient.name,
+          streetLine1: data.recipient.addressLine1,
+          streetLine2: data.recipient.addressLine2,
+          city: data.recipient.city,
+          stateOrProvince: data.recipient.stateOrProvince,
+          postalCode: data.recipient.postalCode,
+          countryCode: data.recipient.countryCode,
+          phone: data.recipient.phone,
+        },
+        packages: [{
+          weight: data.package.weight,
+          weightUnit: data.package.weightUnit,
+          dimensions: {
+            length: data.package.length,
+            width: data.package.width,
+            height: data.package.height,
+            unit: data.package.dimensionUnit,
+          },
+          packageType: data.package.packageType,
+        }],
+        serviceType: data.serviceType,
+      };
+
+      // Get rates from FedEx adapter
+      const carrierRates = await fedexAdapter.getRates(rateRequest);
+
+      // Store quotes with pricing and return to client
+      const quotes: Array<{
+        quoteId: string;
+        carrierName: string;
+        serviceType: string;
+        serviceName: string;
+        finalPrice: number;
+        currency: string;
+        transitDays: number;
+        estimatedDelivery?: Date;
+      }> = [];
+
+      // Quote expiration: 30 minutes
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+      for (const rate of carrierRates) {
+        const marginAmount = rate.baseRate * (marginPercentage / 100);
+        const finalPrice = rate.baseRate + marginAmount;
+
+        // Store quote in database
+        const quote = await storage.createShipmentRateQuote({
+          clientAccountId: user.clientAccountId,
+          shipmentData: JSON.stringify(data),
+          carrierCode: fedexAdapter.carrierCode,
+          carrierName: fedexAdapter.name,
+          serviceType: rate.serviceType,
+          serviceName: rate.serviceName,
+          baseRate: rate.baseRate.toFixed(2),
+          marginPercentage: marginPercentage.toFixed(2),
+          marginAmount: marginAmount.toFixed(2),
+          finalPrice: finalPrice.toFixed(2),
+          currency: rate.currency,
+          transitDays: rate.transitDays,
+          estimatedDelivery: rate.deliveryDate,
+          expiresAt,
+        });
+
+        // Return only what client should see (no baseRate)
+        quotes.push({
+          quoteId: quote.id,
+          carrierName: fedexAdapter.name,
+          serviceType: rate.serviceType,
+          serviceName: rate.serviceName,
+          finalPrice: Number(finalPrice.toFixed(2)),
+          currency: rate.currency,
+          transitDays: rate.transitDays,
+          estimatedDelivery: rate.deliveryDate,
+        });
+      }
+
+      await logAudit(req.session.userId, "get_shipping_rates", "shipment", undefined,
+        `Requested ${quotes.length} shipping rates`, req.ip);
+
+      res.json({ quotes, expiresAt });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get shipping rates", error);
+      res.status(500).json({ error: "Failed to get shipping rates" });
+    }
+  });
+
+  // STEP 2: Checkout - Create payment intent with selected rate
+  app.post("/api/client/shipments/checkout", requireClient, async (req, res) => {
+    try {
+      // Check idempotency
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) {
+          return res.status(cached.statusCode).json(cached.response);
+        }
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const checkoutSchema = z.object({
+        quoteId: z.string().uuid("Invalid quote ID"),
+      });
+
+      const { quoteId } = checkoutSchema.parse(req.body);
+
+      // Verify quote exists and is valid
+      const quote = await storage.getShipmentRateQuote(quoteId);
+      if (!quote) {
+        return res.status(404).json({ error: "Quote not found or expired" });
+      }
+
+      // Verify quote belongs to this client
+      if (quote.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Recalculate price server-side to prevent tampering
+      const shipmentData = JSON.parse(quote.shipmentData);
+      const account = await storage.getClientAccount(user.clientAccountId);
+      const pricingRule = await storage.getPricingRuleByProfile(account?.profile || "regular");
+      const marginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+      const baseRate = Number(quote.baseRate);
+      const recalculatedMargin = baseRate * (marginPercentage / 100);
+      const recalculatedFinalPrice = baseRate + recalculatedMargin;
+
+      // Verify price hasn't been tampered with
+      if (Math.abs(recalculatedFinalPrice - Number(quote.finalPrice)) > 0.01) {
+        return res.status(400).json({ error: "Price mismatch detected" });
+      }
+
+      // Create draft shipment with payment pending status
+      const shipment = await storage.createShipment({
+        clientAccountId: user.clientAccountId,
+        senderName: shipmentData.shipper.name,
+        senderAddress: shipmentData.shipper.addressLine1,
+        senderCity: shipmentData.shipper.city,
+        senderPostalCode: shipmentData.shipper.postalCode,
+        senderCountry: shipmentData.shipper.countryCode,
+        senderPhone: shipmentData.shipper.phone,
+        recipientName: shipmentData.recipient.name,
+        recipientAddress: shipmentData.recipient.addressLine1,
+        recipientCity: shipmentData.recipient.city,
+        recipientPostalCode: shipmentData.recipient.postalCode,
+        recipientCountry: shipmentData.recipient.countryCode,
+        recipientPhone: shipmentData.recipient.phone,
+        weight: shipmentData.package.weight.toString(),
+        weightUnit: shipmentData.package.weightUnit,
+        length: shipmentData.package.length.toString(),
+        width: shipmentData.package.width.toString(),
+        height: shipmentData.package.height.toString(),
+        dimensionUnit: shipmentData.package.dimensionUnit,
+        packageType: shipmentData.package.packageType,
+        shipmentType: shipmentData.shipmentType,
+        serviceType: quote.serviceType,
+        currency: quote.currency,
+        status: "payment_pending",
+        baseRate: quote.baseRate,
+        marginAmount: quote.marginAmount,
+        margin: quote.marginAmount,
+        finalPrice: quote.finalPrice,
+        carrierCode: quote.carrierCode,
+        carrierName: quote.carrierName,
+        carrierServiceType: quote.serviceType,
+        paymentStatus: "pending",
+        estimatedDelivery: quote.estimatedDelivery,
+      });
+
+      // Create payment intent via Stripe
+      let paymentIntent: { id: string; clientSecret: string } | null = null;
+      
+      if (stripeService.isConfigured()) {
+        paymentIntent = await stripeService.createPaymentIntent(
+          Math.round(Number(quote.finalPrice) * 100), // Convert to cents
+          quote.currency.toLowerCase(),
+          {
+            shipmentId: shipment.id,
+            clientAccountId: user.clientAccountId,
+          }
+        );
+
+        // Update shipment with payment intent
+        await storage.updateShipment(shipment.id, {
+          paymentIntentId: paymentIntent.id,
+        });
+      }
+
+      await logAudit(req.session.userId, "checkout_shipment", "shipment", shipment.id,
+        `Created checkout for shipment ${shipment.trackingNumber}`, req.ip);
+
+      const response = {
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        paymentIntentId: paymentIntent?.id,
+        clientSecret: paymentIntent?.clientSecret,
+        amount: Number(quote.finalPrice),
+        currency: quote.currency,
+      };
+
+      // Store idempotency record
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, response, 200);
+      }
+
+      res.json(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create checkout", error);
+      res.status(500).json({ error: "Failed to create checkout" });
+    }
+  });
+
+  // STEP 3: Confirm - Create carrier shipment after payment success
+  app.post("/api/client/shipments/confirm", requireClient, async (req, res) => {
+    try {
+      // Check idempotency
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) {
+          return res.status(cached.statusCode).json(cached.response);
+        }
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const confirmSchema = z.object({
+        shipmentId: z.string().uuid("Invalid shipment ID"),
+        paymentIntentId: z.string().optional(),
+      });
+
+      const { shipmentId, paymentIntentId } = confirmSchema.parse(req.body);
+
+      // Get shipment
+      const shipment = await storage.getShipment(shipmentId);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      // Verify shipment belongs to client
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Verify shipment is in correct state
+      if (shipment.status !== "payment_pending") {
+        return res.status(400).json({ error: "Shipment cannot be confirmed in current state" });
+      }
+
+      // Verify payment if Stripe is configured
+      if (stripeService.isConfigured() && paymentIntentId) {
+        const paymentStatus = await stripeService.verifyPayment(paymentIntentId);
+        if (paymentStatus !== "succeeded") {
+          return res.status(400).json({ error: "Payment not confirmed" });
+        }
+      }
+
+      // Create shipment with carrier
+      const carrierRequest = {
+        shipper: {
+          name: shipment.senderName,
+          streetLine1: shipment.senderAddress,
+          city: shipment.senderCity,
+          stateOrProvince: "",
+          postalCode: shipment.senderPostalCode || "",
+          countryCode: shipment.senderCountry,
+          phone: shipment.senderPhone,
+        },
+        recipient: {
+          name: shipment.recipientName,
+          streetLine1: shipment.recipientAddress,
+          city: shipment.recipientCity,
+          stateOrProvince: "",
+          postalCode: shipment.recipientPostalCode || "",
+          countryCode: shipment.recipientCountry,
+          phone: shipment.recipientPhone,
+        },
+        packages: [{
+          weight: Number(shipment.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: shipment.length && shipment.width && shipment.height ? {
+            length: Number(shipment.length),
+            width: Number(shipment.width),
+            height: Number(shipment.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          } : undefined,
+          packageType: shipment.packageType,
+        }],
+        serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        labelFormat: "PDF" as const,
+      };
+
+      const carrierResponse = await fedexAdapter.createShipment(carrierRequest);
+
+      // Update shipment with carrier response
+      const updatedShipment = await storage.updateShipment(shipmentId, {
+        status: "created",
+        paymentStatus: "paid",
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
+        carrierShipmentId: carrierResponse.trackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+      });
+
+      // Create invoice
+      await storage.createInvoice({
+        clientAccountId: user.clientAccountId,
+        shipmentId: shipment.id,
+        amount: shipment.finalPrice,
+        status: "paid",
+        dueDate: new Date(),
+      });
+
+      await logAudit(req.session.userId, "confirm_shipment", "shipment", shipmentId,
+        `Confirmed shipment ${shipment.trackingNumber} with carrier tracking ${carrierResponse.carrierTrackingNumber}`, req.ip);
+
+      const response = {
+        shipment: updatedShipment,
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+      };
+
+      // Store idempotency record
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, response, 200);
+      }
+
+      res.json(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to confirm shipment", error);
+      res.status(500).json({ error: "Failed to confirm shipment" });
+    }
+  });
+
+  // Client - Create Shipment (LEGACY - direct creation without rate discovery)
   app.post("/api/client/shipments", requireClient, async (req, res) => {
     try {
       // Check idempotency
