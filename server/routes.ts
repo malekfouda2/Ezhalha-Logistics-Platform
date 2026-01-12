@@ -313,6 +313,44 @@ export async function registerRoutes(
     res.json({ user: userWithoutPassword });
   });
 
+  // Change Password (requires authentication)
+  app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current password and new password are required" });
+      }
+      
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+      
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+      
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(user.id, { password: hashedPassword });
+      
+      // Log the password change
+      await logAudit(user.id, "change_password", "user", user.id, 
+        `User changed their password`, req.ip);
+      
+      logInfo("User changed password", { userId: user.id });
+      res.json({ success: true, message: "Password changed successfully" });
+    } catch (error) {
+      logError("Failed to change password", error);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
   // ============================================
   // PUBLIC ROUTES - CLIENT APPLICATIONS
   // ============================================

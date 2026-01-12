@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save } from "lucide-react";
+import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound } from "lucide-react";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -33,6 +33,17 @@ const profileFormSchema = z.object({
 });
 
 type ProfileFormData = z.infer<typeof profileFormSchema>;
+
+const passwordFormSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(8, "Password must be at least 8 characters"),
+  confirmPassword: z.string().min(1, "Please confirm your password"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+type PasswordFormData = z.infer<typeof passwordFormSchema>;
 
 export default function ClientSettings() {
   const { toast } = useToast();
@@ -82,6 +93,43 @@ export default function ClientSettings() {
 
   const onSubmit = (data: ProfileFormData) => {
     updateMutation.mutate(data);
+  };
+
+  const passwordForm = useForm<PasswordFormData>({
+    resolver: zodResolver(passwordFormSchema),
+    defaultValues: {
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    },
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (data: PasswordFormData) => {
+      const res = await apiRequest("POST", "/api/auth/change-password", {
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      passwordForm.reset();
+      toast({
+        title: "Password Changed",
+        description: "Your password has been updated successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onPasswordSubmit = (data: PasswordFormData) => {
+    changePasswordMutation.mutate(data);
   };
 
   const profileBenefits: Record<string, string[]> = {
@@ -286,6 +334,99 @@ export default function ClientSettings() {
               <p className="text-xs text-muted-foreground mt-4">
                 Contact your account manager to upgrade your tier.
               </p>
+            </CardContent>
+          </Card>
+
+          {/* Change Password Card */}
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Lock className="h-5 w-5" />
+                Change Password
+              </CardTitle>
+              <CardDescription>
+                Update your password to keep your account secure
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...passwordForm}>
+                <form onSubmit={passwordForm.handleSubmit(onPasswordSubmit)} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <FormField
+                      control={passwordForm.control}
+                      name="currentPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Current Password</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder="Enter current password"
+                              data-testid="input-current-password"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={passwordForm.control}
+                      name="newPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>New Password</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder="Enter new password"
+                              data-testid="input-new-password"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription>At least 8 characters</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={passwordForm.control}
+                      name="confirmPassword"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Confirm Password</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder="Confirm new password"
+                              data-testid="input-confirm-password"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="flex justify-end pt-4">
+                    <Button
+                      type="submit"
+                      disabled={changePasswordMutation.isPending}
+                      data-testid="button-change-password"
+                    >
+                      {changePasswordMutation.isPending ? (
+                        <LoadingSpinner size="sm" className="mr-2" />
+                      ) : (
+                        <KeyRound className="mr-2 h-4 w-4" />
+                      )}
+                      Change Password
+                    </Button>
+                  </div>
+                </form>
+              </Form>
             </CardContent>
           </Card>
         </div>
