@@ -158,29 +158,44 @@ export const shipments = pgTable("shipments", {
   senderName: text("sender_name").notNull(),
   senderAddress: text("sender_address").notNull(),
   senderCity: text("sender_city").notNull(),
+  senderPostalCode: text("sender_postal_code"),
   senderCountry: text("sender_country").notNull(),
   senderPhone: text("sender_phone").notNull(),
   recipientName: text("recipient_name").notNull(),
   recipientAddress: text("recipient_address").notNull(),
   recipientCity: text("recipient_city").notNull(),
+  recipientPostalCode: text("recipient_postal_code"),
   recipientCountry: text("recipient_country").notNull(),
   recipientPhone: text("recipient_phone").notNull(),
   weight: decimal("weight", { precision: 10, scale: 2 }).notNull(),
+  weightUnit: text("weight_unit").default("LB"),
+  length: decimal("length", { precision: 10, scale: 2 }),
+  width: decimal("width", { precision: 10, scale: 2 }),
+  height: decimal("height", { precision: 10, scale: 2 }),
+  dimensionUnit: text("dimension_unit").default("IN"),
   dimensions: text("dimensions"),
   packageType: text("package_type").notNull(),
-  serviceType: text("service_type"), // FedEx service type (e.g., FEDEX_GROUND, FEDEX_2_DAY)
-  status: text("status").notNull().default("processing"),
+  shipmentType: text("shipment_type").default("domestic"),
+  serviceType: text("service_type"),
+  currency: text("currency").default("USD"),
+  status: text("status").notNull().default("draft"),
   baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
+  marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }),
   margin: decimal("margin", { precision: 10, scale: 2 }).notNull(),
   finalPrice: decimal("final_price", { precision: 10, scale: 2 }).notNull(),
+  carrierCode: text("carrier_code"),
   carrierName: text("carrier_name"),
-  carrierTrackingNumber: text("carrier_tracking_number"), // Carrier's own tracking number
-  labelUrl: text("label_url"), // Shipping label URL
+  carrierServiceType: text("carrier_service_type"),
+  carrierShipmentId: text("carrier_shipment_id"),
+  carrierTrackingNumber: text("carrier_tracking_number"),
+  labelUrl: text("label_url"),
+  paymentIntentId: text("payment_intent_id"),
+  paymentStatus: text("payment_status").default("pending"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at"), // Soft delete
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const insertShipmentSchema = createInsertSchema(shipments).omit({
@@ -192,6 +207,34 @@ export const insertShipmentSchema = createInsertSchema(shipments).omit({
 
 export type InsertShipment = z.infer<typeof insertShipmentSchema>;
 export type Shipment = typeof shipments.$inferSelect;
+
+// Shipment Rate Quotes table (for rate discovery)
+export const shipmentRateQuotes = pgTable("shipment_rate_quotes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  shipmentData: text("shipment_data").notNull(),
+  carrierCode: text("carrier_code").notNull(),
+  carrierName: text("carrier_name").notNull(),
+  serviceType: text("service_type").notNull(),
+  serviceName: text("service_name").notNull(),
+  baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
+  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }).notNull(),
+  finalPrice: decimal("final_price", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("USD"),
+  transitDays: integer("transit_days"),
+  estimatedDelivery: timestamp("estimated_delivery"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShipmentRateQuoteSchema = createInsertSchema(shipmentRateQuotes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentRateQuote = z.infer<typeof insertShipmentRateQuoteSchema>;
+export type ShipmentRateQuote = typeof shipmentRateQuotes.$inferSelect;
 
 // Invoices table
 export const invoices = pgTable("invoices", {

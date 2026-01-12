@@ -27,6 +27,8 @@ import {
   type InsertIntegrationLog,
   type WebhookEvent,
   type InsertWebhookEvent,
+  type ShipmentRateQuote,
+  type InsertShipmentRateQuote,
   users,
   clientAccounts,
   clientApplications,
@@ -41,9 +43,10 @@ import {
   rolePermissions,
   integrationLogs,
   webhookEvents,
+  shipmentRateQuotes,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, isNull, and } from "drizzle-orm";
+import { eq, desc, isNull, and, gt, lt } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 const SALT_ROUNDS = 10;
@@ -130,6 +133,12 @@ export interface IStorage {
   getRolePermissions(roleId: string): Promise<RolePermission[]>;
   assignRolePermission(rolePermission: InsertRolePermission): Promise<RolePermission>;
   removeRolePermission(roleId: string, permissionId: string): Promise<void>;
+
+  // Shipment Rate Quotes
+  getShipmentRateQuote(id: string): Promise<ShipmentRateQuote | undefined>;
+  getValidShipmentRateQuotes(clientAccountId: string): Promise<ShipmentRateQuote[]>;
+  createShipmentRateQuote(quote: InsertShipmentRateQuote): Promise<ShipmentRateQuote>;
+  deleteExpiredShipmentRateQuotes(): Promise<void>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -440,6 +449,31 @@ export class DatabaseStorage implements IStorage {
 
   async removeRolePermission(roleId: string, permissionId: string): Promise<void> {
     await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+  }
+
+  // Shipment Rate Quotes
+  async getShipmentRateQuote(id: string): Promise<ShipmentRateQuote | undefined> {
+    const [quote] = await db.select().from(shipmentRateQuotes)
+      .where(and(eq(shipmentRateQuotes.id, id), gt(shipmentRateQuotes.expiresAt, new Date())));
+    return quote || undefined;
+  }
+
+  async getValidShipmentRateQuotes(clientAccountId: string): Promise<ShipmentRateQuote[]> {
+    return db.select().from(shipmentRateQuotes)
+      .where(and(
+        eq(shipmentRateQuotes.clientAccountId, clientAccountId),
+        gt(shipmentRateQuotes.expiresAt, new Date())
+      ))
+      .orderBy(desc(shipmentRateQuotes.createdAt));
+  }
+
+  async createShipmentRateQuote(quote: InsertShipmentRateQuote): Promise<ShipmentRateQuote> {
+    const [newQuote] = await db.insert(shipmentRateQuotes).values(quote).returning();
+    return newQuote;
+  }
+
+  async deleteExpiredShipmentRateQuotes(): Promise<void> {
+    await db.delete(shipmentRateQuotes).where(lt(shipmentRateQuotes.expiresAt, new Date()));
   }
 
   // Initialize default data if database is empty
