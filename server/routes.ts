@@ -171,10 +171,116 @@ async function logAudit(
   }
 }
 
+// Default permissions for the platform
+const DEFAULT_PERMISSIONS = [
+  // Clients
+  { resource: "clients", action: "create", description: "Create new client accounts" },
+  { resource: "clients", action: "read", description: "View client information" },
+  { resource: "clients", action: "update", description: "Update client details" },
+  { resource: "clients", action: "delete", description: "Delete client accounts" },
+  { resource: "clients", action: "activate", description: "Activate or deactivate clients" },
+  
+  // Shipments
+  { resource: "shipments", action: "create", description: "Create new shipments" },
+  { resource: "shipments", action: "read", description: "View shipment information" },
+  { resource: "shipments", action: "update", description: "Update shipment details" },
+  { resource: "shipments", action: "delete", description: "Delete shipments" },
+  { resource: "shipments", action: "cancel", description: "Cancel shipments" },
+  { resource: "shipments", action: "track", description: "Track shipment status" },
+  
+  // Invoices
+  { resource: "invoices", action: "create", description: "Create new invoices" },
+  { resource: "invoices", action: "read", description: "View invoice information" },
+  { resource: "invoices", action: "update", description: "Update invoice details" },
+  { resource: "invoices", action: "delete", description: "Delete invoices" },
+  { resource: "invoices", action: "download", description: "Download invoice PDFs" },
+  { resource: "invoices", action: "sync", description: "Sync invoices with Zoho" },
+  
+  // Payments
+  { resource: "payments", action: "read", description: "View payment information" },
+  { resource: "payments", action: "create", description: "Process payments" },
+  { resource: "payments", action: "refund", description: "Issue payment refunds" },
+  
+  // Applications
+  { resource: "applications", action: "read", description: "View client applications" },
+  { resource: "applications", action: "approve", description: "Approve client applications" },
+  { resource: "applications", action: "reject", description: "Reject client applications" },
+  
+  // Pricing Rules
+  { resource: "pricing-rules", action: "create", description: "Create pricing rules" },
+  { resource: "pricing-rules", action: "read", description: "View pricing rules" },
+  { resource: "pricing-rules", action: "update", description: "Update pricing rules" },
+  { resource: "pricing-rules", action: "delete", description: "Delete pricing rules" },
+  
+  // Audit Logs
+  { resource: "audit-logs", action: "read", description: "View audit logs" },
+  
+  // Users
+  { resource: "users", action: "create", description: "Create new users" },
+  { resource: "users", action: "read", description: "View user information" },
+  { resource: "users", action: "update", description: "Update user details" },
+  { resource: "users", action: "delete", description: "Delete users" },
+  { resource: "users", action: "reset-password", description: "Reset user passwords" },
+  
+  // Roles
+  { resource: "roles", action: "create", description: "Create new roles" },
+  { resource: "roles", action: "read", description: "View roles" },
+  { resource: "roles", action: "update", description: "Update role details" },
+  { resource: "roles", action: "delete", description: "Delete roles" },
+  { resource: "roles", action: "assign", description: "Assign roles to users" },
+  
+  // Permissions
+  { resource: "permissions", action: "create", description: "Create new permissions" },
+  { resource: "permissions", action: "read", description: "View permissions" },
+  { resource: "permissions", action: "delete", description: "Delete permissions" },
+  { resource: "permissions", action: "assign", description: "Assign permissions to roles" },
+  
+  // Settings
+  { resource: "settings", action: "read", description: "View system settings" },
+  { resource: "settings", action: "update", description: "Update system settings" },
+  
+  // Integrations
+  { resource: "integrations", action: "read", description: "View integration status" },
+  { resource: "integrations", action: "configure", description: "Configure integrations" },
+  
+  // Webhooks
+  { resource: "webhooks", action: "read", description: "View webhook events" },
+  
+  // Dashboard
+  { resource: "dashboard", action: "read", description: "View admin dashboard" },
+  { resource: "dashboard", action: "export", description: "Export dashboard reports" },
+];
+
+async function seedDefaultPermissions() {
+  try {
+    const existingPermissions = await storage.getPermissions();
+    
+    if (existingPermissions.length === 0) {
+      logInfo("Seeding default permissions...");
+      
+      for (const perm of DEFAULT_PERMISSIONS) {
+        await storage.createPermission({
+          name: `${perm.resource}:${perm.action}`,
+          resource: perm.resource,
+          action: perm.action,
+          description: perm.description,
+        });
+      }
+      
+      logInfo(`Seeded ${DEFAULT_PERMISSIONS.length} default permissions`);
+    }
+  } catch (error) {
+    logError("Error seeding default permissions", error);
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Seed default permissions on startup
+  await seedDefaultPermissions();
+  
   // Trust proxy for rate limiting behind reverse proxy
   app.set("trust proxy", 1);
 
