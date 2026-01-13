@@ -97,7 +97,9 @@ export interface IStorage {
   // Pricing Rules
   getPricingRules(): Promise<PricingRule[]>;
   getPricingRuleByProfile(profile: string): Promise<PricingRule | undefined>;
+  createPricingRule(rule: InsertPricingRule): Promise<PricingRule>;
   updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined>;
+  deletePricingRule(id: string): Promise<void>;
 
   // Audit Logs
   getAuditLogs(): Promise<AuditLog[]>;
@@ -344,12 +346,21 @@ export class DatabaseStorage implements IStorage {
     return rule || undefined;
   }
 
+  async createPricingRule(rule: InsertPricingRule): Promise<PricingRule> {
+    const [newRule] = await db.insert(pricingRules).values(rule).returning();
+    return newRule;
+  }
+
   async updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined> {
     const [rule] = await db.update(pricingRules).set({
       ...updates,
       updatedAt: new Date(),
     }).where(eq(pricingRules.id, id)).returning();
     return rule || undefined;
+  }
+
+  async deletePricingRule(id: string): Promise<void> {
+    await db.delete(pricingRules).where(eq(pricingRules.id, id));
   }
 
   // Audit Logs
@@ -510,9 +521,9 @@ export class DatabaseStorage implements IStorage {
     const existingRules = await this.getPricingRules();
     if (existingRules.length === 0) {
       const pricingData = [
-        { profile: "regular", marginPercentage: "20.00" },
-        { profile: "mid_level", marginPercentage: "15.00" },
-        { profile: "vip", marginPercentage: "10.00" },
+        { profile: "regular", displayName: "Regular", marginPercentage: "20.00", isActive: true },
+        { profile: "mid_level", displayName: "Mid-Level", marginPercentage: "15.00", isActive: true },
+        { profile: "vip", displayName: "VIP", marginPercentage: "10.00", isActive: true },
       ];
 
       for (const rule of pricingData) {
