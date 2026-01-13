@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -23,13 +25,18 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Plus, Shield, Key, Trash2 } from "lucide-react";
+import { Plus, Shield, Key, Trash2, Settings2 } from "lucide-react";
 import type { Role, Permission } from "@shared/schema";
 import { format } from "date-fns";
+
+interface RoleWithPermissions extends Role {
+  permissions?: Permission[];
+}
 
 export default function AdminRBAC() {
   const [activeTab, setActiveTab] = useState("roles");
@@ -40,6 +47,8 @@ export default function AdminRBAC() {
   const [newPermDescription, setNewPermDescription] = useState("");
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [permDialogOpen, setPermDialogOpen] = useState(false);
+  const [assignPermDialogOpen, setAssignPermDialogOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const { toast } = useToast();
 
   const { data: roles, isLoading: rolesLoading } = useQuery<Role[]>({
@@ -49,6 +58,67 @@ export default function AdminRBAC() {
   const { data: permissions, isLoading: permissionsLoading } = useQuery<Permission[]>({
     queryKey: ["/api/admin/permissions"],
   });
+
+  const { data: selectedRoleData, isLoading: selectedRoleLoading } = useQuery<RoleWithPermissions>({
+    queryKey: ["/api/admin/roles", selectedRole?.id],
+    enabled: !!selectedRole?.id && assignPermDialogOpen,
+  });
+
+  const assignPermissionMutation = useMutation({
+    mutationFn: async ({ roleId, permissionId }: { roleId: string; permissionId: string }) => {
+      const res = await apiRequest("POST", `/api/admin/roles/${roleId}/permissions/${permissionId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/roles", selectedRole?.id] });
+      toast({ title: "Permission assigned" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to assign permission", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const removePermissionMutation = useMutation({
+    mutationFn: async ({ roleId, permissionId }: { roleId: string; permissionId: string }) => {
+      const res = await apiRequest("DELETE", `/api/admin/roles/${roleId}/permissions/${permissionId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/roles", selectedRole?.id] });
+      toast({ title: "Permission removed" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to remove permission", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handlePermissionToggle = (permissionId: string, isAssigned: boolean) => {
+    if (!selectedRole) return;
+    
+    if (isAssigned) {
+      removePermissionMutation.mutate({ roleId: selectedRole.id, permissionId });
+    } else {
+      assignPermissionMutation.mutate({ roleId: selectedRole.id, permissionId });
+    }
+  };
+
+  const openAssignPermissionsDialog = (role: Role) => {
+    setSelectedRole(role);
+    setAssignPermDialogOpen(true);
+  };
+
+  const getPermissionsByResource = () => {
+    if (!permissions) return {};
+    return permissions.reduce((acc, perm) => {
+      if (!acc[perm.resource]) acc[perm.resource] = [];
+      acc[perm.resource].push(perm);
+      return acc;
+    }, {} as Record<string, Permission[]>);
+  };
+
+  const isPermissionAssigned = (permissionId: string) => {
+    return selectedRoleData?.permissions?.some(p => p.id === permissionId) || false;
+  };
 
   const createRoleMutation = useMutation({
     mutationFn: async (data: { name: string; description?: string }) => {
@@ -212,7 +282,7 @@ export default function AdminRBAC() {
                         <TableHead>Name</TableHead>
                         <TableHead>Description</TableHead>
                         <TableHead>Created</TableHead>
-                        <TableHead className="w-[80px]">Actions</TableHead>
+                        <TableHead className="w-[120px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -228,15 +298,25 @@ export default function AdminRBAC() {
                             {format(new Date(role.createdAt), "MMM d, yyyy")}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => deleteRoleMutation.mutate(role.id)}
-                              disabled={deleteRoleMutation.isPending}
-                              data-testid={`button-delete-role-${role.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openAssignPermissionsDialog(role)}
+                                data-testid={`button-assign-permissions-${role.id}`}
+                              >
+                                <Settings2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => deleteRoleMutation.mutate(role.id)}
+                                disabled={deleteRoleMutation.isPending}
+                                data-testid={`button-delete-role-${role.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -367,6 +447,74 @@ export default function AdminRBAC() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={assignPermDialogOpen} onOpenChange={setAssignPermDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle>Assign Permissions to "{selectedRole?.name}"</DialogTitle>
+              <DialogDescription>
+                Select which permissions this role should have. Changes are saved automatically.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedRoleLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading permissions...</div>
+            ) : (
+              <ScrollArea className="h-[400px] pr-4">
+                <div className="space-y-6">
+                  {Object.entries(getPermissionsByResource()).map(([resource, perms]) => (
+                    <div key={resource} className="space-y-3">
+                      <h4 className="font-medium text-sm capitalize border-b pb-2">
+                        {resource.replace(/-/g, " ")}
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {perms.map((perm) => {
+                          const isAssigned = isPermissionAssigned(perm.id);
+                          const isPending = assignPermissionMutation.isPending || removePermissionMutation.isPending;
+                          return (
+                            <div
+                              key={perm.id}
+                              className="flex items-start gap-3 p-2 rounded-md hover-elevate"
+                            >
+                              <Checkbox
+                                id={`perm-${perm.id}`}
+                                checked={isAssigned}
+                                onCheckedChange={() => handlePermissionToggle(perm.id, isAssigned)}
+                                disabled={isPending}
+                                data-testid={`checkbox-permission-${perm.id}`}
+                              />
+                              <div className="grid gap-1 leading-none">
+                                <label
+                                  htmlFor={`perm-${perm.id}`}
+                                  className="text-sm font-medium cursor-pointer"
+                                >
+                                  {perm.action}
+                                </label>
+                                {perm.description && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {perm.description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setAssignPermDialogOpen(false)}
+                data-testid="button-close-assign-permissions"
+              >
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminLayout>
   );
