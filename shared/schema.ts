@@ -136,7 +136,9 @@ export type ClientApplication = typeof clientApplications.$inferSelect;
 export const pricingRules = pgTable("pricing_rules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   profile: text("profile").notNull().unique(),
+  displayName: text("display_name").notNull(),
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
