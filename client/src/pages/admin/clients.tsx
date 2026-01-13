@@ -81,7 +81,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { ClientAccount } from "@shared/schema";
+import type { ClientAccount, PricingRule } from "@shared/schema";
 import { format } from "date-fns";
 
 export default function AdminClients() {
@@ -138,6 +138,10 @@ export default function AdminClients() {
 
   const { data: clients, isLoading } = useQuery<ClientAccount[]>({
     queryKey: ["/api/admin/clients"],
+  });
+
+  const { data: pricingRules } = useQuery<PricingRule[]>({
+    queryKey: ["/api/admin/pricing"],
   });
 
   const updateProfileMutation = useMutation({
@@ -430,9 +434,11 @@ export default function AdminClients() {
                 <SelectValue placeholder="Select profile" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="regular">Regular</SelectItem>
-                <SelectItem value="mid_level">Mid-Level</SelectItem>
-                <SelectItem value="vip">VIP</SelectItem>
+                {pricingRules?.map((rule) => (
+                  <SelectItem key={rule.id} value={rule.profile}>
+                    {rule.displayName || rule.profile}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

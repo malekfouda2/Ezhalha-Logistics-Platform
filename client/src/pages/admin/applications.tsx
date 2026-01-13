@@ -35,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, Check, X, Building2, Mail, Phone, MapPin, FileText, Hash, Download } from "lucide-react";
-import type { ClientApplication } from "@shared/schema";
+import type { ClientApplication, PricingRule } from "@shared/schema";
 import { format } from "date-fns";
 
 export default function AdminApplications() {
@@ -50,6 +50,10 @@ export default function AdminApplications() {
 
   const { data: applications, isLoading } = useQuery<ClientApplication[]>({
     queryKey: ["/api/admin/applications"],
+  });
+
+  const { data: pricingRules } = useQuery<PricingRule[]>({
+    queryKey: ["/api/admin/pricing"],
   });
 
   const reviewMutation = useMutation({
@@ -383,9 +387,11 @@ export default function AdminApplications() {
                     <SelectValue placeholder="Select profile" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="regular">Regular</SelectItem>
-                    <SelectItem value="mid_level">Mid-Level</SelectItem>
-                    <SelectItem value="vip">VIP</SelectItem>
+                    {pricingRules?.map((rule) => (
+                      <SelectItem key={rule.id} value={rule.profile}>
+                        {rule.displayName || rule.profile}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
