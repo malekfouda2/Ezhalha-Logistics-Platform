@@ -911,7 +911,10 @@ export async function registerRoutes(
       const { id } = req.params;
       const { profile } = req.body;
 
-      if (!["regular", "mid_level", "vip"].includes(profile)) {
+      // Validate profile against actual pricing rules in database
+      const pricingRules = await storage.getPricingRules();
+      const validProfiles = pricingRules.map(r => r.profile);
+      if (!validProfiles.includes(profile)) {
         return res.status(400).json({ error: "Invalid profile" });
       }
 
@@ -970,7 +973,11 @@ export async function registerRoutes(
       if (nationalAddressDistrict !== undefined) updates.nationalAddressDistrict = nationalAddressDistrict;
       if (nationalAddressCity !== undefined) updates.nationalAddressCity = nationalAddressCity;
       if (nationalAddressPostalCode !== undefined) updates.nationalAddressPostalCode = nationalAddressPostalCode;
-      if (profile !== undefined && ["regular", "mid_level", "vip"].includes(profile)) updates.profile = profile;
+      if (profile !== undefined) {
+        const pricingRules = await storage.getPricingRules();
+        const validProfiles = pricingRules.map(r => r.profile);
+        if (validProfiles.includes(profile)) updates.profile = profile;
+      }
       if (isActive !== undefined) updates.isActive = isActive;
 
       const updated = await storage.updateClientAccount(id, updates);
