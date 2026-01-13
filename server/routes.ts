@@ -1006,30 +1006,129 @@ export async function registerRoutes(
     res.json(rules);
   });
 
-  // Admin - Update Pricing Rule
-  app.patch("/api/admin/pricing/:id", requireAdmin, async (req, res) => {
+  // Admin - Create Pricing Profile
+  app.post("/api/admin/pricing", requireAdmin, async (req, res) => {
     try {
-      const { id } = req.params;
-      const { marginPercentage } = req.body;
+      const { profile, displayName, marginPercentage } = req.body;
+      
+      if (!profile || !displayName) {
+        return res.status(400).json({ error: "Profile key and display name are required" });
+      }
 
-      const margin = parseFloat(marginPercentage);
+      // Validate profile key format (lowercase, underscores, no spaces)
+      const profileKey = profile.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+      if (!profileKey) {
+        return res.status(400).json({ error: "Invalid profile key" });
+      }
+
+      // Check if profile already exists
+      const existing = await storage.getPricingRuleByProfile(profileKey);
+      if (existing) {
+        return res.status(400).json({ error: "A profile with this key already exists" });
+      }
+
+      const margin = parseFloat(marginPercentage || "15");
       if (isNaN(margin) || margin < 0 || margin > 100) {
         return res.status(400).json({ error: "Invalid margin percentage" });
       }
 
-      const updated = await storage.updatePricingRule(id, {
+      const newRule = await storage.createPricingRule({
+        profile: profileKey,
+        displayName: displayName.trim(),
         marginPercentage: margin.toFixed(2),
+        isActive: true,
       });
+
+      await logAudit(req.session.userId, "create_pricing_profile", "pricing_rule", newRule.id,
+        `Created pricing profile: ${displayName} with ${margin}% margin`, req.ip);
+
+      res.status(201).json(newRule);
+    } catch (error) {
+      logError("Error creating pricing profile", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Update Pricing Rule
+  app.patch("/api/admin/pricing/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { marginPercentage, displayName, isActive } = req.body;
+      
+      const updates: { marginPercentage?: string; displayName?: string; isActive?: boolean } = {};
+
+      if (marginPercentage !== undefined) {
+        const margin = parseFloat(marginPercentage);
+        if (isNaN(margin) || margin < 0 || margin > 100) {
+          return res.status(400).json({ error: "Invalid margin percentage" });
+        }
+        updates.marginPercentage = margin.toFixed(2);
+      }
+
+      if (displayName !== undefined) {
+        if (!displayName.trim()) {
+          return res.status(400).json({ error: "Display name cannot be empty" });
+        }
+        updates.displayName = displayName.trim();
+      }
+
+      if (isActive !== undefined) {
+        updates.isActive = isActive;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid updates provided" });
+      }
+
+      const updated = await storage.updatePricingRule(id, updates);
       if (!updated) {
         return res.status(404).json({ error: "Pricing rule not found" });
       }
 
-      // Log pricing change
+      const changeDetails = [];
+      if (updates.marginPercentage) changeDetails.push(`margin to ${updates.marginPercentage}%`);
+      if (updates.displayName) changeDetails.push(`name to "${updates.displayName}"`);
+      if (updates.isActive !== undefined) changeDetails.push(`active to ${updates.isActive}`);
+
       await logAudit(req.session.userId, "update_pricing", "pricing_rule", id,
-        `Updated margin to ${margin}%`, req.ip);
+        `Updated ${changeDetails.join(", ")}`, req.ip);
 
       res.json(updated);
     } catch (error) {
+      logError("Error updating pricing rule", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Delete Pricing Profile
+  app.delete("/api/admin/pricing/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Check if profile exists
+      const rules = await storage.getPricingRules();
+      const rule = rules.find(r => r.id === id);
+      if (!rule) {
+        return res.status(404).json({ error: "Pricing rule not found" });
+      }
+
+      // Don't allow deleting if there are clients using this profile
+      const clients = await storage.getClientAccounts();
+      const clientsUsingProfile = clients.filter(c => c.profile === rule.profile);
+      if (clientsUsingProfile.length > 0) {
+        return res.status(400).json({ 
+          error: `Cannot delete profile. ${clientsUsingProfile.length} client(s) are using this profile.` 
+        });
+      }
+
+      await storage.deletePricingRule(id);
+      
+      await logAudit(req.session.userId, "delete_pricing_profile", "pricing_rule", id,
+        `Deleted pricing profile: ${rule.displayName}`, req.ip);
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting pricing profile", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
