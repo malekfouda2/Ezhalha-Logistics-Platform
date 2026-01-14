@@ -1140,12 +1140,41 @@ export async function registerRoutes(
     }
   });
 
-  // Admin - Audit Logs
-  app.get("/api/admin/audit-logs", requireAdmin, async (_req, res) => {
+  // Admin - Audit Logs (paginated)
+  app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
     try {
-      const logs = await storage.getAuditLogs();
-      res.json(logs);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const entityType = req.query.entityType as string | undefined;
+      const action = req.query.action as string | undefined;
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+
+      const result = await storage.getAuditLogsPaginated({
+        page,
+        limit,
+        search,
+        entityType,
+        action,
+        startDate,
+        endDate,
+      });
+
+      res.json(result);
     } catch (error) {
+      logError("Error fetching audit logs", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Audit Log Stats
+  app.get("/api/admin/audit-logs/stats", requireAdmin, async (_req, res) => {
+    try {
+      const stats = await storage.getAuditLogStats();
+      res.json(stats);
+    } catch (error) {
+      logError("Error fetching audit log stats", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

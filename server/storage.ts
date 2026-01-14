@@ -46,7 +46,7 @@ import {
   shipmentRateQuotes,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, isNull, and, gt, lt } from "drizzle-orm";
+import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 const SALT_ROUNDS = 10;
@@ -103,6 +103,16 @@ export interface IStorage {
 
   // Audit Logs
   getAuditLogs(): Promise<AuditLog[]>;
+  getAuditLogsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    entityType?: string;
+    action?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<{ logs: AuditLog[]; total: number; page: number; totalPages: number }>;
+  getAuditLogStats(): Promise<{ totalLogs: number; uniqueActions: string[]; uniqueEntityTypes: string[] }>;
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
 
   // Integration Logs
@@ -366,6 +376,82 @@ export class DatabaseStorage implements IStorage {
   // Audit Logs
   async getAuditLogs(): Promise<AuditLog[]> {
     return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  }
+
+  async getAuditLogsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    entityType?: string;
+    action?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<{ logs: AuditLog[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, entityType, action, startDate, endDate } = params;
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+    
+    if (entityType && entityType !== "all") {
+      conditions.push(eq(auditLogs.entityType, entityType));
+    }
+    
+    if (action && action !== "all") {
+      conditions.push(eq(auditLogs.action, action));
+    }
+    
+    if (startDate) {
+      conditions.push(gte(auditLogs.createdAt, startDate));
+    }
+    
+    if (endDate) {
+      conditions.push(lte(auditLogs.createdAt, endDate));
+    }
+    
+    if (search) {
+      conditions.push(
+        or(
+          ilike(auditLogs.action, `%${search}%`),
+          ilike(auditLogs.details, `%${search}%`),
+          ilike(auditLogs.entityType, `%${search}%`),
+          ilike(auditLogs.ipAddress, `%${search}%`)
+        )
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(auditLogs)
+      .where(whereClause);
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const logs = await db
+      .select()
+      .from(auditLogs)
+      .where(whereClause)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    return { logs, total, page, totalPages };
+  }
+
+  async getAuditLogStats(): Promise<{ totalLogs: number; uniqueActions: string[]; uniqueEntityTypes: string[] }> {
+    const [totalResult] = await db.select({ count: count() }).from(auditLogs);
+    const total = totalResult?.count || 0;
+
+    const actionsResult = await db.selectDistinct({ action: auditLogs.action }).from(auditLogs);
+    const entityTypesResult = await db.selectDistinct({ entityType: auditLogs.entityType }).from(auditLogs);
+
+    return {
+      totalLogs: total,
+      uniqueActions: actionsResult.map(r => r.action),
+      uniqueEntityTypes: entityTypesResult.map(r => r.entityType),
+    };
   }
 
   async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
