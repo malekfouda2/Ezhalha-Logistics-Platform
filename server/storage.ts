@@ -419,23 +419,39 @@ export class DatabaseStorage implements IStorage {
       );
     }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let totalResult;
+    let logs;
 
-    const [totalResult] = await db
-      .select({ count: count() })
-      .from(auditLogs)
-      .where(whereClause);
+    if (conditions.length > 0) {
+      const whereClause = and(...conditions);
+      
+      [totalResult] = await db
+        .select({ count: count() })
+        .from(auditLogs)
+        .where(whereClause);
+
+      logs = await db
+        .select()
+        .from(auditLogs)
+        .where(whereClause)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limit)
+        .offset(offset);
+    } else {
+      [totalResult] = await db
+        .select({ count: count() })
+        .from(auditLogs);
+
+      logs = await db
+        .select()
+        .from(auditLogs)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limit)
+        .offset(offset);
+    }
 
     const total = totalResult?.count || 0;
     const totalPages = Math.ceil(total / limit);
-
-    const logs = await db
-      .select()
-      .from(auditLogs)
-      .where(whereClause)
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(limit)
-      .offset(offset);
 
     return { logs, total, page, totalPages };
   }
