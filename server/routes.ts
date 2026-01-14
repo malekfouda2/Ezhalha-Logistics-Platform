@@ -570,9 +570,19 @@ export async function registerRoutes(
   });
 
   // Admin - All Shipments
-  app.get("/api/admin/shipments", requireAdmin, async (_req, res) => {
-    const shipments = await storage.getShipments();
-    res.json(shipments);
+  app.get("/api/admin/shipments", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      const result = await storage.getShipmentsPaginated({ page, limit, search, status });
+      res.json(result);
+    } catch (error) {
+      logError("Error fetching shipments", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Admin - Update Shipment Status (cancelled is handled by dedicated cancel endpoint)
@@ -645,9 +655,19 @@ export async function registerRoutes(
   });
 
   // Admin - All Applications
-  app.get("/api/admin/applications", requireAdmin, async (_req, res) => {
-    const applications = await storage.getClientApplications();
-    res.json(applications);
+  app.get("/api/admin/applications", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      const result = await storage.getClientApplicationsPaginated({ page, limit, search, status });
+      res.json(result);
+    } catch (error) {
+      logError("Error fetching applications", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Admin - Review Application
@@ -777,9 +797,20 @@ export async function registerRoutes(
   });
 
   // Admin - All Clients
-  app.get("/api/admin/clients", requireAdmin, async (_req, res) => {
-    const clients = await storage.getClientAccounts();
-    res.json(clients);
+  app.get("/api/admin/clients", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const profile = req.query.profile as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      const result = await storage.getClientAccountsPaginated({ page, limit, search, profile, status });
+      res.json(result);
+    } catch (error) {
+      logError("Error fetching clients", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Admin - Get Single Client
@@ -996,15 +1027,35 @@ export async function registerRoutes(
   });
 
   // Admin - All Invoices
-  app.get("/api/admin/invoices", requireAdmin, async (_req, res) => {
-    const invoices = await storage.getInvoices();
-    res.json(invoices);
+  app.get("/api/admin/invoices", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      const result = await storage.getInvoicesPaginated({ page, limit, search, status });
+      res.json(result);
+    } catch (error) {
+      logError("Error fetching invoices", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Admin - All Payments
-  app.get("/api/admin/payments", requireAdmin, async (_req, res) => {
-    const payments = await storage.getPayments();
-    res.json(payments);
+  app.get("/api/admin/payments", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const status = req.query.status as string | undefined;
+
+      const result = await storage.getPaymentsPaginated({ page, limit, search, status });
+      res.json(result);
+    } catch (error) {
+      logError("Error fetching payments", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Admin - Pricing Rules
@@ -1180,10 +1231,16 @@ export async function registerRoutes(
   });
 
   // Admin - Integration Logs
-  app.get("/api/admin/integration-logs", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/integration-logs", requireAdmin, async (req, res) => {
     try {
-      const logs = await storage.getIntegrationLogs();
-      res.json(logs);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const service = req.query.service as string | undefined;
+      const success = req.query.success as string | undefined;
+
+      const result = await storage.getIntegrationLogsPaginated({ page, limit, search, service, success });
+      res.json(result);
     } catch (error) {
       logError("Error fetching integration logs", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1191,10 +1248,16 @@ export async function registerRoutes(
   });
 
   // Admin - Webhook Events
-  app.get("/api/admin/webhook-events", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/webhook-events", requireAdmin, async (req, res) => {
     try {
-      const events = await storage.getWebhookEvents();
-      res.json(events);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const search = req.query.search as string | undefined;
+      const source = req.query.source as string | undefined;
+      const processed = req.query.processed as string | undefined;
+
+      const result = await storage.getWebhookEventsPaginated({ page, limit, search, source, processed });
+      res.json(result);
     } catch (error) {
       logError("Error fetching webhook events", error);
       res.status(500).json({ error: "Internal server error" });

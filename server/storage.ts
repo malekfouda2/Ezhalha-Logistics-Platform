@@ -62,6 +62,13 @@ export interface IStorage {
 
   // Client Accounts
   getClientAccounts(): Promise<ClientAccount[]>;
+  getClientAccountsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    profile?: string;
+    status?: string;
+  }): Promise<{ clients: ClientAccount[]; total: number; page: number; totalPages: number }>;
   getClientAccount(id: string): Promise<ClientAccount | undefined>;
   createClientAccount(account: InsertClientAccount): Promise<ClientAccount>;
   updateClientAccount(id: string, updates: Partial<ClientAccount>): Promise<ClientAccount | undefined>;
@@ -69,12 +76,24 @@ export interface IStorage {
 
   // Client Applications
   getClientApplications(): Promise<ClientApplication[]>;
+  getClientApplicationsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ applications: ClientApplication[]; total: number; page: number; totalPages: number }>;
   getClientApplication(id: string): Promise<ClientApplication | undefined>;
   createClientApplication(application: InsertClientApplication): Promise<ClientApplication>;
   updateClientApplication(id: string, updates: Partial<ClientApplication>): Promise<ClientApplication | undefined>;
 
   // Shipments
   getShipments(): Promise<Shipment[]>;
+  getShipmentsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
   getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
@@ -83,6 +102,12 @@ export interface IStorage {
 
   // Invoices
   getInvoices(): Promise<Invoice[]>;
+  getInvoicesPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ invoices: Invoice[]; total: number; page: number; totalPages: number }>;
   getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -90,6 +115,12 @@ export interface IStorage {
 
   // Payments
   getPayments(): Promise<Payment[]>;
+  getPaymentsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ payments: Payment[]; total: number; page: number; totalPages: number }>;
   getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined>;
@@ -117,10 +148,24 @@ export interface IStorage {
 
   // Integration Logs
   getIntegrationLogs(): Promise<IntegrationLog[]>;
+  getIntegrationLogsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    service?: string;
+    success?: string;
+  }): Promise<{ logs: IntegrationLog[]; total: number; page: number; totalPages: number }>;
   createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog>;
 
   // Webhook Events
   getWebhookEvents(): Promise<WebhookEvent[]>;
+  getWebhookEventsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    source?: string;
+    processed?: string;
+  }): Promise<{ events: WebhookEvent[]; total: number; page: number; totalPages: number }>;
   createWebhookEvent(event: InsertWebhookEvent): Promise<WebhookEvent>;
   updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined>;
 
@@ -210,6 +255,50 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(clientAccounts.createdAt));
   }
 
+  async getClientAccountsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    profile?: string;
+    status?: string;
+  }): Promise<{ clients: ClientAccount[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, profile, status } = params;
+    const offset = (page - 1) * limit;
+    const conditions = [isNull(clientAccounts.deletedAt)];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(clientAccounts.name, `%${search}%`),
+          ilike(clientAccounts.email, `%${search}%`),
+          ilike(clientAccounts.companyName, `%${search}%`)
+        )!
+      );
+    }
+    if (profile && profile !== "all") {
+      conditions.push(eq(clientAccounts.profile, profile));
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(clientAccounts.isActive, status === "active"));
+    }
+
+    let totalResult;
+    let clients;
+
+    if (conditions.length > 1) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(clientAccounts).where(whereClause);
+      clients = await db.select().from(clientAccounts).where(whereClause).orderBy(desc(clientAccounts.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(clientAccounts).where(conditions[0]);
+      clients = await db.select().from(clientAccounts).where(conditions[0]).orderBy(desc(clientAccounts.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { clients, total, page, totalPages };
+  }
+
   async getClientAccount(id: string): Promise<ClientAccount | undefined> {
     const [account] = await db.select().from(clientAccounts)
       .where(and(eq(clientAccounts.id, id), isNull(clientAccounts.deletedAt)));
@@ -237,6 +326,46 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(clientApplications).orderBy(desc(clientApplications.createdAt));
   }
 
+  async getClientApplicationsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ applications: ClientApplication[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, status } = params;
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(clientApplications.name, `%${search}%`),
+          ilike(clientApplications.email, `%${search}%`),
+          ilike(clientApplications.companyName, `%${search}%`)
+        )
+      );
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(clientApplications.status, status));
+    }
+
+    let totalResult;
+    let applications;
+
+    if (conditions.length > 0) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(clientApplications).where(whereClause);
+      applications = await db.select().from(clientApplications).where(whereClause).orderBy(desc(clientApplications.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(clientApplications);
+      applications = await db.select().from(clientApplications).orderBy(desc(clientApplications.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { applications, total, page, totalPages };
+  }
+
   async getClientApplication(id: string): Promise<ClientApplication | undefined> {
     const [application] = await db.select().from(clientApplications).where(eq(clientApplications.id, id));
     return application || undefined;
@@ -257,6 +386,47 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(shipments)
       .where(isNull(shipments.deletedAt))
       .orderBy(desc(shipments.createdAt));
+  }
+
+  async getShipmentsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, status } = params;
+    const offset = (page - 1) * limit;
+    const conditions = [isNull(shipments.deletedAt)];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(shipments.trackingNumber, `%${search}%`),
+          ilike(shipments.recipientName, `%${search}%`),
+          ilike(shipments.recipientCity, `%${search}%`),
+          ilike(shipments.senderName, `%${search}%`)
+        )!
+      );
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(shipments.status, status as any));
+    }
+
+    let totalResult;
+    let results;
+
+    if (conditions.length > 1) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(shipments).where(whereClause);
+      results = await db.select().from(shipments).where(whereClause).orderBy(desc(shipments.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(shipments).where(conditions[0]);
+      results = await db.select().from(shipments).where(conditions[0]).orderBy(desc(shipments.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { shipments: results, total, page, totalPages };
   }
 
   async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {
@@ -300,6 +470,40 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(invoices.createdAt));
   }
 
+  async getInvoicesPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ invoices: Invoice[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, status } = params;
+    const offset = (page - 1) * limit;
+    const conditions = [isNull(invoices.deletedAt)];
+
+    if (search) {
+      conditions.push(ilike(invoices.invoiceNumber, `%${search}%`));
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(invoices.status, status));
+    }
+
+    let totalResult;
+    let results;
+
+    if (conditions.length > 1) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(invoices).where(whereClause);
+      results = await db.select().from(invoices).where(whereClause).orderBy(desc(invoices.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(invoices).where(conditions[0]);
+      results = await db.select().from(invoices).where(conditions[0]).orderBy(desc(invoices.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { invoices: results, total, page, totalPages };
+  }
+
   async getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]> {
     return db.select().from(invoices)
       .where(and(eq(invoices.clientAccountId, clientAccountId), isNull(invoices.deletedAt)))
@@ -330,6 +534,46 @@ export class DatabaseStorage implements IStorage {
   // Payments
   async getPayments(): Promise<Payment[]> {
     return db.select().from(payments).orderBy(desc(payments.createdAt));
+  }
+
+  async getPaymentsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    status?: string;
+  }): Promise<{ payments: Payment[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, status } = params;
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(payments.invoiceId, `%${search}%`),
+          ilike(payments.transactionId, `%${search}%`),
+          ilike(payments.paymentMethod, `%${search}%`)
+        )
+      );
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(payments.status, status));
+    }
+
+    let totalResult;
+    let results;
+
+    if (conditions.length > 0) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(payments).where(whereClause);
+      results = await db.select().from(payments).where(whereClause).orderBy(desc(payments.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(payments);
+      results = await db.select().from(payments).orderBy(desc(payments.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { payments: results, total, page, totalPages };
   }
 
   async getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]> {
@@ -480,6 +724,49 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(integrationLogs).orderBy(desc(integrationLogs.createdAt));
   }
 
+  async getIntegrationLogsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    service?: string;
+    success?: string;
+  }): Promise<{ logs: IntegrationLog[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, service, success } = params;
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(integrationLogs.serviceName, `%${search}%`),
+          ilike(integrationLogs.operation, `%${search}%`)
+        )
+      );
+    }
+    if (service && service !== "all") {
+      conditions.push(eq(integrationLogs.serviceName, service));
+    }
+    if (success && success !== "all") {
+      conditions.push(eq(integrationLogs.success, success === "true"));
+    }
+
+    let totalResult;
+    let results;
+
+    if (conditions.length > 0) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(integrationLogs).where(whereClause);
+      results = await db.select().from(integrationLogs).where(whereClause).orderBy(desc(integrationLogs.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(integrationLogs);
+      results = await db.select().from(integrationLogs).orderBy(desc(integrationLogs.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { logs: results, total, page, totalPages };
+  }
+
   async createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog> {
     const [integrationLog] = await db.insert(integrationLogs).values(log).returning();
     return integrationLog;
@@ -488,6 +775,49 @@ export class DatabaseStorage implements IStorage {
   // Webhook Events
   async getWebhookEvents(): Promise<WebhookEvent[]> {
     return db.select().from(webhookEvents).orderBy(desc(webhookEvents.createdAt));
+  }
+
+  async getWebhookEventsPaginated(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    source?: string;
+    processed?: string;
+  }): Promise<{ events: WebhookEvent[]; total: number; page: number; totalPages: number }> {
+    const { page, limit, search, source, processed } = params;
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+
+    if (search) {
+      conditions.push(
+        or(
+          ilike(webhookEvents.source, `%${search}%`),
+          ilike(webhookEvents.eventType, `%${search}%`)
+        )
+      );
+    }
+    if (source && source !== "all") {
+      conditions.push(eq(webhookEvents.source, source));
+    }
+    if (processed && processed !== "all") {
+      conditions.push(eq(webhookEvents.processed, processed === "true"));
+    }
+
+    let totalResult;
+    let results;
+
+    if (conditions.length > 0) {
+      const whereClause = and(...conditions);
+      [totalResult] = await db.select({ count: count() }).from(webhookEvents).where(whereClause);
+      results = await db.select().from(webhookEvents).where(whereClause).orderBy(desc(webhookEvents.createdAt)).limit(limit).offset(offset);
+    } else {
+      [totalResult] = await db.select({ count: count() }).from(webhookEvents);
+      results = await db.select().from(webhookEvents).orderBy(desc(webhookEvents.createdAt)).limit(limit).offset(offset);
+    }
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    return { events: results, total, page, totalPages };
   }
 
   async createWebhookEvent(event: InsertWebhookEvent): Promise<WebhookEvent> {

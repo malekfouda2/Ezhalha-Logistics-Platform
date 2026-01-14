@@ -34,10 +34,6 @@ import {
   Users, 
   Package, 
   DollarSign,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   CalendarIcon,
   Filter,
   X,
@@ -46,6 +42,7 @@ import {
   BarChart3,
   RefreshCw
 } from "lucide-react";
+import { PaginationControls } from "@/components/pagination-controls";
 import type { AuditLog } from "@shared/schema";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -93,7 +90,6 @@ const actionColors: Record<string, string> = {
   delete_pricing_profile: "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200",
 };
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export default function AdminAuditLogs() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -153,11 +149,6 @@ export default function AdminAuditLogs() {
   const setQuickDateRange = (days: number) => {
     setStartDate(subDays(new Date(), days));
     setEndDate(new Date());
-    setPage(1);
-  };
-
-  const handlePageSizeChange = (newSize: string) => {
-    setPageSize(parseInt(newSize));
     setPage(1);
   };
 
@@ -399,83 +390,14 @@ export default function AdminAuditLogs() {
                   </Table>
                 </div>
 
-                <div className="flex items-center justify-between gap-4 px-4 py-4 border-t flex-wrap">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>Showing</span>
-                    <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
-                      <SelectTrigger className="w-[70px] h-8" data-testid="select-page-size">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((size) => (
-                          <SelectItem key={size} value={String(size)}>{size}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <span>of {total.toLocaleString()} entries</span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setPage(1)}
-                      disabled={page === 1}
-                      data-testid="button-first-page"
-                    >
-                      <ChevronsLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setPage(page - 1)}
-                      disabled={page === 1}
-                      data-testid="button-prev-page"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-
-                    <div className="flex items-center gap-1 mx-2">
-                      <span className="text-sm">Page</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={totalPages}
-                        value={page}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (val >= 1 && val <= totalPages) setPage(val);
-                        }}
-                        className="w-16 h-8 text-center"
-                        data-testid="input-page-number"
-                      />
-                      <span className="text-sm">of {totalPages}</span>
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setPage(page + 1)}
-                      disabled={page >= totalPages}
-                      data-testid="button-next-page"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setPage(totalPages)}
-                      disabled={page >= totalPages}
-                      data-testid="button-last-page"
-                    >
-                      <ChevronsRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                <PaginationControls
+                  page={page}
+                  totalPages={totalPages}
+                  total={total}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+                />
               </>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-center">
