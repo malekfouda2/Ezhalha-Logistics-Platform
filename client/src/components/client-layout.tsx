@@ -19,6 +19,7 @@ import {
   User,
   LogOut,
   ChevronDown,
+  Settings,
 } from "lucide-react";
 
 interface ClientLayoutProps {
@@ -42,20 +43,22 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
   };
 
   return (
-    <div className="flex flex-col h-screen w-full">
-      {/* Header */}
-      <header className="h-16 flex items-center justify-between px-6 border-b bg-background sticky top-0 z-50">
+    <div className="flex h-screen w-full">
+      {/* Sidebar */}
+      <aside className="w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
         {/* Logo */}
-        <Link href="/client" className="flex items-center gap-3">
-          <img
-            src="/assets/branding/logo.png"
-            alt="ezhalha"
-            className="h-8 w-auto"
-          />
-        </Link>
+        <div className="h-16 flex items-center px-6 border-b border-sidebar-border">
+          <Link href="/client" className="flex items-center gap-3">
+            <img
+              src="/assets/branding/logo.png"
+              alt="ezhalha"
+              className="h-9 w-auto"
+            />
+          </Link>
+        </div>
 
         {/* Navigation */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = location === item.href || 
               (item.href !== "/client" && location.startsWith(item.href));
@@ -65,14 +68,14 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
               <Link key={item.href} href={item.href}>
                 <div
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors hover-elevate active-elevate-2",
                     isActive
                       ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
                   )}
                   data-testid={`nav-${item.label.toLowerCase()}`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-5 w-5 flex-shrink-0" />
                   <span>{item.label}</span>
                 </div>
               </Link>
@@ -80,22 +83,23 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
           })}
         </nav>
 
-        {/* Right section */}
-        <div className="flex items-center gap-3">
-          <ProfileBadge profile={clientProfile} />
-          <ThemeToggle />
-          
+        {/* User Menu */}
+        <div className="p-3 border-t border-sidebar-border">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex items-center gap-2 p-1.5 rounded-md hover-elevate"
+                className="w-full flex items-center gap-3 p-2 rounded-md hover-elevate active-elevate-2"
                 data-testid="button-client-menu"
               >
-                <Avatar className="h-8 w-8">
+                <Avatar className="h-9 w-9">
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                     {user?.username?.charAt(0).toUpperCase() || "C"}
                   </AvatarFallback>
                 </Avatar>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-medium truncate">{user?.username}</p>
+                  <p className="text-xs text-muted-foreground">Client</p>
+                </div>
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
@@ -106,8 +110,8 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
               </div>
               <DropdownMenuSeparator />
               <Link href="/client/settings">
-                <DropdownMenuItem data-testid="menu-profile">
-                  <User className="mr-2 h-4 w-4" />
+                <DropdownMenuItem data-testid="menu-settings">
+                  <Settings className="mr-2 h-4 w-4" />
                   Account Settings
                 </DropdownMenuItem>
               </Link>
@@ -119,37 +123,23 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </header>
+      </aside>
 
-      {/* Mobile Navigation */}
-      <nav className="md:hidden flex items-center gap-1 px-4 py-2 border-b bg-background overflow-x-auto">
-        {navItems.map((item) => {
-          const isActive = location === item.href || 
-            (item.href !== "/client" && location.startsWith(item.href));
-          const Icon = item.icon;
-          
-          return (
-            <Link key={item.href} href={item.href}>
-              <div
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
-              </div>
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header */}
+        <header className="h-16 flex items-center justify-between gap-4 px-6 border-b bg-background">
+          <div className="flex items-center gap-3">
+            <ProfileBadge profile={clientProfile} />
+          </div>
+          <ThemeToggle />
+        </header>
 
-      {/* Page Content */}
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+        {/* Page Content */}
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
