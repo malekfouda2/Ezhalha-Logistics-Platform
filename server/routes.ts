@@ -1042,6 +1042,115 @@ export async function registerRoutes(
     }
   });
 
+  // Admin - Get Single Invoice
+  app.get("/api/admin/invoices/:id", requireAdmin, async (req, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      
+      // Get client account info
+      const client = await storage.getClientAccount(invoice.clientAccountId);
+      
+      res.json({ ...invoice, client });
+    } catch (error) {
+      logError("Error fetching invoice", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Download Invoice PDF
+  app.get("/api/admin/invoices/:id/pdf", requireAdmin, async (req, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      const client = await storage.getClientAccount(invoice.clientAccountId);
+      
+      // Generate simple HTML invoice
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Invoice ${invoice.invoiceNumber}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+            .logo { font-size: 24px; font-weight: bold; color: #fe5200; }
+            .invoice-info { text-align: right; }
+            .invoice-number { font-size: 20px; font-weight: bold; }
+            .client-info { margin-bottom: 30px; }
+            .table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+            .table th { background: #f5f5f5; }
+            .total-row { font-weight: bold; font-size: 18px; }
+            .footer { margin-top: 40px; text-align: center; color: #666; font-size: 12px; }
+            .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; }
+            .status-pending { background: #fef3c7; color: #92400e; }
+            .status-paid { background: #d1fae5; color: #065f46; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="logo">ezhalha</div>
+            <div class="invoice-info">
+              <div class="invoice-number">${invoice.invoiceNumber}</div>
+              <div>Date: ${new Date(invoice.createdAt).toLocaleDateString()}</div>
+              <div>Due: ${new Date(invoice.dueDate).toLocaleDateString()}</div>
+              <div class="status ${invoice.status === 'pending' ? 'status-pending' : 'status-paid'}">
+                ${invoice.status === 'pending' ? 'Pending' : 'Paid'}
+              </div>
+            </div>
+          </div>
+          
+          <div class="client-info">
+            <strong>Bill To:</strong><br>
+            ${client?.name || 'N/A'}<br>
+            ${client?.companyName ? client.companyName + '<br>' : ''}
+            ${client?.email || ''}<br>
+            ${client?.phone || ''}
+          </div>
+          
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Shipping Services</td>
+                <td style="text-align: right;">$${Number(invoice.amount).toFixed(2)}</td>
+              </tr>
+              <tr class="total-row">
+                <td>Total</td>
+                <td style="text-align: right;">$${Number(invoice.amount).toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+          
+          <div class="footer">
+            <p>Thank you for your business!</p>
+            <p>ezhalha Logistics - Enterprise Shipping Solutions</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Content-Disposition', `inline; filename="invoice-${invoice.invoiceNumber}.html"`);
+      res.send(html);
+    } catch (error) {
+      logError("Error generating invoice PDF", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - All Payments
   app.get("/api/admin/payments", requireAdmin, async (req, res) => {
     try {

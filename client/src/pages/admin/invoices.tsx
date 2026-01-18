@@ -8,6 +8,7 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -23,8 +24,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Download, Eye, RefreshCw, Filter, X, FileText } from "lucide-react";
-import type { Invoice } from "@shared/schema";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Search, Download, Eye, RefreshCw, Filter, X, FileText, Calendar, DollarSign, User, Building } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import type { Invoice, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -35,12 +43,20 @@ interface PaginatedResponse {
   totalPages: number;
 }
 
+interface InvoiceWithClient extends Invoice {
+  client?: ClientAccount;
+}
+
 export default function AdminInvoices() {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceWithClient | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -77,6 +93,25 @@ export default function AdminInvoices() {
     setPage(1);
   };
 
+  const handleViewInvoice = async (invoice: Invoice) => {
+    setIsLoadingDetails(true);
+    try {
+      const res = await fetch(`/api/admin/invoices/${invoice.id}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch invoice details");
+      const data = await res.json();
+      setSelectedInvoice(data);
+      setIsDetailsOpen(true);
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to load invoice details", variant: "destructive" });
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  const handleDownloadInvoice = (invoiceId: string) => {
+    window.open(`/api/admin/invoices/${invoiceId}/pdf`, "_blank");
+  };
+
   if (isLoading && !data) {
     return (
       <AdminLayout>
@@ -88,6 +123,8 @@ export default function AdminInvoices() {
   const invoices = data?.invoices || [];
   const totalPages = data?.totalPages || 1;
   const total = data?.total || 0;
+  const totalAmount = invoices.reduce((sum, inv) => sum + Number(inv.amount), 0);
+  const pendingAmount = invoices.filter(i => i.status === "pending").reduce((sum, inv) => sum + Number(inv.amount), 0);
 
   return (
     <AdminLayout>
@@ -113,6 +150,32 @@ export default function AdminInvoices() {
                 <div>
                   <p className="text-2xl font-bold">{total.toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground">Total Invoices</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                  <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">${totalAmount.toFixed(2)}</p>
+                  <p className="text-xs text-muted-foreground">Total Amount (Page)</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                  <DollarSign className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">${pendingAmount.toFixed(2)}</p>
+                  <p className="text-xs text-muted-foreground">Pending (Page)</p>
                 </div>
               </div>
             </CardContent>
@@ -187,10 +250,21 @@ export default function AdminInvoices() {
                         <TableCell className="text-right font-medium">${Number(invoice.amount).toFixed(2)}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" data-testid={`button-view-${invoice.id}`}>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleViewInvoice(invoice)}
+                              disabled={isLoadingDetails}
+                              data-testid={`button-view-${invoice.id}`}
+                            >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" data-testid={`button-download-${invoice.id}`}>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleDownloadInvoice(invoice.id)}
+                              data-testid={`button-download-${invoice.id}`}
+                            >
                               <Download className="h-4 w-4" />
                             </Button>
                           </div>
@@ -214,6 +288,93 @@ export default function AdminInvoices() {
           </CardContent>
         </Card>
       </div>
+
+      <Sheet open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <SheetContent className="sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Invoice Details
+            </SheetTitle>
+          </SheetHeader>
+          {selectedInvoice && (
+            <div className="mt-6 space-y-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Invoice Number</p>
+                  <p className="font-mono font-medium text-lg">{selectedInvoice.invoiceNumber}</p>
+                </div>
+                <StatusBadge status={selectedInvoice.status} />
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Client Information
+                </h4>
+                <div className="p-4 rounded-lg bg-muted/50 space-y-2">
+                  <p className="font-medium">{selectedInvoice.client?.name || "N/A"}</p>
+                  {selectedInvoice.client?.companyName && (
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Building className="h-3 w-3" />
+                      {selectedInvoice.client.companyName}
+                    </p>
+                  )}
+                  <p className="text-sm text-muted-foreground">{selectedInvoice.client?.email}</p>
+                  <p className="text-sm text-muted-foreground">{selectedInvoice.client?.phone}</p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Dates
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 rounded-lg bg-muted/50">
+                    <p className="text-xs text-muted-foreground">Created</p>
+                    <p className="text-sm font-medium">{format(new Date(selectedInvoice.createdAt), "MMM d, yyyy")}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/50">
+                    <p className="text-xs text-muted-foreground">Due Date</p>
+                    <p className="text-sm font-medium">{format(new Date(selectedInvoice.dueDate), "MMM d, yyyy")}</p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Amount
+                </h4>
+                <div className="p-4 rounded-lg border">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Total Amount</span>
+                    <span className="text-2xl font-bold">${Number(selectedInvoice.amount).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button 
+                  variant="outline" 
+                  className="flex-1"
+                  onClick={() => handleDownloadInvoice(selectedInvoice.id)}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </AdminLayout>
   );
 }
