@@ -32,6 +32,7 @@ import CreateShipment from "@/pages/client/create-shipment";
 import ClientInvoices from "@/pages/client/invoices";
 import ClientPayments from "@/pages/client/payments";
 import ClientSettings from "@/pages/client/settings";
+import ClientUsers from "@/pages/client/users";
 
 function ProtectedRoute({
   component: Component,
@@ -134,6 +135,9 @@ function Router() {
       </Route>
       <Route path="/client/settings">
         <ProtectedRoute component={ClientSettings} requiredUserType="client" />
+      </Route>
+      <Route path="/client/users">
+        <ProtectedRoute component={ClientUsers} requiredUserType="client" />
       </Route>
 
       {/* Fallback */}

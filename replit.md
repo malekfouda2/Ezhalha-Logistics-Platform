@@ -7,14 +7,22 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 **Key Features:**
 - Dual portal system (Admin and Client)
 - Shipment tracking and management with status updates and cancellation
-- Client application and onboarding workflow
+- Client application and onboarding workflow (supports Company and Individual account types)
 - Invoice and payment processing with PDF generation
 - Tiered client profiles (Regular, Mid-Level, VIP) with discount benefits
 - Dynamic pricing rules with profile-based margins
 - Comprehensive audit logging with admin viewing
 - RBAC management (roles, permissions, user-role assignments)
+- Client-level RBAC (team member management with granular permissions)
 - Integration monitoring dashboard (FedEx, Moyasar, Zoho)
 - Webhook event tracking and status
+
+**Client User Management:**
+- Primary contacts can create and manage team members
+- Granular permissions: view_shipments, create_shipments, view_invoices, view_payments, make_payments, manage_users
+- Primary contacts automatically have all permissions
+- Navigation dynamically filtered based on user permissions
+- Permission enforcement on all client API endpoints
 
 **Security:**
 - Bcrypt password hashing (10 salt rounds)
@@ -155,12 +163,14 @@ Both layouts share common components like `StatCard`, `StatusBadge`, and `Profil
 - Integration Logs (API call tracking)
 - Webhook Events (external webhook processing)
 - RBAC: Roles, Permissions, UserRoles, RolePermissions
+- Client User Permissions (granular access control for client team members)
 
 ### Authentication & Authorization
 - Session-based authentication with cookies
 - Role-based access control (RBAC) with `admin` and `client` user types
-- Middleware functions: `requireAuth`, `requireAdmin`, `requireClient`
+- Middleware functions: `requireAuth`, `requireAdmin`, `requireClient`, `requirePrimaryContact`, `requireClientPermission`
 - Protected routes redirect based on user type
+- Client routes filtered by permission
 
 ### Branding System
 - Brand color: `#fe5200` (vibrant orange)

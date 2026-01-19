@@ -5,7 +5,8 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
-import type { ClientAccount } from "@shared/schema";
+import type { ClientAccount, ClientUserPermission } from "@shared/schema";
+import { ClientPermission, ALL_CLIENT_PERMISSIONS, type ClientPermissionValue } from "@shared/schema";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication } from "./services/email";
 import { fedexAdapter } from "./integrations/fedex";
@@ -1660,6 +1661,283 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================
+  // CLIENT USER MANAGEMENT (for primary contacts only)
+  // ============================================
+
+  // Middleware to check if user is primary contact
+  const requirePrimaryContact = async (req: Request, res: Response, next: NextFunction) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user || !user.clientAccountId) {
+      return res.status(404).json({ error: "Client account not found" });
+    }
+    if (!user.isPrimaryContact) {
+      return res.status(403).json({ error: "Only primary contacts can manage users" });
+    }
+    next();
+  };
+
+  // Middleware to check if user has specific permission (or is primary contact who has all permissions)
+  const requireClientPermission = (permission: ClientPermissionValue) => {
+    return async (req: Request, res: Response, next: NextFunction) => {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      
+      // Primary contacts have all permissions
+      if (user.isPrimaryContact) {
+        return next();
+      }
+      
+      // Check permissions
+      const perms = await storage.getClientUserPermissions(user.id, user.clientAccountId);
+      if (!perms || !perms.permissions.includes(permission)) {
+        return res.status(403).json({ error: "Permission denied" });
+      }
+      
+      next();
+    };
+  };
+
+  // Client - Get Users in Account
+  app.get("/api/client/users", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const users = await storage.getUsersByClientAccount(user.clientAccountId);
+      const allPerms = await storage.getClientUserPermissionsByAccount(user.clientAccountId);
+      
+      // Build response with user info and their permissions
+      const usersWithPermissions = users.map(u => {
+        const userPerms = allPerms.find(p => p.userId === u.id);
+        return {
+          id: u.id,
+          username: u.username,
+          email: u.email,
+          isPrimaryContact: u.isPrimaryContact,
+          permissions: u.isPrimaryContact ? ALL_CLIENT_PERMISSIONS : (userPerms?.permissions || []),
+          createdAt: u.createdAt,
+        };
+      });
+
+      res.json(usersWithPermissions);
+    } catch (error) {
+      logError("Error fetching client users", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Client - Create User
+  const createClientUserSchema = z.object({
+    username: z.string().min(3, "Username must be at least 3 characters"),
+    email: z.string().email("Invalid email address"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    permissions: z.array(z.enum([
+      ClientPermission.VIEW_SHIPMENTS,
+      ClientPermission.CREATE_SHIPMENTS,
+      ClientPermission.VIEW_INVOICES,
+      ClientPermission.VIEW_PAYMENTS,
+      ClientPermission.MAKE_PAYMENTS,
+      ClientPermission.MANAGE_USERS,
+    ] as const)).default([]),
+  });
+
+  app.post("/api/client/users", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const data = createClientUserSchema.parse(req.body);
+
+      // Check if username or email already exists
+      const existingUsername = await storage.getUserByUsername(data.username);
+      if (existingUsername) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+
+      const existingEmail = await storage.getUserByEmail(data.email);
+      if (existingEmail) {
+        return res.status(400).json({ error: "Email already in use" });
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(data.password, SALT_ROUNDS);
+
+      // Create the user
+      const newUser = await storage.createUser({
+        username: data.username,
+        email: data.email,
+        password: hashedPassword,
+        userType: "client",
+        clientAccountId: user.clientAccountId,
+        isPrimaryContact: false,
+      });
+
+      // Create permissions record
+      await storage.createClientUserPermissions({
+        userId: newUser.id,
+        clientAccountId: user.clientAccountId,
+        permissions: data.permissions,
+      });
+
+      await logAudit(req.session.userId, "create_client_user", "user", newUser.id,
+        `Created client user: ${data.username}`, req.ip);
+
+      res.status(201).json({
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        isPrimaryContact: false,
+        permissions: data.permissions,
+        createdAt: newUser.createdAt,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error creating client user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Client - Update User Permissions
+  const updateUserPermissionsSchema = z.object({
+    permissions: z.array(z.enum([
+      ClientPermission.VIEW_SHIPMENTS,
+      ClientPermission.CREATE_SHIPMENTS,
+      ClientPermission.VIEW_INVOICES,
+      ClientPermission.VIEW_PAYMENTS,
+      ClientPermission.MAKE_PAYMENTS,
+      ClientPermission.MANAGE_USERS,
+    ] as const)),
+  });
+
+  app.patch("/api/client/users/:userId/permissions", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = await storage.getUser(req.session.userId!);
+      if (!currentUser || !currentUser.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser || targetUser.clientAccountId !== currentUser.clientAccountId) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (targetUser.isPrimaryContact) {
+        return res.status(400).json({ error: "Cannot modify primary contact permissions" });
+      }
+
+      const data = updateUserPermissionsSchema.parse(req.body);
+
+      // Get existing permissions record
+      const existingPerms = await storage.getClientUserPermissions(userId, currentUser.clientAccountId);
+      
+      if (existingPerms) {
+        await storage.updateClientUserPermissions(existingPerms.id, {
+          permissions: data.permissions,
+        });
+      } else {
+        await storage.createClientUserPermissions({
+          userId,
+          clientAccountId: currentUser.clientAccountId,
+          permissions: data.permissions,
+        });
+      }
+
+      await logAudit(req.session.userId, "update_user_permissions", "user", userId,
+        `Updated permissions for user: ${targetUser.username}`, req.ip);
+
+      res.json({
+        id: targetUser.id,
+        username: targetUser.username,
+        email: targetUser.email,
+        isPrimaryContact: false,
+        permissions: data.permissions,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error updating user permissions", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Client - Delete User
+  app.delete("/api/client/users/:userId", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const currentUser = await storage.getUser(req.session.userId!);
+      if (!currentUser || !currentUser.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser || targetUser.clientAccountId !== currentUser.clientAccountId) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (targetUser.isPrimaryContact) {
+        return res.status(400).json({ error: "Cannot delete primary contact" });
+      }
+
+      if (targetUser.id === currentUser.id) {
+        return res.status(400).json({ error: "Cannot delete yourself" });
+      }
+
+      // Delete permissions first
+      await storage.deleteClientUserPermissions(userId, currentUser.clientAccountId);
+
+      // Update user to remove from client account (soft delete approach)
+      await storage.updateUser(userId, {
+        clientAccountId: null,
+      });
+
+      await logAudit(req.session.userId, "delete_client_user", "user", userId,
+        `Removed client user: ${targetUser.username}`, req.ip);
+
+      res.json({ message: "User removed successfully" });
+    } catch (error) {
+      logError("Error deleting client user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Client - Get Current User's Permissions
+  app.get("/api/client/my-permissions", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      // Primary contacts have all permissions
+      if (user.isPrimaryContact) {
+        return res.json({
+          permissions: ALL_CLIENT_PERMISSIONS,
+          isPrimaryContact: true,
+        });
+      }
+
+      const perms = await storage.getClientUserPermissions(user.id, user.clientAccountId);
+      res.json({
+        permissions: perms?.permissions || [],
+        isPrimaryContact: false,
+      });
+    } catch (error) {
+      logError("Error fetching user permissions", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Client - Dashboard Stats
   app.get("/api/client/stats", requireClient, async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
@@ -1682,7 +1960,7 @@ export async function registerRoutes(
   });
 
   // Client - Recent Shipments
-  app.get("/api/client/shipments/recent", requireClient, async (req, res) => {
+  app.get("/api/client/shipments/recent", requireClient, requireClientPermission(ClientPermission.VIEW_SHIPMENTS), async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
     if (!user || !user.clientAccountId) {
       return res.status(404).json({ error: "Client account not found" });
@@ -1693,7 +1971,7 @@ export async function registerRoutes(
   });
 
   // Client - All Shipments
-  app.get("/api/client/shipments", requireClient, async (req, res) => {
+  app.get("/api/client/shipments", requireClient, requireClientPermission(ClientPermission.VIEW_SHIPMENTS), async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
     if (!user || !user.clientAccountId) {
       return res.status(404).json({ error: "Client account not found" });
@@ -1704,7 +1982,7 @@ export async function registerRoutes(
   });
 
   // Client - Get Single Shipment Details
-  app.get("/api/client/shipments/:id", requireClient, async (req, res) => {
+  app.get("/api/client/shipments/:id", requireClient, requireClientPermission(ClientPermission.VIEW_SHIPMENTS), async (req, res) => {
     try {
       const { id } = req.params;
       const user = await storage.getUser(req.session.userId!);
@@ -1783,7 +2061,7 @@ export async function registerRoutes(
   });
 
   // STEP 1: Rate Discovery - Get rates from all carriers
-  app.post("/api/client/shipments/rates", requireClient, async (req, res) => {
+  app.post("/api/client/shipments/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
@@ -1905,7 +2183,7 @@ export async function registerRoutes(
   });
 
   // STEP 2: Checkout - Create payment intent with selected rate
-  app.post("/api/client/shipments/checkout", requireClient, async (req, res) => {
+  app.post("/api/client/shipments/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       // Check idempotency
       const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
@@ -2052,7 +2330,7 @@ export async function registerRoutes(
   });
 
   // STEP 3: Confirm - Create carrier shipment after payment success
-  app.post("/api/client/shipments/confirm", requireClient, async (req, res) => {
+  app.post("/api/client/shipments/confirm", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       // Check idempotency
       const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
@@ -2189,7 +2467,7 @@ export async function registerRoutes(
   });
 
   // Client - Create Shipment (LEGACY - direct creation without rate discovery)
-  app.post("/api/client/shipments", requireClient, async (req, res) => {
+  app.post("/api/client/shipments", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       // Check idempotency
       const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
@@ -2294,7 +2572,7 @@ export async function registerRoutes(
   });
 
   // Client - Cancel Shipment
-  app.post("/api/client/shipments/:id/cancel", requireClient, async (req, res) => {
+  app.post("/api/client/shipments/:id/cancel", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
@@ -2331,7 +2609,7 @@ export async function registerRoutes(
   });
 
   // Client - Invoices
-  app.get("/api/client/invoices", requireClient, async (req, res) => {
+  app.get("/api/client/invoices", requireClient, requireClientPermission(ClientPermission.VIEW_INVOICES), async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
     if (!user || !user.clientAccountId) {
       return res.status(404).json({ error: "Client account not found" });
@@ -2342,7 +2620,7 @@ export async function registerRoutes(
   });
 
   // Client - Invoice PDF (downloadable HTML for print)
-  app.get("/api/client/invoices/:id/pdf", requireClient, async (req, res) => {
+  app.get("/api/client/invoices/:id/pdf", requireClient, requireClientPermission(ClientPermission.VIEW_INVOICES), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
@@ -2494,7 +2772,7 @@ export async function registerRoutes(
   });
 
   // Client - Payments
-  app.get("/api/client/payments", requireClient, async (req, res) => {
+  app.get("/api/client/payments", requireClient, requireClientPermission(ClientPermission.VIEW_PAYMENTS), async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
     if (!user || !user.clientAccountId) {
       return res.status(404).json({ error: "Client account not found" });
@@ -2509,7 +2787,7 @@ export async function registerRoutes(
     invoiceId: z.string().min(1, "Invoice ID is required"),
   });
 
-  app.post("/api/client/payments/create-intent", requireClient, async (req, res) => {
+  app.post("/api/client/payments/create-intent", requireClient, requireClientPermission(ClientPermission.MAKE_PAYMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {

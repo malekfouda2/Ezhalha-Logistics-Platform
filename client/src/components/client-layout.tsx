@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "./theme-toggle";
@@ -20,6 +21,7 @@ import {
   LogOut,
   ChevronDown,
   Settings,
+  Users,
 } from "lucide-react";
 
 interface ClientLayoutProps {
@@ -27,16 +29,47 @@ interface ClientLayoutProps {
   clientProfile?: string;
 }
 
-const navItems = [
+type PermissionId = "view_shipments" | "create_shipments" | "view_invoices" | "view_payments" | "make_payments" | "manage_users";
+
+interface MyPermissions {
+  permissions: PermissionId[];
+  isPrimaryContact: boolean;
+}
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  requiredPermission?: PermissionId;
+}
+
+const navItems: NavItem[] = [
   { href: "/client", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/client/shipments", label: "Shipments", icon: Package },
-  { href: "/client/invoices", label: "Invoices", icon: FileText },
-  { href: "/client/payments", label: "Payments", icon: CreditCard },
+  { href: "/client/shipments", label: "Shipments", icon: Package, requiredPermission: "view_shipments" },
+  { href: "/client/invoices", label: "Invoices", icon: FileText, requiredPermission: "view_invoices" },
+  { href: "/client/payments", label: "Payments", icon: CreditCard, requiredPermission: "view_payments" },
+  { href: "/client/users", label: "Team", icon: Users, requiredPermission: "manage_users" },
 ];
 
 export function ClientLayout({ children, clientProfile = "regular" }: ClientLayoutProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+
+  const { data: myPerms } = useQuery<MyPermissions>({
+    queryKey: ["/api/client/my-permissions"],
+  });
+
+  const hasPermission = (perm: PermissionId): boolean => {
+    if (!myPerms) return false;
+    if (myPerms.isPrimaryContact) return true;
+    return myPerms.permissions.includes(perm);
+  };
+
+  const filteredNavItems = navItems.filter(item => {
+    if (!item.requiredPermission) return true;
+    if (!myPerms) return false;
+    return hasPermission(item.requiredPermission);
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -59,7 +92,7 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
 
         {/* Navigation */}
         <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             const isActive = location === item.href || 
               (item.href !== "/client" && location.startsWith(item.href));
             const Icon = item.icon;
