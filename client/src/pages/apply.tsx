@@ -8,6 +8,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import {
   Form,
   FormControl,
@@ -27,7 +29,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useUpload } from "@/hooks/use-upload";
-import { ArrowLeft, Send, CheckCircle, Upload, FileText, X } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle, Upload, FileText, X, Building2, User } from "lucide-react";
 
 const countries = [
   "Saudi Arabia",
@@ -93,6 +95,7 @@ export default function ApplyPage() {
   const form = useForm<ApplicationFormData>({
     resolver: zodResolver(applicationFormSchema),
     defaultValues: {
+      accountType: "company",
       name: "",
       email: "",
       phone: "",
@@ -101,11 +104,15 @@ export default function ApplyPage() {
     },
   });
 
+  const accountType = form.watch("accountType");
+
   const onSubmit = async (data: ApplicationFormData) => {
     if (uploadedDocs.length === 0) {
       toast({
         title: "Documents required",
-        description: "Please upload at least one company document",
+        description: accountType === "company" 
+          ? "Please upload at least one company document" 
+          : "Please upload identification documents",
         variant: "destructive",
       });
       return;
@@ -174,7 +181,6 @@ export default function ApplyPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Header */}
       <header className="flex items-center justify-between p-4">
         <img
           src="/assets/branding/logo.png"
@@ -184,7 +190,6 @@ export default function ApplyPage() {
         <ThemeToggle />
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 flex items-center justify-center p-4">
         <Card className="w-full max-w-lg">
           <CardHeader className="text-center pb-2">
@@ -197,6 +202,58 @@ export default function ApplyPage() {
           <CardContent className="pt-4">
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="accountType"
+                  render={({ field }) => (
+                    <FormItem className="space-y-3">
+                      <FormLabel>Account Type</FormLabel>
+                      <FormControl>
+                        <RadioGroup
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          className="grid grid-cols-2 gap-4"
+                          data-testid="radio-account-type"
+                        >
+                          <div>
+                            <RadioGroupItem
+                              value="company"
+                              id="company"
+                              className="peer sr-only"
+                            />
+                            <Label
+                              htmlFor="company"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-transparent p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                              data-testid="label-account-company"
+                            >
+                              <Building2 className="mb-3 h-6 w-6" />
+                              <span className="text-sm font-medium">Company</span>
+                              <span className="text-xs text-muted-foreground">Business account</span>
+                            </Label>
+                          </div>
+                          <div>
+                            <RadioGroupItem
+                              value="individual"
+                              id="individual"
+                              className="peer sr-only"
+                            />
+                            <Label
+                              htmlFor="individual"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-transparent p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                              data-testid="label-account-individual"
+                            >
+                              <User className="mb-3 h-6 w-6" />
+                              <span className="text-sm font-medium">Individual</span>
+                              <span className="text-xs text-muted-foreground">Personal account</span>
+                            </Label>
+                          </div>
+                        </RadioGroup>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="name"
@@ -282,28 +339,34 @@ export default function ApplyPage() {
                   />
                 </div>
 
-                <FormField
-                  control={form.control}
-                  name="companyName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company Name (Optional)</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Your company name"
-                          data-testid="input-company"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {accountType === "company" && (
+                  <FormField
+                    control={form.control}
+                    name="companyName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company Name</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Your company name"
+                            data-testid="input-company"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 <div className="pt-4 border-t">
-                  <h3 className="text-sm font-medium mb-3">Upload Company Documents</h3>
+                  <h3 className="text-sm font-medium mb-3">
+                    {accountType === "company" ? "Upload Company Documents" : "Upload Identification"}
+                  </h3>
                   <FormDescription className="mb-3">
-                    Please upload your Commercial Registration, Tax Certificate, and any other required business documents.
+                    {accountType === "company" 
+                      ? "Please upload your Commercial Registration, Tax Certificate, and any other required business documents."
+                      : "Please upload a valid government-issued ID (passport, national ID, or driver's license)."}
                   </FormDescription>
                   
                   <div className="space-y-3">
@@ -347,7 +410,7 @@ export default function ApplyPage() {
                               size="icon"
                               variant="ghost"
                               onClick={() => removeDocument(doc.path)}
-                              data-testid={`button-remove-doc-${doc.path}`}
+                              data-testid={`button-remove-doc-${doc.name}`}
                             >
                               <X className="h-4 w-4" />
                             </Button>
@@ -355,47 +418,41 @@ export default function ApplyPage() {
                         ))}
                       </div>
                     )}
-                    
-                    {uploadedDocs.length === 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        No documents uploaded yet
-                      </p>
-                    )}
                   </div>
                 </div>
 
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isLoading || isUploading}
-                  data-testid="button-submit"
-                >
-                  {isLoading ? (
-                    <LoadingSpinner size="sm" className="mr-2" />
-                  ) : (
-                    <Send className="mr-2 h-4 w-4" />
-                  )}
-                  Submit Application
-                </Button>
+                <CardFooter className="flex flex-col gap-4 px-0 pt-4">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading || isUploading}
+                    data-testid="button-submit"
+                  >
+                    {isLoading ? (
+                      <>
+                        <LoadingSpinner className="mr-2" size="sm" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="mr-2 h-4 w-4" />
+                        Submit Application
+                      </>
+                    )}
+                  </Button>
+
+                  <p className="text-center text-sm text-muted-foreground">
+                    Already have an account?{" "}
+                    <Link href="/" className="text-primary hover:underline">
+                      Sign in
+                    </Link>
+                  </p>
+                </CardFooter>
               </form>
             </Form>
           </CardContent>
-
-          <CardFooter className="justify-center pt-2">
-            <Link href="/">
-              <Button variant="ghost" data-testid="link-back-login">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Login
-              </Button>
-            </Link>
-          </CardFooter>
         </Card>
       </main>
-
-      {/* Footer */}
-      <footer className="py-4 text-center text-sm text-muted-foreground">
-        <p>ezhalha Logistics Platform</p>
-      </footer>
     </div>
   );
 }

@@ -29,6 +29,8 @@ import {
   type InsertWebhookEvent,
   type ShipmentRateQuote,
   type InsertShipmentRateQuote,
+  type ClientUserPermission,
+  type InsertClientUserPermission,
   users,
   clientAccounts,
   clientApplications,
@@ -44,6 +46,7 @@ import {
   integrationLogs,
   webhookEvents,
   shipmentRateQuotes,
+  clientUserPermissions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -197,6 +200,13 @@ export interface IStorage {
   getValidShipmentRateQuotes(clientAccountId: string): Promise<ShipmentRateQuote[]>;
   createShipmentRateQuote(quote: InsertShipmentRateQuote): Promise<ShipmentRateQuote>;
   deleteExpiredShipmentRateQuotes(): Promise<void>;
+
+  // Client User Permissions
+  getClientUserPermissions(userId: string, clientAccountId: string): Promise<ClientUserPermission | undefined>;
+  getClientUserPermissionsByAccount(clientAccountId: string): Promise<ClientUserPermission[]>;
+  createClientUserPermissions(perms: InsertClientUserPermission): Promise<ClientUserPermission>;
+  updateClientUserPermissions(id: string, updates: Partial<ClientUserPermission>): Promise<ClientUserPermission | undefined>;
+  deleteClientUserPermissions(userId: string, clientAccountId: string): Promise<void>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -926,6 +936,42 @@ export class DatabaseStorage implements IStorage {
 
   async deleteExpiredShipmentRateQuotes(): Promise<void> {
     await db.delete(shipmentRateQuotes).where(lt(shipmentRateQuotes.expiresAt, new Date()));
+  }
+
+  // Client User Permissions
+  async getClientUserPermissions(userId: string, clientAccountId: string): Promise<ClientUserPermission | undefined> {
+    const [perms] = await db.select().from(clientUserPermissions)
+      .where(and(
+        eq(clientUserPermissions.userId, userId),
+        eq(clientUserPermissions.clientAccountId, clientAccountId)
+      ));
+    return perms || undefined;
+  }
+
+  async getClientUserPermissionsByAccount(clientAccountId: string): Promise<ClientUserPermission[]> {
+    return db.select().from(clientUserPermissions)
+      .where(eq(clientUserPermissions.clientAccountId, clientAccountId));
+  }
+
+  async createClientUserPermissions(perms: InsertClientUserPermission): Promise<ClientUserPermission> {
+    const [newPerms] = await db.insert(clientUserPermissions).values(perms).returning();
+    return newPerms;
+  }
+
+  async updateClientUserPermissions(id: string, updates: Partial<ClientUserPermission>): Promise<ClientUserPermission | undefined> {
+    const [perms] = await db.update(clientUserPermissions)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(clientUserPermissions.id, id))
+      .returning();
+    return perms || undefined;
+  }
+
+  async deleteClientUserPermissions(userId: string, clientAccountId: string): Promise<void> {
+    await db.delete(clientUserPermissions)
+      .where(and(
+        eq(clientUserPermissions.userId, userId),
+        eq(clientUserPermissions.clientAccountId, clientAccountId)
+      ));
   }
 
   // Initialize default data if database is empty
