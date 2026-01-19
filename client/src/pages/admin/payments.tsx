@@ -106,7 +106,7 @@ export default function AdminPayments() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">Payments</h1>
+            <h1 className="text-2xl font-bold">Financial Statements</h1>
             <p className="text-muted-foreground">View and manage all payment transactions</p>
           </div>
           <div className="flex items-center gap-4">

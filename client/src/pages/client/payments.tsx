@@ -43,7 +43,7 @@ export default function ClientPayments() {
         {/* Page Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">Payment History</h1>
+            <h1 className="text-2xl font-bold">Financial Statements</h1>
             <p className="text-muted-foreground">
               View all your payment transactions
             </p>

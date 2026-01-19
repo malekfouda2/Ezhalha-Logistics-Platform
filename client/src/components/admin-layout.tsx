@@ -37,7 +37,7 @@ const navItems = [
   { href: "/admin/applications", label: "Applications", icon: ClipboardList },
   { href: "/admin/shipments", label: "Shipments", icon: Package },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
-  { href: "/admin/payments", label: "Payments", icon: CreditCard },
+  { href: "/admin/payments", label: "Financial Statements", icon: CreditCard },
   { href: "/admin/pricing", label: "Pricing", icon: DollarSign },
   { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },
   { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
