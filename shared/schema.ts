@@ -48,6 +48,29 @@ export const PaymentStatus = {
 
 export type PaymentStatusValue = typeof PaymentStatus[keyof typeof PaymentStatus];
 
+// Account type (company vs individual)
+export const AccountType = {
+  COMPANY: "company",
+  INDIVIDUAL: "individual",
+} as const;
+
+export type AccountTypeValue = typeof AccountType[keyof typeof AccountType];
+
+// Client permissions
+export const ClientPermission = {
+  VIEW_SHIPMENTS: "view_shipments",
+  CREATE_SHIPMENTS: "create_shipments",
+  VIEW_INVOICES: "view_invoices",
+  VIEW_PAYMENTS: "view_payments",
+  MAKE_PAYMENTS: "make_payments",
+  MANAGE_USERS: "manage_users",
+} as const;
+
+export type ClientPermissionValue = typeof ClientPermission[keyof typeof ClientPermission];
+
+// All client permissions array for convenience
+export const ALL_CLIENT_PERMISSIONS = Object.values(ClientPermission);
+
 // Users table
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -56,6 +79,7 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   userType: text("user_type").notNull().default("client"),
   clientAccountId: varchar("client_account_id"),
+  isPrimaryContact: boolean("is_primary_contact").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -72,6 +96,7 @@ export type User = typeof users.$inferSelect;
 // Client Accounts table
 export const clientAccounts = pgTable("client_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountType: text("account_type").notNull().default("company"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   phone: text("phone").notNull(),
@@ -103,6 +128,7 @@ export type ClientAccount = typeof clientAccounts.$inferSelect;
 // Client Applications table
 export const clientApplications = pgTable("client_applications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountType: text("account_type").notNull().default("company"),
   name: text("name").notNull(),
   email: text("email").notNull(),
   phone: text("phone").notNull(),
@@ -286,6 +312,25 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 
+// Client User Permissions table - stores permissions for each client user
+export const clientUserPermissions = pgTable("client_user_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  clientAccountId: varchar("client_account_id").notNull(),
+  permissions: text("permissions").array().notNull().default(sql`ARRAY[]::text[]`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertClientUserPermissionSchema = createInsertSchema(clientUserPermissions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertClientUserPermission = z.infer<typeof insertClientUserPermissionSchema>;
+export type ClientUserPermission = typeof clientUserPermissions.$inferSelect;
+
 // Audit Logs table
 export const auditLogs = pgTable("audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -438,6 +483,7 @@ export type LoginData = z.infer<typeof loginSchema>;
 
 // Application form schema
 export const applicationFormSchema = z.object({
+  accountType: z.enum(["company", "individual"]),
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
   phone: z.string().min(8, "Phone number must be at least 8 digits"),
