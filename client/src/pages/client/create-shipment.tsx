@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
-import { LoadingSpinner } from "@/components/loading-spinner";
+import { LoadingSpinner, LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -111,6 +112,11 @@ const packageTypes = [
   { value: "FEDEX_BOX", label: "FedEx Box" },
   { value: "FEDEX_TUBE", label: "FedEx Tube" },
 ];
+
+interface MyPermissions {
+  permissions: string[];
+  isPrimaryContact: boolean;
+}
 
 export default function CreateShipment() {
   const [, navigate] = useLocation();
@@ -259,6 +265,38 @@ export default function CreateShipment() {
       navigate("/client/shipments", { replace: true });
     },
   });
+
+  const { data: myPerms, isLoading: permsLoading } = useQuery<MyPermissions>({
+    queryKey: ["/api/client/my-permissions"],
+  });
+
+  const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
+
+  // Permission check - show access denied if user lacks create_shipments permission
+  if (permsLoading) {
+    return <LoadingScreen />;
+  }
+
+  if (!canCreateShipments) {
+    return (
+      <ClientLayout>
+        <div className="p-6">
+          <Card>
+            <CardContent className="py-16 text-center">
+              <Shield className="mx-auto h-12 w-12 text-muted-foreground" />
+              <h2 className="mt-4 text-lg font-medium">Access Denied</h2>
+              <p className="mt-2 text-muted-foreground">
+                You don't have permission to create shipments.
+              </p>
+              <Button className="mt-4" onClick={() => navigate("/client/dashboard")}>
+                Back to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </ClientLayout>
+    );
+  }
 
   const handlePayment = () => {
     if (checkoutData?.transactionUrl) {
