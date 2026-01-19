@@ -96,6 +96,7 @@ export type User = typeof users.$inferSelect;
 // Client Accounts table
 export const clientAccounts = pgTable("client_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountNumber: text("account_number").notNull().unique(), // Human-readable ID: EZ0001, EZ0002, etc.
   accountType: text("account_type").notNull().default("company"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
@@ -119,6 +120,7 @@ export const clientAccounts = pgTable("client_accounts", {
 
 export const insertClientAccountSchema = createInsertSchema(clientAccounts).omit({
   id: true,
+  accountNumber: true, // Generated automatically: EZ0001, EZ0002, etc.
   createdAt: true,
 });
 

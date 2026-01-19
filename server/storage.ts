@@ -316,7 +316,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createClientAccount(account: InsertClientAccount): Promise<ClientAccount> {
-    const [newAccount] = await db.insert(clientAccounts).values(account).returning();
+    // Generate next account number in format EZ0001, EZ0002, etc.
+    const [maxResult] = await db.select({ accountNumber: clientAccounts.accountNumber })
+      .from(clientAccounts)
+      .orderBy(desc(clientAccounts.accountNumber))
+      .limit(1);
+    
+    let nextNumber = 1;
+    if (maxResult?.accountNumber) {
+      const match = maxResult.accountNumber.match(/EZ(\d+)/);
+      if (match) {
+        nextNumber = parseInt(match[1], 10) + 1;
+      }
+    }
+    const accountNumber = `EZ${String(nextNumber).padStart(4, '0')}`;
+    
+    const [newAccount] = await db.insert(clientAccounts).values({
+      ...account,
+      accountNumber,
+    }).returning();
     return newAccount;
   }
 
@@ -1014,15 +1032,14 @@ export class DatabaseStorage implements IStorage {
     let demoClientAccount = existingClients.find(c => c.email === "demo@company.com");
     
     if (!demoClientAccount) {
-      const [clientAccount] = await db.insert(clientAccounts).values({
+      demoClientAccount = await this.createClientAccount({
         name: "Demo Company",
         email: "demo@company.com",
         phone: "+1 555 123 4567",
         country: "United States",
         profile: "regular",
         isActive: true,
-      }).returning();
-      demoClientAccount = clientAccount;
+      });
 
       // Create sample shipments for new client account
       const shipmentData = [

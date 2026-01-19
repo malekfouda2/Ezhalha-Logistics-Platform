@@ -375,6 +375,7 @@ export default function AdminClients() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Account ID</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Contact</TableHead>
                       <TableHead>Profile</TableHead>
@@ -386,6 +387,9 @@ export default function AdminClients() {
                   <TableBody>
                     {clients.map((client) => (
                       <TableRow key={client.id} data-testid={`row-client-${client.id}`}>
+                        <TableCell className="font-mono text-sm">
+                          {client.accountNumber}
+                        </TableCell>
                         <TableCell>
                           <div>
                             <p className="font-medium">{client.name}</p>
@@ -576,8 +580,8 @@ export default function AdminClients() {
                 <h4 className="text-sm font-medium text-muted-foreground">Account Information</h4>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Client ID</span>
-                    <span className="text-sm font-mono">{selectedClient.id.slice(0, 8)}...</span>
+                    <span className="text-sm text-muted-foreground">Account ID</span>
+                    <span className="text-sm font-mono">{selectedClient.accountNumber}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Joined</span>
