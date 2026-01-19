@@ -107,12 +107,10 @@ export default function ApplyPage() {
   const accountType = form.watch("accountType");
 
   const onSubmit = async (data: ApplicationFormData) => {
-    if (uploadedDocs.length === 0) {
+    if (accountType === "company" && uploadedDocs.length === 0) {
       toast({
         title: "Documents required",
-        description: accountType === "company" 
-          ? "Please upload at least one company document" 
-          : "Please upload identification documents",
+        description: "Please upload at least one company document",
         variant: "destructive",
       });
       return;
@@ -359,67 +357,67 @@ export default function ApplyPage() {
                   />
                 )}
 
-                <div className="pt-4 border-t">
-                  <h3 className="text-sm font-medium mb-3">
-                    {accountType === "company" ? "Upload Company Documents" : "Upload Identification"}
-                  </h3>
-                  <FormDescription className="mb-3">
-                    {accountType === "company" 
-                      ? "Please upload your Commercial Registration, Tax Certificate, and any other required business documents."
-                      : "Please upload a valid government-issued ID (passport, national ID, or driver's license)."}
-                  </FormDescription>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="document-upload" className="cursor-pointer">
-                        <div className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-muted/50 transition-colors">
-                          <Upload className="h-4 w-4" />
-                          <span className="text-sm">
-                            {isUploading ? "Uploading..." : "Choose Files"}
-                          </span>
-                        </div>
-                        <input
-                          id="document-upload"
-                          type="file"
-                          multiple
-                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                          className="hidden"
-                          onChange={handleFileSelect}
-                          disabled={isUploading}
-                          data-testid="input-documents"
-                        />
-                      </label>
-                      <span className="text-xs text-muted-foreground">
-                        PDF, DOC, DOCX, JPG, PNG (max 10MB each)
-                      </span>
-                    </div>
+                {accountType === "company" && (
+                  <div className="pt-4 border-t">
+                    <h3 className="text-sm font-medium mb-3">
+                      Upload Company Documents
+                    </h3>
+                    <FormDescription className="mb-3">
+                      Please upload your Commercial Registration, Tax Certificate, and any other required business documents.
+                    </FormDescription>
                     
-                    {uploadedDocs.length > 0 && (
-                      <div className="space-y-2">
-                        {uploadedDocs.map((doc) => (
-                          <div
-                            key={doc.path}
-                            className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                              <span className="text-sm truncate">{doc.name}</span>
-                            </div>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => removeDocument(doc.path)}
-                              data-testid={`button-remove-doc-${doc.name}`}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="document-upload" className="cursor-pointer">
+                          <div className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-muted/50 transition-colors">
+                            <Upload className="h-4 w-4" />
+                            <span className="text-sm">
+                              {isUploading ? "Uploading..." : "Choose Files"}
+                            </span>
                           </div>
-                        ))}
+                          <input
+                            id="document-upload"
+                            type="file"
+                            multiple
+                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                            className="hidden"
+                            onChange={handleFileSelect}
+                            disabled={isUploading}
+                            data-testid="input-documents"
+                          />
+                        </label>
+                        <span className="text-xs text-muted-foreground">
+                          PDF, DOC, DOCX, JPG, PNG (max 10MB each)
+                        </span>
                       </div>
-                    )}
+                      
+                      {uploadedDocs.length > 0 && (
+                        <div className="space-y-2">
+                          {uploadedDocs.map((doc) => (
+                            <div
+                              key={doc.path}
+                              className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                <span className="text-sm truncate">{doc.name}</span>
+                              </div>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => removeDocument(doc.path)}
+                                data-testid={`button-remove-doc-${doc.name}`}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <CardFooter className="flex flex-col gap-4 px-0 pt-4">
                   <Button
