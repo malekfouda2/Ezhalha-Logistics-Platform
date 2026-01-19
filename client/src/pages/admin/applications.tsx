@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, Check, X, Building2, Mail, Phone, MapPin, FileText, Hash, Download, RefreshCw, Filter, Inbox } from "lucide-react";
+import { Search, Check, X, Building2, User, Mail, Phone, MapPin, FileText, Hash, Download, RefreshCw, Filter, Inbox } from "lucide-react";
 import type { ClientApplication, PricingRule } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -252,9 +252,20 @@ export default function AdminApplications() {
                       <TableRow key={app.id} data-testid={`row-application-${app.id}`}>
                         <TableCell>
                           <div>
-                            <p className="font-medium">{app.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{app.name}</p>
+                              <span className={cn(
+                                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
+                                app.accountType === "company" 
+                                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                                  : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                              )}>
+                                {app.accountType === "company" ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
+                                {app.accountType === "company" ? "Company" : "Individual"}
+                              </span>
+                            </div>
                             {app.companyName && (
-                              <p className="text-sm text-muted-foreground flex items-center gap-1">
+                              <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                                 <Building2 className="h-3 w-3" />
                                 {app.companyName}
                               </p>
@@ -343,7 +354,18 @@ export default function AdminApplications() {
           </DialogHeader>
           <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
             <div className="p-4 rounded-lg bg-muted/50 space-y-2">
-              <p className="font-medium">{selectedApp?.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-medium">{selectedApp?.name}</p>
+                <span className={cn(
+                  "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium",
+                  selectedApp?.accountType === "company" 
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                    : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                )}>
+                  {selectedApp?.accountType === "company" ? <Building2 className="h-3 w-3" /> : <User className="h-3 w-3" />}
+                  {selectedApp?.accountType === "company" ? "Company" : "Individual"}
+                </span>
+              </div>
               <p className="text-sm text-muted-foreground">{selectedApp?.email}</p>
               <p className="text-sm text-muted-foreground">
                 {selectedApp?.country}
