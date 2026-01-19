@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import type { User } from "@shared/schema";
-import { apiRequest } from "./queryClient";
+import { apiRequest, queryClient } from "./queryClient";
 
 interface AuthContextType {
   user: User | null;
@@ -40,11 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     const data = await res.json();
     setUser(data.user);
+    // Clear all cached queries to ensure fresh data for new user
+    queryClient.clear();
   }, []);
 
   const logout = useCallback(async () => {
     await apiRequest("POST", "/api/auth/logout");
     setUser(null);
+    // Clear all cached queries on logout
+    queryClient.clear();
   }, []);
 
   return (
