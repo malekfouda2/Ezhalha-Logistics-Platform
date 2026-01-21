@@ -1301,6 +1301,105 @@ export async function registerRoutes(
     }
   });
 
+  // Admin - Get Pricing Tiers for a Profile
+  app.get("/api/admin/pricing/:id/tiers", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const tiers = await storage.getPricingTiersByProfileId(id);
+      res.json(tiers);
+    } catch (error) {
+      logError("Error fetching pricing tiers", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Create Pricing Tier
+  const pricingTierSchema = z.object({
+    minAmount: z.number().min(0, "Minimum amount must be 0 or greater"),
+    marginPercentage: z.number().min(0, "Margin must be 0 or greater").max(1000, "Margin cannot exceed 1000%"),
+  });
+
+  app.post("/api/admin/pricing/:id/tiers", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const { minAmount, marginPercentage } = pricingTierSchema.parse(req.body);
+
+      // Verify profile exists
+      const profile = await storage.getPricingRuleById(id);
+      if (!profile) {
+        return res.status(404).json({ error: "Pricing profile not found" });
+      }
+
+      const tier = await storage.createPricingTier({
+        profileId: id,
+        minAmount: String(minAmount),
+        marginPercentage: String(marginPercentage),
+      });
+
+      await logAudit(req.session.userId, "create_pricing_tier", "pricing_tier", tier.id,
+        `Created pricing tier for ${profile.displayName}: $${minAmount}+ at ${marginPercentage}%`, req.ip);
+
+      res.status(201).json(tier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error creating pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Update Pricing Tier
+  const pricingTierUpdateSchema = z.object({
+    minAmount: z.number().min(0, "Minimum amount must be 0 or greater").optional(),
+    marginPercentage: z.number().min(0, "Margin must be 0 or greater").max(1000, "Margin cannot exceed 1000%").optional(),
+  });
+
+  app.patch("/api/admin/pricing/tiers/:tierId", requireAdmin, async (req, res) => {
+    try {
+      const { tierId } = req.params;
+      
+      const validated = pricingTierUpdateSchema.parse(req.body);
+
+      const updates: any = {};
+      if (validated.minAmount !== undefined) updates.minAmount = String(validated.minAmount);
+      if (validated.marginPercentage !== undefined) updates.marginPercentage = String(validated.marginPercentage);
+
+      const tier = await storage.updatePricingTier(tierId, updates);
+      if (!tier) {
+        return res.status(404).json({ error: "Pricing tier not found" });
+      }
+
+      await logAudit(req.session.userId, "update_pricing_tier", "pricing_tier", tierId,
+        `Updated pricing tier: $${tier.minAmount}+ at ${tier.marginPercentage}%`, req.ip);
+
+      res.json(tier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error updating pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Delete Pricing Tier
+  app.delete("/api/admin/pricing/tiers/:tierId", requireAdmin, async (req, res) => {
+    try {
+      const { tierId } = req.params;
+      await storage.deletePricingTier(tierId);
+
+      await logAudit(req.session.userId, "delete_pricing_tier", "pricing_tier", tierId,
+        "Deleted pricing tier", req.ip);
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - Audit Logs (paginated)
   app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
     try {
@@ -2078,7 +2177,7 @@ export async function registerRoutes(
 
       // Get pricing rule for client profile
       const pricingRule = await storage.getPricingRuleByProfile(account.profile);
-      const marginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
 
       // Map to carrier adapter format
       const rateRequest = {
@@ -2135,6 +2234,11 @@ export async function registerRoutes(
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
       for (const rate of carrierRates) {
+        // Get tiered margin based on the base rate amount
+        const marginPercentage = pricingRule 
+          ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+          : defaultMarginPercentage;
+        
         const marginAmount = rate.baseRate * (marginPercentage / 100);
         const finalPrice = rate.baseRate + marginAmount;
 
@@ -2493,11 +2597,17 @@ export async function registerRoutes(
 
       // Get pricing rule for client profile
       const pricingRule = await storage.getPricingRuleByProfile(account.profile);
-      const marginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
 
       // Calculate pricing (simulated base rate)
       const weight = parseFloat(data.weight);
       const baseRate = 25 + weight * 5; // Base rate calculation
+      
+      // Get tiered margin based on the base rate amount
+      const marginPercentage = pricingRule 
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        : defaultMarginPercentage;
+      
       const margin = baseRate * (marginPercentage / 100);
       const finalPrice = baseRate + margin;
 

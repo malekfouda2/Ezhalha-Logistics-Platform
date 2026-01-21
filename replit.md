@@ -10,7 +10,7 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Client application and onboarding workflow (supports Company and Individual account types)
 - Invoice and payment processing with PDF generation
 - Tiered client profiles (Regular, Mid-Level, VIP) with discount benefits
-- Dynamic pricing rules with profile-based margins
+- Dynamic tiered pricing rules with profile-based margins (multiple tiers per profile based on shipment value)
 - Comprehensive audit logging with admin viewing
 - RBAC management (roles, permissions, user-role assignments)
 - Client-level RBAC (team member management with granular permissions)

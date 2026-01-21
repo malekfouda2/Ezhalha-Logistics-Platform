@@ -180,6 +180,23 @@ export const insertPricingRuleSchema = createInsertSchema(pricingRules).omit({
 export type InsertPricingRule = z.infer<typeof insertPricingRuleSchema>;
 export type PricingRule = typeof pricingRules.$inferSelect;
 
+// Pricing Tiers table (tiered margins per profile based on shipment value)
+export const pricingTiers = pgTable("pricing_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  profileId: varchar("profile_id").notNull(),
+  minAmount: decimal("min_amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPricingTier = z.infer<typeof insertPricingTierSchema>;
+export type PricingTier = typeof pricingTiers.$inferSelect;
+
 // Shipments table
 export const shipments = pgTable("shipments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

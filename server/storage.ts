@@ -13,6 +13,8 @@ import {
   type InsertPayment,
   type PricingRule,
   type InsertPricingRule,
+  type PricingTier,
+  type InsertPricingTier,
   type AuditLog,
   type InsertAuditLog,
   type Role,
@@ -38,6 +40,7 @@ import {
   invoices,
   payments,
   pricingRules,
+  pricingTiers,
   auditLogs,
   roles,
   permissions,
@@ -131,9 +134,17 @@ export interface IStorage {
   // Pricing Rules
   getPricingRules(): Promise<PricingRule[]>;
   getPricingRuleByProfile(profile: string): Promise<PricingRule | undefined>;
+  getPricingRuleById(id: string): Promise<PricingRule | undefined>;
   createPricingRule(rule: InsertPricingRule): Promise<PricingRule>;
   updatePricingRule(id: string, updates: Partial<PricingRule>): Promise<PricingRule | undefined>;
   deletePricingRule(id: string): Promise<void>;
+
+  // Pricing Tiers
+  getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]>;
+  createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
+  updatePricingTier(id: string, updates: Partial<PricingTier>): Promise<PricingTier | undefined>;
+  deletePricingTier(id: string): Promise<void>;
+  getMarginForAmount(profileId: string, amount: number): Promise<number>;
 
   // Audit Logs
   getAuditLogs(): Promise<AuditLog[]>;
@@ -628,6 +639,11 @@ export class DatabaseStorage implements IStorage {
     return rule || undefined;
   }
 
+  async getPricingRuleById(id: string): Promise<PricingRule | undefined> {
+    const [rule] = await db.select().from(pricingRules).where(eq(pricingRules.id, id));
+    return rule || undefined;
+  }
+
   async createPricingRule(rule: InsertPricingRule): Promise<PricingRule> {
     const [newRule] = await db.insert(pricingRules).values(rule).returning();
     return newRule;
@@ -642,7 +658,48 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deletePricingRule(id: string): Promise<void> {
+    // Also delete associated pricing tiers
+    await db.delete(pricingTiers).where(eq(pricingTiers.profileId, id));
     await db.delete(pricingRules).where(eq(pricingRules.id, id));
+  }
+
+  // Pricing Tiers
+  async getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]> {
+    return db.select().from(pricingTiers)
+      .where(eq(pricingTiers.profileId, profileId))
+      .orderBy(pricingTiers.minAmount);
+  }
+
+  async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {
+    const [newTier] = await db.insert(pricingTiers).values(tier).returning();
+    return newTier;
+  }
+
+  async updatePricingTier(id: string, updates: Partial<PricingTier>): Promise<PricingTier | undefined> {
+    const [tier] = await db.update(pricingTiers).set(updates).where(eq(pricingTiers.id, id)).returning();
+    return tier || undefined;
+  }
+
+  async deletePricingTier(id: string): Promise<void> {
+    await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
+  }
+
+  async getMarginForAmount(profileId: string, amount: number): Promise<number> {
+    // Get all tiers for this profile, ordered by minAmount descending
+    const tiers = await db.select().from(pricingTiers)
+      .where(eq(pricingTiers.profileId, profileId))
+      .orderBy(desc(pricingTiers.minAmount));
+    
+    // Find the applicable tier (highest minAmount that is <= the amount)
+    for (const tier of tiers) {
+      if (amount >= Number(tier.minAmount)) {
+        return Number(tier.marginPercentage);
+      }
+    }
+    
+    // If no tiers found, fall back to the profile's default marginPercentage
+    const profile = await this.getPricingRuleById(profileId);
+    return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
   }
 
   // Audit Logs
