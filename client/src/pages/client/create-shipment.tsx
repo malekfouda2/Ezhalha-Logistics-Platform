@@ -159,8 +159,8 @@ export default function CreateShipment() {
   const [isProcessingCallback, setIsProcessingCallback] = useState(false);
 
   const [formData, setFormData] = useState<ShipmentFormData>({
-    shipmentType: "domestic",
-    carrier: "FEDEX",
+    shipmentType: "" as "domestic" | "inbound" | "outbound",
+    carrier: "",
     serviceType: "",
     shipper: {
       name: "",
@@ -363,8 +363,8 @@ export default function CreateShipment() {
 
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
-      if (!formData.carrier) {
-        toast({ title: "Please select a carrier", variant: "destructive" });
+      if (!formData.shipmentType) {
+        toast({ title: "Please select a shipment type", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 2) {
@@ -507,41 +507,6 @@ export default function CreateShipment() {
                 </RadioGroup>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Carrier *</Label>
-                  <Select
-                    value={formData.carrier}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, carrier: v, serviceType: "" }))}
-                  >
-                    <SelectTrigger data-testid="select-carrier">
-                      <SelectValue placeholder="Select carrier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {carriers.map((c) => (
-                        <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Service Type</Label>
-                  <Select
-                    value={formData.serviceType}
-                    onValueChange={(v) => setFormData(prev => ({ ...prev, serviceType: v }))}
-                  >
-                    <SelectTrigger data-testid="select-service-type">
-                      <SelectValue placeholder="Select service (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(serviceTypes[formData.carrier] || []).map((s) => (
-                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">Optional - you can also choose after getting rates</p>
-                </div>
-              </div>
             </CardContent>
             <CardFooter className="flex justify-end">
               <Button onClick={nextStep} data-testid="button-next">Next: Sender Details</Button>
