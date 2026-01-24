@@ -165,7 +165,7 @@ export default function CreateShipment() {
     shipper: {
       name: "",
       phone: "",
-      countryCode: "SA",
+      countryCode: "",
       city: "",
       postalCode: "",
       addressLine1: "",
@@ -176,7 +176,7 @@ export default function CreateShipment() {
     recipient: {
       name: "",
       phone: "",
-      countryCode: "SA",
+      countryCode: "",
       city: "",
       postalCode: "",
       addressLine1: "",
@@ -436,12 +436,7 @@ export default function CreateShipment() {
     "Confirmation",
   ];
 
-  const involvesKSA = formData.shipmentType === "domestic" || 
-    formData.shipper.countryCode === "SA" || 
-    formData.recipient.countryCode === "SA";
-  
   const senderNeedsShortAddress = formData.shipper.countryCode === "SA";
-  
   const recipientNeedsShortAddress = formData.recipient.countryCode === "SA";
 
   return (
