@@ -40,12 +40,24 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Stripe webhook handler (legacy, kept for backwards compatibility)
 - Zoho Books invoice sync stub (ready for API configuration)
 
-**Shipment Creation Flow:**
-1. Rate Discovery: Client submits shipment details, receives carrier quotes with final prices (margins applied server-side)
-2. Checkout: Client selects a quote, server creates Moyasar payment and pending shipment
-3. Payment: Client is redirected to Moyasar's secure payment page (or demo mode simulation)
-4. Callback: After payment, user is redirected back with payment status
-5. Confirmation: Server verifies payment and creates carrier shipment
+**Shipment Creation Flow (7 Steps):**
+1. Shipment Type: Client selects direction (domestic/inbound/outbound) and carrier (FedEx, more coming)
+2. Sender Details: Enter pickup address with optional short address (Arabic) for KSA shipments
+3. Recipient Details: Enter delivery address with optional short address (Arabic) for KSA shipments
+4. Package Details: Specify weight, dimensions, number of packages, and package type
+5. Rate Discovery: Get quotes from selected carrier with final prices (margins applied server-side)
+6. Payment: Client is redirected to Moyasar's secure payment page (or demo mode simulation)
+7. Confirmation: Server verifies payment and creates carrier shipment
+
+**Shipment Types:**
+- Domestic: Shipping within Saudi Arabia (KSA to KSA)
+- Inbound: Shipping into Saudi Arabia from abroad
+- Outbound: Shipping from Saudi Arabia to abroad
+
+**Short Address Field:**
+- Required for KSA addresses (displayed when sender or recipient is in KSA)
+- Arabic text field for local address format
+
 - Quote expiration: 30 minutes from creation, enforced server-side
 - Clients never see base carrier rates, only final prices with margin
 - Demo mode: Works without Moyasar configuration for development/testing

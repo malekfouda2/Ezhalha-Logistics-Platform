@@ -2125,6 +2125,9 @@ export async function registerRoutes(
 
   // Canonical Shipment Input Schema
   const shipmentInputSchema = z.object({
+    shipmentType: z.enum(["domestic", "inbound", "outbound"]),
+    carrier: z.string().min(1, "Carrier is required"),
+    serviceType: z.string().optional(),
     shipper: z.object({
       name: z.string().min(1, "Shipper name is required"),
       phone: z.string().min(1, "Shipper phone is required"),
@@ -2134,6 +2137,7 @@ export async function registerRoutes(
       addressLine1: z.string().min(1, "Shipper address is required"),
       addressLine2: z.string().optional(),
       stateOrProvince: z.string().optional(),
+      shortAddress: z.string().optional(),
     }),
     recipient: z.object({
       name: z.string().min(1, "Recipient name is required"),
@@ -2144,6 +2148,7 @@ export async function registerRoutes(
       addressLine1: z.string().min(1, "Recipient address is required"),
       addressLine2: z.string().optional(),
       stateOrProvince: z.string().optional(),
+      shortAddress: z.string().optional(),
     }),
     package: z.object({
       weight: z.number().positive("Weight must be positive"),
@@ -2153,10 +2158,9 @@ export async function registerRoutes(
       height: z.number().positive("Height must be positive"),
       dimensionUnit: z.enum(["IN", "CM"]),
       packageType: z.string().default("YOUR_PACKAGING"),
+      numberOfPackages: z.number().int().min(1, "Must have at least 1 package").default(1),
     }),
-    shipmentType: z.enum(["domestic", "international"]),
-    serviceType: z.string().optional(),
-    currency: z.string().default("USD"),
+    currency: z.string().default("SAR"),
   });
 
   // STEP 1: Rate Discovery - Get rates from all carriers
@@ -2343,12 +2347,14 @@ export async function registerRoutes(
         senderPostalCode: shipmentData.shipper.postalCode,
         senderCountry: shipmentData.shipper.countryCode,
         senderPhone: shipmentData.shipper.phone,
+        senderShortAddress: shipmentData.shipper.shortAddress,
         recipientName: shipmentData.recipient.name,
         recipientAddress: shipmentData.recipient.addressLine1,
         recipientCity: shipmentData.recipient.city,
         recipientPostalCode: shipmentData.recipient.postalCode,
         recipientCountry: shipmentData.recipient.countryCode,
         recipientPhone: shipmentData.recipient.phone,
+        recipientShortAddress: shipmentData.recipient.shortAddress,
         weight: shipmentData.package.weight.toString(),
         weightUnit: shipmentData.package.weightUnit,
         length: shipmentData.package.length.toString(),
@@ -2356,6 +2362,7 @@ export async function registerRoutes(
         height: shipmentData.package.height.toString(),
         dimensionUnit: shipmentData.package.dimensionUnit,
         packageType: shipmentData.package.packageType,
+        numberOfPackages: shipmentData.package.numberOfPackages,
         shipmentType: shipmentData.shipmentType,
         serviceType: quote.serviceType,
         currency: quote.currency,

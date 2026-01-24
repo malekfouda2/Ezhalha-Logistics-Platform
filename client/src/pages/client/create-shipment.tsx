@@ -24,6 +24,9 @@ import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
 interface ShipmentFormData {
+  shipmentType: "domestic" | "inbound" | "outbound";
+  carrier: string;
+  serviceType: string;
   shipper: {
     name: string;
     phone: string;
@@ -33,6 +36,7 @@ interface ShipmentFormData {
     addressLine1: string;
     addressLine2?: string;
     stateOrProvince?: string;
+    shortAddress?: string;
   };
   recipient: {
     name: string;
@@ -43,6 +47,7 @@ interface ShipmentFormData {
     addressLine1: string;
     addressLine2?: string;
     stateOrProvince?: string;
+    shortAddress?: string;
   };
   package: {
     weight: number;
@@ -52,8 +57,8 @@ interface ShipmentFormData {
     height: number;
     dimensionUnit: "IN" | "CM";
     packageType: string;
+    numberOfPackages: number;
   };
-  shipmentType: "domestic" | "international";
   currency: string;
 }
 
@@ -113,6 +118,30 @@ const packageTypes = [
   { value: "FEDEX_TUBE", label: "FedEx Tube" },
 ];
 
+const carriers = [
+  { code: "FEDEX", name: "FedEx" },
+];
+
+const serviceTypes: Record<string, { value: string; label: string }[]> = {
+  FEDEX: [
+    { value: "FEDEX_GROUND", label: "FedEx Ground" },
+    { value: "FEDEX_EXPRESS_SAVER", label: "FedEx Express Saver" },
+    { value: "FEDEX_2_DAY", label: "FedEx 2Day" },
+    { value: "FEDEX_2_DAY_AM", label: "FedEx 2Day AM" },
+    { value: "STANDARD_OVERNIGHT", label: "FedEx Standard Overnight" },
+    { value: "PRIORITY_OVERNIGHT", label: "FedEx Priority Overnight" },
+    { value: "FIRST_OVERNIGHT", label: "FedEx First Overnight" },
+    { value: "INTERNATIONAL_ECONOMY", label: "FedEx International Economy" },
+    { value: "INTERNATIONAL_PRIORITY", label: "FedEx International Priority" },
+  ],
+};
+
+const shipmentTypeOptions = [
+  { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
+  { value: "inbound", label: "Inbound", description: "Shipping into Saudi Arabia from abroad" },
+  { value: "outbound", label: "Outbound", description: "Shipping from Saudi Arabia to abroad" },
+];
+
 interface MyPermissions {
   permissions: string[];
   isPrimaryContact: boolean;
@@ -130,37 +159,42 @@ export default function CreateShipment() {
   const [isProcessingCallback, setIsProcessingCallback] = useState(false);
 
   const [formData, setFormData] = useState<ShipmentFormData>({
+    shipmentType: "domestic",
+    carrier: "FEDEX",
+    serviceType: "",
     shipper: {
       name: "",
       phone: "",
-      countryCode: "US",
+      countryCode: "SA",
       city: "",
       postalCode: "",
       addressLine1: "",
       addressLine2: "",
       stateOrProvince: "",
+      shortAddress: "",
     },
     recipient: {
       name: "",
       phone: "",
-      countryCode: "US",
+      countryCode: "SA",
       city: "",
       postalCode: "",
       addressLine1: "",
       addressLine2: "",
       stateOrProvince: "",
+      shortAddress: "",
     },
     package: {
       weight: 1,
-      weightUnit: "LB",
+      weightUnit: "KG",
       length: 10,
       width: 10,
       height: 10,
-      dimensionUnit: "IN",
+      dimensionUnit: "CM",
       packageType: "YOUR_PACKAGING",
+      numberOfPackages: 1,
     },
-    shipmentType: "domestic",
-    currency: "USD",
+    currency: "SAR",
   });
 
   const { data: account } = useQuery<ClientAccount>({
@@ -213,7 +247,7 @@ export default function CreateShipment() {
     },
     onSuccess: (data) => {
       setRates(data);
-      setStep(4);
+      setStep(5);
     },
     onError: (error) => {
       toast({
@@ -231,7 +265,7 @@ export default function CreateShipment() {
     },
     onSuccess: (data) => {
       setCheckoutData(data);
-      setStep(5);
+      setStep(6);
     },
     onError: (error) => {
       toast({
@@ -249,7 +283,7 @@ export default function CreateShipment() {
     },
     onSuccess: (data) => {
       setConfirmData(data);
-      setStep(6);
+      setStep(7);
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       // Clear URL params after successful confirmation
@@ -329,20 +363,35 @@ export default function CreateShipment() {
 
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
-      const { name, phone, countryCode, city, postalCode, addressLine1 } = formData.shipper;
-      if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
-        toast({ title: "Please fill in all required shipper fields", variant: "destructive" });
+      if (!formData.carrier) {
+        toast({ title: "Please select a carrier", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 2) {
-      const { name, phone, countryCode, city, postalCode, addressLine1 } = formData.recipient;
+      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress } = formData.shipper;
+      if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
+        toast({ title: "Please fill in all required sender fields", variant: "destructive" });
+        return false;
+      }
+      const needsShortAddr = formData.shipmentType === "domestic" || formData.shipmentType === "outbound" || countryCode === "SA";
+      if (needsShortAddr && !shortAddress) {
+        toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
+        return false;
+      }
+    } else if (currentStep === 3) {
+      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress } = formData.recipient;
       if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
         toast({ title: "Please fill in all required recipient fields", variant: "destructive" });
         return false;
       }
-    } else if (currentStep === 3) {
-      const { weight, length, width, height, packageType } = formData.package;
-      if (!weight || !length || !width || !height || !packageType) {
+      const needsShortAddr = formData.shipmentType === "domestic" || formData.shipmentType === "inbound" || countryCode === "SA";
+      if (needsShortAddr && !shortAddress) {
+        toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
+        return false;
+      }
+    } else if (currentStep === 4) {
+      const { weight, length, width, height, packageType, numberOfPackages } = formData.package;
+      if (!weight || !length || !width || !height || !packageType || !numberOfPackages || numberOfPackages < 1) {
         toast({ title: "Please fill in all package details", variant: "destructive" });
         return false;
       }
@@ -352,8 +401,7 @@ export default function CreateShipment() {
 
   const nextStep = () => {
     if (validateStep(step)) {
-      if (step === 3) {
-        formData.shipmentType = formData.shipper.countryCode === formData.recipient.countryCode ? "domestic" : "international";
+      if (step === 4) {
         getRatesMutation.mutate(formData);
       } else {
         setStep(step + 1);
@@ -381,6 +429,7 @@ export default function CreateShipment() {
   };
 
   const stepTitles = [
+    "Shipment Type",
     "Sender Details",
     "Recipient Details",
     "Package Details",
@@ -388,6 +437,18 @@ export default function CreateShipment() {
     "Payment",
     "Confirmation",
   ];
+
+  const involvesKSA = formData.shipmentType === "domestic" || 
+    formData.shipper.countryCode === "SA" || 
+    formData.recipient.countryCode === "SA";
+  
+  const senderNeedsShortAddress = formData.shipmentType === "domestic" || 
+    formData.shipmentType === "outbound" || 
+    formData.shipper.countryCode === "SA";
+  
+  const recipientNeedsShortAddress = formData.shipmentType === "domestic" || 
+    formData.shipmentType === "inbound" || 
+    formData.recipient.countryCode === "SA";
 
   return (
     <ClientLayout clientProfile={account?.profile}>
@@ -400,7 +461,7 @@ export default function CreateShipment() {
         </Link>
 
         <div className="flex items-center justify-center mb-8">
-          {[1, 2, 3, 4, 5, 6].map((s) => (
+          {[1, 2, 3, 4, 5, 6, 7].map((s) => (
             <div key={s} className="flex items-center">
               <div
                 className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
@@ -411,8 +472,8 @@ export default function CreateShipment() {
               >
                 {step > s ? <Check className="h-4 w-4" /> : s}
               </div>
-              {s < 6 && (
-                <div className={`w-8 h-1 mx-1 ${step > s ? "bg-primary" : "bg-muted"}`} />
+              {s < 7 && (
+                <div className={`w-6 h-1 mx-0.5 ${step > s ? "bg-primary" : "bg-muted"}`} />
               )}
             </div>
           ))}
@@ -421,6 +482,85 @@ export default function CreateShipment() {
         <p className="text-center text-muted-foreground mb-6">{stepTitles[step - 1]}</p>
 
         {step === 1 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Shipment Type
+              </CardTitle>
+              <CardDescription>Select the type of shipment and carrier</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <Label className="text-base font-medium">Shipment Direction *</Label>
+                <RadioGroup 
+                  value={formData.shipmentType} 
+                  onValueChange={(v: "domestic" | "inbound" | "outbound") => setFormData(prev => ({ ...prev, shipmentType: v }))}
+                  className="mt-3"
+                >
+                  {shipmentTypeOptions.map((option) => (
+                    <div 
+                      key={option.value} 
+                      className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer hover-elevate ${
+                        formData.shipmentType === option.value ? "border-primary bg-primary/5" : "border-border"
+                      }`}
+                      onClick={() => setFormData(prev => ({ ...prev, shipmentType: option.value as "domestic" | "inbound" | "outbound" }))}
+                    >
+                      <RadioGroupItem value={option.value} id={`shipment-type-${option.value}`} className="mt-1" />
+                      <div>
+                        <Label htmlFor={`shipment-type-${option.value}`} className="text-base font-medium cursor-pointer">
+                          {option.label}
+                        </Label>
+                        <p className="text-sm text-muted-foreground mt-1">{option.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Carrier *</Label>
+                  <Select
+                    value={formData.carrier}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, carrier: v, serviceType: "" }))}
+                  >
+                    <SelectTrigger data-testid="select-carrier">
+                      <SelectValue placeholder="Select carrier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {carriers.map((c) => (
+                        <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Service Type</Label>
+                  <Select
+                    value={formData.serviceType}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, serviceType: v }))}
+                  >
+                    <SelectTrigger data-testid="select-service-type">
+                      <SelectValue placeholder="Select service (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(serviceTypes[formData.carrier] || []).map((s) => (
+                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">Optional - you can also choose after getting rates</p>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end">
+              <Button onClick={nextStep} data-testid="button-next">Next: Sender Details</Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === 2 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -513,14 +653,28 @@ export default function CreateShipment() {
                   data-testid="input-shipper-phone"
                 />
               </div>
+              {senderNeedsShortAddress && (
+                <div>
+                  <Label>Short Address (Arabic) *</Label>
+                  <Input
+                    value={formData.shipper.shortAddress || ""}
+                    onChange={(e) => updateShipper("shortAddress", e.target.value)}
+                    placeholder="العنوان المختصر"
+                    data-testid="input-shipper-short-address"
+                    dir="rtl"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
+                </div>
+              )}
             </CardContent>
-            <CardFooter className="flex justify-end">
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} data-testid="button-next">Next: Recipient Details</Button>
             </CardFooter>
           </Card>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -613,15 +767,28 @@ export default function CreateShipment() {
                   data-testid="input-recipient-phone"
                 />
               </div>
+              {recipientNeedsShortAddress && (
+                <div>
+                  <Label>Short Address (Arabic) *</Label>
+                  <Input
+                    value={formData.recipient.shortAddress || ""}
+                    onChange={(e) => updateRecipient("shortAddress", e.target.value)}
+                    placeholder="العنوان المختصر"
+                    data-testid="input-recipient-short-address"
+                    dir="rtl"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
+                </div>
+              )}
             </CardContent>
-            <CardFooter className="flex justify-between">
+            <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} data-testid="button-next">Next: Package Details</Button>
             </CardFooter>
           </Card>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -710,23 +877,35 @@ export default function CreateShipment() {
                   />
                 </div>
               </div>
-              <div>
-                <Label>Dimension Unit</Label>
-                <Select
-                  value={formData.package.dimensionUnit}
-                  onValueChange={(v) => updatePackage("dimensionUnit", v)}
-                >
-                  <SelectTrigger data-testid="select-dimension-unit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="IN">Inches (IN)</SelectItem>
-                    <SelectItem value="CM">Centimeters (CM)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Dimension Unit</Label>
+                  <Select
+                    value={formData.package.dimensionUnit}
+                    onValueChange={(v) => updatePackage("dimensionUnit", v)}
+                  >
+                    <SelectTrigger data-testid="select-dimension-unit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="IN">Inches (IN)</SelectItem>
+                      <SelectItem value="CM">Centimeters (CM)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Number of Packages *</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.package.numberOfPackages}
+                    onChange={(e) => updatePackage("numberOfPackages", parseInt(e.target.value) || 1)}
+                    data-testid="input-number-of-packages"
+                  />
+                </div>
               </div>
             </CardContent>
-            <CardFooter className="flex justify-between">
+            <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} disabled={getRatesMutation.isPending} data-testid="button-get-rates">
                 {getRatesMutation.isPending ? (
@@ -739,7 +918,7 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === 4 && rates && (
+        {step === 5 && rates && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -789,8 +968,8 @@ export default function CreateShipment() {
                 </div>
               </RadioGroup>
             </CardContent>
-            <CardFooter className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(3)} data-testid="button-prev">Back</Button>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
               <Button
                 onClick={handleSelectRate}
                 disabled={!selectedQuoteId || checkoutMutation.isPending}
@@ -806,7 +985,7 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === 5 && checkoutData && (
+        {step === 6 && checkoutData && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -861,8 +1040,8 @@ export default function CreateShipment() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
               <Button
                 onClick={handlePayment}
                 disabled={confirmMutation.isPending}
@@ -880,7 +1059,7 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === 6 && confirmData && (
+        {step === 7 && confirmData && (
           <Card>
             <CardHeader className="text-center">
               <div className="mx-auto w-12 h-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">

@@ -20,6 +20,15 @@ export const ClientProfile = {
 
 export type ClientProfileValue = typeof ClientProfile[keyof typeof ClientProfile];
 
+// Shipment type (direction)
+export const ShipmentType = {
+  DOMESTIC: "domestic",
+  INBOUND: "inbound",
+  OUTBOUND: "outbound",
+} as const;
+
+export type ShipmentTypeValue = typeof ShipmentType[keyof typeof ShipmentType];
+
 // Shipment status
 export const ShipmentStatus = {
   PROCESSING: "processing",
@@ -208,12 +217,14 @@ export const shipments = pgTable("shipments", {
   senderPostalCode: text("sender_postal_code"),
   senderCountry: text("sender_country").notNull(),
   senderPhone: text("sender_phone").notNull(),
+  senderShortAddress: text("sender_short_address"),
   recipientName: text("recipient_name").notNull(),
   recipientAddress: text("recipient_address").notNull(),
   recipientCity: text("recipient_city").notNull(),
   recipientPostalCode: text("recipient_postal_code"),
   recipientCountry: text("recipient_country").notNull(),
   recipientPhone: text("recipient_phone").notNull(),
+  recipientShortAddress: text("recipient_short_address"),
   weight: decimal("weight", { precision: 10, scale: 2 }).notNull(),
   weightUnit: text("weight_unit").default("LB"),
   length: decimal("length", { precision: 10, scale: 2 }),
@@ -222,6 +233,7 @@ export const shipments = pgTable("shipments", {
   dimensionUnit: text("dimension_unit").default("IN"),
   dimensions: text("dimensions"),
   packageType: text("package_type").notNull(),
+  numberOfPackages: integer("number_of_packages").default(1),
   shipmentType: text("shipment_type").default("domestic"),
   serviceType: text("service_type"),
   currency: text("currency").default("USD"),
