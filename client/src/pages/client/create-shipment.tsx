@@ -137,9 +137,9 @@ const serviceTypes: Record<string, { value: string; label: string }[]> = {
 };
 
 const shipmentTypeOptions = [
-  { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
-  { value: "inbound", label: "Inbound", description: "Shipping into Saudi Arabia from abroad" },
-  { value: "outbound", label: "Outbound", description: "Shipping from Saudi Arabia to abroad" },
+  { value: "domestic", label: "Domestic", description: "Shipping within the same country" },
+  { value: "inbound", label: "Inbound", description: "International shipping into a country" },
+  { value: "outbound", label: "Outbound", description: "International shipping out of a country" },
 ];
 
 interface MyPermissions {
