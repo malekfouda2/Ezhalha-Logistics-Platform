@@ -373,8 +373,7 @@ export default function CreateShipment() {
         toast({ title: "Please fill in all required sender fields", variant: "destructive" });
         return false;
       }
-      const needsShortAddr = formData.shipmentType === "domestic" || formData.shipmentType === "outbound" || countryCode === "SA";
-      if (needsShortAddr && !shortAddress) {
+      if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
       }
@@ -384,8 +383,7 @@ export default function CreateShipment() {
         toast({ title: "Please fill in all required recipient fields", variant: "destructive" });
         return false;
       }
-      const needsShortAddr = formData.shipmentType === "domestic" || formData.shipmentType === "inbound" || countryCode === "SA";
-      if (needsShortAddr && !shortAddress) {
+      if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
       }
@@ -442,13 +440,9 @@ export default function CreateShipment() {
     formData.shipper.countryCode === "SA" || 
     formData.recipient.countryCode === "SA";
   
-  const senderNeedsShortAddress = formData.shipmentType === "domestic" || 
-    formData.shipmentType === "outbound" || 
-    formData.shipper.countryCode === "SA";
+  const senderNeedsShortAddress = formData.shipper.countryCode === "SA";
   
-  const recipientNeedsShortAddress = formData.shipmentType === "domestic" || 
-    formData.shipmentType === "inbound" || 
-    formData.recipient.countryCode === "SA";
+  const recipientNeedsShortAddress = formData.recipient.countryCode === "SA";
 
   return (
     <ClientLayout clientProfile={account?.profile}>
