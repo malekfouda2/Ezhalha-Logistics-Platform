@@ -139,7 +139,7 @@ const serviceTypes: Record<string, { value: string; label: string }[]> = {
 };
 
 const shipmentTypeOptions = [
-  { value: "domestic", label: "Domestic", description: "Shipping within the same country" },
+  { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
   { value: "inbound", label: "Inbound", description: "International shipping into a country" },
   { value: "outbound", label: "Outbound", description: "International shipping out of a country" },
 ];
@@ -375,6 +375,10 @@ export default function CreateShipment() {
         toast({ title: "Please fill in all required sender fields", variant: "destructive" });
         return false;
       }
+      if (formData.shipmentType === "domestic" && countryCode !== "SA") {
+        toast({ title: "Domestic shipments must be within Saudi Arabia", variant: "destructive" });
+        return false;
+      }
       if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
@@ -383,6 +387,10 @@ export default function CreateShipment() {
       const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress } = formData.recipient;
       if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
         toast({ title: "Please fill in all required recipient fields", variant: "destructive" });
+        return false;
+      }
+      if (formData.shipmentType === "domestic" && countryCode !== "SA") {
+        toast({ title: "Domestic shipments must be within Saudi Arabia", variant: "destructive" });
         return false;
       }
       if (countryCode === "SA" && !shortAddress) {
@@ -486,7 +494,18 @@ export default function CreateShipment() {
                 <Label className="text-base font-medium">Shipment Direction *</Label>
                 <RadioGroup 
                   value={formData.shipmentType} 
-                  onValueChange={(v: "domestic" | "inbound" | "outbound") => setFormData(prev => ({ ...prev, shipmentType: v }))}
+                  onValueChange={(v: "domestic" | "inbound" | "outbound") => {
+                    if (v === "domestic") {
+                      setFormData(prev => ({
+                        ...prev,
+                        shipmentType: v,
+                        shipper: { ...prev.shipper, countryCode: "SA" },
+                        recipient: { ...prev.recipient, countryCode: "SA" },
+                      }));
+                    } else {
+                      setFormData(prev => ({ ...prev, shipmentType: v }));
+                    }
+                  }}
                   className="mt-3"
                 >
                   {shipmentTypeOptions.map((option) => (
@@ -495,7 +514,19 @@ export default function CreateShipment() {
                       className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer hover-elevate ${
                         formData.shipmentType === option.value ? "border-primary bg-primary/5" : "border-border"
                       }`}
-                      onClick={() => setFormData(prev => ({ ...prev, shipmentType: option.value as "domestic" | "inbound" | "outbound" }))}
+                      onClick={() => {
+                        const v = option.value as "domestic" | "inbound" | "outbound";
+                        if (v === "domestic") {
+                          setFormData(prev => ({
+                            ...prev,
+                            shipmentType: v,
+                            shipper: { ...prev.shipper, countryCode: "SA" },
+                            recipient: { ...prev.recipient, countryCode: "SA" },
+                          }));
+                        } else {
+                          setFormData(prev => ({ ...prev, shipmentType: v }));
+                        }
+                      }}
                     >
                       <RadioGroupItem value={option.value} id={`shipment-type-${option.value}`} className="mt-1" />
                       <div>
@@ -588,6 +619,7 @@ export default function CreateShipment() {
                   <Select
                     value={formData.shipper.countryCode}
                     onValueChange={(v) => updateShipper("countryCode", v)}
+                    disabled={formData.shipmentType === "domestic"}
                   >
                     <SelectTrigger data-testid="select-shipper-country">
                       <SelectValue />
@@ -598,6 +630,9 @@ export default function CreateShipment() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {formData.shipmentType === "domestic" && (
+                    <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
+                  )}
                 </div>
               </div>
               <div>
@@ -702,6 +737,7 @@ export default function CreateShipment() {
                   <Select
                     value={formData.recipient.countryCode}
                     onValueChange={(v) => updateRecipient("countryCode", v)}
+                    disabled={formData.shipmentType === "domestic"}
                   >
                     <SelectTrigger data-testid="select-recipient-country">
                       <SelectValue />
@@ -712,6 +748,9 @@ export default function CreateShipment() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {formData.shipmentType === "domestic" && (
+                    <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
+                  )}
                 </div>
               </div>
               <div>
