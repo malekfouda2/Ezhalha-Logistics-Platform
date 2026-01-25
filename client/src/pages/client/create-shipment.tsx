@@ -111,11 +111,13 @@ const countries = [
 ];
 
 const packageTypes = [
-  { value: "YOUR_PACKAGING", label: "Your Packaging" },
-  { value: "FEDEX_ENVELOPE", label: "FedEx Envelope" },
-  { value: "FEDEX_PAK", label: "FedEx Pak" },
-  { value: "FEDEX_BOX", label: "FedEx Box" },
-  { value: "FEDEX_TUBE", label: "FedEx Tube" },
+  { value: "YOUR_PACKAGING", label: "Your Own Packaging" },
+  { value: "ENVELOPE", label: "Envelope" },
+  { value: "PAK", label: "Pak / Pouch" },
+  { value: "BOX_SMALL", label: "Small Box" },
+  { value: "BOX_MEDIUM", label: "Medium Box" },
+  { value: "BOX_LARGE", label: "Large Box" },
+  { value: "TUBE", label: "Tube / Cylinder" },
 ];
 
 const carriers = [

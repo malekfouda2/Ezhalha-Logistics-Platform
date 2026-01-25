@@ -2126,7 +2126,7 @@ export async function registerRoutes(
   // Canonical Shipment Input Schema
   const shipmentInputSchema = z.object({
     shipmentType: z.enum(["domestic", "inbound", "outbound"]),
-    carrier: z.string().min(1, "Carrier is required"),
+    carrier: z.string().optional(),
     serviceType: z.string().optional(),
     shipper: z.object({
       name: z.string().min(1, "Shipper name is required"),
