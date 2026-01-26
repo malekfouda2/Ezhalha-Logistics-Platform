@@ -539,7 +539,28 @@ export const applicationFormSchema = z.object({
   country: z.string().min(2, "Country is required"),
   companyName: z.string().optional(),
   documents: z.array(z.string()).optional(),
-});
+  // Default Shipping Address
+  shippingContactName: z.string().min(2, "Contact name is required"),
+  shippingContactPhone: z.string().min(8, "Contact phone is required"),
+  shippingCountryCode: z.string().min(2, "Country is required"),
+  shippingCity: z.string().min(2, "City is required"),
+  shippingPostalCode: z.string().min(3, "Postal code is required"),
+  shippingAddressLine1: z.string().min(5, "Address is required"),
+  shippingAddressLine2: z.string().optional(),
+  shippingShortAddress: z.string().optional(),
+}).refine(
+  (data) => {
+    // Require short address for Saudi Arabia
+    if (data.shippingCountryCode === "SA") {
+      return !!data.shippingShortAddress && data.shippingShortAddress.length >= 3;
+    }
+    return true;
+  },
+  {
+    message: "Short address is required for Saudi Arabia addresses",
+    path: ["shippingShortAddress"],
+  }
+);
 
 export type ApplicationFormData = z.infer<typeof applicationFormSchema>;
 

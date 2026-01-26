@@ -693,7 +693,7 @@ export async function registerRoutes(
           return res.status(400).json({ error: "A user with this email already exists" });
         }
 
-        // Create client account with all company document fields
+        // Create client account with all company document fields and shipping address
         const clientAccount = await storage.createClientAccount({
           name: application.name,
           email: application.email,
@@ -707,6 +707,15 @@ export async function registerRoutes(
           nationalAddressDistrict: application.nationalAddressDistrict,
           nationalAddressCity: application.nationalAddressCity,
           nationalAddressPostalCode: application.nationalAddressPostalCode,
+          // Default Shipping Address
+          shippingContactName: application.shippingContactName,
+          shippingContactPhone: application.shippingContactPhone,
+          shippingCountryCode: application.shippingCountryCode,
+          shippingCity: application.shippingCity,
+          shippingPostalCode: application.shippingPostalCode,
+          shippingAddressLine1: application.shippingAddressLine1,
+          shippingAddressLine2: application.shippingAddressLine2,
+          shippingShortAddress: application.shippingShortAddress,
           documents: application.documents,
           profile: profile || "regular",
           isActive: true,
@@ -848,7 +857,13 @@ export async function registerRoutes(
   // Admin - Create Client
   app.post("/api/admin/clients", requireAdmin, async (req, res) => {
     try {
-      const { name, email, phone, country, companyName, documents, profile } = req.body;
+      const { 
+        name, email, phone, country, companyName, documents, profile,
+        // Shipping address fields (optional for admin-created clients)
+        shippingContactName, shippingContactPhone, shippingCountryCode,
+        shippingCity, shippingPostalCode, shippingAddressLine1,
+        shippingAddressLine2, shippingShortAddress
+      } = req.body;
       
       if (!name || !email || !phone || !country) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -869,6 +884,15 @@ export async function registerRoutes(
         documents: documents || null,
         profile: profile || "regular",
         isActive: true,
+        // Default Shipping Address (optional for admin-created clients)
+        shippingContactName: shippingContactName || null,
+        shippingContactPhone: shippingContactPhone || null,
+        shippingCountryCode: shippingCountryCode || null,
+        shippingCity: shippingCity || null,
+        shippingPostalCode: shippingPostalCode || null,
+        shippingAddressLine1: shippingAddressLine1 || null,
+        shippingAddressLine2: shippingAddressLine2 || null,
+        shippingShortAddress: shippingShortAddress || null,
       });
 
       // Create Zoho Books customer (if configured)

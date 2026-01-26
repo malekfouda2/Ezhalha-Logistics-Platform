@@ -48,6 +48,62 @@ const countries = [
   "Other",
 ];
 
+const shippingCountries = [
+  { code: "SA", name: "Saudi Arabia" },
+  { code: "AE", name: "United Arab Emirates" },
+  { code: "QA", name: "Qatar" },
+  { code: "KW", name: "Kuwait" },
+  { code: "BH", name: "Bahrain" },
+  { code: "OM", name: "Oman" },
+  { code: "EG", name: "Egypt" },
+  { code: "JO", name: "Jordan" },
+  { code: "LB", name: "Lebanon" },
+  { code: "US", name: "United States" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "DE", name: "Germany" },
+  { code: "FR", name: "France" },
+  { code: "IT", name: "Italy" },
+  { code: "ES", name: "Spain" },
+  { code: "NL", name: "Netherlands" },
+  { code: "BE", name: "Belgium" },
+  { code: "CH", name: "Switzerland" },
+  { code: "SE", name: "Sweden" },
+  { code: "NO", name: "Norway" },
+  { code: "DK", name: "Denmark" },
+  { code: "AT", name: "Austria" },
+  { code: "PL", name: "Poland" },
+  { code: "IE", name: "Ireland" },
+  { code: "PT", name: "Portugal" },
+  { code: "FI", name: "Finland" },
+  { code: "GR", name: "Greece" },
+  { code: "CZ", name: "Czech Republic" },
+  { code: "HU", name: "Hungary" },
+  { code: "RO", name: "Romania" },
+  { code: "IN", name: "India" },
+  { code: "CN", name: "China" },
+  { code: "JP", name: "Japan" },
+  { code: "KR", name: "South Korea" },
+  { code: "SG", name: "Singapore" },
+  { code: "MY", name: "Malaysia" },
+  { code: "TH", name: "Thailand" },
+  { code: "ID", name: "Indonesia" },
+  { code: "PH", name: "Philippines" },
+  { code: "VN", name: "Vietnam" },
+  { code: "AU", name: "Australia" },
+  { code: "NZ", name: "New Zealand" },
+  { code: "CA", name: "Canada" },
+  { code: "MX", name: "Mexico" },
+  { code: "BR", name: "Brazil" },
+  { code: "AR", name: "Argentina" },
+  { code: "ZA", name: "South Africa" },
+  { code: "NG", name: "Nigeria" },
+  { code: "KE", name: "Kenya" },
+  { code: "TR", name: "Turkey" },
+  { code: "IL", name: "Israel" },
+  { code: "PK", name: "Pakistan" },
+  { code: "BD", name: "Bangladesh" },
+];
+
 interface UploadedDocument {
   name: string;
   path: string;
@@ -101,8 +157,18 @@ export default function ApplyPage() {
       phone: "",
       country: "",
       companyName: "",
+      shippingContactName: "",
+      shippingContactPhone: "",
+      shippingCountryCode: "",
+      shippingCity: "",
+      shippingPostalCode: "",
+      shippingAddressLine1: "",
+      shippingAddressLine2: "",
+      shippingShortAddress: "",
     },
   });
+
+  const shippingCountryCode = form.watch("shippingCountryCode");
 
   const accountType = form.watch("accountType");
 
@@ -111,6 +177,16 @@ export default function ApplyPage() {
       toast({
         title: "Documents required",
         description: "Please upload at least one company document",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Validate short address for SA
+    if (data.shippingCountryCode === "SA" && !data.shippingShortAddress) {
+      toast({
+        title: "Short address required",
+        description: "Short address is required for Saudi Arabia addresses",
         variant: "destructive",
       });
       return;
@@ -356,6 +432,177 @@ export default function ApplyPage() {
                     )}
                   />
                 )}
+
+                {/* Default Shipping Address Section */}
+                <div className="pt-4 border-t">
+                  <h3 className="text-sm font-medium mb-1">Default Shipping Address</h3>
+                  <FormDescription className="mb-4">
+                    This address will be used as the default for your shipments. For inbound shipments, it will be the recipient address. For outbound shipments, it will be the sender address.
+                  </FormDescription>
+                  
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="shippingContactName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Contact Name</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="Contact person name"
+                                data-testid="input-shipping-contact-name"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="shippingContactPhone"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Contact Phone</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="+966 5XX XXX XXXX"
+                                data-testid="input-shipping-contact-phone"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="shippingAddressLine1"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 1</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Street address, building number"
+                              data-testid="input-shipping-address1"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="shippingAddressLine2"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 2 (Optional)</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Suite, unit, floor, etc."
+                              data-testid="input-shipping-address2"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="shippingCity"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>City</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="City"
+                                data-testid="input-shipping-city"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="shippingPostalCode"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Postal Code</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="Postal/ZIP code"
+                                data-testid="input-shipping-postal"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="shippingCountryCode"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Country</FormLabel>
+                            <Select
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                            >
+                              <FormControl>
+                                <SelectTrigger data-testid="select-shipping-country">
+                                  <SelectValue placeholder="Select country" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {shippingCountries.map((c) => (
+                                  <SelectItem key={c.code} value={c.code}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    {shippingCountryCode === "SA" && (
+                      <FormField
+                        control={form.control}
+                        name="shippingShortAddress"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Short Address (Arabic)</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="العنوان المختصر"
+                                dir="rtl"
+                                data-testid="input-shipping-short-address"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Required for Saudi Arabia addresses
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+                </div>
 
                 {accountType === "company" && (
                   <div className="pt-4 border-t">

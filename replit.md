@@ -58,6 +58,16 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Required for KSA addresses (displayed when sender or recipient is in KSA)
 - Arabic text field for local address format
 
+**Default Shipping Address:**
+- Clients provide a default shipping address during account application
+- Address includes: contact name, phone, country, city, postal code, address lines, and short address (for KSA)
+- Auto-population based on shipment type:
+  - Inbound: Recipient is pre-filled with client's default shipping address
+  - Outbound: Sender is pre-filled with client's default shipping address
+  - Domestic: Both addresses pre-filled with client's address (country locked to SA)
+- Addresses can be edited during shipment creation
+- Visual indicator shows when addresses are pre-filled from account
+
 - Quote expiration: 30 minutes from creation, enforced server-side
 - Clients never see base carrier rates, only final prices with margin
 - Demo mode: Works without Moyasar configuration for development/testing

@@ -203,6 +203,64 @@ export default function CreateShipment() {
     queryKey: ["/api/client/account"],
   });
 
+  // Helper function to create address from account's default shipping address
+  const getAccountShippingAddress = () => {
+    if (!account) return null;
+    return {
+      name: account.shippingContactName || account.name || "",
+      phone: account.shippingContactPhone || account.phone || "",
+      countryCode: account.shippingCountryCode || "",
+      city: account.shippingCity || "",
+      postalCode: account.shippingPostalCode || "",
+      addressLine1: account.shippingAddressLine1 || "",
+      addressLine2: account.shippingAddressLine2 || "",
+      stateOrProvince: "",
+      shortAddress: account.shippingShortAddress || "",
+    };
+  };
+
+  // Auto-populate addresses when account data loads (handles async fetch case)
+  // Use functional update to avoid stale closure issues with formData
+  useEffect(() => {
+    if (!account) return;
+    
+    const accountAddress = getAccountShippingAddress();
+    if (!accountAddress) return;
+    
+    setFormData(prev => {
+      if (!prev.shipmentType) return prev;
+      
+      // Only auto-populate if the addresses are still empty (user hasn't manually entered data)
+      const isShipperEmpty = !prev.shipper.name && !prev.shipper.addressLine1;
+      const isRecipientEmpty = !prev.recipient.name && !prev.recipient.addressLine1;
+      
+      if (prev.shipmentType === "domestic") {
+        if (isShipperEmpty && isRecipientEmpty) {
+          return {
+            ...prev,
+            shipper: { ...accountAddress, countryCode: "SA" },
+            recipient: { ...accountAddress, countryCode: "SA" },
+          };
+        }
+      } else if (prev.shipmentType === "inbound") {
+        if (isRecipientEmpty) {
+          return {
+            ...prev,
+            recipient: { ...accountAddress },
+          };
+        }
+      } else if (prev.shipmentType === "outbound") {
+        if (isShipperEmpty) {
+          return {
+            ...prev,
+            shipper: { ...accountAddress },
+          };
+        }
+      }
+      return prev;
+    });
+  }, [account]);
+
   // Handle Moyasar payment callback
   useEffect(() => {
     const params = new URLSearchParams(searchString);
@@ -495,15 +553,45 @@ export default function CreateShipment() {
                 <RadioGroup 
                   value={formData.shipmentType} 
                   onValueChange={(v: "domestic" | "inbound" | "outbound") => {
+                    const accountAddress = getAccountShippingAddress();
+                    const emptyAddress = {
+                      name: "",
+                      phone: "",
+                      countryCode: "",
+                      city: "",
+                      postalCode: "",
+                      addressLine1: "",
+                      addressLine2: "",
+                      stateOrProvince: "",
+                      shortAddress: "",
+                    };
+                    
                     if (v === "domestic") {
+                      // Domestic: Both addresses are in SA, use account address for both (deep copy to avoid shared reference)
+                      const shipperAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
+                      const recipientAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
-                        shipper: { ...prev.shipper, countryCode: "SA" },
-                        recipient: { ...prev.recipient, countryCode: "SA" },
+                        shipper: shipperAddress,
+                        recipient: recipientAddress,
                       }));
-                    } else {
-                      setFormData(prev => ({ ...prev, shipmentType: v }));
+                    } else if (v === "inbound") {
+                      // Inbound: Recipient is the client's address (deep copy to avoid shared reference)
+                      setFormData(prev => ({
+                        ...prev,
+                        shipmentType: v,
+                        shipper: { ...emptyAddress },
+                        recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
+                      }));
+                    } else if (v === "outbound") {
+                      // Outbound: Sender is the client's address (deep copy to avoid shared reference)
+                      setFormData(prev => ({
+                        ...prev,
+                        shipmentType: v,
+                        shipper: accountAddress ? { ...accountAddress } : { ...emptyAddress },
+                        recipient: { ...emptyAddress },
+                      }));
                     }
                   }}
                   className="mt-3"
@@ -516,15 +604,42 @@ export default function CreateShipment() {
                       }`}
                       onClick={() => {
                         const v = option.value as "domestic" | "inbound" | "outbound";
+                        const accountAddress = getAccountShippingAddress();
+                        const emptyAddress = {
+                          name: "",
+                          phone: "",
+                          countryCode: "",
+                          city: "",
+                          postalCode: "",
+                          addressLine1: "",
+                          addressLine2: "",
+                          stateOrProvince: "",
+                          shortAddress: "",
+                        };
+                        
                         if (v === "domestic") {
+                          const shipperAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
+                          const recipientAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
                           setFormData(prev => ({
                             ...prev,
                             shipmentType: v,
-                            shipper: { ...prev.shipper, countryCode: "SA" },
-                            recipient: { ...prev.recipient, countryCode: "SA" },
+                            shipper: shipperAddress,
+                            recipient: recipientAddress,
                           }));
-                        } else {
-                          setFormData(prev => ({ ...prev, shipmentType: v }));
+                        } else if (v === "inbound") {
+                          setFormData(prev => ({
+                            ...prev,
+                            shipmentType: v,
+                            shipper: { ...emptyAddress },
+                            recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
+                          }));
+                        } else if (v === "outbound") {
+                          setFormData(prev => ({
+                            ...prev,
+                            shipmentType: v,
+                            shipper: accountAddress ? { ...accountAddress } : { ...emptyAddress },
+                            recipient: { ...emptyAddress },
+                          }));
                         }
                       }}
                     >
@@ -557,6 +672,16 @@ export default function CreateShipment() {
               <CardDescription>Enter the pickup address and contact information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {formData.shipmentType === "outbound" && account?.shippingAddressLine1 && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
+                  Pre-filled with your default shipping address. You can edit these details if needed.
+                </div>
+              )}
+              {formData.shipmentType === "domestic" && account?.shippingAddressLine1 && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
+                  Pre-filled with your default shipping address. You can edit these details if needed.
+                </div>
+              )}
               <div>
                 <Label>Full Name *</Label>
                 <Input
@@ -675,6 +800,16 @@ export default function CreateShipment() {
               <CardDescription>Enter the delivery address and contact information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {formData.shipmentType === "inbound" && account?.shippingAddressLine1 && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
+                  Pre-filled with your default shipping address. You can edit these details if needed.
+                </div>
+              )}
+              {formData.shipmentType === "domestic" && account?.shippingAddressLine1 && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
+                  Pre-filled with your default shipping address. You can edit these details if needed.
+                </div>
+              )}
               <div>
                 <Label>Full Name *</Label>
                 <Input
