@@ -123,11 +123,12 @@ export const clientAccounts = pgTable("client_accounts", {
   shippingContactName: text("shipping_contact_name"),
   shippingContactPhone: text("shipping_contact_phone"),
   shippingCountryCode: text("shipping_country_code"),
+  shippingStateOrProvince: text("shipping_state_or_province"),
   shippingCity: text("shipping_city"),
   shippingPostalCode: text("shipping_postal_code"),
   shippingAddressLine1: text("shipping_address_line1"),
   shippingAddressLine2: text("shipping_address_line2"),
-  shippingShortAddress: text("shipping_short_address"), // Arabic short address for KSA
+  shippingShortAddress: text("shipping_short_address"), // Short address code for KSA
   documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
@@ -165,11 +166,12 @@ export const clientApplications = pgTable("client_applications", {
   shippingContactName: text("shipping_contact_name"),
   shippingContactPhone: text("shipping_contact_phone"),
   shippingCountryCode: text("shipping_country_code"),
+  shippingStateOrProvince: text("shipping_state_or_province"),
   shippingCity: text("shipping_city"),
   shippingPostalCode: text("shipping_postal_code"),
   shippingAddressLine1: text("shipping_address_line1"),
   shippingAddressLine2: text("shipping_address_line2"),
-  shippingShortAddress: text("shipping_short_address"), // Arabic short address for KSA
+  shippingShortAddress: text("shipping_short_address"), // Short address code for KSA
   documents: text("documents").array(), // Array of document object paths
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
@@ -536,13 +538,13 @@ export const applicationFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
   phone: z.string().min(8, "Phone number must be at least 8 digits"),
-  country: z.string().min(2, "Country is required"),
   companyName: z.string().optional(),
   documents: z.array(z.string()).optional(),
   // Default Shipping Address
   shippingContactName: z.string().min(2, "Contact name is required"),
   shippingContactPhone: z.string().min(8, "Contact phone is required"),
   shippingCountryCode: z.string().min(2, "Country is required"),
+  shippingStateOrProvince: z.string().min(2, "State/Province is required"),
   shippingCity: z.string().min(2, "City is required"),
   shippingPostalCode: z.string().min(3, "Postal code is required"),
   shippingAddressLine1: z.string().min(5, "Address is required"),

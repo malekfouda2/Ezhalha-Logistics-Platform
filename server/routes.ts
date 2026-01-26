@@ -490,8 +490,16 @@ export async function registerRoutes(
       }
       
       const data = applicationFormSchema.parse(req.body);
+      // Derive country from shipping country code for backwards compatibility
+      const countryMap: Record<string, string> = {
+        SA: "Saudi Arabia", AE: "United Arab Emirates", QA: "Qatar", KW: "Kuwait",
+        BH: "Bahrain", OM: "Oman", EG: "Egypt", JO: "Jordan", LB: "Lebanon",
+        US: "United States", GB: "United Kingdom", DE: "Germany", FR: "France",
+      };
+      const country = countryMap[data.shippingCountryCode] || data.shippingCountryCode;
       const application = await storage.createClientApplication({
         ...data,
+        country,
         documents: data.documents || null,
         status: "pending",
       });
@@ -711,6 +719,7 @@ export async function registerRoutes(
           shippingContactName: application.shippingContactName,
           shippingContactPhone: application.shippingContactPhone,
           shippingCountryCode: application.shippingCountryCode,
+          shippingStateOrProvince: (application as any).shippingStateOrProvince,
           shippingCity: application.shippingCity,
           shippingPostalCode: application.shippingPostalCode,
           shippingAddressLine1: application.shippingAddressLine1,
@@ -861,7 +870,7 @@ export async function registerRoutes(
         name, email, phone, country, companyName, documents, profile,
         // Shipping address fields (optional for admin-created clients)
         shippingContactName, shippingContactPhone, shippingCountryCode,
-        shippingCity, shippingPostalCode, shippingAddressLine1,
+        shippingStateOrProvince, shippingCity, shippingPostalCode, shippingAddressLine1,
         shippingAddressLine2, shippingShortAddress
       } = req.body;
       
@@ -888,6 +897,7 @@ export async function registerRoutes(
         shippingContactName: shippingContactName || null,
         shippingContactPhone: shippingContactPhone || null,
         shippingCountryCode: shippingCountryCode || null,
+        shippingStateOrProvince: shippingStateOrProvince || null,
         shippingCity: shippingCity || null,
         shippingPostalCode: shippingPostalCode || null,
         shippingAddressLine1: shippingAddressLine1 || null,
@@ -1760,6 +1770,7 @@ export async function registerRoutes(
     shippingContactName: z.string().min(2).optional(),
     shippingContactPhone: z.string().min(8).optional(),
     shippingCountryCode: z.string().min(2).optional(),
+    shippingStateOrProvince: z.string().min(2).optional(),
     shippingCity: z.string().min(2).optional(),
     shippingPostalCode: z.string().min(3).optional(),
     shippingAddressLine1: z.string().min(5).optional(),

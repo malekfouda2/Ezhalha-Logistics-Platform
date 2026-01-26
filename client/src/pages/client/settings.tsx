@@ -72,6 +72,7 @@ const shippingAddressSchema = z.object({
   shippingContactName: z.string().min(2, "Contact name is required"),
   shippingContactPhone: z.string().min(8, "Contact phone is required"),
   shippingCountryCode: z.string().min(2, "Country is required"),
+  shippingStateOrProvince: z.string().min(2, "State/Province is required"),
   shippingCity: z.string().min(2, "City is required"),
   shippingPostalCode: z.string().min(3, "Postal code is required"),
   shippingAddressLine1: z.string().min(5, "Address is required"),
@@ -186,6 +187,7 @@ export default function ClientSettings() {
       shippingContactName: "",
       shippingContactPhone: "",
       shippingCountryCode: "",
+      shippingStateOrProvince: "",
       shippingCity: "",
       shippingPostalCode: "",
       shippingAddressLine1: "",
@@ -197,6 +199,7 @@ export default function ClientSettings() {
           shippingContactName: account.shippingContactName || "",
           shippingContactPhone: account.shippingContactPhone || "",
           shippingCountryCode: account.shippingCountryCode || "",
+          shippingStateOrProvince: (account as any).shippingStateOrProvince || "",
           shippingCity: account.shippingCity || "",
           shippingPostalCode: account.shippingPostalCode || "",
           shippingAddressLine1: account.shippingAddressLine1 || "",
@@ -603,6 +606,24 @@ export default function ClientSettings() {
                               ))}
                             </SelectContent>
                           </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingStateOrProvince"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>State/Province</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="State or Province"
+                              data-testid="input-shipping-state"
+                              {...field}
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}

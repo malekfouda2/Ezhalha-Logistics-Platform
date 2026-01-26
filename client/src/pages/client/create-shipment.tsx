@@ -210,11 +210,11 @@ export default function CreateShipment() {
       name: account.shippingContactName || account.name || "",
       phone: account.shippingContactPhone || account.phone || "",
       countryCode: account.shippingCountryCode || "",
+      stateOrProvince: (account as any).shippingStateOrProvince || "",
       city: account.shippingCity || "",
       postalCode: account.shippingPostalCode || "",
       addressLine1: account.shippingAddressLine1 || "",
       addressLine2: account.shippingAddressLine2 || "",
-      stateOrProvince: "",
       shortAddress: account.shippingShortAddress || "",
     };
   };
