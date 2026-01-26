@@ -21,7 +21,14 @@ import {
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound } from "lucide-react";
+import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound, Truck } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -44,6 +51,46 @@ const passwordFormSchema = z.object({
 });
 
 type PasswordFormData = z.infer<typeof passwordFormSchema>;
+
+const shippingCountries = [
+  { code: "SA", name: "Saudi Arabia" },
+  { code: "AE", name: "United Arab Emirates" },
+  { code: "QA", name: "Qatar" },
+  { code: "KW", name: "Kuwait" },
+  { code: "BH", name: "Bahrain" },
+  { code: "OM", name: "Oman" },
+  { code: "EG", name: "Egypt" },
+  { code: "JO", name: "Jordan" },
+  { code: "LB", name: "Lebanon" },
+  { code: "US", name: "United States" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "DE", name: "Germany" },
+  { code: "FR", name: "France" },
+];
+
+const shippingAddressSchema = z.object({
+  shippingContactName: z.string().min(2, "Contact name is required"),
+  shippingContactPhone: z.string().min(8, "Contact phone is required"),
+  shippingCountryCode: z.string().min(2, "Country is required"),
+  shippingCity: z.string().min(2, "City is required"),
+  shippingPostalCode: z.string().min(3, "Postal code is required"),
+  shippingAddressLine1: z.string().min(5, "Address is required"),
+  shippingAddressLine2: z.string().optional(),
+  shippingShortAddress: z.string().optional(),
+}).refine(
+  (data) => {
+    if (data.shippingCountryCode === "SA") {
+      return !!data.shippingShortAddress && data.shippingShortAddress.length >= 3;
+    }
+    return true;
+  },
+  {
+    message: "Short address is required for Saudi Arabia addresses",
+    path: ["shippingShortAddress"],
+  }
+);
+
+type ShippingAddressFormData = z.infer<typeof shippingAddressSchema>;
 
 export default function ClientSettings() {
   const { toast } = useToast();
@@ -131,6 +178,61 @@ export default function ClientSettings() {
   const onPasswordSubmit = (data: PasswordFormData) => {
     changePasswordMutation.mutate(data);
   };
+
+  // Shipping Address Form
+  const shippingForm = useForm<ShippingAddressFormData>({
+    resolver: zodResolver(shippingAddressSchema),
+    defaultValues: {
+      shippingContactName: "",
+      shippingContactPhone: "",
+      shippingCountryCode: "",
+      shippingCity: "",
+      shippingPostalCode: "",
+      shippingAddressLine1: "",
+      shippingAddressLine2: "",
+      shippingShortAddress: "",
+    },
+    values: account
+      ? {
+          shippingContactName: account.shippingContactName || "",
+          shippingContactPhone: account.shippingContactPhone || "",
+          shippingCountryCode: account.shippingCountryCode || "",
+          shippingCity: account.shippingCity || "",
+          shippingPostalCode: account.shippingPostalCode || "",
+          shippingAddressLine1: account.shippingAddressLine1 || "",
+          shippingAddressLine2: account.shippingAddressLine2 || "",
+          shippingShortAddress: account.shippingShortAddress || "",
+        }
+      : undefined,
+  });
+
+  const updateShippingMutation = useMutation({
+    mutationFn: async (data: ShippingAddressFormData) => {
+      const res = await apiRequest("PATCH", "/api/client/account", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/client/account"] });
+      toast({
+        title: "Shipping Address Updated",
+        description: "Your default shipping address has been saved.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onShippingSubmit = (data: ShippingAddressFormData) => {
+    updateShippingMutation.mutate(data);
+  };
+
+  const watchedShippingCountry = shippingForm.watch("shippingCountryCode");
+  const showShortAddress = watchedShippingCountry === "SA";
 
   const profileBenefits: Record<string, string[]> = {
     regular: ["Standard shipping rates", "Email support"],
@@ -423,6 +525,197 @@ export default function ClientSettings() {
                         <KeyRound className="mr-2 h-4 w-4" />
                       )}
                       Change Password
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {/* Default Shipping Address Card */}
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Default Shipping Address
+              </CardTitle>
+              <CardDescription>
+                This address will be auto-filled when creating shipments
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...shippingForm}>
+                <form onSubmit={shippingForm.handleSubmit(onShippingSubmit)} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingContactName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contact Name</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Full name"
+                              data-testid="input-shipping-contact-name"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingContactPhone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contact Phone</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="+966 50 123 4567"
+                              data-testid="input-shipping-contact-phone"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingCountryCode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Country</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-shipping-country">
+                                <SelectValue placeholder="Select country" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {shippingCountries.map((country) => (
+                                <SelectItem key={country.code} value={country.code}>
+                                  {country.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingCity"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>City</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="City name"
+                              data-testid="input-shipping-city"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingPostalCode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Postal Code</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="12345"
+                              data-testid="input-shipping-postal-code"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingAddressLine1"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 1</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Street address"
+                              data-testid="input-shipping-address-line1"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={shippingForm.control}
+                      name="shippingAddressLine2"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 2 (Optional)</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Suite, building, etc."
+                              data-testid="input-shipping-address-line2"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {showShortAddress && (
+                      <FormField
+                        control={shippingForm.control}
+                        name="shippingShortAddress"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Short Address</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="e.g. RCTB4359"
+                                data-testid="input-shipping-short-address"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Required for Saudi Arabia addresses
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex justify-end pt-4">
+                    <Button
+                      type="submit"
+                      disabled={updateShippingMutation.isPending}
+                      data-testid="button-save-shipping"
+                    >
+                      {updateShippingMutation.isPending ? (
+                        <LoadingSpinner size="sm" className="mr-2" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Save Shipping Address
                     </Button>
                   </div>
                 </form>

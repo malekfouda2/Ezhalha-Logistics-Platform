@@ -1756,6 +1756,15 @@ export async function registerRoutes(
     email: z.string().email().optional(),
     phone: z.string().min(1).optional(),
     companyName: z.string().optional(),
+    // Shipping address fields
+    shippingContactName: z.string().min(2).optional(),
+    shippingContactPhone: z.string().min(8).optional(),
+    shippingCountryCode: z.string().min(2).optional(),
+    shippingCity: z.string().min(2).optional(),
+    shippingPostalCode: z.string().min(3).optional(),
+    shippingAddressLine1: z.string().min(5).optional(),
+    shippingAddressLine2: z.string().optional(),
+    shippingShortAddress: z.string().optional(),
   });
 
   app.patch("/api/client/account", requireClient, async (req, res) => {

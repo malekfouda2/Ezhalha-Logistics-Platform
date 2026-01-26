@@ -56,7 +56,7 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 
 **Short Address Field:**
 - Required for KSA addresses (displayed when sender or recipient is in KSA)
-- Arabic text field for local address format
+- Location code format (e.g. RCTB4359)
 
 **Default Shipping Address:**
 - Clients provide a default shipping address during account application

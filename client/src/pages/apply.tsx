@@ -584,17 +584,16 @@ export default function ApplyPage() {
                         name="shippingShortAddress"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Short Address (Arabic)</FormLabel>
+                            <FormLabel>Short Address</FormLabel>
                             <FormControl>
                               <Input
-                                placeholder="العنوان المختصر"
-                                dir="rtl"
+                                placeholder="e.g. RCTB4359"
                                 data-testid="input-shipping-short-address"
                                 {...field}
                               />
                             </FormControl>
                             <FormDescription>
-                              Required for Saudi Arabia addresses
+                              Required for Saudi Arabia addresses (e.g. RCTB4359)
                             </FormDescription>
                             <FormMessage />
                           </FormItem>

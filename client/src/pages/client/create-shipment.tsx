@@ -771,13 +771,12 @@ export default function CreateShipment() {
               </div>
               {senderNeedsShortAddress && (
                 <div>
-                  <Label>Short Address (Arabic) *</Label>
+                  <Label>Short Address *</Label>
                   <Input
                     value={formData.shipper.shortAddress || ""}
                     onChange={(e) => updateShipper("shortAddress", e.target.value)}
-                    placeholder="العنوان المختصر"
+                    placeholder="e.g. RCTB4359"
                     data-testid="input-shipper-short-address"
-                    dir="rtl"
                   />
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
@@ -899,13 +898,12 @@ export default function CreateShipment() {
               </div>
               {recipientNeedsShortAddress && (
                 <div>
-                  <Label>Short Address (Arabic) *</Label>
+                  <Label>Short Address *</Label>
                   <Input
                     value={formData.recipient.shortAddress || ""}
                     onChange={(e) => updateRecipient("shortAddress", e.target.value)}
-                    placeholder="العنوان المختصر"
+                    placeholder="e.g. RCTB4359"
                     data-testid="input-recipient-short-address"
-                    dir="rtl"
                   />
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
