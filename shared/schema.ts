@@ -119,6 +119,15 @@ export const clientAccounts = pgTable("client_accounts", {
   nationalAddressDistrict: text("national_address_district"),
   nationalAddressCity: text("national_address_city"),
   nationalAddressPostalCode: text("national_address_postal_code"),
+  // Default Shipping Address fields
+  shippingContactName: text("shipping_contact_name"),
+  shippingContactPhone: text("shipping_contact_phone"),
+  shippingCountryCode: text("shipping_country_code"),
+  shippingCity: text("shipping_city"),
+  shippingPostalCode: text("shipping_postal_code"),
+  shippingAddressLine1: text("shipping_address_line1"),
+  shippingAddressLine2: text("shipping_address_line2"),
+  shippingShortAddress: text("shipping_short_address"), // Arabic short address for KSA
   documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
@@ -152,6 +161,15 @@ export const clientApplications = pgTable("client_applications", {
   nationalAddressDistrict: text("national_address_district"),
   nationalAddressCity: text("national_address_city"),
   nationalAddressPostalCode: text("national_address_postal_code"),
+  // Default Shipping Address fields
+  shippingContactName: text("shipping_contact_name"),
+  shippingContactPhone: text("shipping_contact_phone"),
+  shippingCountryCode: text("shipping_country_code"),
+  shippingCity: text("shipping_city"),
+  shippingPostalCode: text("shipping_postal_code"),
+  shippingAddressLine1: text("shipping_address_line1"),
+  shippingAddressLine2: text("shipping_address_line2"),
+  shippingShortAddress: text("shipping_short_address"), // Arabic short address for KSA
   documents: text("documents").array(), // Array of document object paths
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
