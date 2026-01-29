@@ -36,6 +36,14 @@ export interface ZohoCustomerParams {
   phone?: string;
   companyName?: string;
   country?: string;
+  // Billing address fields
+  billingCity?: string;
+  billingState?: string;
+  billingPostalCode?: string;
+  billingStreet?: string;
+  billingStreet2?: string;
+  // Account type
+  customerType?: 'business' | 'individual';
 }
 
 export class ZohoService {
@@ -169,6 +177,20 @@ export class ZohoService {
     }
 
     try {
+      // Split name into first and last name for contact persons
+      const nameParts = params.name.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      // Build billing address object
+      const billingAddress: Record<string, string> = {};
+      if (params.country) billingAddress.country = params.country;
+      if (params.billingCity) billingAddress.city = params.billingCity;
+      if (params.billingState) billingAddress.state = params.billingState;
+      if (params.billingPostalCode) billingAddress.zip = params.billingPostalCode;
+      if (params.billingStreet) billingAddress.street = params.billingStreet;
+      if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
+      
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts?organization_id=${this.organizationId}`,
         {
@@ -180,10 +202,18 @@ export class ZohoService {
           body: JSON.stringify({
             contact_name: params.name,
             contact_type: 'customer',
+            customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
+            company_name: params.companyName || '',
             email: params.email,
             phone: params.phone,
-            company_name: params.companyName,
-            billing_address: { country: params.country },
+            billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
+            contact_persons: [{
+              first_name: firstName,
+              last_name: lastName,
+              email: params.email,
+              phone: params.phone,
+              is_primary_contact: true,
+            }],
           }),
         }
       );

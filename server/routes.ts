@@ -739,6 +739,12 @@ export async function registerRoutes(
               phone: application.phone,
               companyName: application.companyName || undefined,
               country: application.country,
+              customerType: application.accountType === 'individual' ? 'individual' : 'business',
+              billingCity: application.shippingCity || undefined,
+              billingState: (application as any).shippingStateOrProvince || undefined,
+              billingPostalCode: application.shippingPostalCode || undefined,
+              billingStreet: application.shippingAddressLine1 || undefined,
+              billingStreet2: application.shippingAddressLine2 || undefined,
             });
             if (zohoCustomerId) {
               await storage.updateClientAccount(clientAccount.id, { zohoCustomerId });
@@ -914,6 +920,11 @@ export async function registerRoutes(
             phone,
             companyName: companyName || undefined,
             country,
+            billingCity: shippingCity || undefined,
+            billingState: shippingStateOrProvince || undefined,
+            billingPostalCode: shippingPostalCode || undefined,
+            billingStreet: shippingAddressLine1 || undefined,
+            billingStreet2: shippingAddressLine2 || undefined,
           });
           if (zohoCustomerId) {
             await storage.updateClientAccount(client.id, { zohoCustomerId });
