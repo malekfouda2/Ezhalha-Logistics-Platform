@@ -7,11 +7,6 @@
  * - ZOHO_CLIENT_SECRET
  * - ZOHO_REFRESH_TOKEN
  * - ZOHO_ORGANIZATION_ID
- * 
- * To fully enable Zoho integration:
- * 1. Register an application in Zoho Developer Console
- * 2. Generate OAuth credentials and refresh token
- * 3. Set environment variables
  */
 
 export interface ZohoInvoiceParams {
@@ -50,6 +45,7 @@ export class ZohoService {
   private organizationId: string | undefined;
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
+  private apiDomain: string = 'https://www.zohoapis.sa';
 
   constructor() {
     this.clientId = process.env.ZOHO_CLIENT_ID;
@@ -67,31 +63,42 @@ export class ZohoService {
       return null;
     }
 
-    // Check if current token is still valid
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken;
     }
 
-    // Zoho integration stub - full OAuth refresh implementation would go here
-    // To enable Zoho integration, uncomment and configure:
-    // const response = await fetch('https://accounts.zoho.com/oauth/v2/token', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    //   body: new URLSearchParams({
-    //     refresh_token: this.refreshToken!,
-    //     client_id: this.clientId!,
-    //     client_secret: this.clientSecret!,
-    //     grant_type: 'refresh_token',
-    //   }),
-    // });
-    // 
-    // const data = await response.json();
-    // this.accessToken = data.access_token;
-    // this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
-    // return this.accessToken;
-
-    console.log("Zoho OAuth not fully configured - skipping token refresh");
-    return null;
+    try {
+      const response = await fetch('https://accounts.zoho.sa/oauth/v2/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          refresh_token: this.refreshToken!,
+          client_id: this.clientId!,
+          client_secret: this.clientSecret!,
+          grant_type: 'refresh_token',
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        console.error("Zoho token refresh error:", data.error);
+        return null;
+      }
+      
+      this.accessToken = data.access_token;
+      this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
+      
+      if (data.api_domain) {
+        this.apiDomain = data.api_domain;
+      }
+      
+      console.log("Zoho access token refreshed successfully");
+      return this.accessToken || null;
+    } catch (error) {
+      console.error("Zoho token refresh failed:", error);
+      return null;
+    }
   }
 
   async createInvoice(params: ZohoInvoiceParams): Promise<ZohoInvoiceResult | null> {
@@ -106,40 +113,47 @@ export class ZohoService {
       return null;
     }
 
-    // Zoho invoice creation stub - full implementation would go here
-    // To enable, uncomment and configure:
-    // const response = await fetch(
-    //   `https://www.zohoapis.com/books/v3/invoices?organization_id=${this.organizationId}`,
-    //   {
-    //     method: 'POST',
-    //     headers: {
-    //       'Authorization': `Zoho-oauthtoken ${accessToken}`,
-    //       'Content-Type': 'application/json',
-    //     },
-    //     body: JSON.stringify({
-    //       customer_id: params.customerId,
-    //       invoice_number: params.invoiceNumber,
-    //       date: params.date,
-    //       due_date: params.dueDate,
-    //       line_items: params.lineItems.map(item => ({
-    //         name: item.name,
-    //         description: item.description,
-    //         quantity: item.quantity,
-    //         rate: item.rate,
-    //       })),
-    //       notes: params.notes,
-    //     }),
-    //   }
-    // );
-    // 
-    // const data = await response.json();
-    // return {
-    //   zohoInvoiceId: data.invoice.invoice_id,
-    //   invoiceUrl: data.invoice.invoice_url,
-    // };
-
-    console.log("Zoho invoice API not fully implemented - returning empty result");
-    return null;
+    try {
+      const response = await fetch(
+        `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Zoho-oauthtoken ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            customer_id: params.customerId,
+            invoice_number: params.invoiceNumber,
+            date: params.date,
+            due_date: params.dueDate,
+            line_items: params.lineItems.map(item => ({
+              name: item.name,
+              description: item.description,
+              quantity: item.quantity,
+              rate: item.rate,
+            })),
+            notes: params.notes,
+          }),
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (data.code !== 0) {
+        console.error("Zoho invoice creation error:", data.message);
+        return null;
+      }
+      
+      console.log("Zoho invoice created:", data.invoice?.invoice_id);
+      return {
+        zohoInvoiceId: data.invoice.invoice_id,
+        invoiceUrl: data.invoice.invoice_url || "",
+      };
+    } catch (error) {
+      console.error("Zoho invoice creation failed:", error);
+      return null;
+    }
   }
 
   async createCustomer(params: ZohoCustomerParams): Promise<string | null> {
@@ -154,31 +168,39 @@ export class ZohoService {
       return null;
     }
 
-    // Zoho customer creation stub - full implementation would go here
-    // To enable, uncomment and configure:
-    // const response = await fetch(
-    //   `https://www.zohoapis.com/books/v3/contacts?organization_id=${this.organizationId}`,
-    //   {
-    //     method: 'POST',
-    //     headers: {
-    //       'Authorization': `Zoho-oauthtoken ${accessToken}`,
-    //       'Content-Type': 'application/json',
-    //     },
-    //     body: JSON.stringify({
-    //       contact_name: params.name,
-    //       email: params.email,
-    //       phone: params.phone,
-    //       company_name: params.companyName,
-    //       billing_address: { country: params.country },
-    //     }),
-    //   }
-    // );
-    // 
-    // const data = await response.json();
-    // return data.contact.contact_id;
-
-    console.log("Zoho customer API not fully implemented - returning empty result");
-    return null;
+    try {
+      const response = await fetch(
+        `${this.apiDomain}/books/v3/contacts?organization_id=${this.organizationId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Zoho-oauthtoken ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contact_name: params.name,
+            contact_type: 'customer',
+            email: params.email,
+            phone: params.phone,
+            company_name: params.companyName,
+            billing_address: { country: params.country },
+          }),
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (data.code !== 0) {
+        console.error("Zoho customer creation error:", data.message);
+        return null;
+      }
+      
+      console.log("Zoho customer created:", data.contact?.contact_id);
+      return data.contact.contact_id;
+    } catch (error) {
+      console.error("Zoho customer creation failed:", error);
+      return null;
+    }
   }
 
   async syncInvoice(invoiceId: string, params: ZohoInvoiceParams): Promise<ZohoInvoiceResult> {
