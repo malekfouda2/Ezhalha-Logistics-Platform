@@ -1057,9 +1057,32 @@ export async function registerRoutes(
       }
       if (isActive !== undefined) updates.isActive = isActive;
 
+      // Get current client to check for zohoCustomerId
+      const currentClient = await storage.getClientAccount(id);
+      
       const updated = await storage.updateClientAccount(id, updates);
       if (!updated) {
         return res.status(404).json({ error: "Client not found" });
+      }
+
+      // Sync to Zoho Books if configured and customer exists
+      if (zohoService.isConfigured() && currentClient?.zohoCustomerId) {
+        try {
+          await zohoService.updateCustomer(currentClient.zohoCustomerId, {
+            name: updated.name,
+            email: updated.email,
+            phone: updated.phone,
+            companyName: updated.companyName || undefined,
+            country: updated.country,
+            billingCity: updated.shippingCity || undefined,
+            billingState: (updated as any).shippingStateOrProvince || undefined,
+            billingPostalCode: updated.shippingPostalCode || undefined,
+            billingStreet: updated.shippingAddressLine1 || undefined,
+            billingStreet2: updated.shippingAddressLine2 || undefined,
+          });
+        } catch (error) {
+          logError("Failed to update Zoho customer", error);
+        }
       }
 
       await logAudit(req.session.userId, "update_client", "client_account", id,
@@ -1798,9 +1821,32 @@ export async function registerRoutes(
 
       const data = clientProfileUpdateSchema.parse(req.body);
       
+      // Get current client to check for zohoCustomerId
+      const currentClient = await storage.getClientAccount(user.clientAccountId);
+      
       const updated = await storage.updateClientAccount(user.clientAccountId, data);
       if (!updated) {
         return res.status(404).json({ error: "Client account not found" });
+      }
+
+      // Sync to Zoho Books if configured and customer exists
+      if (zohoService.isConfigured() && currentClient?.zohoCustomerId) {
+        try {
+          await zohoService.updateCustomer(currentClient.zohoCustomerId, {
+            name: updated.name,
+            email: updated.email,
+            phone: updated.phone,
+            companyName: updated.companyName || undefined,
+            country: updated.country,
+            billingCity: updated.shippingCity || undefined,
+            billingState: (updated as any).shippingStateOrProvince || undefined,
+            billingPostalCode: updated.shippingPostalCode || undefined,
+            billingStreet: updated.shippingAddressLine1 || undefined,
+            billingStreet2: updated.shippingAddressLine2 || undefined,
+          });
+        } catch (error) {
+          logError("Failed to update Zoho customer", error);
+        }
       }
 
       await logAudit(req.session.userId, "update_profile", "client_account", user.clientAccountId,

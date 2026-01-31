@@ -233,6 +233,74 @@ export class ZohoService {
     }
   }
 
+  async updateCustomer(zohoCustomerId: string, params: ZohoCustomerParams): Promise<boolean> {
+    if (!this.isConfigured()) {
+      console.log("Zoho not configured, skipping customer update");
+      return false;
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) {
+      console.log("Zoho access token not available, skipping customer update");
+      return false;
+    }
+
+    try {
+      // Split name into first and last name for contact persons
+      const nameParts = params.name.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      // Build billing address object
+      const billingAddress: Record<string, string> = {};
+      if (params.country) billingAddress.country = params.country;
+      if (params.billingCity) billingAddress.city = params.billingCity;
+      if (params.billingState) billingAddress.state = params.billingState;
+      if (params.billingPostalCode) billingAddress.zip = params.billingPostalCode;
+      if (params.billingStreet) billingAddress.street = params.billingStreet;
+      if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
+      
+      const response = await fetch(
+        `${this.apiDomain}/books/v3/contacts/${zohoCustomerId}?organization_id=${this.organizationId}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Zoho-oauthtoken ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contact_name: params.name,
+            customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
+            company_name: params.companyName || '',
+            email: params.email,
+            phone: params.phone,
+            billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
+            contact_persons: [{
+              first_name: firstName,
+              last_name: lastName,
+              email: params.email,
+              phone: params.phone,
+              is_primary_contact: true,
+            }],
+          }),
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (data.code !== 0) {
+        console.error("Zoho customer update error:", data.message);
+        return false;
+      }
+      
+      console.log("Zoho customer updated:", zohoCustomerId);
+      return true;
+    } catch (error) {
+      console.error("Zoho customer update failed:", error);
+      return false;
+    }
+  }
+
   async syncInvoice(invoiceId: string, params: ZohoInvoiceParams): Promise<ZohoInvoiceResult> {
     if (!this.isConfigured()) {
       console.log("Zoho not configured, skipping invoice sync");
