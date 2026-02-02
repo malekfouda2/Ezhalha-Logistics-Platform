@@ -44,6 +44,13 @@ export interface ZohoCustomerParams {
   billingStreet2?: string;
   // Account type
   customerType?: 'business' | 'individual';
+  // Arabic (Secondary Language) fields
+  nameAr?: string;
+  companyNameAr?: string;
+  billingStreetAr?: string;
+  billingStreet2Ar?: string;
+  billingDistrictAr?: string;
+  billingCityAr?: string;
 }
 
 export class ZohoService {
@@ -182,7 +189,7 @@ export class ZohoService {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
-      // Build billing address object
+      // Build billing address object (Primary Language)
       const billingAddress: Record<string, string> = {};
       if (params.country) billingAddress.country = params.country;
       if (params.billingCity) billingAddress.city = params.billingCity;
@@ -190,6 +197,45 @@ export class ZohoService {
       if (params.billingPostalCode) billingAddress.zip = params.billingPostalCode;
       if (params.billingStreet) billingAddress.street = params.billingStreet;
       if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
+      
+      // Build Arabic billing address object (Secondary Language)
+      const billingAddressAr: Record<string, string> = {};
+      if (params.billingCityAr) billingAddressAr.city = params.billingCityAr;
+      if (params.billingStreetAr) billingAddressAr.street = params.billingStreetAr;
+      if (params.billingStreet2Ar) billingAddressAr.street2 = params.billingStreet2Ar;
+      if (params.billingDistrictAr) billingAddressAr.state = params.billingDistrictAr;
+      // Copy common fields that don't need translation
+      if (params.country) billingAddressAr.country = params.country;
+      if (params.billingPostalCode) billingAddressAr.zip = params.billingPostalCode;
+      
+      // Build contact payload
+      const contactPayload: Record<string, any> = {
+        contact_name: params.name,
+        contact_type: 'customer',
+        customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
+        company_name: params.companyName || '',
+        email: params.email,
+        phone: params.phone,
+        billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
+        contact_persons: [{
+          first_name: firstName,
+          last_name: lastName,
+          email: params.email,
+          phone: params.phone,
+          is_primary_contact: true,
+        }],
+      };
+      
+      // Add Arabic (secondary language) data if provided
+      if (params.nameAr) {
+        contactPayload.contact_name_ar = params.nameAr;
+      }
+      if (params.companyNameAr) {
+        contactPayload.company_name_ar = params.companyNameAr;
+      }
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_ar = billingAddressAr;
+      }
       
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts?organization_id=${this.organizationId}`,
@@ -199,22 +245,7 @@ export class ZohoService {
             'Authorization': `Zoho-oauthtoken ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            contact_name: params.name,
-            contact_type: 'customer',
-            customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
-            company_name: params.companyName || '',
-            email: params.email,
-            phone: params.phone,
-            billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
-            contact_persons: [{
-              first_name: firstName,
-              last_name: lastName,
-              email: params.email,
-              phone: params.phone,
-              is_primary_contact: true,
-            }],
-          }),
+          body: JSON.stringify(contactPayload),
         }
       );
       
@@ -251,7 +282,7 @@ export class ZohoService {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
-      // Build billing address object
+      // Build billing address object (Primary Language)
       const billingAddress: Record<string, string> = {};
       if (params.country) billingAddress.country = params.country;
       if (params.billingCity) billingAddress.city = params.billingCity;
@@ -259,6 +290,44 @@ export class ZohoService {
       if (params.billingPostalCode) billingAddress.zip = params.billingPostalCode;
       if (params.billingStreet) billingAddress.street = params.billingStreet;
       if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
+      
+      // Build Arabic billing address object (Secondary Language)
+      const billingAddressAr: Record<string, string> = {};
+      if (params.billingCityAr) billingAddressAr.city = params.billingCityAr;
+      if (params.billingStreetAr) billingAddressAr.street = params.billingStreetAr;
+      if (params.billingStreet2Ar) billingAddressAr.street2 = params.billingStreet2Ar;
+      if (params.billingDistrictAr) billingAddressAr.state = params.billingDistrictAr;
+      // Copy common fields that don't need translation
+      if (params.country) billingAddressAr.country = params.country;
+      if (params.billingPostalCode) billingAddressAr.zip = params.billingPostalCode;
+      
+      // Build contact payload
+      const contactPayload: Record<string, any> = {
+        contact_name: params.name,
+        customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
+        company_name: params.companyName || '',
+        email: params.email,
+        phone: params.phone,
+        billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
+        contact_persons: [{
+          first_name: firstName,
+          last_name: lastName,
+          email: params.email,
+          phone: params.phone,
+          is_primary_contact: true,
+        }],
+      };
+      
+      // Add Arabic (secondary language) data if provided
+      if (params.nameAr) {
+        contactPayload.contact_name_ar = params.nameAr;
+      }
+      if (params.companyNameAr) {
+        contactPayload.company_name_ar = params.companyNameAr;
+      }
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_ar = billingAddressAr;
+      }
       
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts/${zohoCustomerId}?organization_id=${this.organizationId}`,
@@ -268,21 +337,7 @@ export class ZohoService {
             'Authorization': `Zoho-oauthtoken ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            contact_name: params.name,
-            customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
-            company_name: params.companyName || '',
-            email: params.email,
-            phone: params.phone,
-            billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
-            contact_persons: [{
-              first_name: firstName,
-              last_name: lastName,
-              email: params.email,
-              phone: params.phone,
-              is_primary_contact: true,
-            }],
-          }),
+          body: JSON.stringify(contactPayload),
         }
       );
       

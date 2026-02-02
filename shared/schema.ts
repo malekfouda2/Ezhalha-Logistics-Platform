@@ -119,6 +119,13 @@ export const clientAccounts = pgTable("client_accounts", {
   nationalAddressDistrict: text("national_address_district"),
   nationalAddressCity: text("national_address_city"),
   nationalAddressPostalCode: text("national_address_postal_code"),
+  // Arabic (Secondary Language) fields - Admin only
+  nameAr: text("name_ar"),
+  companyNameAr: text("company_name_ar"),
+  nationalAddressStreetAr: text("national_address_street_ar"),
+  nationalAddressBuildingAr: text("national_address_building_ar"),
+  nationalAddressDistrictAr: text("national_address_district_ar"),
+  nationalAddressCityAr: text("national_address_city_ar"),
   // Default Shipping Address fields
   shippingContactName: text("shipping_contact_name"),
   shippingContactPhone: text("shipping_contact_phone"),

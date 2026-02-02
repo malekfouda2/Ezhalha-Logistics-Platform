@@ -1036,7 +1036,10 @@ export async function registerRoutes(
       const { id } = req.params;
       const { name, phone, country, companyName, crNumber, taxNumber, 
               nationalAddressStreet, nationalAddressBuilding, nationalAddressDistrict,
-              nationalAddressCity, nationalAddressPostalCode, profile, isActive } = req.body;
+              nationalAddressCity, nationalAddressPostalCode, profile, isActive,
+              // Arabic (Secondary Language) fields
+              nameAr, companyNameAr, nationalAddressStreetAr, nationalAddressBuildingAr,
+              nationalAddressDistrictAr, nationalAddressCityAr } = req.body;
 
       const updates: Partial<ClientAccount> = {};
       if (name !== undefined) updates.name = name;
@@ -1050,6 +1053,13 @@ export async function registerRoutes(
       if (nationalAddressDistrict !== undefined) updates.nationalAddressDistrict = nationalAddressDistrict;
       if (nationalAddressCity !== undefined) updates.nationalAddressCity = nationalAddressCity;
       if (nationalAddressPostalCode !== undefined) updates.nationalAddressPostalCode = nationalAddressPostalCode;
+      // Arabic fields
+      if (nameAr !== undefined) updates.nameAr = nameAr;
+      if (companyNameAr !== undefined) updates.companyNameAr = companyNameAr;
+      if (nationalAddressStreetAr !== undefined) updates.nationalAddressStreetAr = nationalAddressStreetAr;
+      if (nationalAddressBuildingAr !== undefined) updates.nationalAddressBuildingAr = nationalAddressBuildingAr;
+      if (nationalAddressDistrictAr !== undefined) updates.nationalAddressDistrictAr = nationalAddressDistrictAr;
+      if (nationalAddressCityAr !== undefined) updates.nationalAddressCityAr = nationalAddressCityAr;
       if (profile !== undefined) {
         const pricingRules = await storage.getPricingRules();
         const validProfiles = pricingRules.map(r => r.profile);
