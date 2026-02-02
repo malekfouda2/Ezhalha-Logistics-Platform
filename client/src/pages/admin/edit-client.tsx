@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { AdminLayout } from "@/components/admin-layout";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -16,10 +18,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ArrowLeft, Save, Building, User, MapPin, Globe } from "lucide-react";
-import type { ClientAccount, PricingRule } from "@shared/schema";
+import { insertClientAccountSchema, type ClientAccount, type PricingRule } from "@shared/schema";
+
+const editClientSchema = insertClientAccountSchema.partial().extend({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email"),
+  isActive: z.boolean(),
+});
+
+type EditClientFormData = z.infer<typeof editClientSchema>;
 
 const countries = [
   "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman",
@@ -32,36 +50,34 @@ export default function AdminEditClient() {
   const [, params] = useRoute("/admin/clients/:id/edit");
   const clientId = params?.id;
 
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    country: "",
-    companyName: "",
-    crNumber: "",
-    taxNumber: "",
-    nationalAddressStreet: "",
-    nationalAddressBuilding: "",
-    nationalAddressDistrict: "",
-    nationalAddressCity: "",
-    nationalAddressPostalCode: "",
-    profile: "",
-    isActive: true,
-    nameAr: "",
-    companyNameAr: "",
-    nationalAddressStreetAr: "",
-    nationalAddressBuildingAr: "",
-    nationalAddressDistrictAr: "",
-    nationalAddressCityAr: "",
+  const form = useForm<EditClientFormData>({
+    resolver: zodResolver(editClientSchema),
+    defaultValues: {
+      name: "",
+      email: "",
+      phone: "",
+      country: "",
+      companyName: "",
+      crNumber: "",
+      taxNumber: "",
+      nationalAddressStreet: "",
+      nationalAddressBuilding: "",
+      nationalAddressDistrict: "",
+      nationalAddressCity: "",
+      nationalAddressPostalCode: "",
+      profile: "",
+      isActive: true,
+      nameAr: "",
+      companyNameAr: "",
+      nationalAddressStreetAr: "",
+      nationalAddressBuildingAr: "",
+      nationalAddressDistrictAr: "",
+      nationalAddressCityAr: "",
+    },
   });
 
   const { data: client, isLoading } = useQuery<ClientAccount>({
     queryKey: ["/api/admin/clients", clientId],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/clients/${clientId}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch client");
-      return res.json();
-    },
     enabled: !!clientId,
   });
 
@@ -71,7 +87,7 @@ export default function AdminEditClient() {
 
   useEffect(() => {
     if (client) {
-      setFormData({
+      form.reset({
         name: client.name || "",
         email: client.email || "",
         phone: client.phone || "",
@@ -86,18 +102,18 @@ export default function AdminEditClient() {
         nationalAddressPostalCode: client.nationalAddressPostalCode || "",
         profile: client.profile || "",
         isActive: client.isActive,
-        nameAr: (client as any).nameAr || "",
-        companyNameAr: (client as any).companyNameAr || "",
-        nationalAddressStreetAr: (client as any).nationalAddressStreetAr || "",
-        nationalAddressBuildingAr: (client as any).nationalAddressBuildingAr || "",
-        nationalAddressDistrictAr: (client as any).nationalAddressDistrictAr || "",
-        nationalAddressCityAr: (client as any).nationalAddressCityAr || "",
+        nameAr: client.nameAr || "",
+        companyNameAr: client.companyNameAr || "",
+        nationalAddressStreetAr: client.nationalAddressStreetAr || "",
+        nationalAddressBuildingAr: client.nationalAddressBuildingAr || "",
+        nationalAddressDistrictAr: client.nationalAddressDistrictAr || "",
+        nationalAddressCityAr: client.nationalAddressCityAr || "",
       });
     }
-  }, [client]);
+  }, [client, form]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
+    mutationFn: async (data: EditClientFormData) => {
       await apiRequest("PATCH", `/api/admin/clients/${clientId}`, data);
     },
     onSuccess: () => {
@@ -110,9 +126,8 @@ export default function AdminEditClient() {
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateMutation.mutate(formData);
+  const onSubmit = (data: EditClientFormData) => {
+    updateMutation.mutate(data);
   };
 
   const uniqueProfiles = pricingRules
@@ -154,319 +169,396 @@ export default function AdminEditClient() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <Tabs defaultValue="primary" className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="primary" data-testid="tab-primary-language">
-                <Globe className="w-4 h-4 mr-2" />
-                Primary Language (English)
-              </TabsTrigger>
-              <TabsTrigger value="arabic" data-testid="tab-secondary-language">
-                <Globe className="w-4 h-4 mr-2" />
-                Secondary Language (Arabic)
-              </TabsTrigger>
-            </TabsList>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <Tabs defaultValue="primary" className="space-y-6">
+              <TabsList>
+                <TabsTrigger value="primary" data-testid="tab-primary-language">
+                  <Globe className="w-4 h-4 mr-2" />
+                  Primary Language (English)
+                </TabsTrigger>
+                <TabsTrigger value="arabic" data-testid="tab-secondary-language">
+                  <Globe className="w-4 h-4 mr-2" />
+                  Secondary Language (Arabic)
+                </TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="primary" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="w-5 h-5" />
-                    Basic Information
-                  </CardTitle>
-                  <CardDescription>Contact and account details</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Contact Name</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      data-testid="input-name"
+              <TabsContent value="primary" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <User className="w-5 h-5" />
+                      Basic Information
+                    </CardTitle>
+                    <CardDescription>Contact and account details</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contact Name</FormLabel>
+                          <FormControl>
+                            <Input {...field} data-testid="input-name" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      disabled
-                      className="bg-muted"
-                      data-testid="input-email"
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email</FormLabel>
+                          <FormControl>
+                            <Input {...field} type="email" disabled className="bg-muted" data-testid="input-email" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Phone</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      data-testid="input-phone"
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-phone" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="country">Country</Label>
-                    <Select
-                      value={formData.country}
-                      onValueChange={(value) => setFormData({ ...formData, country: value })}
-                    >
-                      <SelectTrigger data-testid="select-country">
-                        <SelectValue placeholder="Select country" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {countries.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="profile">Profile</Label>
-                    <Select
-                      value={formData.profile}
-                      onValueChange={(value) => setFormData({ ...formData, profile: value })}
-                    >
-                      <SelectTrigger data-testid="select-profile">
-                        <SelectValue placeholder="Select profile" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {uniqueProfiles.map((p) => (
-                          <SelectItem key={p} value={p}>{p}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="isActive">Status</Label>
-                    <Select
-                      value={formData.isActive ? "active" : "inactive"}
-                      onValueChange={(value) => setFormData({ ...formData, isActive: value === "active" })}
-                    >
-                      <SelectTrigger data-testid="select-status">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
+                    <FormField
+                      control={form.control}
+                      name="country"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Country</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || ""}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-country">
+                                <SelectValue placeholder="Select country" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {countries.map((c) => (
+                                <SelectItem key={c} value={c}>{c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="profile"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Profile</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || ""}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-profile">
+                                <SelectValue placeholder="Select profile" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {uniqueProfiles.map((p) => (
+                                <SelectItem key={p} value={p}>{p}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="isActive"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Status</FormLabel>
+                          <Select
+                            onValueChange={(value) => field.onChange(value === "active")}
+                            value={field.value ? "active" : "inactive"}
+                          >
+                            <FormControl>
+                              <SelectTrigger data-testid="select-status">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </CardContent>
+                </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Building className="w-5 h-5" />
-                    Company Information
-                  </CardTitle>
-                  <CardDescription>Business registration details</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="companyName">Company Name</Label>
-                    <Input
-                      id="companyName"
-                      value={formData.companyName}
-                      onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                      data-testid="input-company-name"
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Building className="w-5 h-5" />
+                      Company Information
+                    </CardTitle>
+                    <CardDescription>Business registration details</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="companyName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Company Name</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-company-name" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="crNumber">CR Number</Label>
-                    <Input
-                      id="crNumber"
-                      value={formData.crNumber}
-                      onChange={(e) => setFormData({ ...formData, crNumber: e.target.value })}
-                      data-testid="input-cr-number"
+                    <FormField
+                      control={form.control}
+                      name="crNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>CR Number</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-cr-number" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxNumber">Tax Number</Label>
-                    <Input
-                      id="taxNumber"
-                      value={formData.taxNumber}
-                      onChange={(e) => setFormData({ ...formData, taxNumber: e.target.value })}
-                      data-testid="input-tax-number"
+                    <FormField
+                      control={form.control}
+                      name="taxNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tax Number</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-tax-number" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MapPin className="w-5 h-5" />
-                    National Address
-                  </CardTitle>
-                  <CardDescription>Saudi Arabia national address details</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressStreet">Street</Label>
-                    <Input
-                      id="nationalAddressStreet"
-                      value={formData.nationalAddressStreet}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressStreet: e.target.value })}
-                      data-testid="input-national-street"
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <MapPin className="w-5 h-5" />
+                      National Address
+                    </CardTitle>
+                    <CardDescription>Saudi Arabia national address details</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressStreet"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Street</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-national-street" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressBuilding">Building Number</Label>
-                    <Input
-                      id="nationalAddressBuilding"
-                      value={formData.nationalAddressBuilding}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressBuilding: e.target.value })}
-                      data-testid="input-national-building"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressBuilding"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Building Number</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-national-building" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressDistrict">District</Label>
-                    <Input
-                      id="nationalAddressDistrict"
-                      value={formData.nationalAddressDistrict}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressDistrict: e.target.value })}
-                      data-testid="input-national-district"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressDistrict"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>District</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-national-district" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressCity">City</Label>
-                    <Input
-                      id="nationalAddressCity"
-                      value={formData.nationalAddressCity}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressCity: e.target.value })}
-                      data-testid="input-national-city"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressCity"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>City</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-national-city" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressPostalCode">Postal Code</Label>
-                    <Input
-                      id="nationalAddressPostalCode"
-                      value={formData.nationalAddressPostalCode}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressPostalCode: e.target.value })}
-                      data-testid="input-national-postal"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressPostalCode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Postal Code</FormLabel>
+                          <FormControl>
+                            <Input {...field} value={field.value || ""} data-testid="input-national-postal" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-            <TabsContent value="arabic" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="w-5 h-5" />
-                    معلومات أساسية (Basic Information)
-                  </CardTitle>
-                  <CardDescription>Arabic language version of client information for Zoho Books</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="nameAr">الاسم (Name in Arabic)</Label>
-                    <Input
-                      id="nameAr"
-                      dir="rtl"
-                      value={formData.nameAr}
-                      onChange={(e) => setFormData({ ...formData, nameAr: e.target.value })}
-                      placeholder="أدخل الاسم بالعربية"
-                      data-testid="input-name-ar"
+              <TabsContent value="arabic" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <User className="w-5 h-5" />
+                      معلومات أساسية (Basic Information)
+                    </CardTitle>
+                    <CardDescription>Arabic language version of client information for Zoho Books</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="nameAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>الاسم (Name in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل الاسم بالعربية" data-testid="input-name-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="companyNameAr">اسم الشركة (Company Name in Arabic)</Label>
-                    <Input
-                      id="companyNameAr"
-                      dir="rtl"
-                      value={formData.companyNameAr}
-                      onChange={(e) => setFormData({ ...formData, companyNameAr: e.target.value })}
-                      placeholder="أدخل اسم الشركة بالعربية"
-                      data-testid="input-company-name-ar"
+                    <FormField
+                      control={form.control}
+                      name="companyNameAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>اسم الشركة (Company Name in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل اسم الشركة بالعربية" data-testid="input-company-name-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MapPin className="w-5 h-5" />
-                    العنوان الوطني (National Address)
-                  </CardTitle>
-                  <CardDescription>Arabic language version of national address for Zoho Books</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressStreetAr">الشارع (Street in Arabic)</Label>
-                    <Input
-                      id="nationalAddressStreetAr"
-                      dir="rtl"
-                      value={formData.nationalAddressStreetAr}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressStreetAr: e.target.value })}
-                      placeholder="أدخل اسم الشارع بالعربية"
-                      data-testid="input-street-ar"
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <MapPin className="w-5 h-5" />
+                      العنوان الوطني (National Address)
+                    </CardTitle>
+                    <CardDescription>Arabic language version of national address for Zoho Books</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressStreetAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>الشارع (Street in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل اسم الشارع بالعربية" data-testid="input-street-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressBuildingAr">رقم المبنى (Building Number in Arabic)</Label>
-                    <Input
-                      id="nationalAddressBuildingAr"
-                      dir="rtl"
-                      value={formData.nationalAddressBuildingAr}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressBuildingAr: e.target.value })}
-                      placeholder="أدخل رقم المبنى بالعربية"
-                      data-testid="input-building-ar"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressBuildingAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>رقم المبنى (Building Number in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل رقم المبنى بالعربية" data-testid="input-building-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressDistrictAr">الحي (District in Arabic)</Label>
-                    <Input
-                      id="nationalAddressDistrictAr"
-                      dir="rtl"
-                      value={formData.nationalAddressDistrictAr}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressDistrictAr: e.target.value })}
-                      placeholder="أدخل اسم الحي بالعربية"
-                      data-testid="input-district-ar"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressDistrictAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>الحي (District in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل اسم الحي بالعربية" data-testid="input-district-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nationalAddressCityAr">المدينة (City in Arabic)</Label>
-                    <Input
-                      id="nationalAddressCityAr"
-                      dir="rtl"
-                      value={formData.nationalAddressCityAr}
-                      onChange={(e) => setFormData({ ...formData, nationalAddressCityAr: e.target.value })}
-                      placeholder="أدخل اسم المدينة بالعربية"
-                      data-testid="input-city-ar"
+                    <FormField
+                      control={form.control}
+                      name="nationalAddressCityAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>المدينة (City in Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} placeholder="أدخل اسم المدينة بالعربية" data-testid="input-city-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
 
-          <Separator className="my-6" />
+            <Separator className="my-6" />
 
-          <div className="flex justify-end gap-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setLocation("/admin/clients")}
-              data-testid="button-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={updateMutation.isPending}
-              data-testid="button-save"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              {updateMutation.isPending ? "Saving..." : "Save Changes"}
-            </Button>
-          </div>
-        </form>
+            <div className="flex justify-end gap-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setLocation("/admin/clients")}
+                data-testid="button-cancel"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={updateMutation.isPending}
+                data-testid="button-save"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </Form>
       </div>
     </AdminLayout>
   );
