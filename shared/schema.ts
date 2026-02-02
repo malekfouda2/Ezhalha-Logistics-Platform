@@ -138,10 +138,14 @@ export const clientAccounts = pgTable("client_accounts", {
   shippingShortAddress: text("shipping_short_address"), // Short address code for KSA
   // Arabic Shipping Address fields
   shippingContactNameAr: text("shipping_contact_name_ar"),
+  shippingContactPhoneAr: text("shipping_contact_phone_ar"),
+  shippingCountryCodeAr: text("shipping_country_code_ar"),
   shippingStateOrProvinceAr: text("shipping_state_or_province_ar"),
   shippingCityAr: text("shipping_city_ar"),
+  shippingPostalCodeAr: text("shipping_postal_code_ar"),
   shippingAddressLine1Ar: text("shipping_address_line1_ar"),
   shippingAddressLine2Ar: text("shipping_address_line2_ar"),
+  shippingShortAddressAr: text("shipping_short_address_ar"),
   documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),

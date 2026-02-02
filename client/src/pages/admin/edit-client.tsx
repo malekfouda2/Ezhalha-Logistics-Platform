@@ -74,10 +74,14 @@ export default function AdminEditClient() {
       nameAr: "",
       companyNameAr: "",
       shippingContactNameAr: "",
+      shippingContactPhoneAr: "",
+      shippingCountryCodeAr: "",
       shippingStateOrProvinceAr: "",
       shippingCityAr: "",
+      shippingPostalCodeAr: "",
       shippingAddressLine1Ar: "",
       shippingAddressLine2Ar: "",
+      shippingShortAddressAr: "",
     },
   });
 
@@ -114,10 +118,14 @@ export default function AdminEditClient() {
         nameAr: client.nameAr || "",
         companyNameAr: client.companyNameAr || "",
         shippingContactNameAr: client.shippingContactNameAr || "",
+        shippingContactPhoneAr: client.shippingContactPhoneAr || "",
+        shippingCountryCodeAr: client.shippingCountryCodeAr || "",
         shippingStateOrProvinceAr: client.shippingStateOrProvinceAr || "",
         shippingCityAr: client.shippingCityAr || "",
+        shippingPostalCodeAr: client.shippingPostalCodeAr || "",
         shippingAddressLine1Ar: client.shippingAddressLine1Ar || "",
         shippingAddressLine2Ar: client.shippingAddressLine2Ar || "",
+        shippingShortAddressAr: client.shippingShortAddressAr || "",
       });
     }
   }, [client, form]);
@@ -557,6 +565,32 @@ export default function AdminEditClient() {
                     />
                     <FormField
                       control={form.control}
+                      name="shippingContactPhoneAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contact Phone (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-contact-phone-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="shippingCountryCodeAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Country Code (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-country-code-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
                       name="shippingStateOrProvinceAr"
                       render={({ field }) => (
                         <FormItem>
@@ -583,6 +617,19 @@ export default function AdminEditClient() {
                     />
                     <FormField
                       control={form.control}
+                      name="shippingPostalCodeAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Postal Code (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-postal-code-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
                       name="shippingAddressLine1Ar"
                       render={({ field }) => (
                         <FormItem>
@@ -602,6 +649,19 @@ export default function AdminEditClient() {
                           <FormLabel>Address Line 2 (Arabic)</FormLabel>
                           <FormControl>
                             <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-address-2-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="shippingShortAddressAr"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Short Address (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-short-address-ar" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
