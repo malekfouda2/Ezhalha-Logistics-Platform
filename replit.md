@@ -33,12 +33,21 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Brute-force protection: 5 max login attempts, 15min lockout per IP/username
 - Audit trail for all admin/client actions
 
+**Bilingual Support (Arabic as Secondary Language):**
+- Admin can edit client information with Arabic translations
+- Arabic fields stored in client_accounts: nameAr, companyNameAr, nationalAddress fields with Ar suffix
+- Admin edit client page at /admin/clients/:id/edit with two tabs:
+  - Primary Language (English): All standard client fields
+  - Secondary Language (Arabic): Arabic versions for Zoho Books
+- Arabic data synced to Zoho Books via custom_fields
+- Right-to-left (RTL) input direction for Arabic text fields
+
 **Webhooks & Integrations:**
 - FedEx webhook handler with HMAC signature validation
 - Moyasar payment gateway with redirect-based payment flow
 - Moyasar webhook handler for payment status updates
 - Stripe webhook handler (legacy, kept for backwards compatibility)
-- Zoho Books invoice sync stub (ready for API configuration)
+- Zoho Books customer sync with bilingual support (English + Arabic custom fields)
 
 **Shipment Creation Flow (7 Steps):**
 1. Shipment Type: Client selects direction (domestic/inbound/outbound) and carrier (FedEx, more coming)
