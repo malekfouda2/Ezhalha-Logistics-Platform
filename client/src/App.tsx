@@ -24,6 +24,7 @@ import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminIntegrationLogs from "@/pages/admin/integration-logs";
 import AdminWebhookEvents from "@/pages/admin/webhook-events";
 import AdminRBAC from "@/pages/admin/rbac";
+import AdminEditClient from "@/pages/admin/edit-client";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -88,6 +89,9 @@ function Router() {
       </Route>
       <Route path="/admin/clients">
         <ProtectedRoute component={AdminClients} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/clients/:id/edit">
+        <ProtectedRoute component={AdminEditClient} requiredUserType="admin" />
       </Route>
       <Route path="/admin/applications">
         <ProtectedRoute component={AdminApplications} requiredUserType="admin" />

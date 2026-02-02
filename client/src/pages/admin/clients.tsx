@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { AdminLayout } from "@/components/admin-layout";
 import { StatusBadge } from "@/components/status-badge";
 import { ProfileBadge } from "@/components/profile-badge";
@@ -83,6 +84,7 @@ interface PaginatedResponse {
 
 export default function AdminClients() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [profileFilter, setProfileFilter] = useState("all");
@@ -426,6 +428,10 @@ export default function AdminClients() {
                               <DropdownMenuItem onClick={() => handleEditProfile(client)}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit Profile
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setLocation(`/admin/clients/${client.id}/edit`)} data-testid={`button-edit-client-${client.id}`}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit Full Details
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleViewDocs(client)}>
                                 <FileText className="mr-2 h-4 w-4" />

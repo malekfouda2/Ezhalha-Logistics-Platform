@@ -198,16 +198,6 @@ export class ZohoService {
       if (params.billingStreet) billingAddress.street = params.billingStreet;
       if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
       
-      // Build Arabic billing address object (Secondary Language)
-      const billingAddressAr: Record<string, string> = {};
-      if (params.billingCityAr) billingAddressAr.city = params.billingCityAr;
-      if (params.billingStreetAr) billingAddressAr.street = params.billingStreetAr;
-      if (params.billingStreet2Ar) billingAddressAr.street2 = params.billingStreet2Ar;
-      if (params.billingDistrictAr) billingAddressAr.state = params.billingDistrictAr;
-      // Copy common fields that don't need translation
-      if (params.country) billingAddressAr.country = params.country;
-      if (params.billingPostalCode) billingAddressAr.zip = params.billingPostalCode;
-      
       // Build contact payload
       const contactPayload: Record<string, any> = {
         contact_name: params.name,
@@ -226,15 +216,30 @@ export class ZohoService {
         }],
       };
       
-      // Add Arabic (secondary language) data if provided
+      // Add Arabic (secondary language) data using custom fields
+      // Zoho Books API requires custom fields to be created first in the organization
+      // These will be stored as custom fields with API names: cf_name_ar, cf_company_name_ar, etc.
+      const customFields: Array<{label: string; value: string}> = [];
       if (params.nameAr) {
-        contactPayload.contact_name_ar = params.nameAr;
+        customFields.push({ label: "Name (Arabic)", value: params.nameAr });
       }
       if (params.companyNameAr) {
-        contactPayload.company_name_ar = params.companyNameAr;
+        customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
       }
-      if (Object.keys(billingAddressAr).length > 0) {
-        contactPayload.billing_address_ar = billingAddressAr;
+      if (params.billingStreetAr) {
+        customFields.push({ label: "Street (Arabic)", value: params.billingStreetAr });
+      }
+      if (params.billingStreet2Ar) {
+        customFields.push({ label: "Building (Arabic)", value: params.billingStreet2Ar });
+      }
+      if (params.billingDistrictAr) {
+        customFields.push({ label: "District (Arabic)", value: params.billingDistrictAr });
+      }
+      if (params.billingCityAr) {
+        customFields.push({ label: "City (Arabic)", value: params.billingCityAr });
+      }
+      if (customFields.length > 0) {
+        contactPayload.custom_fields = customFields;
       }
       
       const response = await fetch(
@@ -291,16 +296,6 @@ export class ZohoService {
       if (params.billingStreet) billingAddress.street = params.billingStreet;
       if (params.billingStreet2) billingAddress.street2 = params.billingStreet2;
       
-      // Build Arabic billing address object (Secondary Language)
-      const billingAddressAr: Record<string, string> = {};
-      if (params.billingCityAr) billingAddressAr.city = params.billingCityAr;
-      if (params.billingStreetAr) billingAddressAr.street = params.billingStreetAr;
-      if (params.billingStreet2Ar) billingAddressAr.street2 = params.billingStreet2Ar;
-      if (params.billingDistrictAr) billingAddressAr.state = params.billingDistrictAr;
-      // Copy common fields that don't need translation
-      if (params.country) billingAddressAr.country = params.country;
-      if (params.billingPostalCode) billingAddressAr.zip = params.billingPostalCode;
-      
       // Build contact payload
       const contactPayload: Record<string, any> = {
         contact_name: params.name,
@@ -318,15 +313,28 @@ export class ZohoService {
         }],
       };
       
-      // Add Arabic (secondary language) data if provided
+      // Add Arabic (secondary language) data using custom fields
+      const customFields: Array<{label: string; value: string}> = [];
       if (params.nameAr) {
-        contactPayload.contact_name_ar = params.nameAr;
+        customFields.push({ label: "Name (Arabic)", value: params.nameAr });
       }
       if (params.companyNameAr) {
-        contactPayload.company_name_ar = params.companyNameAr;
+        customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
       }
-      if (Object.keys(billingAddressAr).length > 0) {
-        contactPayload.billing_address_ar = billingAddressAr;
+      if (params.billingStreetAr) {
+        customFields.push({ label: "Street (Arabic)", value: params.billingStreetAr });
+      }
+      if (params.billingStreet2Ar) {
+        customFields.push({ label: "Building (Arabic)", value: params.billingStreet2Ar });
+      }
+      if (params.billingDistrictAr) {
+        customFields.push({ label: "District (Arabic)", value: params.billingDistrictAr });
+      }
+      if (params.billingCityAr) {
+        customFields.push({ label: "City (Arabic)", value: params.billingCityAr });
+      }
+      if (customFields.length > 0) {
+        contactPayload.custom_fields = customFields;
       }
       
       const response = await fetch(

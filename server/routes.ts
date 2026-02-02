@@ -1089,6 +1089,13 @@ export async function registerRoutes(
             billingPostalCode: updated.shippingPostalCode || undefined,
             billingStreet: updated.shippingAddressLine1 || undefined,
             billingStreet2: updated.shippingAddressLine2 || undefined,
+            // Arabic (Secondary Language) fields
+            nameAr: updated.nameAr || undefined,
+            companyNameAr: updated.companyNameAr || undefined,
+            billingStreetAr: updated.nationalAddressStreetAr || undefined,
+            billingStreet2Ar: updated.nationalAddressBuildingAr || undefined,
+            billingDistrictAr: updated.nationalAddressDistrictAr || undefined,
+            billingCityAr: updated.nationalAddressCityAr || undefined,
           });
         } catch (error) {
           logError("Failed to update Zoho customer", error);
