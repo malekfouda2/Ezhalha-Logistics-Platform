@@ -60,11 +60,6 @@ export default function AdminEditClient() {
       companyName: "",
       crNumber: "",
       taxNumber: "",
-      nationalAddressStreet: "",
-      nationalAddressBuilding: "",
-      nationalAddressDistrict: "",
-      nationalAddressCity: "",
-      nationalAddressPostalCode: "",
       shippingContactName: "",
       shippingContactPhone: "",
       shippingCountryCode: "",
@@ -78,10 +73,11 @@ export default function AdminEditClient() {
       isActive: true,
       nameAr: "",
       companyNameAr: "",
-      nationalAddressStreetAr: "",
-      nationalAddressBuildingAr: "",
-      nationalAddressDistrictAr: "",
-      nationalAddressCityAr: "",
+      shippingContactNameAr: "",
+      shippingStateOrProvinceAr: "",
+      shippingCityAr: "",
+      shippingAddressLine1Ar: "",
+      shippingAddressLine2Ar: "",
     },
   });
 
@@ -104,11 +100,6 @@ export default function AdminEditClient() {
         companyName: client.companyName || "",
         crNumber: client.crNumber || "",
         taxNumber: client.taxNumber || "",
-        nationalAddressStreet: client.nationalAddressStreet || "",
-        nationalAddressBuilding: client.nationalAddressBuilding || "",
-        nationalAddressDistrict: client.nationalAddressDistrict || "",
-        nationalAddressCity: client.nationalAddressCity || "",
-        nationalAddressPostalCode: client.nationalAddressPostalCode || "",
         shippingContactName: client.shippingContactName || "",
         shippingContactPhone: client.shippingContactPhone || "",
         shippingCountryCode: client.shippingCountryCode || "",
@@ -122,10 +113,11 @@ export default function AdminEditClient() {
         isActive: client.isActive,
         nameAr: client.nameAr || "",
         companyNameAr: client.companyNameAr || "",
-        nationalAddressStreetAr: client.nationalAddressStreetAr || "",
-        nationalAddressBuildingAr: client.nationalAddressBuildingAr || "",
-        nationalAddressDistrictAr: client.nationalAddressDistrictAr || "",
-        nationalAddressCityAr: client.nationalAddressCityAr || "",
+        shippingContactNameAr: client.shippingContactNameAr || "",
+        shippingStateOrProvinceAr: client.shippingStateOrProvinceAr || "",
+        shippingCityAr: client.shippingCityAr || "",
+        shippingAddressLine1Ar: client.shippingAddressLine1Ar || "",
+        shippingAddressLine2Ar: client.shippingAddressLine2Ar || "",
       });
     }
   }, [client, form]);
@@ -376,83 +368,6 @@ export default function AdminEditClient() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <MapPin className="w-5 h-5" />
-                      National Address
-                    </CardTitle>
-                    <CardDescription>Saudi Arabia national address details</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4 md:grid-cols-2">
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressStreet"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Street</FormLabel>
-                          <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-national-street" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressBuilding"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Building Number</FormLabel>
-                          <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-national-building" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressDistrict"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>District</FormLabel>
-                          <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-national-district" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressCity"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>City</FormLabel>
-                          <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-national-city" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressPostalCode"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Postal Code</FormLabel>
-                          <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-national-postal" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MapPin className="w-5 h-5" />
                       Default Shipping Address
                     </CardTitle>
                     <CardDescription>Client's default shipping address for shipments</CardDescription>
@@ -622,19 +537,19 @@ export default function AdminEditClient() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <MapPin className="w-5 h-5" />
-                      National Address (Arabic)
+                      Shipping Address (Arabic)
                     </CardTitle>
-                    <CardDescription>Arabic language version of national address for Zoho Books</CardDescription>
+                    <CardDescription>Arabic language version of shipping address for Zoho Books</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4 md:grid-cols-2">
                     <FormField
                       control={form.control}
-                      name="nationalAddressStreetAr"
+                      name="shippingContactNameAr"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Street (Arabic)</FormLabel>
+                          <FormLabel>Contact Name (Arabic)</FormLabel>
                           <FormControl>
-                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-street-ar" />
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-contact-name-ar" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -642,12 +557,12 @@ export default function AdminEditClient() {
                     />
                     <FormField
                       control={form.control}
-                      name="nationalAddressBuildingAr"
+                      name="shippingStateOrProvinceAr"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Building Number (Arabic)</FormLabel>
+                          <FormLabel>State/Province (Arabic)</FormLabel>
                           <FormControl>
-                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-building-ar" />
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-state-ar" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -655,25 +570,38 @@ export default function AdminEditClient() {
                     />
                     <FormField
                       control={form.control}
-                      name="nationalAddressDistrictAr"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>District (Arabic)</FormLabel>
-                          <FormControl>
-                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-district-ar" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="nationalAddressCityAr"
+                      name="shippingCityAr"
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>City (Arabic)</FormLabel>
                           <FormControl>
-                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-city-ar" />
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-city-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="shippingAddressLine1Ar"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 1 (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-address-1-ar" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="shippingAddressLine2Ar"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Address Line 2 (Arabic)</FormLabel>
+                          <FormControl>
+                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-address-2-ar" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
