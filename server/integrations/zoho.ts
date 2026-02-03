@@ -307,6 +307,20 @@ export class ZohoService {
     }
 
     try {
+      // DEBUG: Log incoming params to verify data
+      console.log("=== ZOHO UPDATE DEBUG ===");
+      console.log("English fields received:");
+      console.log("  shippingContactName:", params.shippingContactName);
+      console.log("  shippingAddressLine1:", params.shippingAddressLine1);
+      console.log("  shippingCity:", params.shippingCity);
+      console.log("  shippingStateOrProvince:", params.shippingStateOrProvince);
+      console.log("Arabic fields received:");
+      console.log("  shippingContactNameAr:", params.shippingContactNameAr);
+      console.log("  shippingAddressLine1Ar:", params.shippingAddressLine1Ar);
+      console.log("  shippingCityAr:", params.shippingCityAr);
+      console.log("  nameAr:", params.nameAr);
+      console.log("=========================");
+      
       // Split name into first and last name for contact persons
       const nameParts = params.name.split(' ');
       const firstName = nameParts[0] || '';
@@ -373,6 +387,14 @@ export class ZohoService {
         contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
       }
       
+      // DEBUG: Log full payload being sent
+      console.log("=== ZOHO API PAYLOAD ===");
+      console.log("billing_address:", JSON.stringify(contactPayload.billing_address, null, 2));
+      console.log("shipping_address:", JSON.stringify(contactPayload.shipping_address, null, 2));
+      console.log("billing_address_in_secondary_language:", JSON.stringify(contactPayload.billing_address_in_secondary_language, null, 2));
+      console.log("shipping_address_in_secondary_language:", JSON.stringify(contactPayload.shipping_address_in_secondary_language, null, 2));
+      console.log("========================");
+      
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts/${zohoCustomerId}?organization_id=${this.organizationId}`,
         {
@@ -388,11 +410,11 @@ export class ZohoService {
       const data = await response.json();
       
       if (data.code !== 0) {
-        console.error("Zoho customer update error:", data.message);
+        console.error("Zoho customer update error:", data.message, "Response:", JSON.stringify(data, null, 2));
         return false;
       }
       
-      console.log("Zoho customer updated:", zohoCustomerId);
+      console.log("Zoho customer updated successfully:", zohoCustomerId);
       return true;
     } catch (error) {
       console.error("Zoho customer update failed:", error);
