@@ -222,45 +222,46 @@ export class ZohoService {
         }],
       };
       
-      // Add Arabic (secondary language) data using custom fields
-      // Zoho Books API requires custom fields to be created first in the organization
-      const customFields: Array<{label: string; value: string}> = [];
+      // Add Arabic (secondary language) using Zoho Books native secondary language fields
+      // These are built-in fields for KSA e-invoicing compliance
+      
+      // Secondary language for contact name (Arabic)
       if (params.nameAr) {
-        customFields.push({ label: "Name (Arabic)", value: params.nameAr });
+        contactPayload.contact_name_in_secondary_language = params.nameAr;
       }
       if (params.companyNameAr) {
-        customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
+        contactPayload.company_name_in_secondary_language = params.companyNameAr;
       }
-      // Shipping Address Arabic fields
-      if (params.shippingContactNameAr) {
-        customFields.push({ label: "Shipping Contact Name (Arabic)", value: params.shippingContactNameAr });
+      
+      // Billing address in secondary language (Arabic)
+      // Using billing address to store shipping address for Zoho Books structure
+      const billingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr;
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar;
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar;
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr;
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr;
+      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr;
+      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr;
+      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr;
+      
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
       }
-      if (params.shippingContactPhoneAr) {
-        customFields.push({ label: "Shipping Contact Phone (Arabic)", value: params.shippingContactPhoneAr });
-      }
-      if (params.shippingCountryCodeAr) {
-        customFields.push({ label: "Shipping Country (Arabic)", value: params.shippingCountryCodeAr });
-      }
-      if (params.shippingStateOrProvinceAr) {
-        customFields.push({ label: "Shipping State (Arabic)", value: params.shippingStateOrProvinceAr });
-      }
-      if (params.shippingCityAr) {
-        customFields.push({ label: "Shipping City (Arabic)", value: params.shippingCityAr });
-      }
-      if (params.shippingPostalCodeAr) {
-        customFields.push({ label: "Shipping Postal Code (Arabic)", value: params.shippingPostalCodeAr });
-      }
-      if (params.shippingAddressLine1Ar) {
-        customFields.push({ label: "Shipping Address Line 1 (Arabic)", value: params.shippingAddressLine1Ar });
-      }
-      if (params.shippingAddressLine2Ar) {
-        customFields.push({ label: "Shipping Address Line 2 (Arabic)", value: params.shippingAddressLine2Ar });
-      }
-      if (params.shippingShortAddressAr) {
-        customFields.push({ label: "Shipping Short Address (Arabic)", value: params.shippingShortAddressAr });
-      }
-      if (customFields.length > 0) {
-        contactPayload.custom_fields = customFields;
+      
+      // Shipping address in secondary language (Arabic)
+      const shippingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) shippingAddressAr.attention = params.shippingContactNameAr;
+      if (params.shippingAddressLine1Ar) shippingAddressAr.address = params.shippingAddressLine1Ar;
+      if (params.shippingAddressLine2Ar) shippingAddressAr.street2 = params.shippingAddressLine2Ar;
+      if (params.shippingCityAr) shippingAddressAr.city = params.shippingCityAr;
+      if (params.shippingStateOrProvinceAr) shippingAddressAr.state = params.shippingStateOrProvinceAr;
+      if (params.shippingPostalCodeAr) shippingAddressAr.zip = params.shippingPostalCodeAr;
+      if (params.shippingCountryCodeAr) shippingAddressAr.country = params.shippingCountryCodeAr;
+      if (params.shippingContactPhoneAr) shippingAddressAr.phone = params.shippingContactPhoneAr;
+      
+      if (Object.keys(shippingAddressAr).length > 0) {
+        contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
       }
       
       const response = await fetch(
@@ -334,44 +335,45 @@ export class ZohoService {
         }],
       };
       
-      // Add Arabic (secondary language) data using custom fields
-      const customFields: Array<{label: string; value: string}> = [];
+      // Add Arabic (secondary language) using Zoho Books native secondary language fields
+      // These are built-in fields for KSA e-invoicing compliance
+      
+      // Secondary language for contact name (Arabic)
       if (params.nameAr) {
-        customFields.push({ label: "Name (Arabic)", value: params.nameAr });
+        contactPayload.contact_name_in_secondary_language = params.nameAr;
       }
       if (params.companyNameAr) {
-        customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
+        contactPayload.company_name_in_secondary_language = params.companyNameAr;
       }
-      // Shipping Address Arabic fields
-      if (params.shippingContactNameAr) {
-        customFields.push({ label: "Shipping Contact Name (Arabic)", value: params.shippingContactNameAr });
+      
+      // Billing address in secondary language (Arabic)
+      const billingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr;
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar;
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar;
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr;
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr;
+      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr;
+      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr;
+      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr;
+      
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
       }
-      if (params.shippingContactPhoneAr) {
-        customFields.push({ label: "Shipping Contact Phone (Arabic)", value: params.shippingContactPhoneAr });
-      }
-      if (params.shippingCountryCodeAr) {
-        customFields.push({ label: "Shipping Country (Arabic)", value: params.shippingCountryCodeAr });
-      }
-      if (params.shippingStateOrProvinceAr) {
-        customFields.push({ label: "Shipping State (Arabic)", value: params.shippingStateOrProvinceAr });
-      }
-      if (params.shippingCityAr) {
-        customFields.push({ label: "Shipping City (Arabic)", value: params.shippingCityAr });
-      }
-      if (params.shippingPostalCodeAr) {
-        customFields.push({ label: "Shipping Postal Code (Arabic)", value: params.shippingPostalCodeAr });
-      }
-      if (params.shippingAddressLine1Ar) {
-        customFields.push({ label: "Shipping Address Line 1 (Arabic)", value: params.shippingAddressLine1Ar });
-      }
-      if (params.shippingAddressLine2Ar) {
-        customFields.push({ label: "Shipping Address Line 2 (Arabic)", value: params.shippingAddressLine2Ar });
-      }
-      if (params.shippingShortAddressAr) {
-        customFields.push({ label: "Shipping Short Address (Arabic)", value: params.shippingShortAddressAr });
-      }
-      if (customFields.length > 0) {
-        contactPayload.custom_fields = customFields;
+      
+      // Shipping address in secondary language (Arabic)
+      const shippingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) shippingAddressAr.attention = params.shippingContactNameAr;
+      if (params.shippingAddressLine1Ar) shippingAddressAr.address = params.shippingAddressLine1Ar;
+      if (params.shippingAddressLine2Ar) shippingAddressAr.street2 = params.shippingAddressLine2Ar;
+      if (params.shippingCityAr) shippingAddressAr.city = params.shippingCityAr;
+      if (params.shippingStateOrProvinceAr) shippingAddressAr.state = params.shippingStateOrProvinceAr;
+      if (params.shippingPostalCodeAr) shippingAddressAr.zip = params.shippingPostalCodeAr;
+      if (params.shippingCountryCodeAr) shippingAddressAr.country = params.shippingCountryCodeAr;
+      if (params.shippingContactPhoneAr) shippingAddressAr.phone = params.shippingContactPhoneAr;
+      
+      if (Object.keys(shippingAddressAr).length > 0) {
+        contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
       }
       
       const response = await fetch(
