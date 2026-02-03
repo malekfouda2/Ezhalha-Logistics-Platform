@@ -247,20 +247,22 @@ export class ZohoService {
       }
       
       // Build billing address in secondary language (Arabic)
-      // Zoho KSA requires total content under 100 chars - use minimal fields
-      // Combine address into single "address" field to stay under limit
-      const addressPartsAr: string[] = [];
-      if (params.shippingContactNameAr) addressPartsAr.push(params.shippingContactNameAr.substring(0, 20));
-      if (params.shippingAddressLine1Ar) addressPartsAr.push(params.shippingAddressLine1Ar.substring(0, 30));
-      if (params.shippingCityAr) addressPartsAr.push(params.shippingCityAr.substring(0, 20));
-      if (params.shippingStateOrProvinceAr) addressPartsAr.push(params.shippingStateOrProvinceAr.substring(0, 20));
+      // Zoho KSA requires object format with individual fields under limits
+      // Only include a few essential fields to avoid 100 char limit errors
+      const hasArabicAddress = params.shippingAddressLine1Ar || params.shippingCityAr;
       
-      const combinedAddressAr = addressPartsAr.join(', ').substring(0, 99);
-      
-      if (combinedAddressAr) {
-        // Try sending as string value directly - Zoho may expect this format
-        contactPayload.billing_address_in_secondary_language = combinedAddressAr;
-        contactPayload.shipping_address_in_secondary_language = combinedAddressAr;
+      if (hasArabicAddress) {
+        // Build a combined address string for the single 'address' field
+        const addressParts: string[] = [];
+        if (params.shippingAddressLine1Ar) addressParts.push(params.shippingAddressLine1Ar.substring(0, 40));
+        if (params.shippingCityAr) addressParts.push(params.shippingCityAr.substring(0, 30));
+        
+        const billingAddressAr: Record<string, string> = {
+          address: addressParts.join(', ').substring(0, 90)
+        };
+        
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
+        contactPayload.shipping_address_in_secondary_language = billingAddressAr;
       }
       
       const response = await fetch(
@@ -363,24 +365,28 @@ export class ZohoService {
       }
       
       // Build billing address in secondary language (Arabic)
-      // Zoho KSA requires total content under 100 chars - use minimal fields
-      // Combine address into single "address" field to stay under limit
-      const addressPartsAr: string[] = [];
-      if (params.shippingContactNameAr) addressPartsAr.push(params.shippingContactNameAr.substring(0, 20));
-      if (params.shippingAddressLine1Ar) addressPartsAr.push(params.shippingAddressLine1Ar.substring(0, 30));
-      if (params.shippingCityAr) addressPartsAr.push(params.shippingCityAr.substring(0, 20));
-      if (params.shippingStateOrProvinceAr) addressPartsAr.push(params.shippingStateOrProvinceAr.substring(0, 20));
+      // Zoho KSA requires object format with individual fields under limits
+      // Only include a few essential fields to avoid 100 char limit errors
+      const hasArabicAddress = params.shippingAddressLine1Ar || params.shippingCityAr;
       
-      const combinedAddressAr = addressPartsAr.join(', ').substring(0, 99);
-      
-      if (combinedAddressAr) {
-        // Try sending as string value directly - Zoho may expect this format
-        contactPayload.billing_address_in_secondary_language = combinedAddressAr;
-        contactPayload.shipping_address_in_secondary_language = combinedAddressAr;
+      if (hasArabicAddress) {
+        // Build a combined address string for the single 'address' field
+        const addressParts: string[] = [];
+        if (params.shippingAddressLine1Ar) addressParts.push(params.shippingAddressLine1Ar.substring(0, 40));
+        if (params.shippingCityAr) addressParts.push(params.shippingCityAr.substring(0, 30));
+        
+        const billingAddressAr: Record<string, string> = {
+          address: addressParts.join(', ').substring(0, 90)
+        };
+        
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
+        contactPayload.shipping_address_in_secondary_language = billingAddressAr;
       }
       
       // DEBUG: Log full payload being sent
       console.log("=== ZOHO API PAYLOAD ===");
+      console.log("contact_name_in_secondary_language:", contactPayload.contact_name_in_secondary_language);
+      console.log("company_name_in_secondary_language:", contactPayload.company_name_in_secondary_language);
       console.log("billing_address:", JSON.stringify(contactPayload.billing_address, null, 2));
       console.log("shipping_address:", JSON.stringify(contactPayload.shipping_address, null, 2));
       console.log("billing_address_in_secondary_language:", JSON.stringify(contactPayload.billing_address_in_secondary_language, null, 2));
