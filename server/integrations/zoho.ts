@@ -246,23 +246,27 @@ export class ZohoService {
         contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
       }
       
-      // Build billing address in secondary language (Arabic) - each field max 99 chars
+      // Build billing address in secondary language (Arabic)
+      // Zoho KSA has strict limits - only include essential fields
       const billingAddressAr: Record<string, string> = {};
-      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 99);
-      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 99);
-      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 99);
-      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 99);
-      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 99);
-      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr.substring(0, 99);
-      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr.substring(0, 99);
-      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr.substring(0, 99);
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 50);
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 50);
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 50);
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 50);
       
       if (Object.keys(billingAddressAr).length > 0) {
         contactPayload.billing_address_in_secondary_language = billingAddressAr;
       }
       
       // Build shipping address in secondary language (Arabic)
-      const shippingAddressAr = { ...billingAddressAr };
+      const shippingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) shippingAddressAr.attention = params.shippingContactNameAr.substring(0, 50);
+      if (params.shippingAddressLine1Ar) shippingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 50);
+      if (params.shippingAddressLine2Ar) shippingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 50);
+      if (params.shippingCityAr) shippingAddressAr.city = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) shippingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 50);
+      
       if (Object.keys(shippingAddressAr).length > 0) {
         contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
       }
@@ -366,23 +370,27 @@ export class ZohoService {
         contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
       }
       
-      // Build billing address in secondary language (Arabic) - each field max 99 chars
+      // Build billing address in secondary language (Arabic)
+      // Zoho KSA has strict limits - only include essential fields
       const billingAddressAr: Record<string, string> = {};
-      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 99);
-      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 99);
-      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 99);
-      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 99);
-      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 99);
-      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr.substring(0, 99);
-      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr.substring(0, 99);
-      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr.substring(0, 99);
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 50);
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 50);
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 50);
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 50);
       
       if (Object.keys(billingAddressAr).length > 0) {
         contactPayload.billing_address_in_secondary_language = billingAddressAr;
       }
       
       // Build shipping address in secondary language (Arabic)
-      const shippingAddressAr = { ...billingAddressAr };
+      const shippingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) shippingAddressAr.attention = params.shippingContactNameAr.substring(0, 50);
+      if (params.shippingAddressLine1Ar) shippingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 50);
+      if (params.shippingAddressLine2Ar) shippingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 50);
+      if (params.shippingCityAr) shippingAddressAr.city = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) shippingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 50);
+      
       if (Object.keys(shippingAddressAr).length > 0) {
         contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
       }
