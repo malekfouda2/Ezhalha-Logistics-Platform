@@ -336,11 +336,12 @@ export class ZohoService {
       if (params.country) billingAddress.country = params.country;
       if (params.shippingContactPhone) billingAddress.phone = params.shippingContactPhone;
       
-      // Add Arabic address fields with _arabic suffix (embedded in same object)
-      if (params.shippingAddressLine1Ar) billingAddress.address_arabic = params.shippingAddressLine1Ar.substring(0, 90);
-      if (params.shippingAddressLine2Ar) billingAddress.street2_arabic = params.shippingAddressLine2Ar.substring(0, 90);
-      if (params.shippingCityAr) billingAddress.city_arabic = params.shippingCityAr.substring(0, 50);
-      if (params.shippingStateOrProvinceAr) billingAddress.state_arabic = params.shippingStateOrProvinceAr.substring(0, 50);
+      // Add Arabic address fields with _sec_lang suffix (Zoho's secondary language format)
+      if (params.shippingContactNameAr) billingAddress.attention_sec_lang = params.shippingContactNameAr.substring(0, 90);
+      if (params.shippingAddressLine1Ar) billingAddress.address_sec_lang = params.shippingAddressLine1Ar.substring(0, 90);
+      if (params.shippingAddressLine2Ar) billingAddress.street2_sec_lang = params.shippingAddressLine2Ar.substring(0, 90);
+      if (params.shippingCityAr) billingAddress.city_sec_lang = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) billingAddress.state_sec_lang = params.shippingStateOrProvinceAr.substring(0, 50);
       
       // Build shipping address (same as billing)
       const shippingAddress = { ...billingAddress };
