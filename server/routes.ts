@@ -1107,11 +1107,14 @@ export async function registerRoutes(
             phone: updated.phone,
             companyName: updated.companyName || undefined,
             country: updated.country,
-            billingCity: updated.shippingCity || undefined,
-            billingState: (updated as any).shippingStateOrProvince || undefined,
-            billingPostalCode: updated.shippingPostalCode || undefined,
-            billingStreet: updated.shippingAddressLine1 || undefined,
-            billingStreet2: updated.shippingAddressLine2 || undefined,
+            // Shipping Address fields (Primary Language - English)
+            shippingContactName: updated.shippingContactName || undefined,
+            shippingContactPhone: updated.shippingContactPhone || undefined,
+            shippingStateOrProvince: updated.shippingStateOrProvince || undefined,
+            shippingCity: updated.shippingCity || undefined,
+            shippingPostalCode: updated.shippingPostalCode || undefined,
+            shippingAddressLine1: updated.shippingAddressLine1 || undefined,
+            shippingAddressLine2: updated.shippingAddressLine2 || undefined,
             // Arabic (Secondary Language) fields
             nameAr: updated.nameAr || undefined,
             companyNameAr: updated.companyNameAr || undefined,
@@ -1884,11 +1887,14 @@ export async function registerRoutes(
             phone: updated.phone,
             companyName: updated.companyName || undefined,
             country: updated.country,
-            billingCity: updated.shippingCity || undefined,
-            billingState: (updated as any).shippingStateOrProvince || undefined,
-            billingPostalCode: updated.shippingPostalCode || undefined,
-            billingStreet: updated.shippingAddressLine1 || undefined,
-            billingStreet2: updated.shippingAddressLine2 || undefined,
+            // Shipping Address fields (Primary Language - English)
+            shippingContactName: updated.shippingContactName || undefined,
+            shippingContactPhone: updated.shippingContactPhone || undefined,
+            shippingStateOrProvince: updated.shippingStateOrProvince || undefined,
+            shippingCity: updated.shippingCity || undefined,
+            shippingPostalCode: updated.shippingPostalCode || undefined,
+            shippingAddressLine1: updated.shippingAddressLine1 || undefined,
+            shippingAddressLine2: updated.shippingAddressLine2 || undefined,
           });
         } catch (error) {
           logError("Failed to update Zoho customer", error);

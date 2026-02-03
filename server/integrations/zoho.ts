@@ -36,7 +36,7 @@ export interface ZohoCustomerParams {
   phone?: string;
   companyName?: string;
   country?: string;
-  // Billing address fields
+  // Billing address fields (legacy)
   billingCity?: string;
   billingState?: string;
   billingPostalCode?: string;
@@ -44,6 +44,16 @@ export interface ZohoCustomerParams {
   billingStreet2?: string;
   // Account type
   customerType?: 'business' | 'individual';
+  // Shipping Address fields (Primary Language - English)
+  shippingContactName?: string;
+  shippingContactPhone?: string;
+  shippingCountryCode?: string;
+  shippingStateOrProvince?: string;
+  shippingCity?: string;
+  shippingPostalCode?: string;
+  shippingAddressLine1?: string;
+  shippingAddressLine2?: string;
+  shippingShortAddress?: string;
   // Arabic (Secondary Language) fields
   nameAr?: string;
   companyNameAr?: string;
@@ -195,55 +205,26 @@ export class ZohoService {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
-      // Helper function to create bilingual text (English/Arabic) for KSA e-invoicing
-      const bilingual = (en: string | undefined, ar: string | undefined): string | undefined => {
-        if (en && ar) return `${en}/${ar}`;
-        return en || ar;
-      };
-      
-      // Build billing address with inline bilingual format for KSA compliance
-      // Format: "English/Arabic" (e.g., "Riyadh/الرياض")
+      // Build billing address (Primary Language - English)
       const billingAddress: Record<string, string> = {};
-      
-      // Use shipping address fields for billing address (they're the same in our system)
-      const attentionBilingual = bilingual(params.shippingContactName, params.shippingContactNameAr);
-      if (attentionBilingual) billingAddress.attention = attentionBilingual;
-      
-      const addressBilingual = bilingual(params.shippingAddressLine1, params.shippingAddressLine1Ar);
-      if (addressBilingual) billingAddress.address = addressBilingual;
-      
-      const street2Bilingual = bilingual(params.shippingAddressLine2, params.shippingAddressLine2Ar);
-      if (street2Bilingual) billingAddress.street2 = street2Bilingual;
-      
-      const cityBilingual = bilingual(params.shippingCity, params.shippingCityAr);
-      if (cityBilingual) billingAddress.city = cityBilingual;
-      
-      const stateBilingual = bilingual(params.shippingStateOrProvince, params.shippingStateOrProvinceAr);
-      if (stateBilingual) billingAddress.state = stateBilingual;
-      
-      // Postal code doesn't need bilingual (numbers are universal)
+      if (params.shippingContactName) billingAddress.attention = params.shippingContactName;
+      if (params.shippingAddressLine1) billingAddress.address = params.shippingAddressLine1;
+      if (params.shippingAddressLine2) billingAddress.street2 = params.shippingAddressLine2;
+      if (params.shippingCity) billingAddress.city = params.shippingCity;
+      if (params.shippingStateOrProvince) billingAddress.state = params.shippingStateOrProvince;
       if (params.shippingPostalCode) billingAddress.zip = params.shippingPostalCode;
-      
-      // Country - use full country name with Arabic
-      const countryBilingual = bilingual(params.country, params.shippingCountryCodeAr);
-      if (countryBilingual) billingAddress.country = countryBilingual;
-      
-      // Phone doesn't need bilingual (numbers are universal)
+      if (params.country) billingAddress.country = params.country;
       if (params.shippingContactPhone) billingAddress.phone = params.shippingContactPhone;
       
-      // Build shipping address (same as billing for our use case)
+      // Build shipping address (same as billing)
       const shippingAddress = { ...billingAddress };
       
-      // Build contact name with bilingual format
-      const contactNameBilingual = bilingual(params.name, params.nameAr);
-      const companyNameBilingual = bilingual(params.companyName, params.companyNameAr);
-      
-      // Build contact payload
+      // Build contact payload with Primary Language data
       const contactPayload: Record<string, any> = {
-        contact_name: contactNameBilingual || params.name,
+        contact_name: params.name,
         contact_type: 'customer',
         customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
-        company_name: companyNameBilingual || params.companyName || '',
+        company_name: params.companyName || '',
         email: params.email,
         phone: params.phone,
         billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
@@ -256,6 +237,35 @@ export class ZohoService {
           is_primary_contact: true,
         }],
       };
+      
+      // Add Secondary Language (Arabic) fields for KSA e-invoicing
+      if (params.nameAr) {
+        contactPayload.contact_name_in_secondary_language = params.nameAr.substring(0, 99);
+      }
+      if (params.companyNameAr) {
+        contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
+      }
+      
+      // Build billing address in secondary language (Arabic) - each field max 99 chars
+      const billingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 99);
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 99);
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 99);
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 99);
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 99);
+      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr.substring(0, 99);
+      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr.substring(0, 99);
+      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr.substring(0, 99);
+      
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
+      }
+      
+      // Build shipping address in secondary language (Arabic)
+      const shippingAddressAr = { ...billingAddressAr };
+      if (Object.keys(shippingAddressAr).length > 0) {
+        contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
+      }
       
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts?organization_id=${this.organizationId}`,
@@ -302,54 +312,25 @@ export class ZohoService {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
-      // Helper function to create bilingual text (English/Arabic) for KSA e-invoicing
-      const bilingual = (en: string | undefined, ar: string | undefined): string | undefined => {
-        if (en && ar) return `${en}/${ar}`;
-        return en || ar;
-      };
-      
-      // Build billing address with inline bilingual format for KSA compliance
-      // Format: "English/Arabic" (e.g., "Riyadh/الرياض")
+      // Build billing address (Primary Language - English)
       const billingAddress: Record<string, string> = {};
-      
-      // Use shipping address fields for billing address (they're the same in our system)
-      const attentionBilingual = bilingual(params.shippingContactName, params.shippingContactNameAr);
-      if (attentionBilingual) billingAddress.attention = attentionBilingual;
-      
-      const addressBilingual = bilingual(params.shippingAddressLine1, params.shippingAddressLine1Ar);
-      if (addressBilingual) billingAddress.address = addressBilingual;
-      
-      const street2Bilingual = bilingual(params.shippingAddressLine2, params.shippingAddressLine2Ar);
-      if (street2Bilingual) billingAddress.street2 = street2Bilingual;
-      
-      const cityBilingual = bilingual(params.shippingCity, params.shippingCityAr);
-      if (cityBilingual) billingAddress.city = cityBilingual;
-      
-      const stateBilingual = bilingual(params.shippingStateOrProvince, params.shippingStateOrProvinceAr);
-      if (stateBilingual) billingAddress.state = stateBilingual;
-      
-      // Postal code doesn't need bilingual (numbers are universal)
+      if (params.shippingContactName) billingAddress.attention = params.shippingContactName;
+      if (params.shippingAddressLine1) billingAddress.address = params.shippingAddressLine1;
+      if (params.shippingAddressLine2) billingAddress.street2 = params.shippingAddressLine2;
+      if (params.shippingCity) billingAddress.city = params.shippingCity;
+      if (params.shippingStateOrProvince) billingAddress.state = params.shippingStateOrProvince;
       if (params.shippingPostalCode) billingAddress.zip = params.shippingPostalCode;
-      
-      // Country - use full country name with Arabic
-      const countryBilingual = bilingual(params.country, params.shippingCountryCodeAr);
-      if (countryBilingual) billingAddress.country = countryBilingual;
-      
-      // Phone doesn't need bilingual (numbers are universal)
+      if (params.country) billingAddress.country = params.country;
       if (params.shippingContactPhone) billingAddress.phone = params.shippingContactPhone;
       
-      // Build shipping address (same as billing for our use case)
+      // Build shipping address (same as billing)
       const shippingAddress = { ...billingAddress };
       
-      // Build contact name with bilingual format
-      const contactNameBilingual = bilingual(params.name, params.nameAr);
-      const companyNameBilingual = bilingual(params.companyName, params.companyNameAr);
-      
-      // Build contact payload
+      // Build contact payload with Primary Language data
       const contactPayload: Record<string, any> = {
-        contact_name: contactNameBilingual || params.name,
+        contact_name: params.name,
         customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
-        company_name: companyNameBilingual || params.companyName || '',
+        company_name: params.companyName || '',
         email: params.email,
         phone: params.phone,
         billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
@@ -362,6 +343,35 @@ export class ZohoService {
           is_primary_contact: true,
         }],
       };
+      
+      // Add Secondary Language (Arabic) fields for KSA e-invoicing
+      if (params.nameAr) {
+        contactPayload.contact_name_in_secondary_language = params.nameAr.substring(0, 99);
+      }
+      if (params.companyNameAr) {
+        contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
+      }
+      
+      // Build billing address in secondary language (Arabic) - each field max 99 chars
+      const billingAddressAr: Record<string, string> = {};
+      if (params.shippingContactNameAr) billingAddressAr.attention = params.shippingContactNameAr.substring(0, 99);
+      if (params.shippingAddressLine1Ar) billingAddressAr.address = params.shippingAddressLine1Ar.substring(0, 99);
+      if (params.shippingAddressLine2Ar) billingAddressAr.street2 = params.shippingAddressLine2Ar.substring(0, 99);
+      if (params.shippingCityAr) billingAddressAr.city = params.shippingCityAr.substring(0, 99);
+      if (params.shippingStateOrProvinceAr) billingAddressAr.state = params.shippingStateOrProvinceAr.substring(0, 99);
+      if (params.shippingPostalCodeAr) billingAddressAr.zip = params.shippingPostalCodeAr.substring(0, 99);
+      if (params.shippingCountryCodeAr) billingAddressAr.country = params.shippingCountryCodeAr.substring(0, 99);
+      if (params.shippingContactPhoneAr) billingAddressAr.phone = params.shippingContactPhoneAr.substring(0, 99);
+      
+      if (Object.keys(billingAddressAr).length > 0) {
+        contactPayload.billing_address_in_secondary_language = billingAddressAr;
+      }
+      
+      // Build shipping address in secondary language (Arabic)
+      const shippingAddressAr = { ...billingAddressAr };
+      if (Object.keys(shippingAddressAr).length > 0) {
+        contactPayload.shipping_address_in_secondary_language = shippingAddressAr;
+      }
       
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts/${zohoCustomerId}?organization_id=${this.organizationId}`,
