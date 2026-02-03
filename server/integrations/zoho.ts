@@ -324,7 +324,8 @@ export class ZohoService {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
-      // Build billing address (Primary Language - English)
+      // Build billing address with both English (primary) and Arabic (secondary) fields
+      // Zoho embeds Arabic fields INSIDE the address object with _arabic suffix
       const billingAddress: Record<string, string> = {};
       if (params.shippingContactName) billingAddress.attention = params.shippingContactName;
       if (params.shippingAddressLine1) billingAddress.address = params.shippingAddressLine1;
@@ -334,6 +335,12 @@ export class ZohoService {
       if (params.shippingPostalCode) billingAddress.zip = params.shippingPostalCode;
       if (params.country) billingAddress.country = params.country;
       if (params.shippingContactPhone) billingAddress.phone = params.shippingContactPhone;
+      
+      // Add Arabic address fields with _arabic suffix (embedded in same object)
+      if (params.shippingAddressLine1Ar) billingAddress.address_arabic = params.shippingAddressLine1Ar.substring(0, 90);
+      if (params.shippingAddressLine2Ar) billingAddress.street2_arabic = params.shippingAddressLine2Ar.substring(0, 90);
+      if (params.shippingCityAr) billingAddress.city_arabic = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) billingAddress.state_arabic = params.shippingStateOrProvinceAr.substring(0, 50);
       
       // Build shipping address (same as billing)
       const shippingAddress = { ...billingAddress };
@@ -357,40 +364,19 @@ export class ZohoService {
       };
       
       // Add Secondary Language (Arabic) fields for KSA e-invoicing
+      // Use _in_transaction_language suffix (not _in_secondary_language)
       if (params.nameAr) {
-        contactPayload.contact_name_in_secondary_language = params.nameAr.substring(0, 99);
+        contactPayload.contact_name_in_transaction_language = params.nameAr.substring(0, 99);
       }
       if (params.companyNameAr) {
-        contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
-      }
-      
-      // Build billing address in secondary language (Arabic)
-      // Zoho KSA requires object format with individual fields under limits
-      // Only include a few essential fields to avoid 100 char limit errors
-      const hasArabicAddress = params.shippingAddressLine1Ar || params.shippingCityAr;
-      
-      if (hasArabicAddress) {
-        // Build a combined address string for the single 'address' field
-        const addressParts: string[] = [];
-        if (params.shippingAddressLine1Ar) addressParts.push(params.shippingAddressLine1Ar.substring(0, 40));
-        if (params.shippingCityAr) addressParts.push(params.shippingCityAr.substring(0, 30));
-        
-        const billingAddressAr: Record<string, string> = {
-          address: addressParts.join(', ').substring(0, 90)
-        };
-        
-        contactPayload.billing_address_in_secondary_language = billingAddressAr;
-        contactPayload.shipping_address_in_secondary_language = billingAddressAr;
+        contactPayload.company_name_in_transaction_language = params.companyNameAr.substring(0, 99);
       }
       
       // DEBUG: Log full payload being sent
       console.log("=== ZOHO API PAYLOAD ===");
-      console.log("contact_name_in_secondary_language:", contactPayload.contact_name_in_secondary_language);
-      console.log("company_name_in_secondary_language:", contactPayload.company_name_in_secondary_language);
-      console.log("billing_address:", JSON.stringify(contactPayload.billing_address, null, 2));
-      console.log("shipping_address:", JSON.stringify(contactPayload.shipping_address, null, 2));
-      console.log("billing_address_in_secondary_language:", JSON.stringify(contactPayload.billing_address_in_secondary_language, null, 2));
-      console.log("shipping_address_in_secondary_language:", JSON.stringify(contactPayload.shipping_address_in_secondary_language, null, 2));
+      console.log("contact_name_in_transaction_language:", contactPayload.contact_name_in_transaction_language);
+      console.log("company_name_in_transaction_language:", contactPayload.company_name_in_transaction_language);
+      console.log("billing_address (with embedded Arabic):", JSON.stringify(contactPayload.billing_address, null, 2));
       console.log("========================");
       
       const response = await fetch(
@@ -411,9 +397,9 @@ export class ZohoService {
       console.log("=== ZOHO FULL RESPONSE ===");
       console.log("Response code:", data.code);
       console.log("Contact name:", data.contact?.contact_name);
-      console.log("Contact name in secondary:", data.contact?.contact_name_in_secondary_language);
-      console.log("Billing address secondary:", JSON.stringify(data.contact?.billing_address_in_secondary_language, null, 2));
-      console.log("Shipping address secondary:", JSON.stringify(data.contact?.shipping_address_in_secondary_language, null, 2));
+      console.log("Contact name in transaction language:", data.contact?.contact_name_in_transaction_language);
+      console.log("Company name in transaction language:", data.contact?.company_name_in_transaction_language);
+      console.log("Billing address:", JSON.stringify(data.contact?.billing_address, null, 2));
       console.log("==========================");
       
       if (data.code !== 0) {
