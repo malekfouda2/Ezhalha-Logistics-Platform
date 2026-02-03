@@ -365,18 +365,18 @@ export class ZohoService {
       };
       
       // Add Secondary Language (Arabic) fields for KSA e-invoicing
-      // Use _in_transaction_language suffix (not _in_secondary_language)
+      // Use _sec_lang suffix (matching Zoho's secondary language pattern)
       if (params.nameAr) {
-        contactPayload.contact_name_in_transaction_language = params.nameAr.substring(0, 99);
+        contactPayload.contact_name_sec_lang = params.nameAr.substring(0, 99);
       }
       if (params.companyNameAr) {
-        contactPayload.company_name_in_transaction_language = params.companyNameAr.substring(0, 99);
+        contactPayload.company_name_sec_lang = params.companyNameAr.substring(0, 99);
       }
       
       // DEBUG: Log full payload being sent
       console.log("=== ZOHO API PAYLOAD ===");
-      console.log("contact_name_in_transaction_language:", contactPayload.contact_name_in_transaction_language);
-      console.log("company_name_in_transaction_language:", contactPayload.company_name_in_transaction_language);
+      console.log("contact_name_sec_lang:", contactPayload.contact_name_sec_lang);
+      console.log("company_name_sec_lang:", contactPayload.company_name_sec_lang);
       console.log("billing_address (with embedded Arabic):", JSON.stringify(contactPayload.billing_address, null, 2));
       console.log("========================");
       
