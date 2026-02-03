@@ -47,10 +47,16 @@ export interface ZohoCustomerParams {
   // Arabic (Secondary Language) fields
   nameAr?: string;
   companyNameAr?: string;
-  billingStreetAr?: string;
-  billingStreet2Ar?: string;
-  billingDistrictAr?: string;
-  billingCityAr?: string;
+  // Shipping Address Arabic fields
+  shippingContactNameAr?: string;
+  shippingContactPhoneAr?: string;
+  shippingCountryCodeAr?: string;
+  shippingStateOrProvinceAr?: string;
+  shippingCityAr?: string;
+  shippingPostalCodeAr?: string;
+  shippingAddressLine1Ar?: string;
+  shippingAddressLine2Ar?: string;
+  shippingShortAddressAr?: string;
 }
 
 export class ZohoService {
@@ -218,7 +224,6 @@ export class ZohoService {
       
       // Add Arabic (secondary language) data using custom fields
       // Zoho Books API requires custom fields to be created first in the organization
-      // These will be stored as custom fields with API names: cf_name_ar, cf_company_name_ar, etc.
       const customFields: Array<{label: string; value: string}> = [];
       if (params.nameAr) {
         customFields.push({ label: "Name (Arabic)", value: params.nameAr });
@@ -226,17 +231,33 @@ export class ZohoService {
       if (params.companyNameAr) {
         customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
       }
-      if (params.billingStreetAr) {
-        customFields.push({ label: "Street (Arabic)", value: params.billingStreetAr });
+      // Shipping Address Arabic fields
+      if (params.shippingContactNameAr) {
+        customFields.push({ label: "Shipping Contact Name (Arabic)", value: params.shippingContactNameAr });
       }
-      if (params.billingStreet2Ar) {
-        customFields.push({ label: "Building (Arabic)", value: params.billingStreet2Ar });
+      if (params.shippingContactPhoneAr) {
+        customFields.push({ label: "Shipping Contact Phone (Arabic)", value: params.shippingContactPhoneAr });
       }
-      if (params.billingDistrictAr) {
-        customFields.push({ label: "District (Arabic)", value: params.billingDistrictAr });
+      if (params.shippingCountryCodeAr) {
+        customFields.push({ label: "Shipping Country (Arabic)", value: params.shippingCountryCodeAr });
       }
-      if (params.billingCityAr) {
-        customFields.push({ label: "City (Arabic)", value: params.billingCityAr });
+      if (params.shippingStateOrProvinceAr) {
+        customFields.push({ label: "Shipping State (Arabic)", value: params.shippingStateOrProvinceAr });
+      }
+      if (params.shippingCityAr) {
+        customFields.push({ label: "Shipping City (Arabic)", value: params.shippingCityAr });
+      }
+      if (params.shippingPostalCodeAr) {
+        customFields.push({ label: "Shipping Postal Code (Arabic)", value: params.shippingPostalCodeAr });
+      }
+      if (params.shippingAddressLine1Ar) {
+        customFields.push({ label: "Shipping Address Line 1 (Arabic)", value: params.shippingAddressLine1Ar });
+      }
+      if (params.shippingAddressLine2Ar) {
+        customFields.push({ label: "Shipping Address Line 2 (Arabic)", value: params.shippingAddressLine2Ar });
+      }
+      if (params.shippingShortAddressAr) {
+        customFields.push({ label: "Shipping Short Address (Arabic)", value: params.shippingShortAddressAr });
       }
       if (customFields.length > 0) {
         contactPayload.custom_fields = customFields;
@@ -321,17 +342,33 @@ export class ZohoService {
       if (params.companyNameAr) {
         customFields.push({ label: "Company Name (Arabic)", value: params.companyNameAr });
       }
-      if (params.billingStreetAr) {
-        customFields.push({ label: "Street (Arabic)", value: params.billingStreetAr });
+      // Shipping Address Arabic fields
+      if (params.shippingContactNameAr) {
+        customFields.push({ label: "Shipping Contact Name (Arabic)", value: params.shippingContactNameAr });
       }
-      if (params.billingStreet2Ar) {
-        customFields.push({ label: "Building (Arabic)", value: params.billingStreet2Ar });
+      if (params.shippingContactPhoneAr) {
+        customFields.push({ label: "Shipping Contact Phone (Arabic)", value: params.shippingContactPhoneAr });
       }
-      if (params.billingDistrictAr) {
-        customFields.push({ label: "District (Arabic)", value: params.billingDistrictAr });
+      if (params.shippingCountryCodeAr) {
+        customFields.push({ label: "Shipping Country (Arabic)", value: params.shippingCountryCodeAr });
       }
-      if (params.billingCityAr) {
-        customFields.push({ label: "City (Arabic)", value: params.billingCityAr });
+      if (params.shippingStateOrProvinceAr) {
+        customFields.push({ label: "Shipping State (Arabic)", value: params.shippingStateOrProvinceAr });
+      }
+      if (params.shippingCityAr) {
+        customFields.push({ label: "Shipping City (Arabic)", value: params.shippingCityAr });
+      }
+      if (params.shippingPostalCodeAr) {
+        customFields.push({ label: "Shipping Postal Code (Arabic)", value: params.shippingPostalCodeAr });
+      }
+      if (params.shippingAddressLine1Ar) {
+        customFields.push({ label: "Shipping Address Line 1 (Arabic)", value: params.shippingAddressLine1Ar });
+      }
+      if (params.shippingAddressLine2Ar) {
+        customFields.push({ label: "Shipping Address Line 2 (Arabic)", value: params.shippingAddressLine2Ar });
+      }
+      if (params.shippingShortAddressAr) {
+        customFields.push({ label: "Shipping Short Address (Arabic)", value: params.shippingShortAddressAr });
       }
       if (customFields.length > 0) {
         contactPayload.custom_fields = customFields;

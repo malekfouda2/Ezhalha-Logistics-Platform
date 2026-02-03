@@ -1092,10 +1092,16 @@ export async function registerRoutes(
             // Arabic (Secondary Language) fields
             nameAr: updated.nameAr || undefined,
             companyNameAr: updated.companyNameAr || undefined,
-            billingStreetAr: updated.nationalAddressStreetAr || undefined,
-            billingStreet2Ar: updated.nationalAddressBuildingAr || undefined,
-            billingDistrictAr: updated.nationalAddressDistrictAr || undefined,
-            billingCityAr: updated.nationalAddressCityAr || undefined,
+            // Shipping Address Arabic fields
+            shippingContactNameAr: updated.shippingContactNameAr || undefined,
+            shippingContactPhoneAr: updated.shippingContactPhoneAr || undefined,
+            shippingCountryCodeAr: updated.shippingCountryCodeAr || undefined,
+            shippingStateOrProvinceAr: updated.shippingStateOrProvinceAr || undefined,
+            shippingCityAr: updated.shippingCityAr || undefined,
+            shippingPostalCodeAr: updated.shippingPostalCodeAr || undefined,
+            shippingAddressLine1Ar: updated.shippingAddressLine1Ar || undefined,
+            shippingAddressLine2Ar: updated.shippingAddressLine2Ar || undefined,
+            shippingShortAddressAr: updated.shippingShortAddressAr || undefined,
           });
         } catch (error) {
           logError("Failed to update Zoho customer", error);
