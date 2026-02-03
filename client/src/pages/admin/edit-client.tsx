@@ -201,7 +201,7 @@ export default function AdminEditClient() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="primary" className="space-y-6">
+              <TabsContent value="primary" className="space-y-6 data-[state=inactive]:hidden" forceMount>
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -502,7 +502,7 @@ export default function AdminEditClient() {
                 </Card>
               </TabsContent>
 
-              <TabsContent value="arabic" className="space-y-6">
+              <TabsContent value="arabic" className="space-y-6 data-[state=inactive]:hidden" forceMount>
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
