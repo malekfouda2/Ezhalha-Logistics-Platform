@@ -1037,9 +1037,16 @@ export async function registerRoutes(
       const { name, phone, country, companyName, crNumber, taxNumber, 
               nationalAddressStreet, nationalAddressBuilding, nationalAddressDistrict,
               nationalAddressCity, nationalAddressPostalCode, profile, isActive,
+              // Shipping Address fields
+              shippingContactName, shippingContactPhone, shippingCountryCode,
+              shippingStateOrProvince, shippingCity, shippingPostalCode,
+              shippingAddressLine1, shippingAddressLine2, shippingShortAddress,
               // Arabic (Secondary Language) fields
-              nameAr, companyNameAr, nationalAddressStreetAr, nationalAddressBuildingAr,
-              nationalAddressDistrictAr, nationalAddressCityAr } = req.body;
+              nameAr, companyNameAr,
+              // Shipping Address Arabic fields
+              shippingContactNameAr, shippingContactPhoneAr, shippingCountryCodeAr,
+              shippingStateOrProvinceAr, shippingCityAr, shippingPostalCodeAr,
+              shippingAddressLine1Ar, shippingAddressLine2Ar, shippingShortAddressAr } = req.body;
 
       const updates: Partial<ClientAccount> = {};
       if (name !== undefined) updates.name = name;
@@ -1053,13 +1060,29 @@ export async function registerRoutes(
       if (nationalAddressDistrict !== undefined) updates.nationalAddressDistrict = nationalAddressDistrict;
       if (nationalAddressCity !== undefined) updates.nationalAddressCity = nationalAddressCity;
       if (nationalAddressPostalCode !== undefined) updates.nationalAddressPostalCode = nationalAddressPostalCode;
+      // Shipping Address fields
+      if (shippingContactName !== undefined) updates.shippingContactName = shippingContactName;
+      if (shippingContactPhone !== undefined) updates.shippingContactPhone = shippingContactPhone;
+      if (shippingCountryCode !== undefined) updates.shippingCountryCode = shippingCountryCode;
+      if (shippingStateOrProvince !== undefined) updates.shippingStateOrProvince = shippingStateOrProvince;
+      if (shippingCity !== undefined) updates.shippingCity = shippingCity;
+      if (shippingPostalCode !== undefined) updates.shippingPostalCode = shippingPostalCode;
+      if (shippingAddressLine1 !== undefined) updates.shippingAddressLine1 = shippingAddressLine1;
+      if (shippingAddressLine2 !== undefined) updates.shippingAddressLine2 = shippingAddressLine2;
+      if (shippingShortAddress !== undefined) updates.shippingShortAddress = shippingShortAddress;
       // Arabic fields
       if (nameAr !== undefined) updates.nameAr = nameAr;
       if (companyNameAr !== undefined) updates.companyNameAr = companyNameAr;
-      if (nationalAddressStreetAr !== undefined) updates.nationalAddressStreetAr = nationalAddressStreetAr;
-      if (nationalAddressBuildingAr !== undefined) updates.nationalAddressBuildingAr = nationalAddressBuildingAr;
-      if (nationalAddressDistrictAr !== undefined) updates.nationalAddressDistrictAr = nationalAddressDistrictAr;
-      if (nationalAddressCityAr !== undefined) updates.nationalAddressCityAr = nationalAddressCityAr;
+      // Shipping Address Arabic fields
+      if (shippingContactNameAr !== undefined) updates.shippingContactNameAr = shippingContactNameAr;
+      if (shippingContactPhoneAr !== undefined) updates.shippingContactPhoneAr = shippingContactPhoneAr;
+      if (shippingCountryCodeAr !== undefined) updates.shippingCountryCodeAr = shippingCountryCodeAr;
+      if (shippingStateOrProvinceAr !== undefined) updates.shippingStateOrProvinceAr = shippingStateOrProvinceAr;
+      if (shippingCityAr !== undefined) updates.shippingCityAr = shippingCityAr;
+      if (shippingPostalCodeAr !== undefined) updates.shippingPostalCodeAr = shippingPostalCodeAr;
+      if (shippingAddressLine1Ar !== undefined) updates.shippingAddressLine1Ar = shippingAddressLine1Ar;
+      if (shippingAddressLine2Ar !== undefined) updates.shippingAddressLine2Ar = shippingAddressLine2Ar;
+      if (shippingShortAddressAr !== undefined) updates.shippingShortAddressAr = shippingShortAddressAr;
       if (profile !== undefined) {
         const pricingRules = await storage.getPricingRules();
         const validProfiles = pricingRules.map(r => r.profile);
