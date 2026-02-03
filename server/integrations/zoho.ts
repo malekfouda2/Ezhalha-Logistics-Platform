@@ -407,6 +407,15 @@ export class ZohoService {
       
       const data = await response.json();
       
+      // DEBUG: Log full Zoho response to see what was actually saved
+      console.log("=== ZOHO FULL RESPONSE ===");
+      console.log("Response code:", data.code);
+      console.log("Contact name:", data.contact?.contact_name);
+      console.log("Contact name in secondary:", data.contact?.contact_name_in_secondary_language);
+      console.log("Billing address secondary:", JSON.stringify(data.contact?.billing_address_in_secondary_language, null, 2));
+      console.log("Shipping address secondary:", JSON.stringify(data.contact?.shipping_address_in_secondary_language, null, 2));
+      console.log("==========================");
+      
       if (data.code !== 0) {
         console.error("Zoho customer update error:", data.message, "Response:", JSON.stringify(data, null, 2));
         return false;
