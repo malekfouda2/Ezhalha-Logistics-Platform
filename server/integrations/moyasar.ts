@@ -13,6 +13,8 @@
  * All amounts are in the smallest currency unit (e.g., 1000 = 10.00 SAR)
  */
 
+import { storage } from "../storage";
+
 export interface CreatePaymentParams {
   amount: number;
   currency: string;
@@ -87,39 +89,76 @@ export class MoyasarService {
       };
     }
 
-    const response = await fetch(`${MOYASAR_API_BASE}/payments`, {
-      method: "POST",
-      headers: {
-        "Authorization": this.getAuthHeader(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        amount: params.amount,
-        currency: params.currency,
-        description: params.description,
-        callback_url: params.callbackUrl,
-        metadata: params.metadata,
-        source: {
-          type: "creditcard",
-          "3ds": true,
+    const startTime = Date.now();
+    try {
+      const response = await fetch(`${MOYASAR_API_BASE}/payments`, {
+        method: "POST",
+        headers: {
+          "Authorization": this.getAuthHeader(),
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          amount: params.amount,
+          currency: params.currency,
+          description: params.description,
+          callback_url: params.callbackUrl,
+          metadata: params.metadata,
+          source: {
+            type: "creditcard",
+            "3ds": true,
+          },
+        }),
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `Moyasar API error: ${response.status}`);
+      const duration = Date.now() - startTime;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        await storage.createIntegrationLog({
+          serviceName: "moyasar",
+          operation: "create_payment",
+          success: false,
+          statusCode: response.status,
+          errorMessage: errorData.message || `API error: ${response.status}`,
+          duration,
+          requestPayload: JSON.stringify({ amount: params.amount, currency: params.currency }),
+        });
+        throw new Error(errorData.message || `Moyasar API error: ${response.status}`);
+      }
+
+      const payment: MoyasarPayment = await response.json();
+
+      await storage.createIntegrationLog({
+        serviceName: "moyasar",
+        operation: "create_payment",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ amount: params.amount, currency: params.currency }),
+        responsePayload: JSON.stringify({ paymentId: payment.id, status: payment.status }),
+      });
+
+      return {
+        paymentId: payment.id,
+        status: payment.status,
+        transactionUrl: payment.source?.transaction_url,
+        amount: payment.amount,
+        currency: payment.currency,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (!(error instanceof Error && error.message.includes("Moyasar API error"))) {
+        await storage.createIntegrationLog({
+          serviceName: "moyasar",
+          operation: "create_payment",
+          success: false,
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+          duration,
+          requestPayload: JSON.stringify({ amount: params.amount, currency: params.currency }),
+        });
+      }
+      throw error;
     }
-
-    const payment: MoyasarPayment = await response.json();
-
-    return {
-      paymentId: payment.id,
-      status: payment.status,
-      transactionUrl: payment.source?.transaction_url,
-      amount: payment.amount,
-      currency: payment.currency,
-    };
   }
 
   async getPayment(paymentId: string): Promise<MoyasarPayment | null> {
@@ -138,21 +177,69 @@ export class MoyasarService {
       return null;
     }
 
-    const response = await fetch(`${MOYASAR_API_BASE}/payments/${paymentId}`, {
-      method: "GET",
-      headers: {
-        "Authorization": this.getAuthHeader(),
-      },
-    });
+    const startTime = Date.now();
+    try {
+      const response = await fetch(`${MOYASAR_API_BASE}/payments/${paymentId}`, {
+        method: "GET",
+        headers: {
+          "Authorization": this.getAuthHeader(),
+        },
+      });
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null;
+      const duration = Date.now() - startTime;
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          await storage.createIntegrationLog({
+            serviceName: "moyasar",
+            operation: "get_payment",
+            success: false,
+            statusCode: 404,
+            errorMessage: "Payment not found",
+            duration,
+            requestPayload: JSON.stringify({ paymentId }),
+          });
+          return null;
+        }
+        await storage.createIntegrationLog({
+          serviceName: "moyasar",
+          operation: "get_payment",
+          success: false,
+          statusCode: response.status,
+          errorMessage: `API error: ${response.status}`,
+          duration,
+          requestPayload: JSON.stringify({ paymentId }),
+        });
+        throw new Error(`Moyasar API error: ${response.status}`);
       }
-      throw new Error(`Moyasar API error: ${response.status}`);
-    }
 
-    return response.json();
+      const payment = await response.json();
+      
+      await storage.createIntegrationLog({
+        serviceName: "moyasar",
+        operation: "get_payment",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ paymentId }),
+        responsePayload: JSON.stringify({ status: payment.status }),
+      });
+
+      return payment;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (!(error instanceof Error && error.message.includes("Moyasar API error"))) {
+        await storage.createIntegrationLog({
+          serviceName: "moyasar",
+          operation: "get_payment",
+          success: false,
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+          duration,
+          requestPayload: JSON.stringify({ paymentId }),
+        });
+      }
+      throw error;
+    }
   }
 
   async verifyPayment(paymentId: string): Promise<string> {
@@ -172,16 +259,43 @@ export class MoyasarService {
       return true;
     }
 
-    const response = await fetch(`${MOYASAR_API_BASE}/payments/${paymentId}/refund`, {
-      method: "POST",
-      headers: {
-        "Authorization": this.getAuthHeader(),
-        "Content-Type": "application/json",
-      },
-      body: amount ? JSON.stringify({ amount }) : undefined,
-    });
+    const startTime = Date.now();
+    try {
+      const response = await fetch(`${MOYASAR_API_BASE}/payments/${paymentId}/refund`, {
+        method: "POST",
+        headers: {
+          "Authorization": this.getAuthHeader(),
+          "Content-Type": "application/json",
+        },
+        body: amount ? JSON.stringify({ amount }) : undefined,
+      });
 
-    return response.ok;
+      const duration = Date.now() - startTime;
+
+      await storage.createIntegrationLog({
+        serviceName: "moyasar",
+        operation: "refund_payment",
+        success: response.ok,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ paymentId, amount }),
+        responsePayload: response.ok ? JSON.stringify({ refunded: true }) : undefined,
+        errorMessage: response.ok ? undefined : `Refund failed: ${response.status}`,
+      });
+
+      return response.ok;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await storage.createIntegrationLog({
+        serviceName: "moyasar",
+        operation: "refund_payment",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ paymentId, amount }),
+      });
+      throw error;
+    }
   }
 
   /**

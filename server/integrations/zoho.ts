@@ -9,6 +9,8 @@
  * - ZOHO_ORGANIZATION_ID
  */
 
+import { storage } from "../storage";
+
 export interface ZohoInvoiceParams {
   customerId?: string;
   customerName: string;
@@ -98,6 +100,7 @@ export class ZohoService {
       return this.accessToken;
     }
 
+    const startTime = Date.now();
     try {
       const response = await fetch('https://accounts.zoho.sa/oauth/v2/token', {
         method: 'POST',
@@ -111,9 +114,18 @@ export class ZohoService {
       });
       
       const data = await response.json();
+      const duration = Date.now() - startTime;
       
       if (data.error) {
         console.error("Zoho token refresh error:", data.error);
+        await storage.createIntegrationLog({
+          serviceName: "zoho",
+          operation: "token_refresh",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data.error,
+          duration,
+        });
         return null;
       }
       
@@ -124,10 +136,26 @@ export class ZohoService {
         this.apiDomain = data.api_domain;
       }
       
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "token_refresh",
+        success: true,
+        statusCode: response.status,
+        duration,
+      });
+      
       console.log("Zoho access token refreshed successfully");
       return this.accessToken || null;
     } catch (error) {
+      const duration = Date.now() - startTime;
       console.error("Zoho token refresh failed:", error);
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "token_refresh",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+      });
       return null;
     }
   }
@@ -144,6 +172,7 @@ export class ZohoService {
       return null;
     }
 
+    const startTime = Date.now();
     try {
       const response = await fetch(
         `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}`,
@@ -170,11 +199,31 @@ export class ZohoService {
       );
       
       const data = await response.json();
+      const duration = Date.now() - startTime;
       
       if (data.code !== 0) {
         console.error("Zoho invoice creation error:", data.message);
+        await storage.createIntegrationLog({
+          serviceName: "zoho",
+          operation: "create_invoice",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data.message,
+          duration,
+          requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber }),
+        });
         return null;
       }
+      
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_invoice",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber }),
+        responsePayload: JSON.stringify({ invoiceId: data.invoice?.invoice_id }),
+      });
       
       console.log("Zoho invoice created:", data.invoice?.invoice_id);
       return {
@@ -182,7 +231,16 @@ export class ZohoService {
         invoiceUrl: data.invoice.invoice_url || "",
       };
     } catch (error) {
+      const duration = Date.now() - startTime;
       console.error("Zoho invoice creation failed:", error);
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_invoice",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber }),
+      });
       return null;
     }
   }
@@ -199,6 +257,7 @@ export class ZohoService {
       return null;
     }
 
+    const startTime = Date.now();
     try {
       // Split name into first and last name for contact persons
       const nameParts = params.name.split(' ');
@@ -215,6 +274,13 @@ export class ZohoService {
       if (params.shippingPostalCode) billingAddress.zip = params.shippingPostalCode;
       if (params.country) billingAddress.country = params.country;
       if (params.shippingContactPhone) billingAddress.phone = params.shippingContactPhone;
+      
+      // Add Arabic address fields with _sec_lang suffix (Zoho's secondary language format)
+      if (params.shippingContactNameAr) billingAddress.attention_sec_lang = params.shippingContactNameAr.substring(0, 90);
+      if (params.shippingAddressLine1Ar) billingAddress.address_sec_lang = params.shippingAddressLine1Ar.substring(0, 90);
+      if (params.shippingAddressLine2Ar) billingAddress.street2_sec_lang = params.shippingAddressLine2Ar.substring(0, 90);
+      if (params.shippingCityAr) billingAddress.city_sec_lang = params.shippingCityAr.substring(0, 50);
+      if (params.shippingStateOrProvinceAr) billingAddress.state_sec_lang = params.shippingStateOrProvinceAr.substring(0, 50);
       
       // Build shipping address (same as billing)
       const shippingAddress = { ...billingAddress };
@@ -240,29 +306,10 @@ export class ZohoService {
       
       // Add Secondary Language (Arabic) fields for KSA e-invoicing
       if (params.nameAr) {
-        contactPayload.contact_name_in_secondary_language = params.nameAr.substring(0, 99);
+        contactPayload.contact_name_sec_lang = params.nameAr.substring(0, 99);
       }
       if (params.companyNameAr) {
-        contactPayload.company_name_in_secondary_language = params.companyNameAr.substring(0, 99);
-      }
-      
-      // Build billing address in secondary language (Arabic)
-      // Zoho KSA requires object format with individual fields under limits
-      // Only include a few essential fields to avoid 100 char limit errors
-      const hasArabicAddress = params.shippingAddressLine1Ar || params.shippingCityAr;
-      
-      if (hasArabicAddress) {
-        // Build a combined address string for the single 'address' field
-        const addressParts: string[] = [];
-        if (params.shippingAddressLine1Ar) addressParts.push(params.shippingAddressLine1Ar.substring(0, 40));
-        if (params.shippingCityAr) addressParts.push(params.shippingCityAr.substring(0, 30));
-        
-        const billingAddressAr: Record<string, string> = {
-          address: addressParts.join(', ').substring(0, 90)
-        };
-        
-        contactPayload.billing_address_in_secondary_language = billingAddressAr;
-        contactPayload.shipping_address_in_secondary_language = billingAddressAr;
+        contactPayload.company_name_sec_lang = params.companyNameAr.substring(0, 99);
       }
       
       const response = await fetch(
@@ -278,16 +325,45 @@ export class ZohoService {
       );
       
       const data = await response.json();
+      const duration = Date.now() - startTime;
       
       if (data.code !== 0) {
         console.error("Zoho customer creation error:", data.message);
+        await storage.createIntegrationLog({
+          serviceName: "zoho",
+          operation: "create_customer",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data.message,
+          duration,
+          requestPayload: JSON.stringify({ email: params.email, name: params.name }),
+        });
         return null;
       }
+      
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_customer",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ email: params.email, name: params.name }),
+        responsePayload: JSON.stringify({ customerId: data.contact?.contact_id }),
+      });
       
       console.log("Zoho customer created:", data.contact?.contact_id);
       return data.contact.contact_id;
     } catch (error) {
+      const duration = Date.now() - startTime;
       console.error("Zoho customer creation failed:", error);
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_customer",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ email: params.email, name: params.name }),
+      });
       return null;
     }
   }
@@ -304,21 +380,8 @@ export class ZohoService {
       return false;
     }
 
+    const startTime = Date.now();
     try {
-      // DEBUG: Log incoming params to verify data
-      console.log("=== ZOHO UPDATE DEBUG ===");
-      console.log("English fields received:");
-      console.log("  shippingContactName:", params.shippingContactName);
-      console.log("  shippingAddressLine1:", params.shippingAddressLine1);
-      console.log("  shippingCity:", params.shippingCity);
-      console.log("  shippingStateOrProvince:", params.shippingStateOrProvince);
-      console.log("Arabic fields received:");
-      console.log("  shippingContactNameAr:", params.shippingContactNameAr);
-      console.log("  shippingAddressLine1Ar:", params.shippingAddressLine1Ar);
-      console.log("  shippingCityAr:", params.shippingCityAr);
-      console.log("  nameAr:", params.nameAr);
-      console.log("=========================");
-      
       // Split name into first and last name for contact persons
       const nameParts = params.name.split(' ');
       const firstName = nameParts[0] || '';
@@ -373,13 +436,6 @@ export class ZohoService {
         contactPayload.company_name_sec_lang = params.companyNameAr.substring(0, 99);
       }
       
-      // DEBUG: Log full payload being sent
-      console.log("=== ZOHO API PAYLOAD ===");
-      console.log("contact_name_sec_lang:", contactPayload.contact_name_sec_lang);
-      console.log("company_name_sec_lang:", contactPayload.company_name_sec_lang);
-      console.log("billing_address (with embedded Arabic):", JSON.stringify(contactPayload.billing_address, null, 2));
-      console.log("========================");
-      
       const response = await fetch(
         `${this.apiDomain}/books/v3/contacts/${zohoCustomerId}?organization_id=${this.organizationId}`,
         {
@@ -393,25 +449,45 @@ export class ZohoService {
       );
       
       const data = await response.json();
-      
-      // DEBUG: Log full Zoho response to see what was actually saved
-      console.log("=== ZOHO FULL RESPONSE ===");
-      console.log("Response code:", data.code);
-      console.log("Contact name:", data.contact?.contact_name);
-      console.log("Contact name in transaction language:", data.contact?.contact_name_in_transaction_language);
-      console.log("Company name in transaction language:", data.contact?.company_name_in_transaction_language);
-      console.log("Billing address:", JSON.stringify(data.contact?.billing_address, null, 2));
-      console.log("==========================");
+      const duration = Date.now() - startTime;
       
       if (data.code !== 0) {
-        console.error("Zoho customer update error:", data.message, "Response:", JSON.stringify(data, null, 2));
+        console.error("Zoho customer update error:", data.message);
+        await storage.createIntegrationLog({
+          serviceName: "zoho",
+          operation: "update_customer",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data.message,
+          duration,
+          requestPayload: JSON.stringify({ customerId: zohoCustomerId, email: params.email }),
+        });
         return false;
       }
+      
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "update_customer",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ customerId: zohoCustomerId, email: params.email }),
+        responsePayload: JSON.stringify({ contactId: data.contact?.contact_id }),
+      });
       
       console.log("Zoho customer updated successfully:", zohoCustomerId);
       return true;
     } catch (error) {
+      const duration = Date.now() - startTime;
       console.error("Zoho customer update failed:", error);
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "update_customer",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ customerId: zohoCustomerId, email: params.email }),
+      });
       return false;
     }
   }
