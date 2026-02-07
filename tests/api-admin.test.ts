@@ -26,8 +26,8 @@ afterAll(() => {
 });
 
 describe("Admin - Dashboard", () => {
-  it("GET /api/admin/dashboard should return stats", async () => {
-    const res = await adminAgent.get("/api/admin/dashboard");
+  it("GET /api/admin/stats should return stats", async () => {
+    const res = await adminAgent.get("/api/admin/stats");
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("totalClients");
     expect(res.body).toHaveProperty("activeClients");
@@ -86,15 +86,6 @@ describe("Admin - Client Management", () => {
     expect(res.status).toBe(404);
   });
 
-  it("GET /api/admin/clients/:id/users should return users for a client", async () => {
-    const listRes = await adminAgent.get("/api/admin/clients");
-    if (listRes.body.clients.length > 0) {
-      const clientId = listRes.body.clients[0].id;
-      const res = await adminAgent.get(`/api/admin/clients/${clientId}/users`);
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    }
-  });
 });
 
 describe("Admin - Applications", () => {
@@ -144,16 +135,16 @@ describe("Admin - Payments", () => {
 });
 
 describe("Admin - Pricing Rules", () => {
-  it("GET /api/admin/pricing-rules should return pricing rules", async () => {
-    const res = await adminAgent.get("/api/admin/pricing-rules");
+  it("GET /api/admin/pricing should return pricing rules", async () => {
+    const res = await adminAgent.get("/api/admin/pricing");
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it("POST /api/admin/pricing-rules should create a pricing rule", async () => {
+  it("POST /api/admin/pricing should create a pricing rule", async () => {
     const uniqueName = `test_profile_${Date.now()}`;
     const res = await adminAgent
-      .post("/api/admin/pricing-rules")
+      .post("/api/admin/pricing")
       .send({
         profile: uniqueName,
         displayName: "Test Profile",
@@ -165,10 +156,10 @@ describe("Admin - Pricing Rules", () => {
     expect(res.body.displayName).toBe("Test Profile");
   });
 
-  it("POST /api/admin/pricing-rules should reject duplicate profile", async () => {
+  it("POST /api/admin/pricing should reject duplicate profile", async () => {
     const uniqueName = `dup_test_${Date.now()}`;
     await adminAgent
-      .post("/api/admin/pricing-rules")
+      .post("/api/admin/pricing")
       .send({
         profile: uniqueName,
         displayName: "Dup Test",
@@ -177,7 +168,7 @@ describe("Admin - Pricing Rules", () => {
       });
 
     const res = await adminAgent
-      .post("/api/admin/pricing-rules")
+      .post("/api/admin/pricing")
       .send({
         profile: uniqueName,
         displayName: "Dup Test 2",

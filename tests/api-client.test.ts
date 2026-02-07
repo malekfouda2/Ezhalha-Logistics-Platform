@@ -2,11 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import supertest from "supertest";
 import express from "express";
 import { createServer } from "http";
+import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
+import { storage } from "../server/storage";
 
 let app: express.Express;
 let server: ReturnType<typeof createServer>;
 let clientAgent: supertest.SuperAgentTest;
+let testClientUsername: string;
+const TEST_CLIENT_PASSWORD = "TestClient123!";
 
 beforeAll(async () => {
   app = express();
@@ -15,10 +19,40 @@ beforeAll(async () => {
   server = createServer(app);
   await registerRoutes(server, app);
 
+  testClientUsername = `test_client_${Date.now()}`;
+  const hashedPassword = await bcrypt.hash(TEST_CLIENT_PASSWORD, 10);
+  const clientAccount = await storage.createClientAccount({
+    name: "Test Client Account",
+    email: `${testClientUsername}@test.com`,
+    phone: "55500001111",
+    country: "United States",
+    profile: "regular",
+    accountType: "company",
+    companyName: "Test Corp",
+    isActive: true,
+    shippingContactName: "Test Contact",
+    shippingContactPhone: "55500001111",
+    shippingCountryCode: "US",
+    shippingStateOrProvince: "Texas",
+    shippingCity: "Houston",
+    shippingPostalCode: "77001",
+    shippingAddressLine1: "100 Test Blvd Suite 1",
+  });
+  await storage.createUser({
+    username: testClientUsername,
+    email: `${testClientUsername}@test.com`,
+    password: hashedPassword,
+    userType: "client",
+    isPrimaryContact: true,
+    mustChangePassword: false,
+    isActive: true,
+    clientAccountId: clientAccount.id,
+  });
+
   clientAgent = supertest.agent(app);
   await clientAgent
     .post("/api/auth/login")
-    .send({ username: "client", password: "welcome123" });
+    .send({ username: testClientUsername, password: TEST_CLIENT_PASSWORD });
 }, 30000);
 
 afterAll(() => {
@@ -72,8 +106,8 @@ describe("Client - Payments", () => {
 });
 
 describe("Client - Dashboard", () => {
-  it("GET /api/client/dashboard should return dashboard stats", async () => {
-    const res = await clientAgent.get("/api/client/dashboard");
+  it("GET /api/client/stats should return dashboard stats", async () => {
+    const res = await clientAgent.get("/api/client/stats");
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("totalShipments");
     expect(res.body).toHaveProperty("shipmentsInTransit");
@@ -175,8 +209,8 @@ describe("Public - Application Submission", () => {
 });
 
 describe("Cross-role Access Control", () => {
-  it("client should not access admin dashboard", async () => {
-    const res = await clientAgent.get("/api/admin/dashboard");
+  it("client should not access admin stats", async () => {
+    const res = await clientAgent.get("/api/admin/stats");
     expect(res.status).toBe(403);
   });
 
@@ -195,14 +229,14 @@ describe("Cross-role Access Control", () => {
     expect(res.status).toBe(403);
   });
 
-  it("client should not access admin pricing rules", async () => {
-    const res = await clientAgent.get("/api/admin/pricing-rules");
+  it("client should not access admin pricing", async () => {
+    const res = await clientAgent.get("/api/admin/pricing");
     expect(res.status).toBe(403);
   });
 
   it("client should not create pricing rules", async () => {
     const res = await clientAgent
-      .post("/api/admin/pricing-rules")
+      .post("/api/admin/pricing")
       .send({
         profile: "hacker_profile",
         displayName: "Hacker",
