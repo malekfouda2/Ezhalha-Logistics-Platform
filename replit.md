@@ -28,9 +28,11 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Bcrypt password hashing (10 salt rounds)
 - Full RBAC implementation with roles, permissions, user-roles, role-permissions
 - Session-based authentication with secure cookies (sameSite: lax for CSRF protection)
+- PostgreSQL session store in production (connect-pg-simple), MemoryStore in development
 - Helmet security headers with Content Security Policy
 - Rate limiting: 100 req/15min general, 5 req/15min for auth endpoints
 - Brute-force protection: 5 max login attempts, 15min lockout per IP/username
+- Forced password change on first login (mustChangePassword flag)
 - Audit trail for all admin/client actions
 
 **Bilingual Support (Arabic as Secondary Language):**

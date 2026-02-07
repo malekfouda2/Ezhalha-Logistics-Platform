@@ -38,9 +38,11 @@ import ClientUsers from "@/pages/client/users";
 function ProtectedRoute({
   component: Component,
   requiredUserType,
+  allowPasswordChange,
 }: {
   component: () => JSX.Element;
   requiredUserType?: "admin" | "client";
+  allowPasswordChange?: boolean;
 }) {
   const { user, isLoading } = useAuth();
   const [, navigate] = useLocation();
@@ -56,6 +58,10 @@ function ProtectedRoute({
   if (requiredUserType && user.userType !== requiredUserType) {
     const redirectPath = user.userType === "admin" ? "/admin" : "/client";
     return <Redirect to={redirectPath} />;
+  }
+
+  if (user.mustChangePassword && !allowPasswordChange) {
+    return <Redirect to="/client/settings" />;
   }
 
   return <Component />;
@@ -138,7 +144,7 @@ function Router() {
         <ProtectedRoute component={ClientPayments} requiredUserType="client" />
       </Route>
       <Route path="/client/settings">
-        <ProtectedRoute component={ClientSettings} requiredUserType="client" />
+        <ProtectedRoute component={ClientSettings} requiredUserType="client" allowPasswordChange />
       </Route>
       <Route path="/client/users">
         <ProtectedRoute component={ClientUsers} requiredUserType="client" />

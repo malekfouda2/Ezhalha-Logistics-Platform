@@ -30,7 +30,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ClientAccount } from "@shared/schema";
+import { useAuth } from "@/lib/auth-context";
 import { format } from "date-fns";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const profileFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -95,6 +97,7 @@ type ShippingAddressFormData = z.infer<typeof shippingAddressSchema>;
 
 export default function ClientSettings() {
   const { toast } = useToast();
+  const { user, checkAuth } = useAuth();
 
   const { data: account, isLoading } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
@@ -162,6 +165,7 @@ export default function ClientSettings() {
     },
     onSuccess: () => {
       passwordForm.reset();
+      checkAuth();
       toast({
         title: "Password Changed",
         description: "Your password has been updated successfully.",
@@ -255,6 +259,16 @@ export default function ClientSettings() {
   return (
     <ClientLayout clientProfile={account?.profile}>
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
+        {user?.mustChangePassword && (
+          <Alert variant="destructive" data-testid="alert-must-change-password">
+            <Shield className="h-4 w-4" />
+            <AlertTitle>Password Change Required</AlertTitle>
+            <AlertDescription>
+              You must change your temporary password before you can access other features. Please update your password below.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Page Header */}
         <div>
           <h1 className="text-2xl font-bold">Account Settings</h1>

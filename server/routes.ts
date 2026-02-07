@@ -95,6 +95,8 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8, "New password must be at least 8 characters"),
 });
 import MemoryStore from "memorystore";
+import pgSession from "connect-pg-simple";
+import pg from "pg";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 
 // Extend express-session types
@@ -105,6 +107,7 @@ declare module "express-session" {
 }
 
 const MemoryStoreSession = MemoryStore(session);
+const PgSessionStore = pgSession(session);
 
 // Middleware to check authentication
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -305,15 +308,24 @@ export async function registerRoutes(
   // General rate limiting
   app.use("/api/", generalLimiter);
 
-  // Session middleware
+  // Session middleware - use PostgreSQL session store in production, MemoryStore in development
+  const sessionStore = process.env.NODE_ENV === "production" && process.env.DATABASE_URL
+    ? new PgSessionStore({
+        pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }),
+        tableName: "session",
+        createTableIfMissing: true,
+        pruneSessionInterval: 60 * 15,
+      })
+    : new MemoryStoreSession({
+        checkPeriod: 86400000,
+      });
+
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "ezhalha-secret-key-dev",
       resave: false,
       saveUninitialized: false,
-      store: new MemoryStoreSession({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      }),
+      store: sessionStore,
       cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
@@ -450,7 +462,7 @@ export async function registerRoutes(
       }
       
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await storage.updateUser(user.id, { password: hashedPassword, updatedAt: new Date() });
+      await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false, updatedAt: new Date() });
       
       // Clear brute-force tracking for this user on successful password change
       if (user.username) {
@@ -703,6 +715,7 @@ export async function registerRoutes(
 
         // Create client account with all company document fields and shipping address
         const clientAccount = await storage.createClientAccount({
+          accountType: application.accountType || "company",
           name: application.name,
           email: application.email,
           phone: application.phone,
@@ -719,7 +732,7 @@ export async function registerRoutes(
           shippingContactName: application.shippingContactName,
           shippingContactPhone: application.shippingContactPhone,
           shippingCountryCode: application.shippingCountryCode,
-          shippingStateOrProvince: (application as any).shippingStateOrProvince,
+          shippingStateOrProvince: application.shippingStateOrProvince,
           shippingCity: application.shippingCity,
           shippingPostalCode: application.shippingPostalCode,
           shippingAddressLine1: application.shippingAddressLine1,
@@ -773,6 +786,8 @@ export async function registerRoutes(
           password: hashedPassword,
           userType: "client",
           clientAccountId: clientAccount.id,
+          isPrimaryContact: true,
+          mustChangePassword: true,
           isActive: true,
         });
 

@@ -89,6 +89,7 @@ export const users = pgTable("users", {
   userType: text("user_type").notNull().default("client"),
   clientAccountId: varchar("client_account_id"),
   isPrimaryContact: boolean("is_primary_contact").notNull().default(false),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
