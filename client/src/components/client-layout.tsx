@@ -22,6 +22,7 @@ import {
   ChevronDown,
   Settings,
   Users,
+  ScrollText,
 } from "lucide-react";
 
 interface ClientLayoutProps {
@@ -115,6 +116,28 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
             );
           })}
         </nav>
+
+        {/* Policy Links */}
+        <div className="px-3 pb-2 space-y-1">
+          <Link href="/policy/privacy-policy">
+            <div
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-xs text-muted-foreground hover-elevate active-elevate-2"
+              data-testid="nav-privacy-policy"
+            >
+              <ScrollText className="h-4 w-4 flex-shrink-0" />
+              <span>Privacy Policy</span>
+            </div>
+          </Link>
+          <Link href="/policy/shipping-return-policy">
+            <div
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-xs text-muted-foreground hover-elevate active-elevate-2"
+              data-testid="nav-shipping-policy"
+            >
+              <ScrollText className="h-4 w-4 flex-shrink-0" />
+              <span>Shipping & Return Policy</span>
+            </div>
+          </Link>
+        </div>
 
         {/* User Menu */}
         <div className="p-3 border-t border-sidebar-border">
