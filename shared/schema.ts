@@ -620,6 +620,27 @@ export const insertIdempotencyRecordSchema = createInsertSchema(idempotencyRecor
 export type InsertIdempotencyRecord = z.infer<typeof insertIdempotencyRecordSchema>;
 export type IdempotencyRecord = typeof idempotencyRecords.$inferSelect;
 
+// Policies
+export const policies = pgTable("policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  isPublished: boolean("is_published").default(true).notNull(),
+  updatedBy: varchar("updated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertPolicySchema = createInsertSchema(policies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPolicy = z.infer<typeof insertPolicySchema>;
+export type Policy = typeof policies.$inferSelect;
+
 // Branding config type
 export interface BrandingConfig {
   appName: string;

@@ -33,6 +33,8 @@ import {
   type InsertShipmentRateQuote,
   type ClientUserPermission,
   type InsertClientUserPermission,
+  type Policy,
+  type InsertPolicy,
   users,
   clientAccounts,
   clientApplications,
@@ -50,6 +52,7 @@ import {
   webhookEvents,
   shipmentRateQuotes,
   clientUserPermissions,
+  policies,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -218,6 +221,14 @@ export interface IStorage {
   createClientUserPermissions(perms: InsertClientUserPermission): Promise<ClientUserPermission>;
   updateClientUserPermissions(id: string, updates: Partial<ClientUserPermission>): Promise<ClientUserPermission | undefined>;
   deleteClientUserPermissions(userId: string, clientAccountId: string): Promise<void>;
+
+  // Policies
+  getPolicies(): Promise<Policy[]>;
+  getPolicyBySlug(slug: string): Promise<Policy | undefined>;
+  getPolicy(id: string): Promise<Policy | undefined>;
+  createPolicy(policy: InsertPolicy): Promise<Policy>;
+  updatePolicy(id: string, updates: Partial<Policy>): Promise<Policy | undefined>;
+  deletePolicy(id: string): Promise<void>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -1050,6 +1061,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Initialize default data if database is empty
+  // Policies
+  async getPolicies(): Promise<Policy[]> {
+    return await db.select().from(policies).orderBy(policies.createdAt);
+  }
+
+  async getPolicyBySlug(slug: string): Promise<Policy | undefined> {
+    const [policy] = await db.select().from(policies).where(eq(policies.slug, slug));
+    return policy;
+  }
+
+  async getPolicy(id: string): Promise<Policy | undefined> {
+    const [policy] = await db.select().from(policies).where(eq(policies.id, id));
+    return policy;
+  }
+
+  async createPolicy(policy: InsertPolicy): Promise<Policy> {
+    const [created] = await db.insert(policies).values(policy).returning();
+    return created;
+  }
+
+  async updatePolicy(id: string, updates: Partial<Policy>): Promise<Policy | undefined> {
+    const [updated] = await db
+      .update(policies)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(policies.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deletePolicy(id: string): Promise<void> {
+    await db.delete(policies).where(eq(policies.id, id));
+  }
+
   async initializeDefaults(): Promise<void> {
     // Check if admin user already exists
     const existingAdmin = await this.getUserByUsername("admin");
@@ -1180,6 +1224,182 @@ export class DatabaseStorage implements IStorage {
           status: "pending",
         });
       }
+    }
+
+    // Seed default policies (only if none exist)
+    const existingPolicies = await this.getPolicies();
+    if (existingPolicies.length === 0) {
+      await this.createPolicy({
+        slug: "privacy-policy",
+        title: "Privacy Policy",
+        content: `<h2>Privacy Policy</h2>
+<p><strong>Last Updated:</strong> ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+
+<h3>1. Introduction</h3>
+<p>ezhalha ("we," "our," or "us") is committed to protecting the privacy and security of your personal information. This Privacy Policy describes how we collect, use, disclose, and safeguard your data when you use our logistics management platform and related services.</p>
+
+<h3>2. Information We Collect</h3>
+<p>We collect the following types of information:</p>
+<ul>
+<li><strong>Account Information:</strong> Name, email address, phone number, company name, and business registration details.</li>
+<li><strong>Shipping Information:</strong> Sender and recipient addresses, contact details, package dimensions, and weight.</li>
+<li><strong>Payment Information:</strong> Billing details processed securely through our third-party payment provider (Moyasar). We do not store full credit card numbers on our servers.</li>
+<li><strong>Usage Data:</strong> Login activity, IP addresses, browser type, pages visited, and actions taken within the platform.</li>
+<li><strong>Communication Data:</strong> Records of correspondence between you and our support team.</li>
+</ul>
+
+<h3>3. How We Use Your Information</h3>
+<p>We use your information to:</p>
+<ul>
+<li>Process and manage shipment requests and deliveries</li>
+<li>Generate invoices and process payments</li>
+<li>Communicate with you regarding your account and shipments</li>
+<li>Comply with legal and regulatory requirements, including ZATCA e-invoicing regulations in Saudi Arabia</li>
+<li>Improve our platform, services, and customer experience</li>
+<li>Prevent fraud and maintain the security of our systems</li>
+</ul>
+
+<h3>4. Data Sharing and Disclosure</h3>
+<p>We may share your information with:</p>
+<ul>
+<li><strong>Shipping Carriers:</strong> Such as FedEx, to fulfill shipment requests on your behalf.</li>
+<li><strong>Payment Processors:</strong> Including Moyasar, to process transactions securely.</li>
+<li><strong>Accounting Systems:</strong> Such as Zoho Books, for invoice management and financial records.</li>
+<li><strong>Legal Authorities:</strong> When required by law or to protect our rights and the safety of our users.</li>
+</ul>
+<p>We do not sell your personal information to third parties.</p>
+
+<h3>5. Data Security</h3>
+<p>We implement industry-standard security measures to protect your data, including:</p>
+<ul>
+<li>Encryption of data in transit (TLS/SSL)</li>
+<li>Secure password hashing (bcrypt)</li>
+<li>Role-based access controls</li>
+<li>Regular security audits and monitoring</li>
+<li>Session management with automatic expiration</li>
+</ul>
+
+<h3>6. Data Retention</h3>
+<p>We retain your personal data for as long as your account is active or as needed to provide our services. Shipment records, invoices, and audit logs may be retained for longer periods to comply with legal, accounting, and regulatory requirements.</p>
+
+<h3>7. Your Rights</h3>
+<p>You have the right to:</p>
+<ul>
+<li>Access and review the personal data we hold about you</li>
+<li>Request correction of inaccurate information</li>
+<li>Request deletion of your account (subject to legal retention requirements)</li>
+<li>Opt out of marketing communications</li>
+</ul>
+
+<h3>8. Cookies and Tracking</h3>
+<p>We use session cookies to maintain your login state and ensure platform functionality. These cookies are essential for the operation of the service and cannot be disabled.</p>
+
+<h3>9. Changes to This Policy</h3>
+<p>We may update this Privacy Policy from time to time. Significant changes will be communicated via email or a prominent notice on our platform. Continued use of our services after such changes constitutes acceptance of the updated policy.</p>
+
+<h3>10. Contact Us</h3>
+<p>If you have any questions or concerns about this Privacy Policy, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
+        isPublished: true,
+      });
+
+      await this.createPolicy({
+        slug: "shipping-return-policy",
+        title: "Shipping & Return Policy",
+        content: `<h2>Shipping & Return Policy</h2>
+<p><strong>Last Updated:</strong> ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+
+<h3>1. Overview</h3>
+<p>This Shipping & Return Policy outlines the terms and conditions governing shipment services provided through the ezhalha logistics platform. By using our services, you agree to comply with and be bound by this policy.</p>
+
+<h3>2. Shipping Services</h3>
+<p>ezhalha provides logistics management services for the following shipment types:</p>
+<ul>
+<li><strong>Domestic Shipments:</strong> Shipping within the Kingdom of Saudi Arabia (KSA).</li>
+<li><strong>Inbound Shipments:</strong> Shipping into Saudi Arabia from international origins.</li>
+<li><strong>Outbound Shipments:</strong> Shipping from Saudi Arabia to international destinations.</li>
+</ul>
+<p>Shipments are fulfilled through our carrier partners, including FedEx, and are subject to the carriers' terms of service.</p>
+
+<h3>3. Shipping Rates and Pricing</h3>
+<ul>
+<li>Shipping rates are calculated based on package weight, dimensions, origin, destination, and selected service type.</li>
+<li>Rates are provided as quotes during the shipment creation process and are valid for 30 minutes from the time of quotation.</li>
+<li>Final prices include applicable margins based on your client profile tier (Regular, Mid-Level, or VIP).</li>
+<li>All prices are displayed in Saudi Riyals (SAR) unless otherwise specified.</li>
+</ul>
+
+<h3>4. Payment Terms</h3>
+<ul>
+<li>Payment is required at the time of shipment booking.</li>
+<li>Payments are processed securely through Moyasar payment gateway.</li>
+<li>Accepted payment methods include credit cards and debit cards with 3D Secure authentication.</li>
+<li>Invoices are generated automatically and can be accessed through your client portal.</li>
+</ul>
+
+<h3>5. Shipment Processing</h3>
+<ul>
+<li>Shipments are processed within 1-2 business days after payment confirmation.</li>
+<li>Tracking numbers are assigned upon shipment creation and can be monitored through the client portal.</li>
+<li>Estimated delivery times vary based on the shipping service selected, origin, and destination.</li>
+<li>ezhalha is not liable for delays caused by customs clearance, weather conditions, or circumstances beyond our control.</li>
+</ul>
+
+<h3>6. Cancellation Policy</h3>
+<ul>
+<li>Shipments may be cancelled before they enter "in transit" status.</li>
+<li>Cancellation requests must be submitted through the client portal or by contacting our support team.</li>
+<li>Cancellations of shipments in "processing" status may be subject to a processing fee.</li>
+<li>Once a shipment is marked as "in transit," cancellation is not possible.</li>
+</ul>
+
+<h3>7. Returns and Refunds</h3>
+<ul>
+<li><strong>Damaged or Lost Shipments:</strong> If a shipment is damaged during transit or lost, please contact our support team within 7 business days of the expected delivery date. We will work with the carrier to investigate and resolve the issue.</li>
+<li><strong>Refund Eligibility:</strong> Refunds are available for cancelled shipments that have not yet been picked up by the carrier. Refunds are processed to the original payment method within 5-10 business days.</li>
+<li><strong>Non-Refundable:</strong> Shipping fees for delivered shipments, customs duties, and shipments cancelled after pickup are non-refundable.</li>
+<li><strong>Return Shipments:</strong> If a return shipment is required, a new shipment must be created through the platform. Return shipments are subject to standard shipping rates.</li>
+</ul>
+
+<h3>8. Prohibited Items</h3>
+<p>The following items are prohibited from shipping through our platform:</p>
+<ul>
+<li>Hazardous materials and dangerous goods (unless specifically authorized)</li>
+<li>Illegal substances and contraband</li>
+<li>Perishable goods without proper packaging and authorization</li>
+<li>Items prohibited by the laws of the origin or destination country</li>
+<li>Items restricted by carrier policies</li>
+</ul>
+
+<h3>9. Insurance and Liability</h3>
+<ul>
+<li>Basic carrier liability coverage is included with all shipments.</li>
+<li>Additional insurance coverage may be available through the carrier for high-value shipments.</li>
+<li>ezhalha's liability is limited to the shipping fees paid for the affected shipment.</li>
+<li>Claims must be filed within 30 days of delivery or expected delivery date.</li>
+</ul>
+
+<h3>10. Address Requirements</h3>
+<ul>
+<li>Accurate and complete addresses are required for all shipments.</li>
+<li>For shipments within Saudi Arabia, a Short Address (National Address code) is required.</li>
+<li>Incorrect or incomplete addresses may result in delivery delays or additional fees.</li>
+<li>ezhalha is not responsible for failed deliveries due to incorrect address information provided by the client.</li>
+</ul>
+
+<h3>11. Customs and Duties</h3>
+<ul>
+<li>International shipments may be subject to customs duties, taxes, and fees imposed by the destination country.</li>
+<li>The recipient is responsible for any customs duties and import taxes unless otherwise agreed.</li>
+<li>ezhalha is not responsible for delays caused by customs inspections or clearance procedures.</li>
+</ul>
+
+<h3>12. Changes to This Policy</h3>
+<p>We reserve the right to modify this Shipping & Return Policy at any time. Changes will be effective immediately upon posting on the platform. Continued use of our services constitutes acceptance of the updated policy.</p>
+
+<h3>13. Contact Us</h3>
+<p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
+        isPublished: true,
+      });
     }
 
     console.log("Database initialization complete!");
