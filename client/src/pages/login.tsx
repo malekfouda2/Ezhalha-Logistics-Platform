@@ -161,7 +161,12 @@ export default function LoginPage() {
       </main>
 
       {/* Footer */}
-      <footer className="py-4 text-center text-sm text-muted-foreground">
+      <footer className="py-4 text-center text-sm text-muted-foreground space-y-2">
+        <div className="flex items-center justify-center gap-4 flex-wrap">
+          <a href="/policy/privacy-policy" className="hover:underline" data-testid="link-privacy-policy">Privacy Policy</a>
+          <span className="text-muted-foreground/50">|</span>
+          <a href="/policy/shipping-return-policy" className="hover:underline" data-testid="link-shipping-policy">Shipping & Return Policy</a>
+        </div>
         <p>ezhalha Logistics Platform</p>
       </footer>
     </div>

@@ -1097,6 +1097,13 @@ export class DatabaseStorage implements IStorage {
   async initializeDefaults(): Promise<void> {
     // Check if admin user already exists
     const existingAdmin = await this.getUserByUsername("admin");
+    // Seed policies independently (they may be added after initial setup)
+    const existingPolicies = await this.getPolicies();
+    if (existingPolicies.length === 0) {
+      console.log("Seeding default policies...");
+      await this.seedDefaultPolicies();
+    }
+
     if (existingAdmin) {
       console.log("Database already initialized");
       return;
@@ -1226,9 +1233,10 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Seed default policies (only if none exist)
-    const existingPolicies = await this.getPolicies();
-    if (existingPolicies.length === 0) {
+    console.log("Database initialization complete!");
+  }
+
+  private async seedDefaultPolicies(): Promise<void> {
       await this.createPolicy({
         slug: "privacy-policy",
         title: "Privacy Policy",
@@ -1400,9 +1408,6 @@ export class DatabaseStorage implements IStorage {
 <p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
         isPublished: true,
       });
-    }
-
-    console.log("Database initialization complete!");
   }
 }
 

@@ -15,6 +15,7 @@ import { stripeService } from "./integrations/stripe";
 import { moyasarService } from "./integrations/moyasar";
 import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
+import sanitizeHtml from "sanitize-html";
 
 const SALT_ROUNDS = 10;
 
@@ -357,6 +358,35 @@ export async function registerRoutes(
       logoUrl: "/assets/branding/logo.png",
     };
     res.json(config);
+  });
+
+  // ============================================
+  // PUBLIC POLICY ROUTES
+  // ============================================
+  app.get("/api/policies", async (_req, res) => {
+    try {
+      const allPolicies = await storage.getPolicies();
+      const published = allPolicies
+        .filter(p => p.isPublished)
+        .map(({ id, slug, title, updatedAt }) => ({ id, slug, title, updatedAt }));
+      res.json(published);
+    } catch (error) {
+      logError("Error fetching public policies", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/policies/:slug", async (req, res) => {
+    try {
+      const policy = await storage.getPolicyBySlug(req.params.slug);
+      if (!policy || !policy.isPublished) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      res.json(policy);
+    } catch (error) {
+      logError("Error fetching policy", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // ============================================
@@ -1835,6 +1865,133 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       logError("Error removing role from user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // ADMIN - POLICIES MANAGEMENT
+  // ============================================
+  app.get("/api/admin/policies", requireAdmin, async (_req, res) => {
+    try {
+      const allPolicies = await storage.getPolicies();
+      res.json(allPolicies);
+    } catch (error) {
+      logError("Error fetching policies", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/policies/:id", requireAdmin, async (req, res) => {
+    try {
+      const policy = await storage.getPolicy(req.params.id);
+      if (!policy) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      res.json(policy);
+    } catch (error) {
+      logError("Error fetching policy", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  const createPolicySchema = z.object({
+    title: z.string().min(1, "Title is required").max(255),
+    slug: z.string().min(1, "Slug is required").max(100),
+    content: z.string().min(1, "Content is required"),
+    isPublished: z.boolean().optional().default(true),
+  });
+
+  const updatePolicySchema = z.object({
+    title: z.string().min(1).max(255).optional(),
+    content: z.string().min(1).optional(),
+    isPublished: z.boolean().optional(),
+  });
+
+  const sanitizeOptions: sanitizeHtml.IOptions = {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat(["h1", "h2", "h3", "h4", "h5", "h6", "img"]),
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      img: ["src", "alt", "width", "height"],
+    },
+    disallowedTagsMode: "discard",
+  };
+
+  app.post("/api/admin/policies", requireAdmin, async (req, res) => {
+    try {
+      const parsed = createPolicySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+
+      const { title, slug, content, isPublished } = parsed.data;
+      const normalizedSlug = slug.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+      if (!normalizedSlug) {
+        return res.status(400).json({ error: "Invalid slug" });
+      }
+
+      const existing = await storage.getPolicyBySlug(normalizedSlug);
+      if (existing) {
+        return res.status(409).json({ error: "A policy with this slug already exists" });
+      }
+
+      const sanitizedContent = sanitizeHtml(content, sanitizeOptions);
+
+      const policy = await storage.createPolicy({
+        title: title.trim(),
+        slug: normalizedSlug,
+        content: sanitizedContent,
+        isPublished,
+        updatedBy: req.session.userId,
+      });
+
+      await logAudit(req.session.userId, "create_policy", "policy", policy.id, JSON.stringify({ title, slug: normalizedSlug }));
+      res.status(201).json(policy);
+    } catch (error) {
+      logError("Error creating policy", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/policies/:id", requireAdmin, async (req, res) => {
+    try {
+      const policy = await storage.getPolicy(req.params.id);
+      if (!policy) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+
+      const parsed = updatePolicySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+
+      const { title, content, isPublished } = parsed.data;
+      const updates: Record<string, any> = { updatedBy: req.session.userId };
+      if (title !== undefined) updates.title = title.trim();
+      if (content !== undefined) updates.content = sanitizeHtml(content, sanitizeOptions);
+      if (isPublished !== undefined) updates.isPublished = isPublished;
+
+      const updated = await storage.updatePolicy(req.params.id, updates);
+      await logAudit(req.session.userId, "update_policy", "policy", req.params.id, JSON.stringify({ title: title || policy.title }));
+      res.json(updated);
+    } catch (error) {
+      logError("Error updating policy", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/policies/:id", requireAdmin, async (req, res) => {
+    try {
+      const policy = await storage.getPolicy(req.params.id);
+      if (!policy) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+
+      await storage.deletePolicy(req.params.id);
+      await logAudit(req.session.userId, "delete_policy", "policy", req.params.id, JSON.stringify({ title: policy.title }));
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting policy", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -25,6 +25,7 @@ import AdminIntegrationLogs from "@/pages/admin/integration-logs";
 import AdminWebhookEvents from "@/pages/admin/webhook-events";
 import AdminRBAC from "@/pages/admin/rbac";
 import AdminEditClient from "@/pages/admin/edit-client";
+import AdminPolicies from "@/pages/admin/policies";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -33,6 +34,7 @@ import CreateShipment from "@/pages/client/create-shipment";
 import ClientInvoices from "@/pages/client/invoices";
 import ClientPayments from "@/pages/client/payments";
 import ClientSettings from "@/pages/client/settings";
+import PolicyPage from "@/pages/policy";
 import ClientUsers from "@/pages/client/users";
 
 function ProtectedRoute({
@@ -88,6 +90,7 @@ function Router() {
       {/* Public routes */}
       <Route path="/" component={AuthRedirect} />
       <Route path="/apply" component={ApplyPage} />
+      <Route path="/policy/:slug" component={PolicyPage} />
 
       {/* Admin routes */}
       <Route path="/admin">
@@ -125,6 +128,9 @@ function Router() {
       </Route>
       <Route path="/admin/rbac">
         <ProtectedRoute component={AdminRBAC} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/policies">
+        <ProtectedRoute component={AdminPolicies} requiredUserType="admin" />
       </Route>
 
       {/* Client routes */}

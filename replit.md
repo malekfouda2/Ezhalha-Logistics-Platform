@@ -16,6 +16,7 @@ ezhalha is a production-ready enterprise logistics management platform designed 
 - Client-level RBAC (team member management with granular permissions)
 - Integration monitoring dashboard (FedEx, Moyasar, Zoho)
 - Webhook event tracking and status
+- Dynamic policy pages (Privacy Policy, Shipping & Return Policy) manageable via admin dashboard
 
 **Client User Management:**
 - Primary contacts can create and manage team members

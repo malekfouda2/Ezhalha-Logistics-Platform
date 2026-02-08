@@ -25,6 +25,7 @@ import {
   CreditCard,
   Plug,
   Webhook,
+  ScrollText,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -43,6 +44,7 @@ const navItems = [
   { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
   { href: "/admin/webhook-events", label: "Webhooks", icon: Webhook },
   { href: "/admin/rbac", label: "Access Control", icon: Shield },
+  { href: "/admin/policies", label: "Policies", icon: ScrollText },
 ];
 
 export function AdminLayout({ children }: AdminLayoutProps) {
