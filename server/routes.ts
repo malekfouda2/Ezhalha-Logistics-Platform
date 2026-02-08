@@ -98,7 +98,7 @@ const changePasswordSchema = z.object({
 import MemoryStore from "memorystore";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
-import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import { registerObjectStorageRoutes } from "./integrations/storage";
 
 // Extend express-session types
 declare module "express-session" {
