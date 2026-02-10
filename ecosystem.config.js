@@ -5,7 +5,7 @@ module.exports = {
   apps: [
     {
       name: "ezhalha",
-      script: "dist/server/index.js",
+      script: "dist/index.cjs",
       instances: "max", // Use all available CPU cores
       exec_mode: "cluster",
       
