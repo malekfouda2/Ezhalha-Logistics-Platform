@@ -17,6 +17,7 @@ module.exports = {
       env_production: {
         NODE_ENV: "production",
         PORT: 5000,
+        DATABASE_URL: "postgresql://ezhalha_user:AmifkY4CZPiTzLbM@localhost:5432/ezhalha",
       },
       
       // Process management
@@ -54,7 +55,7 @@ module.exports = {
       repo: "git@github.com:your-org/ezhalha.git",
       path: "/www/wwwroot/ezhalha",
       "pre-deploy-local": "",
-      "post-deploy": "npm install && npm run build && pm2 reload ecosystem.config.js --env production",
+      "post-deploy": "npm install && npm run build && pm2 reload ecosystem.config.cjs --env production",
       "pre-setup": "",
     },
   },
