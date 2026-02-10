@@ -310,16 +310,30 @@ export async function registerRoutes(
   app.use("/api/", generalLimiter);
 
   // Session middleware - use PostgreSQL session store in production, MemoryStore in development
-  const sessionStore = process.env.NODE_ENV === "production" && process.env.DATABASE_URL
-    ? new PgSessionStore({
-        pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }),
+  if (process.env.NODE_ENV === "production" && process.env.DATABASE_URL) {
+    const sessionPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    await sessionPool.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        "sid" varchar NOT NULL COLLATE "default",
+        "sess" json NOT NULL,
+        "expire" timestamp(6) NOT NULL,
+        CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
+      ) WITH (OIDS=FALSE);
+      CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+    `);
+    var sessionStore: any = new PgSessionStore({
+        pool: sessionPool,
         tableName: "session",
-        createTableIfMissing: true,
+        createTableIfMissing: false,
         pruneSessionInterval: 60 * 15,
-      })
-    : new MemoryStoreSession({
+      });
+  } else {
+    var sessionStore: any = new MemoryStoreSession({
         checkPeriod: 86400000,
       });
+  }
+
+  app.set("trust proxy", 1);
 
   app.use(
     session({
@@ -328,10 +342,10 @@ export async function registerRoutes(
       saveUninitialized: false,
       store: sessionStore,
       cookie: {
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.NODE_ENV === "production" && process.env.FORCE_HTTPS !== "false",
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: "lax", // CSRF protection
+        sameSite: "lax",
       },
     })
   );
