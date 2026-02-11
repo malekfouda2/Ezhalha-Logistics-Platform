@@ -1,0 +1,50 @@
+0|ezhalha  | 2026-02-11 14:35:07 +00:00: 2:35:07 PM [express] GET /api/admin/applications 401 in 7ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:08 +00:00: 2:35:08 PM [express] GET /api/admin/shipments 401 in 0ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:08 +00:00: 2:35:08 PM [express] GET /api/admin/invoices 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:09 +00:00: 2:35:09 PM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:10 +00:00: 2:35:10 PM [express] GET /api/admin/payments 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/audit-logs/stats 401 in 0ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/audit-logs 401 in 3ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/integration-logs 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/webhook-events 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/roles 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/permissions 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:13 +00:00: 2:35:13 PM [express] GET /api/admin/policies 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: 2026-02-11 14:37:44 [INFO] Registered carrier adapter: FedEx (FEDEX)
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: 2026-02-11 14:37:44 [INFO] Registered carrier adapter: FedEx (FEDEX)
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: Database already initialized
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: Database already initialized
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: 2:37:44 PM [express] serving on port 5000
+0|ezhalha  | 2026-02-11 14:37:44 +00:00: 2:37:44 PM [express] serving on port 5000
+0|ezhalha  | 2026-02-11 14:37:54 +00:00: 2026-02-11 14:37:54 [INFO] Registered carrier adapter: FedEx (FEDEX)
+0|ezhalha  | 2026-02-11 14:37:54 +00:00: 2026-02-11 14:37:54 [INFO] Registered carrier adapter: FedEx (FEDEX)
+0|ezhalha  | 2026-02-11 14:37:55 +00:00: Database already initialized
+0|ezhalha  | 2026-02-11 14:37:55 +00:00: 2:37:55 PM [express] serving on port 5000
+0|ezhalha  | 2026-02-11 14:37:55 +00:00: Database already initialized
+0|ezhalha  | 2026-02-11 14:37:55 +00:00: 2:37:55 PM [express] serving on port 5000
+0|ezhalha  | 2026-02-11 14:38:16 +00:00: 2:38:16 PM [express] GET /api/auth/me 401 in 7ms :: {"error":"Not authenticated"}
+0|ezhalha  | 2026-02-11 14:38:18 +00:00: 2026-02-11 14:38:18 [INFO] AUDIT {"userId":"0e51f628-9bb7-4368-940b-650666aa4dfd","action":"login","resource":"user","resourceId":"0e51f628-9bb7-4368-940b-650666aa4dfd","details":"User admin logged in","ipAddress":"102.189.54.177"}
+0|ezhalha  | 2026-02-11 14:38:18 +00:00: 2:38:18 PM [express] POST /api/auth/login 200 in 79ms :: {"user":{"id":"0e51f628-9bb7-4368-940b-650666aa4dfd","username":"admin","email":"admin@ezhalha.com","userType":"admin","clientAccountId":null,"isPrimaryContact":false,"mustChangePassword":false,"isActive":true,"createdAt":"2026-02-10T17:46:52.429Z","updatedAt":"2026-02-10T17:46:52.429Z"}}
+0|ezhalha  | 2026-02-11 14:38:18 +00:00: 2:38:18 PM [express] GET /api/admin/applications/pending 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:18 +00:00: 2:38:18 PM [express] GET /api/admin/stats 401 in 2ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:18 +00:00: 2:38:18 PM [express] GET /api/admin/shipments/recent 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:20 +00:00: 2:38:20 PM [express] GET /api/admin/pricing 401 in 2ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:20 +00:00: 2:38:20 PM [express] GET /api/admin/applications 401 in 2ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:21 +00:00: 2:38:21 PM [express] GET /api/admin/applications/pending 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:21 +00:00: 2:38:21 PM [express] GET /api/admin/stats 401 in 6ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:21 +00:00: 2:38:21 PM [express] GET /api/admin/shipments/recent 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:22 +00:00: 2:38:22 PM [express] GET /api/admin/applications 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:22 +00:00: 2:38:22 PM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:23 +00:00: 2:38:23 PM [express] GET /api/admin/clients 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:23 +00:00: 2:38:23 PM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:23 +00:00: 2:38:23 PM [express] GET /api/admin/shipments 401 in 0ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:24 +00:00: 2:38:24 PM [express] GET /api/admin/payments 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:25 +00:00: 2:38:25 PM [express] GET /api/admin/invoices 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:25 +00:00: 2:38:25 PM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:26 +00:00: 2:38:26 PM [express] GET /api/admin/audit-logs 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:26 +00:00: 2:38:26 PM [express] GET /api/admin/audit-logs/stats 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:26 +00:00: 2:38:26 PM [express] GET /api/admin/integration-logs 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:27 +00:00: 2:38:27 PM [express] GET /api/admin/webhook-events 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:27 +00:00: 2:38:27 PM [express] GET /api/admin/roles 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:27 +00:00: 2:38:27 PM [express] GET /api/admin/permissions 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:38:28 +00:00: 2:38:28 PM [express] GET /api/admin/policies 401 in 1ms :: {"error":"Unauthorized"}
