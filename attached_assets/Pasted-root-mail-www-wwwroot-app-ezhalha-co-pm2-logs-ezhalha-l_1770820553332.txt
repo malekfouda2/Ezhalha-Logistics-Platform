@@ -1,0 +1,127 @@
+root@mail:/www/wwwroot/app.ezhalha.co# pm2 logs ezhalha --lines 50
+[TAILING] Tailing last 50 lines for [ezhalha] process (change the value with --lines option)
+/www/wwwroot/app.ezhalha.co/logs/pm2-error.log last 50 lines:
+0|ezhalha  | 2026-02-10 21:05:04 +00:00: Unhandled error: Error: ENOENT: no such file or directory, open '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  |     at async open (node:internal/fs/promises:637:25)
+0|ezhalha  |     at async Object.readFile (node:internal/fs/promises:1269:14)
+0|ezhalha  |     at async r._rawEnsureSessionStoreTable (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:6191)
+0|ezhalha  |     at async r._asyncQuery (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:7276) {
+0|ezhalha  |   errno: -2,
+0|ezhalha  |   code: 'ENOENT',
+0|ezhalha  |   syscall: 'open',
+0|ezhalha  |   path: '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  | }
+0|ezhalha  | 2026-02-10 21:05:14 +00:00: Failed to prune sessions: Error: ENOENT: no such file or directory, open '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  |     at async open (node:internal/fs/promises:637:25)
+0|ezhalha  |     at async Object.readFile (node:internal/fs/promises:1269:14)
+0|ezhalha  |     at async r._rawEnsureSessionStoreTable (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:6191)
+0|ezhalha  |     at async r._asyncQuery (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:7276) {
+0|ezhalha  |   errno: -2,
+0|ezhalha  |   code: 'ENOENT',
+0|ezhalha  |   syscall: 'open',
+0|ezhalha  |   path: '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  | }
+0|ezhalha  | 2026-02-10 21:11:25 +00:00: Unhandled error: Error: ENOENT: no such file or directory, open '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  |     at async open (node:internal/fs/promises:637:25)
+0|ezhalha  |     at async Object.readFile (node:internal/fs/promises:1269:14)
+0|ezhalha  |     at async r._rawEnsureSessionStoreTable (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:6191)
+0|ezhalha  |     at async r._asyncQuery (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:7276) {
+0|ezhalha  |   errno: -2,
+0|ezhalha  |   code: 'ENOENT',
+0|ezhalha  |   syscall: 'open',
+0|ezhalha  |   path: '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  | }
+0|ezhalha  | 2026-02-10 21:24:02 +00:00: Unhandled error: Error: ENOENT: no such file or directory, open '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  |     at async open (node:internal/fs/promises:637:25)
+0|ezhalha  |     at async Object.readFile (node:internal/fs/promises:1269:14)
+0|ezhalha  |     at async r._rawEnsureSessionStoreTable (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:6191)
+0|ezhalha  |     at async r._asyncQuery (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:7276) {
+0|ezhalha  |   errno: -2,
+0|ezhalha  |   code: 'ENOENT',
+0|ezhalha  |   syscall: 'open',
+0|ezhalha  |   path: '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  | }
+0|ezhalha  | 2026-02-10 21:24:11 +00:00: Unhandled error: Error: ENOENT: no such file or directory, open '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  |     at async open (node:internal/fs/promises:637:25)
+0|ezhalha  |     at async Object.readFile (node:internal/fs/promises:1269:14)
+0|ezhalha  |     at async r._rawEnsureSessionStoreTable (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:6191)
+0|ezhalha  |     at async r._asyncQuery (/www/wwwroot/app.ezhalha.co/dist/index.cjs:145:7276) {
+0|ezhalha  |   errno: -2,
+0|ezhalha  |   code: 'ENOENT',
+0|ezhalha  |   syscall: 'open',
+0|ezhalha  |   path: '/www/wwwroot/app.ezhalha.co/dist/table.sql'
+0|ezhalha  | }
+
+/www/wwwroot/app.ezhalha.co/logs/pm2-out.log last 50 lines:
+0|ezhalha  | 2026-02-11 08:51:34 +00:00: 2026-02-11 08:51:34 [INFO] AUDIT {"userId":"0e51f628-9bb7-4368-940b-650666aa4dfd","action":"login","resource":"user","resourceId":"0e51f628-9bb7-4368-940b-650666aa4dfd","details":"User admin logged in","ipAddress":"51.39.233.133"}
+0|ezhalha  | 2026-02-11 08:51:34 +00:00: 8:51:34 AM [express] POST /api/auth/login 200 in 133ms :: {"user":{"id":"0e51f628-9bb7-4368-940b-650666aa4dfd","username":"admin","email":"admin@ezhalha.com","userType":"admin","clientAccountId":null,"isPrimaryContact":false,"mustChangePassword":false,"isActive":true,"createdAt":"2026-02-10T17:46:52.429Z","updatedAt":"2026-02-10T17:46:52.429Z"}}
+0|ezhalha  | 2026-02-11 08:51:35 +00:00: 8:51:35 AM [express] GET /api/admin/stats 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:35 +00:00: 8:51:35 AM [express] GET /api/admin/shipments/recent 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:35 +00:00: 8:51:35 AM [express] GET /api/admin/applications/pending 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:52 +00:00: 8:51:52 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:52 +00:00: 8:51:52 AM [express] GET /api/admin/clients 401 in 2ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:53 +00:00: 8:51:53 AM [express] GET /api/admin/applications 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:53 +00:00: 8:51:53 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:53 +00:00: 8:51:53 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:53 +00:00: 8:51:53 AM [express] GET /api/admin/clients 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:55 +00:00: 8:51:55 AM [express] GET /api/admin/clients 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:57 +00:00: 8:51:57 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:51:57 +00:00: 8:51:57 AM [express] GET /api/admin/applications 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:00 +00:00: 8:52:00 AM [express] GET /api/admin/applications 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:02 +00:00: 8:52:02 AM [express] GET /api/admin/clients 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:02 +00:00: 8:52:02 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:25 +00:00: 8:52:25 AM [express] GET /api/admin/payments 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:27 +00:00: 8:52:27 AM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:32 +00:00: 8:52:32 AM [express] GET /api/admin/stats 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:32 +00:00: 8:52:32 AM [express] GET /api/admin/shipments/recent 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:32 +00:00: 8:52:32 AM [express] GET /api/admin/applications/pending 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:36 +00:00: 8:52:36 AM [express] GET /api/admin/policies 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:37 +00:00: 8:52:37 AM [express] GET /api/admin/stats 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:37 +00:00: 8:52:37 AM [express] GET /api/admin/shipments/recent 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 08:52:37 +00:00: 8:52:37 AM [express] GET /api/admin/applications/pending 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 09:30:17 +00:00: 2026-02-11 09:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 09:30:17 +00:00: 2026-02-11 09:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 09:30:27 +00:00: 2026-02-11 09:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 09:30:27 +00:00: 2026-02-11 09:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 10:30:17 +00:00: 2026-02-11 10:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 10:30:17 +00:00: 2026-02-11 10:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 10:30:27 +00:00: 2026-02-11 10:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 10:30:27 +00:00: 2026-02-11 10:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 11:30:17 +00:00: 2026-02-11 11:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 11:30:17 +00:00: 2026-02-11 11:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 11:30:27 +00:00: 2026-02-11 11:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 11:30:27 +00:00: 2026-02-11 11:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 12:30:17 +00:00: 2026-02-11 12:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 12:30:17 +00:00: 2026-02-11 12:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 12:30:27 +00:00: 2026-02-11 12:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 12:30:27 +00:00: 2026-02-11 12:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 13:30:17 +00:00: 2026-02-11 13:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 13:30:17 +00:00: 2026-02-11 13:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 13:30:27 +00:00: 2026-02-11 13:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 13:30:27 +00:00: 2026-02-11 13:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 14:30:17 +00:00: 2026-02-11 14:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 14:30:17 +00:00: 2026-02-11 14:30:17 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 14:30:27 +00:00: 2026-02-11 14:30:27 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-02-11 14:30:27 +00:00: 2026-02-11 14:30:27 [INFO] Cleared expired idempotency records
+
+2|ezhalha  | 2026-02-11 14:35:01 +00:00: 2:35:01 PM [express] GET /api/auth/me 401 in 2ms :: {"error":"Not authenticated"}
+0|ezhalha  | 2026-02-11 14:35:04 +00:00: 2026-02-11 14:35:04 [INFO] AUDIT {"userId":"0e51f628-9bb7-4368-940b-650666aa4dfd","action":"login","resource":"user","resourceId":"0e51f628-9bb7-4368-940b-650666aa4dfd","details":"User admin logged in","ipAddress":"102.189.54.177"}
+0|ezhalha  | 2026-02-11 14:35:04 +00:00: 2:35:04 PM [express] POST /api/auth/login 200 in 173ms :: {"user":{"id":"0e51f628-9bb7-4368-940b-650666aa4dfd","username":"admin","email":"admin@ezhalha.com","userType":"admin","clientAccountId":null,"isPrimaryContact":false,"mustChangePassword":false,"isActive":true,"createdAt":"2026-02-10T17:46:52.429Z","updatedAt":"2026-02-10T17:46:52.429Z"}}
+0|ezhalha  | 2026-02-11 14:35:04 +00:00: 2:35:04 PM [express] GET /api/admin/stats 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:04 +00:00: 2:35:04 PM [express] GET /api/admin/shipments/recent 401 in 0ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:04 +00:00: 2:35:04 PM [express] GET /api/admin/applications/pending 401 in 8ms :: {"error":"Unauthorized"}
+2|ezhalha  | 2026-02-11 14:35:06 +00:00: 2:35:06 PM [express] GET /api/admin/clients 401 in 1ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:06 +00:00: 2:35:06 PM [express] GET /api/admin/pricing 401 in 2ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:07 +00:00: 2:35:07 PM [express] GET /api/admin/pricing 401 in 2ms :: {"error":"Unauthorized"}
+3|ezhalha  | 2026-02-11 14:35:07 +00:00: 2:35:07 PM [express] GET /api/admin/applications 401 in 7ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:08 +00:00: 2:35:08 PM [express] GET /api/admin/shipments 401 in 0ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:08 +00:00: 2:35:08 PM [express] GET /api/admin/invoices 401 in 1ms :: {"error":"Unauthorized"}
+3|ezhalha  | 2026-02-11 14:35:09 +00:00: 2:35:09 PM [express] GET /api/admin/pricing 401 in 1ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:10 +00:00: 2:35:10 PM [express] GET /api/admin/payments 401 in 1ms :: {"error":"Unauthorized"}
+2|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/audit-logs/stats 401 in 0ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/audit-logs 401 in 3ms :: {"error":"Unauthorized"}
+2|ezhalha  | 2026-02-11 14:35:11 +00:00: 2:35:11 PM [express] GET /api/admin/integration-logs 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/webhook-events 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/roles 401 in 1ms :: {"error":"Unauthorized"}
+0|ezhalha  | 2026-02-11 14:35:12 +00:00: 2:35:12 PM [express] GET /api/admin/permissions 401 in 1ms :: {"error":"Unauthorized"}
+1|ezhalha  | 2026-02-11 14:35:13 +00:00: 2:35:13 PM [express] GET /api/admin/policies 401 in 1ms :: {"error":"Unauthorized"}
