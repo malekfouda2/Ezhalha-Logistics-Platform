@@ -133,7 +133,10 @@ function registerLocalRoutes(app: Express): void {
         expiresAt: Date.now() + 15 * 60 * 1000,
       });
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const appUrl = process.env.APP_URL;
+      const baseUrl = appUrl
+        ? appUrl.replace(/\/$/, "")
+        : `${req.protocol}://${req.get("host")}`;
       const uploadURL = `${baseUrl}/api/uploads/direct/${result.fileName}`;
 
       res.json({
