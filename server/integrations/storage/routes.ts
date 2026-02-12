@@ -1,40 +1,30 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { LocalStorageService } from "./localStorage";
+import path from "path";
 
-/**
- * Register object storage routes for file uploads.
- *
- * This provides example routes for the presigned URL upload flow:
- * 1. POST /api/uploads/request-url - Get a presigned URL for uploading
- * 2. The client then uploads directly to the presigned URL
- *
- * IMPORTANT: These are example routes. Customize based on your use case:
- * - Add authentication middleware for protected uploads
- * - Add file metadata storage (save to database after upload)
- * - Add ACL policies for access control
- */
+function isObjectStorageAvailable(): boolean {
+  return !!(process.env.PRIVATE_OBJECT_DIR && process.env.PUBLIC_OBJECT_SEARCH_PATHS);
+}
+
+function requireAuthenticated(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
 export function registerObjectStorageRoutes(app: Express): void {
+  if (isObjectStorageAvailable()) {
+    registerCloudRoutes(app);
+  } else {
+    registerLocalRoutes(app);
+  }
+}
+
+function registerCloudRoutes(app: Express): void {
   const objectStorageService = new ObjectStorageService();
 
-  /**
-   * Request a presigned URL for file upload.
-   *
-   * Request body (JSON):
-   * {
-   *   "name": "filename.jpg",
-   *   "size": 12345,
-   *   "contentType": "image/jpeg"
-   * }
-   *
-   * Response:
-   * {
-   *   "uploadURL": "https://storage.googleapis.com/...",
-   *   "objectPath": "/objects/uploads/uuid"
-   * }
-   *
-   * IMPORTANT: The client should NOT send the file to this endpoint.
-   * Send JSON metadata only, then upload the file directly to uploadURL.
-   */
   app.post("/api/uploads/request-url", async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
@@ -46,14 +36,11 @@ export function registerObjectStorageRoutes(app: Express): void {
       }
 
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-
-      // Extract object path from the presigned URL for later reference
       const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
       res.json({
         uploadURL,
         objectPath,
-        // Echo back the metadata for client convenience
         metadata: { name, size, contentType },
       });
     } catch (error) {
@@ -62,14 +49,6 @@ export function registerObjectStorageRoutes(app: Express): void {
     }
   });
 
-  /**
-   * Serve uploaded objects.
-   *
-   * GET /objects/:objectPath(*)
-   *
-   * This serves files from object storage. For public files, no auth needed.
-   * For protected files, add authentication middleware and ACL checks.
-   */
   app.get("/objects/:objectPath(*)", async (req, res) => {
     try {
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
@@ -84,3 +63,154 @@ export function registerObjectStorageRoutes(app: Express): void {
   });
 }
 
+const MIME_MAP: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".csv": "text/csv",
+  ".txt": "text/plain",
+  ".zip": "application/zip",
+};
+
+const ALLOWED_EXTENSIONS = new Set(Object.keys(MIME_MAP));
+
+function getMimeType(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  return MIME_MAP[ext] || "application/octet-stream";
+}
+
+function registerLocalRoutes(app: Express): void {
+  const localStorageService = new LocalStorageService();
+  localStorageService.initialize().catch(console.error);
+  const maxFileSize = localStorageService.getMaxFileSize();
+
+  const pendingUploads = new Map<string, { name: string; expiresAt: number }>();
+
+  setInterval(() => {
+    const now = Date.now();
+    pendingUploads.forEach((value, key) => {
+      if (value.expiresAt < now) {
+        pendingUploads.delete(key);
+        localStorageService.cleanupFile(key).catch(() => {});
+      }
+    });
+  }, 60000);
+
+  app.post("/api/uploads/request-url", async (req, res) => {
+    try {
+      const { name, size, contentType } = req.body;
+
+      if (!name) {
+        return res.status(400).json({
+          error: "Missing required field: name",
+        });
+      }
+
+      const ext = path.extname(name).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return res.status(400).json({
+          error: `File type '${ext}' is not allowed. Allowed types: ${Array.from(ALLOWED_EXTENSIONS).join(", ")}`,
+        });
+      }
+
+      if (size && size > maxFileSize) {
+        return res.status(400).json({
+          error: `File size exceeds maximum allowed size of ${maxFileSize / (1024 * 1024)}MB`,
+        });
+      }
+
+      const result = await localStorageService.reserveFile(name);
+
+      pendingUploads.set(result.fileName, {
+        name,
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      });
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const uploadURL = `${baseUrl}/api/uploads/direct/${result.fileName}`;
+
+      res.json({
+        uploadURL,
+        objectPath: result.objectPath,
+        metadata: { name, size, contentType },
+      });
+    } catch (error) {
+      console.error("Error generating upload URL:", error);
+      res.status(500).json({ error: "Failed to generate upload URL" });
+    }
+  });
+
+  app.put("/api/uploads/direct/:fileName", async (req, res) => {
+    try {
+      const fileName = req.params.fileName;
+
+      const pending = pendingUploads.get(fileName);
+      if (!pending) {
+        return res.status(403).json({ error: "Upload not authorized or expired" });
+      }
+
+      const chunks: Buffer[] = [];
+      let totalSize = 0;
+
+      req.on("data", (chunk: Buffer) => {
+        totalSize += chunk.length;
+        if (totalSize > maxFileSize) {
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      req.on("end", async () => {
+        try {
+          if (totalSize > maxFileSize) {
+            pendingUploads.delete(fileName);
+            await localStorageService.cleanupFile(fileName);
+            return res.status(413).json({ error: "File too large" });
+          }
+
+          const fileData = Buffer.concat(chunks);
+          await localStorageService.writeFile(fileName, fileData);
+          pendingUploads.delete(fileName);
+          res.status(200).json({ success: true });
+        } catch (error) {
+          console.error("Error saving uploaded file:", error);
+          res.status(500).json({ error: "Failed to save file" });
+        }
+      });
+
+      req.on("error", async () => {
+        pendingUploads.delete(fileName);
+        await localStorageService.cleanupFile(fileName);
+      });
+    } catch (error) {
+      console.error("Error handling upload:", error);
+      res.status(500).json({ error: "Failed to handle upload" });
+    }
+  });
+
+  app.get("/uploads/:fileName", requireAuthenticated, async (req, res) => {
+    try {
+      const result = await localStorageService.getFile(req.params.fileName);
+      if (!result) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      const contentType = getMimeType(req.params.fileName);
+
+      res.set("Content-Type", contentType);
+      res.set("Content-Length", String(result.data.length));
+      res.send(result.data);
+    } catch (error) {
+      console.error("Error serving file:", error);
+      res.status(500).json({ error: "Failed to serve file" });
+    }
+  });
+}
