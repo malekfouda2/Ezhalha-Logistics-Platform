@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { LocalStorageService } from "./localStorage";
+import { createHmac } from "crypto";
 import path from "path";
 
 function isObjectStorageAvailable(): boolean {
@@ -12,6 +13,25 @@ function requireAuthenticated(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
+}
+
+function getSigningSecret(): string {
+  return process.env.SESSION_SECRET || process.env.UPLOAD_SIGNING_SECRET || "fallback-upload-secret";
+}
+
+function signUploadToken(fileName: string, expiresAt: number): string {
+  const payload = `${fileName}:${expiresAt}`;
+  const hmac = createHmac("sha256", getSigningSecret());
+  hmac.update(payload);
+  return hmac.digest("hex");
+}
+
+function verifyUploadToken(fileName: string, expiresAt: number, token: string): boolean {
+  if (Date.now() > expiresAt) {
+    return false;
+  }
+  const expected = signUploadToken(fileName, expiresAt);
+  return expected === token;
 }
 
 export function registerObjectStorageRoutes(app: Express): void {
@@ -91,18 +111,6 @@ function registerLocalRoutes(app: Express): void {
   localStorageService.initialize().catch(console.error);
   const maxFileSize = localStorageService.getMaxFileSize();
 
-  const pendingUploads = new Map<string, { name: string; expiresAt: number }>();
-
-  setInterval(() => {
-    const now = Date.now();
-    pendingUploads.forEach((value, key) => {
-      if (value.expiresAt < now) {
-        pendingUploads.delete(key);
-        localStorageService.cleanupFile(key).catch(() => {});
-      }
-    });
-  }, 60000);
-
   app.post("/api/uploads/request-url", async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
@@ -128,16 +136,14 @@ function registerLocalRoutes(app: Express): void {
 
       const result = await localStorageService.reserveFile(name);
 
-      pendingUploads.set(result.fileName, {
-        name,
-        expiresAt: Date.now() + 15 * 60 * 1000,
-      });
+      const expiresAt = Date.now() + 15 * 60 * 1000;
+      const token = signUploadToken(result.fileName, expiresAt);
 
       const appUrl = process.env.APP_URL;
       const baseUrl = appUrl
         ? appUrl.replace(/\/$/, "")
         : `${req.protocol}://${req.get("host")}`;
-      const uploadURL = `${baseUrl}/api/uploads/direct/${result.fileName}`;
+      const uploadURL = `${baseUrl}/api/uploads/direct/${result.fileName}?token=${token}&expires=${expiresAt}`;
 
       res.json({
         uploadURL,
@@ -153,9 +159,10 @@ function registerLocalRoutes(app: Express): void {
   app.put("/api/uploads/direct/:fileName", async (req, res) => {
     try {
       const fileName = req.params.fileName;
+      const token = req.query.token as string;
+      const expires = parseInt(req.query.expires as string, 10);
 
-      const pending = pendingUploads.get(fileName);
-      if (!pending) {
+      if (!token || !expires || !verifyUploadToken(fileName, expires, token)) {
         return res.status(403).json({ error: "Upload not authorized or expired" });
       }
 
@@ -174,14 +181,12 @@ function registerLocalRoutes(app: Express): void {
       req.on("end", async () => {
         try {
           if (totalSize > maxFileSize) {
-            pendingUploads.delete(fileName);
             await localStorageService.cleanupFile(fileName);
             return res.status(413).json({ error: "File too large" });
           }
 
           const fileData = Buffer.concat(chunks);
           await localStorageService.writeFile(fileName, fileData);
-          pendingUploads.delete(fileName);
           res.status(200).json({ success: true });
         } catch (error) {
           console.error("Error saving uploaded file:", error);
@@ -190,7 +195,6 @@ function registerLocalRoutes(app: Express): void {
       });
 
       req.on("error", async () => {
-        pendingUploads.delete(fileName);
         await localStorageService.cleanupFile(fileName);
       });
     } catch (error) {
