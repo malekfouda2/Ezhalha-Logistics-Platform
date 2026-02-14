@@ -27,7 +27,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Percent, Edit, DollarSign, TrendingUp, Info, Plus, Trash2, Settings, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Percent, Edit, TrendingUp, Info, Plus, Trash2, Settings, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
+import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
 import type { PricingRule, PricingTier } from "@shared/schema";
 
 interface TierFormData {
@@ -314,7 +315,7 @@ export default function AdminPricing() {
                 <p className="font-medium">How tiered pricing works</p>
                 <p className="text-sm text-muted-foreground mt-1">
                   Each profile can have multiple pricing tiers based on shipment value.
-                  For example: shipments under $100 = 100% margin, $100-$500 = 50% margin, over $500 = 25% margin.
+                  For example: shipments under 100 SAR = 100% margin, 100-500 SAR = 50% margin, over 500 SAR = 25% margin.
                   The system automatically applies the appropriate margin based on the base rate.
                 </p>
               </div>
@@ -405,7 +406,7 @@ export default function AdminPricing() {
                               <div key={tier.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                                 <div className="flex items-center gap-2 flex-1">
                                   <span className="text-sm text-muted-foreground whitespace-nowrap">Shipments</span>
-                                  <span className="text-sm font-medium">$</span>
+                                  <SarSymbol size="xs" />
                                   <Input
                                     type="number"
                                     min="0"
@@ -466,23 +467,23 @@ export default function AdminPricing() {
                           const clientPays = baseExample + (baseExample * margin / 100);
                           const nextTier = arr[i + 1];
                           const rangeText = nextTier 
-                            ? `$${tier.minAmount} - $${Number(nextTier.minAmount) - 0.01}`
-                            : `$${tier.minAmount}+`;
+                            ? `${tier.minAmount} - ${Number(nextTier.minAmount) - 0.01} SAR`
+                            : `${tier.minAmount}+ SAR`;
                           return (
                             <div key={tier.id} className="p-3 rounded bg-muted/50">
                               <p className="text-muted-foreground mb-2">{rangeText}</p>
                               <div className="space-y-1">
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Base Rate</span>
-                                  <span>${baseExample.toFixed(2)}</span>
+                                  <span><SarAmount amount={baseExample} /></span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Margin ({margin}%)</span>
-                                  <span className="text-green-600 dark:text-green-400">+${(baseExample * margin / 100).toFixed(2)}</span>
+                                  <span className="text-green-600 dark:text-green-400">+<SarAmount amount={baseExample * margin / 100} /></span>
                                 </div>
                                 <div className="flex justify-between font-medium border-t pt-1">
                                   <span>Client Pays</span>
-                                  <span>${clientPays.toFixed(2)}</span>
+                                  <span><SarAmount amount={clientPays} /></span>
                                 </div>
                               </div>
                             </div>
@@ -501,7 +502,7 @@ export default function AdminPricing() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
-                <DollarSign className="h-5 w-5" />
+                <SarSymbol size="sm" />
                 Revenue Impact
               </CardTitle>
               <CardDescription>
@@ -536,7 +537,7 @@ export default function AdminPricing() {
               <ul className="space-y-3 text-sm text-muted-foreground">
                 <li className="flex items-start gap-2">
                   <span className="text-primary font-bold">1.</span>
-                  <span>Higher margins on lower-value shipments (under $100)</span>
+                  <span>Higher margins on lower-value shipments (under 100 SAR)</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-primary font-bold">2.</span>

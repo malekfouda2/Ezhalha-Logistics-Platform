@@ -30,7 +30,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Search, Download, Eye, RefreshCw, Filter, X, FileText, Calendar, DollarSign, User, Building } from "lucide-react";
+import { Search, Download, Eye, RefreshCw, Filter, X, FileText, Calendar, User, Building } from "lucide-react";
+import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import type { Invoice, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
@@ -158,10 +159,10 @@ export default function AdminInvoices() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
-                  <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <SarSymbol size="sm" className="text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">${totalAmount.toFixed(2)}</p>
+                  <p className="text-2xl font-bold"><SarAmount amount={totalAmount} /></p>
                   <p className="text-xs text-muted-foreground">Total Amount (Page)</p>
                 </div>
               </div>
@@ -171,10 +172,10 @@ export default function AdminInvoices() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                  <DollarSign className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  <SarSymbol size="sm" className="text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">${pendingAmount.toFixed(2)}</p>
+                  <p className="text-2xl font-bold"><SarAmount amount={pendingAmount} /></p>
                   <p className="text-xs text-muted-foreground">Pending (Page)</p>
                 </div>
               </div>
@@ -247,7 +248,7 @@ export default function AdminInvoices() {
                         <TableCell className="text-sm text-muted-foreground">
                           {format(new Date(invoice.dueDate), "MMM d, yyyy")}
                         </TableCell>
-                        <TableCell className="text-right font-medium">${Number(invoice.amount).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium"><SarAmount amount={invoice.amount} /></TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
                             <Button 
@@ -350,13 +351,13 @@ export default function AdminInvoices() {
 
               <div className="space-y-4">
                 <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <DollarSign className="h-4 w-4" />
+                  <SarSymbol size="xs" />
                   Amount
                 </h4>
                 <div className="p-4 rounded-lg border">
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Total Amount</span>
-                    <span className="text-2xl font-bold">${Number(selectedInvoice.amount).toFixed(2)}</span>
+                    <span className="text-2xl font-bold"><SarAmount amount={selectedInvoice.amount} /></span>
                   </div>
                 </div>
               </div>

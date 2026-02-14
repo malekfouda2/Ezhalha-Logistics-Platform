@@ -36,10 +36,11 @@ import {
   Users,
   Package,
   FileText,
-  DollarSign,
   ArrowRight,
   Clock,
+  Banknote,
 } from "lucide-react";
+import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import type { AdminDashboardStats, Shipment, ClientApplication } from "@shared/schema";
 import { format } from "date-fns";
@@ -127,8 +128,8 @@ export default function AdminDashboard() {
           />
           <StatCard
             title="Monthly Revenue"
-            value={`$${(stats?.monthlyRevenue ?? 0).toLocaleString()}`}
-            icon={DollarSign}
+            value={<SarAmount amount={stats?.monthlyRevenue ?? 0} showDecimals={false} />}
+            icon={Banknote}
             trend={stats?.trends?.revenue}
           />
         </div>
@@ -167,8 +168,8 @@ export default function AdminDashboard() {
                   <AreaChart data={stats.revenueByMonth} accessibilityLayer>
                     <CartesianGrid vertical={false} strokeDasharray="3 3" />
                     <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                    <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
-                    <ChartTooltip content={<ChartTooltipContent formatter={(value) => `$${Number(value).toLocaleString()}`} />} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `${v} SAR`} />
+                    <ChartTooltip content={<ChartTooltipContent formatter={(value) => `${Number(value).toLocaleString()} SAR`} />} />
                     <defs>
                       <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="var(--color-value)" stopOpacity={0.3} />
@@ -232,7 +233,7 @@ export default function AdminDashboard() {
                           <StatusBadge status={shipment.status} />
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${Number(shipment.finalPrice).toFixed(2)}
+                          <SarAmount amount={shipment.finalPrice} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -326,7 +327,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className="text-center">
                   <p className="text-3xl font-bold" data-testid="stat-total-revenue">
-                    ${(stats?.totalRevenue ?? 0).toLocaleString()}
+                    <SarAmount amount={stats?.totalRevenue ?? 0} showDecimals={false} />
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">Total Revenue</p>
                 </div>

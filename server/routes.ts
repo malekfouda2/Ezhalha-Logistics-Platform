@@ -1346,11 +1346,11 @@ export async function registerRoutes(
             <tbody>
               <tr>
                 <td>Shipping Services</td>
-                <td style="text-align: right;">$${Number(invoice.amount).toFixed(2)}</td>
+                <td style="text-align: right;">SAR ${Number(invoice.amount).toFixed(2)}</td>
               </tr>
               <tr class="total-row">
                 <td>Total</td>
-                <td style="text-align: right;">$${Number(invoice.amount).toFixed(2)}</td>
+                <td style="text-align: right;">SAR ${Number(invoice.amount).toFixed(2)}</td>
               </tr>
             </tbody>
           </table>
@@ -1558,7 +1558,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req.session.userId, "create_pricing_tier", "pricing_tier", tier.id,
-        `Created pricing tier for ${profile.displayName}: $${minAmount}+ at ${marginPercentage}%`, req.ip);
+        `Created pricing tier for ${profile.displayName}: SAR ${minAmount}+ at ${marginPercentage}%`, req.ip);
 
       res.status(201).json(tier);
     } catch (error) {
@@ -1592,7 +1592,7 @@ export async function registerRoutes(
       }
 
       await logAudit(req.session.userId, "update_pricing_tier", "pricing_tier", tierId,
-        `Updated pricing tier: $${tier.minAmount}+ at ${tier.marginPercentage}%`, req.ip);
+        `Updated pricing tier: SAR ${tier.minAmount}+ at ${tier.marginPercentage}%`, req.ip);
 
       res.json(tier);
     } catch (error) {
@@ -3103,7 +3103,7 @@ export async function registerRoutes(
 
       // Log shipment creation
       await logAudit(req.session.userId, "create_shipment", "shipment", shipment.id,
-        `Created shipment ${shipment.trackingNumber} for $${finalPrice.toFixed(2)}`, req.ip);
+        `Created shipment ${shipment.trackingNumber} for SAR ${finalPrice.toFixed(2)}`, req.ip);
 
       // Store idempotency record
       if (idempotencyKey) {
@@ -3282,7 +3282,7 @@ export async function registerRoutes(
           </span>
           ` : 'Logistics Services'}
         </td>
-        <td class="text-right">$${Number(invoice.amount).toFixed(2)}</td>
+        <td class="text-right">SAR ${Number(invoice.amount).toFixed(2)}</td>
       </tr>
     </tbody>
   </table>
@@ -3290,15 +3290,15 @@ export async function registerRoutes(
   <div class="totals">
     <div class="row">
       <span>Subtotal</span>
-      <span>$${Number(invoice.amount).toFixed(2)}</span>
+      <span>SAR ${Number(invoice.amount).toFixed(2)}</span>
     </div>
     <div class="row">
       <span>Tax (0%)</span>
-      <span>$0.00</span>
+      <span>SAR 0.00</span>
     </div>
     <div class="row total">
       <span>Total Due</span>
-      <span>$${Number(invoice.amount).toFixed(2)}</span>
+      <span>SAR ${Number(invoice.amount).toFixed(2)}</span>
     </div>
   </div>
 

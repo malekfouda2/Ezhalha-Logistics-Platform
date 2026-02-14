@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Download, Eye, FileText, CreditCard, Loader2 } from "lucide-react";
+import { SarAmount } from "@/components/sar-symbol";
 import type { Invoice, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
@@ -66,7 +67,7 @@ export default function ClientInvoices() {
       // For now, show the payment details
       toast({
         title: "Payment Initiated",
-        description: `Payment intent created for invoice ${data.invoiceNumber}. Amount: $${data.amount}`,
+        description: `Payment intent created for invoice ${data.invoiceNumber}. Amount: ${data.amount} SAR`,
       });
       setPaymentDialogOpen(false);
       refetch();
@@ -126,7 +127,7 @@ export default function ClientInvoices() {
             <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200">
               <FileText className="h-4 w-4" />
               <span className="text-sm">
-                <span className="font-semibold">${totalPending.toFixed(2)}</span> pending
+                <span className="font-semibold"><SarAmount amount={totalPending} /></span> pending
               </span>
             </div>
           )}
@@ -190,7 +191,7 @@ export default function ClientInvoices() {
                         {format(new Date(invoice.dueDate), "MMM d, yyyy")}
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ${Number(invoice.amount).toFixed(2)}
+                        <SarAmount amount={invoice.amount} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -255,7 +256,7 @@ export default function ClientInvoices() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Invoice Amount</span>
                 <span className="text-2xl font-bold">
-                  ${selectedInvoice ? Number(selectedInvoice.amount).toFixed(2) : "0.00"}
+                  <SarAmount amount={selectedInvoice ? Number(selectedInvoice.amount) : 0} />
                 </span>
               </div>
               <div className="flex justify-between items-center mt-2 text-sm">
@@ -287,7 +288,7 @@ export default function ClientInvoices() {
                 ) : (
                   <>
                     <CreditCard className="h-4 w-4 mr-2" />
-                    Pay ${selectedInvoice ? Number(selectedInvoice.amount).toFixed(2) : "0.00"}
+                    Pay <SarAmount amount={selectedInvoice ? Number(selectedInvoice.amount) : 0} />
                   </>
                 )}
               </Button>

@@ -29,7 +29,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Eye, MapPin, Package, Calendar, DollarSign, Ban, Loader2, RefreshCw, Filter, X } from "lucide-react";
+import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X } from "lucide-react";
+import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment } from "@shared/schema";
@@ -237,7 +238,7 @@ export default function AdminShipments() {
                           <StatusBadge status={shipment.status} />
                         </TableCell>
                         <TableCell className="text-sm">{Number(shipment.weight).toFixed(1)} kg</TableCell>
-                        <TableCell className="text-right font-medium">${Number(shipment.finalPrice).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-medium"><SarAmount amount={shipment.finalPrice} /></TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" onClick={() => setSelectedShipment(shipment)} data-testid={`button-view-${shipment.id}`}>
                             <Eye className="h-4 w-4" />
@@ -312,21 +313,21 @@ export default function AdminShipments() {
               </div>
               <div className="p-4 rounded-lg border">
                 <div className="flex items-center gap-2 mb-3">
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                  <SarSymbol size="xs" className="text-muted-foreground" />
                   <span className="text-sm font-medium">Pricing Breakdown</span>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Base Rate</span>
-                    <span>${Number(selectedShipment.baseRate).toFixed(2)}</span>
+                    <span><SarAmount amount={selectedShipment.baseRate} /></span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Margin</span>
-                    <span className="text-green-600 dark:text-green-400">+${Number(selectedShipment.margin).toFixed(2)}</span>
+                    <span className="text-green-600 dark:text-green-400">+<SarAmount amount={selectedShipment.margin} /></span>
                   </div>
                   <div className="border-t pt-2 flex justify-between font-medium">
                     <span>Final Price</span>
-                    <span>${Number(selectedShipment.finalPrice).toFixed(2)}</span>
+                    <span><SarAmount amount={selectedShipment.finalPrice} /></span>
                   </div>
                 </div>
               </div>

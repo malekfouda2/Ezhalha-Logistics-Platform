@@ -48,7 +48,8 @@ interface SarAmountProps {
 
 export function SarAmount({ amount, className, size = "sm", decimals = 2, showDecimals = true }: SarAmountProps) {
   const num = typeof amount === "string" ? Number(amount) : amount;
-  const formatted = showDecimals ? formatSAR(num, decimals) : num.toLocaleString();
+  const safeNum = isNaN(num) ? 0 : num;
+  const formatted = showDecimals ? formatSAR(safeNum, decimals) : safeNum.toLocaleString();
   return (
     <span className={cn("inline-flex items-center gap-0.5", className)} data-testid="text-sar-amount">
       <SarSymbol size={size} />

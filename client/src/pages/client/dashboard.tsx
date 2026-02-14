@@ -31,7 +31,8 @@ import {
   Cell,
   ResponsiveContainer,
 } from "recharts";
-import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users, DollarSign } from "lucide-react";
+import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users } from "lucide-react";
+import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { ProfileBadge } from "@/components/profile-badge";
 import type { ClientDashboardStats, Shipment, ClientAccount } from "@shared/schema";
@@ -169,8 +170,8 @@ export default function ClientDashboard() {
           />
           <StatCard
             title="Total Spent"
-            value={`$${(stats?.totalSpent ?? 0).toLocaleString()}`}
-            icon={DollarSign}
+            value={<SarAmount amount={stats?.totalSpent ?? 0} showDecimals={false} />}
+            icon={Package}
             trend={stats?.trends?.spent}
           />
         </div>
@@ -293,7 +294,7 @@ export default function ClientDashboard() {
                         {format(new Date(shipment.createdAt), "MMM d, yyyy")}
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ${Number(shipment.finalPrice).toFixed(2)}
+                        <SarAmount amount={shipment.finalPrice} />
                       </TableCell>
                     </TableRow>
                   ))}

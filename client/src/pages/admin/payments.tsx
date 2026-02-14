@@ -22,7 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, DollarSign, CheckCircle, XCircle, Clock, RefreshCw, Filter, X } from "lucide-react";
+import { Search, CheckCircle, XCircle, Clock, RefreshCw, Filter, X } from "lucide-react";
+import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import type { Payment } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -112,7 +113,7 @@ export default function AdminPayments() {
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm text-muted-foreground">Total Collected</p>
-              <p className="text-2xl font-bold text-green-600">${completedAmount.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-green-600"><SarAmount amount={completedAmount} /></p>
             </div>
             <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="button-refresh">
               <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
@@ -126,7 +127,7 @@ export default function AdminPayments() {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-primary/10 rounded-lg">
-                  <DollarSign className="h-5 w-5 text-primary" />
+                  <SarSymbol size="sm" className="text-primary" />
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total Payments</p>
@@ -242,7 +243,7 @@ export default function AdminPayments() {
                             {format(new Date(payment.createdAt), "MMM d, yyyy HH:mm")}
                           </TableCell>
                           <TableCell className="font-mono text-sm">{payment.invoiceId.slice(0, 8)}...</TableCell>
-                          <TableCell className="font-bold">${Number(payment.amount).toFixed(2)}</TableCell>
+                          <TableCell className="font-bold"><SarAmount amount={payment.amount} /></TableCell>
                           <TableCell>
                             <Badge variant="outline">{payment.paymentMethod}</Badge>
                           </TableCell>

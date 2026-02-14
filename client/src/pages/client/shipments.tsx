@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2 } from "lucide-react";
+import { SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ClientAccount } from "@shared/schema";
@@ -168,7 +169,7 @@ export default function ClientShipments() {
                         {format(new Date(shipment.createdAt), "MMM d, yyyy")}
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ${Number(shipment.finalPrice).toFixed(2)}
+                        <SarAmount amount={shipment.finalPrice} />
                       </TableCell>
                       <TableCell>
                         <Button
@@ -266,7 +267,7 @@ export default function ClientShipments() {
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Total Cost</span>
                   <span className="text-2xl font-bold">
-                    ${Number(selectedShipment.finalPrice).toFixed(2)}
+                    <SarAmount amount={selectedShipment.finalPrice} />
                   </span>
                 </div>
               </div>

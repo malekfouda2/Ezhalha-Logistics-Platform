@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreditCard, CheckCircle } from "lucide-react";
+import { SarAmount } from "@/components/sar-symbol";
 import type { Payment, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -52,7 +53,7 @@ export default function ClientPayments() {
             <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200">
               <CheckCircle className="h-4 w-4" />
               <span className="text-sm">
-                <span className="font-semibold">${totalPaid.toFixed(2)}</span> total paid
+                <span className="font-semibold"><SarAmount amount={totalPaid} /></span> total paid
               </span>
             </div>
           )}
@@ -91,7 +92,7 @@ export default function ClientPayments() {
                         {format(new Date(payment.createdAt), "MMM d, yyyy 'at' h:mm a")}
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        ${Number(payment.amount).toFixed(2)}
+                        <SarAmount amount={payment.amount} />
                       </TableCell>
                     </TableRow>
                   ))}

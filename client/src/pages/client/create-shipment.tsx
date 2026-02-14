@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, DollarSign } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock } from "lucide-react";
+import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
@@ -1077,7 +1078,7 @@ export default function CreateShipment() {
                             <p className="text-sm text-muted-foreground">{quote.carrierName}</p>
                           </div>
                           <div className="text-right">
-                            <p className="text-lg font-bold">${quote.finalPrice.toFixed(2)}</p>
+                            <p className="text-lg font-bold"><SarAmount amount={quote.finalPrice} /></p>
                             <p className="text-sm text-muted-foreground">{quote.currency}</p>
                           </div>
                         </div>
@@ -1136,7 +1137,7 @@ export default function CreateShipment() {
                 <div className="flex justify-between text-sm mt-2">
                   <span>Total Amount</span>
                   <span className="font-bold text-lg">
-                    ${checkoutData.amount.toFixed(2)} {checkoutData.currency}
+                    <SarAmount amount={checkoutData.amount} /> {checkoutData.currency}
                   </span>
                 </div>
               </div>
@@ -1159,7 +1160,7 @@ export default function CreateShipment() {
               ) : (
                 <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
-                    <DollarSign className="h-4 w-4" />
+                    <SarSymbol size="xs" />
                     Demo Mode
                   </div>
                   <p className="text-sm text-blue-600 dark:text-blue-400">
