@@ -14,11 +14,51 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users } from "lucide-react";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+} from "recharts";
+import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users, DollarSign } from "lucide-react";
 import { Link } from "wouter";
 import { ProfileBadge } from "@/components/profile-badge";
 import type { ClientDashboardStats, Shipment, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
+
+const shipmentChartConfig: ChartConfig = {
+  value: {
+    label: "Shipments",
+    color: "hsl(var(--primary))",
+  },
+};
+
+const STATUS_COLORS = [
+  "hsl(var(--primary))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--chart-1))",
+];
+
+function formatStatusLabel(status: string): string {
+  return status
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 const profileTierInfo: Record<string, { name: string; icon: typeof Crown; benefit: string; color: string }> = {
   regular: {
@@ -67,7 +107,6 @@ export default function ClientDashboard() {
   return (
     <ClientLayout clientProfile={account?.profile}>
       <div className="p-6 space-y-6 max-w-7xl mx-auto">
-        {/* Page Header with Profile */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-4">
             <div>
@@ -77,7 +116,7 @@ export default function ClientDashboard() {
               </p>
             </div>
             {account?.profile && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border" data-testid="profile-tier-display">
+              <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50 border" data-testid="profile-tier-display">
                 {(() => {
                   const tierInfo = profileTierInfo[account.profile] || profileTierInfo.regular;
                   const TierIcon = tierInfo.icon;
@@ -105,12 +144,12 @@ export default function ClientDashboard() {
           </Button>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           <StatCard
             title="Total Shipments"
             value={stats?.totalShipments ?? 0}
             icon={Package}
+            trend={stats?.trends?.shipments}
           />
           <StatCard
             title="In Transit"
@@ -121,15 +160,97 @@ export default function ClientDashboard() {
             title="Delivered"
             value={stats?.shipmentsDelivered ?? 0}
             icon={CheckCircle}
+            trend={stats?.trends?.delivered}
           />
           <StatCard
             title="Pending Invoices"
             value={stats?.pendingInvoices ?? 0}
             icon={FileText}
           />
+          <StatCard
+            title="Total Spent"
+            value={`$${(stats?.totalSpent ?? 0).toLocaleString()}`}
+            icon={DollarSign}
+            trend={stats?.trends?.spent}
+          />
         </div>
 
-        {/* Recent Shipments */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-lg">Shipment Activity (Last 6 Months)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats?.shipmentsByMonth && stats.shipmentsByMonth.some((d) => d.value > 0) ? (
+                <ChartContainer config={shipmentChartConfig} className="h-[220px] w-full">
+                  <BarChart data={stats.shipmentsByMonth} accessibilityLayer>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                    <YAxis tickLine={false} axisLine={false} allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="value" fill="var(--color-value)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                <div className="h-[220px] flex items-center justify-center text-muted-foreground">
+                  No shipment data yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Status Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats?.statusDistribution && stats.statusDistribution.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="h-[140px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={stats.statusDistribution}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={35}
+                          outerRadius={60}
+                          paddingAngle={3}
+                          dataKey="count"
+                          nameKey="status"
+                        >
+                          {stats.statusDistribution.map((_entry, index) => (
+                            <Cell key={`cell-${index}`} fill={STATUS_COLORS[index % STATUS_COLORS.length]} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="space-y-2">
+                    {stats.statusDistribution.map((item, index) => (
+                      <div key={item.status} className="flex items-center justify-between text-sm" data-testid={`status-legend-${item.status}`}>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: STATUS_COLORS[index % STATUS_COLORS.length] }}
+                          />
+                          <span className="text-muted-foreground">{formatStatusLabel(item.status)}</span>
+                        </div>
+                        <span className="font-medium">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-[220px] flex flex-col items-center justify-center text-muted-foreground">
+                  <Package className="h-10 w-10 mb-2 opacity-50" />
+                  <p>No data yet</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
             <CardTitle className="text-lg">Recent Shipments</CardTitle>
@@ -190,9 +311,8 @@ export default function ClientDashboard() {
           </CardContent>
         </Card>
 
-        {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/shipments/new")}>
+          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/shipments/new")} data-testid="card-action-create-shipment">
             <CardContent className="p-6 text-center">
               <div className="p-4 rounded-full bg-primary/10 w-fit mx-auto mb-4">
                 <Package className="h-8 w-8 text-primary" />
@@ -204,7 +324,7 @@ export default function ClientDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/shipments")}>
+          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/shipments")} data-testid="card-action-track-shipments">
             <CardContent className="p-6 text-center">
               <div className="p-4 rounded-full bg-blue-500/10 w-fit mx-auto mb-4">
                 <Truck className="h-8 w-8 text-blue-500" />
@@ -216,7 +336,7 @@ export default function ClientDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/invoices")}>
+          <Card className="hover-elevate cursor-pointer" onClick={() => navigate("/client/invoices")} data-testid="card-action-view-invoices">
             <CardContent className="p-6 text-center">
               <div className="p-4 rounded-full bg-green-500/10 w-fit mx-auto mb-4">
                 <FileText className="h-8 w-8 text-green-500" />

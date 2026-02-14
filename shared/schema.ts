@@ -649,6 +649,21 @@ export interface BrandingConfig {
 }
 
 // Dashboard stats types
+export interface TrendData {
+  value: number;
+  label: string;
+}
+
+export interface ChartDataPoint {
+  label: string;
+  value: number;
+}
+
+export interface StatusDistribution {
+  status: string;
+  count: number;
+}
+
 export interface AdminDashboardStats {
   totalClients: number;
   activeClients: number;
@@ -658,6 +673,14 @@ export interface AdminDashboardStats {
   shipmentsDelivered: number;
   totalRevenue: number;
   monthlyRevenue: number;
+  trends: {
+    clients: TrendData;
+    shipments: TrendData;
+    revenue: TrendData;
+  };
+  shipmentsByMonth: ChartDataPoint[];
+  revenueByMonth: ChartDataPoint[];
+  statusDistribution: StatusDistribution[];
 }
 
 export interface ClientDashboardStats {
@@ -666,4 +689,11 @@ export interface ClientDashboardStats {
   shipmentsDelivered: number;
   pendingInvoices: number;
   totalSpent: number;
+  trends: {
+    shipments: TrendData;
+    delivered: TrendData;
+    spent: TrendData;
+  };
+  shipmentsByMonth: ChartDataPoint[];
+  statusDistribution: StatusDistribution[];
 }

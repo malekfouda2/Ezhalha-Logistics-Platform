@@ -604,6 +604,51 @@ export async function registerRoutes(
     const clients = await storage.getClientAccounts();
     const shipments = await storage.getShipments();
     const applications = await storage.getClientApplications();
+    const invoices = await storage.getInvoices();
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+    const prevMonth = prevMonthDate.getMonth();
+    const prevYear = prevMonthDate.getFullYear();
+
+    const isCurrentMonth = (d: Date) => d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    const isPrevMonth = (d: Date) => d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+
+    const currentMonthShipments = shipments.filter((s) => isCurrentMonth(new Date(s.createdAt)));
+    const prevMonthShipments = shipments.filter((s) => isPrevMonth(new Date(s.createdAt)));
+    const currentMonthRevenue = currentMonthShipments.reduce((sum, s) => sum + Number(s.finalPrice), 0);
+    const prevMonthRevenue = prevMonthShipments.reduce((sum, s) => sum + Number(s.finalPrice), 0);
+
+    const currentMonthClients = clients.filter((c) => isCurrentMonth(new Date(c.createdAt)));
+    const prevMonthClients = clients.filter((c) => isPrevMonth(new Date(c.createdAt)));
+
+    function calcTrend(current: number, previous: number): number {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return Math.round(((current - previous) / previous) * 100);
+    }
+
+    const shipmentsByMonth: { label: string; value: number }[] = [];
+    const revenueByMonth: { label: string; value: number }[] = [];
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(currentYear, currentMonth - i, 1);
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const monthShipments = shipments.filter((s) => {
+        const sd = new Date(s.createdAt);
+        return sd.getMonth() === m && sd.getFullYear() === y;
+      });
+      shipmentsByMonth.push({ label: monthNames[m], value: monthShipments.length });
+      revenueByMonth.push({ label: monthNames[m], value: monthShipments.reduce((sum, s) => sum + Number(s.finalPrice), 0) });
+    }
+
+    const statusCounts: Record<string, number> = {};
+    shipments.forEach((s) => {
+      statusCounts[s.status] = (statusCounts[s.status] || 0) + 1;
+    });
+    const statusDistribution = Object.entries(statusCounts).map(([status, count]) => ({ status, count }));
 
     const stats: AdminDashboardStats = {
       totalClients: clients.length,
@@ -613,16 +658,15 @@ export async function registerRoutes(
       shipmentsInTransit: shipments.filter((s) => s.status === "in_transit").length,
       shipmentsDelivered: shipments.filter((s) => s.status === "delivered").length,
       totalRevenue: shipments.reduce((sum, s) => sum + Number(s.finalPrice), 0),
-      monthlyRevenue: shipments
-        .filter((s) => {
-          const shipmentDate = new Date(s.createdAt);
-          const now = new Date();
-          return (
-            shipmentDate.getMonth() === now.getMonth() &&
-            shipmentDate.getFullYear() === now.getFullYear()
-          );
-        })
-        .reduce((sum, s) => sum + Number(s.finalPrice), 0),
+      monthlyRevenue: currentMonthRevenue,
+      trends: {
+        clients: { value: calcTrend(currentMonthClients.length, prevMonthClients.length), label: "vs last month" },
+        shipments: { value: calcTrend(currentMonthShipments.length, prevMonthShipments.length), label: "vs last month" },
+        revenue: { value: calcTrend(currentMonthRevenue, prevMonthRevenue), label: "vs last month" },
+      },
+      shipmentsByMonth,
+      revenueByMonth,
+      statusDistribution,
     };
 
     res.json(stats);
@@ -2386,12 +2430,60 @@ export async function registerRoutes(
     const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
     const invoices = await storage.getInvoicesByClientAccount(user.clientAccountId);
 
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+    const prevMonth = prevMonthDate.getMonth();
+    const prevYear = prevMonthDate.getFullYear();
+
+    const isCurrentMonth = (d: Date) => d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    const isPrevMonth = (d: Date) => d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+
+    const currentMonthShipments = shipments.filter((s) => isCurrentMonth(new Date(s.createdAt)));
+    const prevMonthShipments = shipments.filter((s) => isPrevMonth(new Date(s.createdAt)));
+    const currentMonthDelivered = shipments.filter((s) => s.status === "delivered" && isCurrentMonth(new Date(s.createdAt)));
+    const prevMonthDelivered = shipments.filter((s) => s.status === "delivered" && isPrevMonth(new Date(s.createdAt)));
+    const currentMonthSpent = currentMonthShipments.reduce((sum, s) => sum + Number(s.finalPrice), 0);
+    const prevMonthSpent = prevMonthShipments.reduce((sum, s) => sum + Number(s.finalPrice), 0);
+
+    function calcTrend(current: number, previous: number): number {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return Math.round(((current - previous) / previous) * 100);
+    }
+
+    const shipmentsByMonth: { label: string; value: number }[] = [];
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(currentYear, currentMonth - i, 1);
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const monthShipments = shipments.filter((s) => {
+        const sd = new Date(s.createdAt);
+        return sd.getMonth() === m && sd.getFullYear() === y;
+      });
+      shipmentsByMonth.push({ label: monthNames[m], value: monthShipments.length });
+    }
+
+    const statusCounts: Record<string, number> = {};
+    shipments.forEach((s) => {
+      statusCounts[s.status] = (statusCounts[s.status] || 0) + 1;
+    });
+    const statusDistribution = Object.entries(statusCounts).map(([status, count]) => ({ status, count }));
+
     const stats: ClientDashboardStats = {
       totalShipments: shipments.length,
       shipmentsInTransit: shipments.filter((s) => s.status === "in_transit").length,
       shipmentsDelivered: shipments.filter((s) => s.status === "delivered").length,
       pendingInvoices: invoices.filter((i) => i.status === "pending").length,
       totalSpent: shipments.reduce((sum, s) => sum + Number(s.finalPrice), 0),
+      trends: {
+        shipments: { value: calcTrend(currentMonthShipments.length, prevMonthShipments.length), label: "vs last month" },
+        delivered: { value: calcTrend(currentMonthDelivered.length, prevMonthDelivered.length), label: "vs last month" },
+        spent: { value: calcTrend(currentMonthSpent, prevMonthSpent), label: "vs last month" },
+      },
+      shipmentsByMonth,
+      statusDistribution,
     };
 
     res.json(stats);
