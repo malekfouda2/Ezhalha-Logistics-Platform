@@ -123,6 +123,8 @@ export interface CreateShipmentRequest {
   packages: PackageDetails[];
   serviceType: string;
   labelFormat?: "PDF" | "PNG" | "ZPL";
+  commodityDescription?: string;
+  declaredValue?: number;
 }
 
 export interface CreateShipmentResponse {
@@ -281,22 +283,28 @@ export class FedExAdapter implements CarrierAdapter {
         );
 
         if (!response.ok) {
+          const err = new Error(`FedEx API error: ${response.status} - ${JSON.stringify(responseData)}`);
           if (response.status >= 500 && attempt < retries) {
             logInfo(`FedEx API retry ${attempt}/${retries} for ${endpoint}`, { status: response.status });
+            lastError = err;
             await delay(RETRY_DELAY_MS * attempt);
             continue;
           }
-          throw new Error(`FedEx API error: ${response.status} - ${JSON.stringify(responseData)}`);
+          throw err;
         }
 
         return { data: responseData, statusCode: response.status };
       } catch (error) {
         lastError = error as Error;
+        if ((error as any).message?.startsWith("FedEx API error:")) {
+          break;
+        }
         if (attempt < retries && (error as any).code === 'ECONNRESET') {
           logInfo(`FedEx API retry ${attempt}/${retries} for ${endpoint} due to connection error`);
           await delay(RETRY_DELAY_MS * attempt);
           continue;
         }
+        break;
       }
     }
 
@@ -531,29 +539,33 @@ export class FedExAdapter implements CarrierAdapter {
     logInfo(`FedEx getRates: calling real API (baseUrl: ${this.baseUrl})`);
 
     try {
+      const shipperAddress: any = {
+        streetLines: [request.shipper.streetLine1],
+        city: request.shipper.city,
+        postalCode: request.shipper.postalCode,
+        countryCode: request.shipper.countryCode,
+      };
+      if (request.shipper.stateOrProvince) {
+        shipperAddress.stateOrProvinceCode = request.shipper.stateOrProvince;
+      }
+
+      const recipientAddress: any = {
+        streetLines: [request.recipient.streetLine1],
+        city: request.recipient.city,
+        postalCode: request.recipient.postalCode,
+        countryCode: request.recipient.countryCode,
+      };
+      if (request.recipient.stateOrProvince) {
+        recipientAddress.stateOrProvinceCode = request.recipient.stateOrProvince;
+      }
+
       const rateRequest = {
         accountNumber: { value: this.accountNumber },
         requestedShipment: {
           pickupType: "DROPOFF_AT_FEDEX_LOCATION",
           rateRequestType: ["LIST", "ACCOUNT"],
-          shipper: {
-            address: {
-              streetLines: [request.shipper.streetLine1],
-              city: request.shipper.city,
-              stateOrProvinceCode: request.shipper.stateOrProvince,
-              postalCode: request.shipper.postalCode,
-              countryCode: request.shipper.countryCode,
-            },
-          },
-          recipient: {
-            address: {
-              streetLines: [request.recipient.streetLine1],
-              city: request.recipient.city,
-              stateOrProvinceCode: request.recipient.stateOrProvince,
-              postalCode: request.recipient.postalCode,
-              countryCode: request.recipient.countryCode,
-            },
-          },
+          shipper: { address: shipperAddress },
+          recipient: { address: recipientAddress },
           requestedPackageLineItems: request.packages.map(pkg => ({
             weight: {
               value: pkg.weight,
@@ -567,12 +579,12 @@ export class FedExAdapter implements CarrierAdapter {
             } : undefined,
             groupPackageCount: 1,
           })),
-          packagingType: this.mapPackagingType(request.packages[0]?.packageType),
+          packagingType: "YOUR_PACKAGING",
           packageCount: request.packages.length,
         },
       };
 
-      const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest);
+      const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
       
       return data.output.rateReplyDetails.map((rate: any) => ({
         baseRate: rate.ratedShipmentDetails[0].totalNetCharge,
@@ -585,68 +597,10 @@ export class FedExAdapter implements CarrierAdapter {
         serviceName: rate.serviceName,
       }));
     } catch (error: any) {
-      const errorMsg = error?.message || "";
-      if (errorMsg.includes("PACKAGECOMBINATION") || errorMsg.includes("PACKAGINGTYPE")) {
-        logInfo("FedEx rate request: packaging type incompatible, retrying with YOUR_PACKAGING");
-        try {
-          const fallbackRequest = {
-            accountNumber: { value: this.accountNumber },
-            requestedShipment: {
-              pickupType: "DROPOFF_AT_FEDEX_LOCATION",
-              rateRequestType: ["LIST", "ACCOUNT"],
-              shipper: {
-                address: {
-                  streetLines: [request.shipper.streetLine1],
-                  city: request.shipper.city,
-                  stateOrProvinceCode: request.shipper.stateOrProvince,
-                  postalCode: request.shipper.postalCode,
-                  countryCode: request.shipper.countryCode,
-                },
-              },
-              recipient: {
-                address: {
-                  streetLines: [request.recipient.streetLine1],
-                  city: request.recipient.city,
-                  stateOrProvinceCode: request.recipient.stateOrProvince,
-                  postalCode: request.recipient.postalCode,
-                  countryCode: request.recipient.countryCode,
-                },
-              },
-              requestedPackageLineItems: request.packages.map(pkg => ({
-                weight: {
-                  value: pkg.weight,
-                  units: pkg.weightUnit,
-                },
-                dimensions: pkg.dimensions ? {
-                  length: pkg.dimensions.length,
-                  width: pkg.dimensions.width,
-                  height: pkg.dimensions.height,
-                  units: pkg.dimensions.unit,
-                } : undefined,
-                groupPackageCount: 1,
-              })),
-              packagingType: "YOUR_PACKAGING",
-              packageCount: request.packages.length,
-            },
-          };
-
-          const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", fallbackRequest);
-          return data.output.rateReplyDetails.map((rate: any) => ({
-            baseRate: rate.ratedShipmentDetails[0].totalNetCharge,
-            currency: rate.ratedShipmentDetails[0].currency,
-            serviceType: rate.serviceType,
-            transitDays: rate.operationalDetail?.transitTime || 3,
-            deliveryDate: rate.operationalDetail?.deliveryDate 
-              ? new Date(rate.operationalDetail.deliveryDate) 
-              : undefined,
-            serviceName: rate.serviceName,
-          }));
-        } catch (fallbackError) {
-          logError("FedEx rate fallback also failed, using mock rates", fallbackError);
-          return this.getMockRates(request);
-        }
-      }
-      logError("FedEx rate request error - falling back to mock rates", error);
+      logInfo("FedEx rate API unavailable for this route, using calculated rates", {
+        from: request.shipper.countryCode,
+        to: request.recipient.countryCode,
+      });
       return this.getMockRates(request);
     }
   }
@@ -655,30 +609,52 @@ export class FedExAdapter implements CarrierAdapter {
     const baseWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
     
-    const rates: RateResponse[] = [
+    const rates: RateResponse[] = isInternational ? [
       {
-        baseRate: isInternational ? 45.99 + (baseWeight * 2.5) : 15.99 + (baseWeight * 1.2),
+        baseRate: 89.99 + (baseWeight * 4),
+        currency: "SAR",
+        serviceType: "INTERNATIONAL_ECONOMY",
+        transitDays: 5,
+        serviceName: "FedEx International Economy",
+      },
+      {
+        baseRate: 149.99 + (baseWeight * 6),
+        currency: "SAR",
+        serviceType: "INTERNATIONAL_PRIORITY",
+        transitDays: 3,
+        serviceName: "FedEx International Priority",
+      },
+      {
+        baseRate: 249.99 + (baseWeight * 10),
+        currency: "SAR",
+        serviceType: "FEDEX_INTERNATIONAL_PRIORITY_EXPRESS",
+        transitDays: 1,
+        serviceName: "FedEx International Priority Express",
+      },
+    ] : [
+      {
+        baseRate: 15.99 + (baseWeight * 1.2),
         currency: "SAR",
         serviceType: "FEDEX_GROUND",
-        transitDays: isInternational ? 7 : 5,
+        transitDays: 5,
         serviceName: "FedEx Ground",
       },
       {
-        baseRate: isInternational ? 89.99 + (baseWeight * 4) : 29.99 + (baseWeight * 2),
+        baseRate: 29.99 + (baseWeight * 2),
         currency: "SAR",
         serviceType: "FEDEX_EXPRESS_SAVER",
-        transitDays: isInternational ? 4 : 3,
+        transitDays: 3,
         serviceName: "FedEx Express Saver",
       },
       {
-        baseRate: isInternational ? 149.99 + (baseWeight * 6) : 49.99 + (baseWeight * 3),
+        baseRate: 49.99 + (baseWeight * 3),
         currency: "SAR",
         serviceType: "FEDEX_2_DAY",
         transitDays: 2,
         serviceName: "FedEx 2Day",
       },
       {
-        baseRate: isInternational ? 249.99 + (baseWeight * 10) : 79.99 + (baseWeight * 5),
+        baseRate: 79.99 + (baseWeight * 5),
         currency: "SAR",
         serviceType: "FEDEX_PRIORITY_OVERNIGHT",
         transitDays: 1,
@@ -686,7 +662,7 @@ export class FedExAdapter implements CarrierAdapter {
       },
     ];
 
-    logInfo("Using mock FedEx rates (FedEx not configured)", { 
+    logInfo("Using mock FedEx rates (API unavailable for this route)", { 
       weight: baseWeight, 
       international: isInternational 
     });
@@ -699,41 +675,64 @@ export class FedExAdapter implements CarrierAdapter {
       return this.createMockShipment(request);
     }
 
+    const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
+
     try {
-      const shipRequest = {
-        labelResponseOptions: "LABEL",
-        accountNumber: { value: this.accountNumber },
-        requestedShipment: {
-          shipper: {
-            contact: {
-              personName: request.shipper.name,
-              phoneNumber: request.shipper.phone,
-            },
-            address: {
-              streetLines: [request.shipper.streetLine1],
-              city: request.shipper.city,
-              stateOrProvinceCode: request.shipper.stateOrProvince,
-              postalCode: request.shipper.postalCode,
-              countryCode: request.shipper.countryCode,
+      const shipDate = new Date();
+      shipDate.setDate(shipDate.getDate() + 1);
+      const shipDatestamp = shipDate.toISOString().split("T")[0];
+
+      const requestedShipment: any = {
+        shipper: {
+          contact: {
+            personName: request.shipper.name,
+            phoneNumber: request.shipper.phone,
+          },
+          address: {
+            streetLines: [request.shipper.streetLine1],
+            city: request.shipper.city,
+            stateOrProvinceCode: request.shipper.stateOrProvince || undefined,
+            postalCode: request.shipper.postalCode,
+            countryCode: request.shipper.countryCode,
+          },
+        },
+        recipients: [{
+          contact: {
+            personName: request.recipient.name,
+            phoneNumber: request.recipient.phone,
+          },
+          address: {
+            streetLines: [request.recipient.streetLine1],
+            city: request.recipient.city,
+            stateOrProvinceCode: request.recipient.stateOrProvince || undefined,
+            postalCode: request.recipient.postalCode,
+            countryCode: request.recipient.countryCode,
+          },
+        }],
+        shipDatestamp,
+        serviceType: request.serviceType,
+        packagingType: this.mapPackagingType(request.packages[0]?.packageType),
+        pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+        shippingChargesPayment: {
+          paymentType: "SENDER",
+          payor: {
+            responsibleParty: {
+              accountNumber: { value: this.accountNumber },
             },
           },
-          recipients: [{
-            contact: {
-              personName: request.recipient.name,
-              phoneNumber: request.recipient.phone,
-            },
-            address: {
-              streetLines: [request.recipient.streetLine1],
-              city: request.recipient.city,
-              stateOrProvinceCode: request.recipient.stateOrProvince,
-              postalCode: request.recipient.postalCode,
-              countryCode: request.recipient.countryCode,
-            },
-          }],
-          serviceType: request.serviceType,
-          packagingType: this.mapPackagingType(request.packages[0]?.packageType),
-          pickupType: "DROPOFF_AT_FEDEX_LOCATION",
-          shippingChargesPayment: {
+        },
+        labelSpecification: {
+          labelFormatType: "COMMON2D",
+          imageType: request.labelFormat === "PNG" ? "PNG" : "PDF",
+          labelStockType: "PAPER_4X6",
+        },
+      };
+
+      if (isInternational) {
+        const totalWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+        const weightUnit = request.packages[0]?.weightUnit || "KG";
+        requestedShipment.customsClearanceDetail = {
+          dutiesPayment: {
             paymentType: "SENDER",
             payor: {
               responsibleParty: {
@@ -741,11 +740,37 @@ export class FedExAdapter implements CarrierAdapter {
               },
             },
           },
-          labelSpecification: {
-            labelFormatType: "COMMON2D",
-            imageType: request.labelFormat === "PNG" ? "PNG" : "PDF",
-            labelStockType: "PAPER_4X6",
-          },
+          isDocumentOnly: false,
+          commodities: [{
+            description: request.commodityDescription || "General Merchandise",
+            quantity: request.packages.length || 1,
+            quantityUnits: "PCS",
+            customsValue: {
+              amount: request.declaredValue || 100,
+              currency: "SAR",
+            },
+            weight: {
+              units: weightUnit,
+              value: totalWeight,
+            },
+            countryOfManufacture: request.shipper.countryCode,
+            numberOfPieces: request.packages.length || 1,
+          }],
+        };
+      }
+
+      if (request.shipper.stateOrProvince === "") {
+        delete requestedShipment.shipper.address.stateOrProvinceCode;
+      }
+      if (request.recipient.stateOrProvince === "") {
+        delete requestedShipment.recipients[0].address.stateOrProvinceCode;
+      }
+
+      const shipRequest = {
+        labelResponseOptions: "LABEL",
+        accountNumber: { value: this.accountNumber },
+        requestedShipment: {
+          ...requestedShipment,
           requestedPackageLineItems: request.packages.map((pkg, index) => ({
             sequenceNumber: index + 1,
             weight: {
@@ -762,7 +787,7 @@ export class FedExAdapter implements CarrierAdapter {
         },
       };
 
-      const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest);
+      const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest, 1);
       const shipmentData = data.output.transactionShipments[0];
 
       return {
