@@ -35,6 +35,8 @@ import {
   type InsertClientUserPermission,
   type Policy,
   type InsertPolicy,
+  type PolicyVersion,
+  type InsertPolicyVersion,
   users,
   clientAccounts,
   clientApplications,
@@ -53,6 +55,7 @@ import {
   shipmentRateQuotes,
   clientUserPermissions,
   policies,
+  policyVersions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -229,6 +232,12 @@ export interface IStorage {
   createPolicy(policy: InsertPolicy): Promise<Policy>;
   updatePolicy(id: string, updates: Partial<Policy>): Promise<Policy | undefined>;
   deletePolicy(id: string): Promise<void>;
+
+  // Policy Versions
+  getPolicyVersions(policyId: string): Promise<PolicyVersion[]>;
+  getPolicyVersion(versionId: string): Promise<PolicyVersion | undefined>;
+  getLatestPolicyVersionNumber(policyId: string): Promise<number>;
+  createPolicyVersion(version: InsertPolicyVersion): Promise<PolicyVersion>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -1091,6 +1100,31 @@ export class DatabaseStorage implements IStorage {
 
   async deletePolicy(id: string): Promise<void> {
     await db.delete(policies).where(eq(policies.id, id));
+  }
+
+  // Policy Versions
+  async getPolicyVersions(policyId: string): Promise<PolicyVersion[]> {
+    return await db.select().from(policyVersions)
+      .where(eq(policyVersions.policyId, policyId))
+      .orderBy(desc(policyVersions.versionNumber));
+  }
+
+  async getPolicyVersion(versionId: string): Promise<PolicyVersion | undefined> {
+    const [version] = await db.select().from(policyVersions)
+      .where(eq(policyVersions.id, versionId));
+    return version;
+  }
+
+  async getLatestPolicyVersionNumber(policyId: string): Promise<number> {
+    const [result] = await db.select({ maxVersion: sql<number>`COALESCE(MAX(${policyVersions.versionNumber}), 0)` })
+      .from(policyVersions)
+      .where(eq(policyVersions.policyId, policyId));
+    return result?.maxVersion || 0;
+  }
+
+  async createPolicyVersion(version: InsertPolicyVersion): Promise<PolicyVersion> {
+    const [created] = await db.insert(policyVersions).values(version).returning();
+    return created;
   }
 
   async initializeDefaults(): Promise<void> {
