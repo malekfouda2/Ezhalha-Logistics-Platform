@@ -193,20 +193,27 @@ export class FedExAdapter implements CarrierAdapter {
   name = "FedEx";
   carrierCode = "FEDEX";
   
-  private clientId: string | undefined;
-  private clientSecret: string | undefined;
-  private accountNumber: string | undefined;
-  private webhookSecret: string | undefined;
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
-  private baseUrl: string;
 
-  constructor() {
-    this.clientId = process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
-    this.clientSecret = process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
-    this.accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
-    this.webhookSecret = process.env.FEDEX_WEBHOOK_SECRET;
-    this.baseUrl = process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
+  private get clientId(): string | undefined {
+    return process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
+  }
+
+  private get clientSecret(): string | undefined {
+    return process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
+  }
+
+  private get accountNumber(): string | undefined {
+    return process.env.FEDEX_ACCOUNT_NUMBER;
+  }
+
+  private get webhookSecret(): string | undefined {
+    return process.env.FEDEX_WEBHOOK_SECRET;
+  }
+
+  private get baseUrl(): string {
+    return process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
   }
 
   isConfigured(): boolean {
@@ -495,13 +502,18 @@ export class FedExAdapter implements CarrierAdapter {
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
     if (!this.isConfigured()) {
+      logInfo("FedEx not configured, using mock rates");
       return this.getMockRates(request);
     }
+
+    logInfo(`FedEx getRates: calling real API (baseUrl: ${this.baseUrl})`);
 
     try {
       const rateRequest = {
         accountNumber: { value: this.accountNumber },
         requestedShipment: {
+          pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+          rateRequestType: ["LIST", "ACCOUNT"],
           shipper: {
             address: {
               streetLines: [request.shipper.streetLine1],
@@ -531,7 +543,10 @@ export class FedExAdapter implements CarrierAdapter {
               height: pkg.dimensions.height,
               units: pkg.dimensions.unit,
             } : undefined,
+            groupPackageCount: 1,
           })),
+          packagingType: request.packages[0]?.packageType || "YOUR_PACKAGING",
+          packageCount: request.packages.length,
         },
       };
 
@@ -548,7 +563,7 @@ export class FedExAdapter implements CarrierAdapter {
         serviceName: rate.serviceName,
       }));
     } catch (error) {
-      logError("FedEx rate request error", error);
+      logError("FedEx rate request error - falling back to mock rates", error);
       return this.getMockRates(request);
     }
   }
@@ -818,7 +833,8 @@ export class CarrierService {
 
   registerAdapter(adapter: CarrierAdapter): void {
     this.adapters.set(adapter.carrierCode.toUpperCase(), adapter);
-    logInfo(`Registered carrier adapter: ${adapter.name} (${adapter.carrierCode})`);
+    const configured = adapter.isConfigured();
+    logInfo(`Registered carrier adapter: ${adapter.name} (${adapter.carrierCode}) - configured: ${configured}`);
   }
 
   getAdapter(carrierCode: string): CarrierAdapter {
