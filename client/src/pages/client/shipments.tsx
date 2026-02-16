@@ -109,7 +109,7 @@ export default function ClientShipments() {
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by tracking # or recipient..."
+                  placeholder="Search by shipment ID or recipient..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -143,7 +143,7 @@ export default function ClientShipments() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Tracking #</TableHead>
+                    <TableHead>Shipment ID</TableHead>
                     <TableHead>Recipient</TableHead>
                     <TableHead>Destination</TableHead>
                     <TableHead>Status</TableHead>
@@ -204,14 +204,20 @@ export default function ClientShipments() {
 
           {selectedShipment && (
             <div className="mt-6 space-y-6">
-              {/* Tracking & Status */}
-              <div className="flex items-center justify-between gap-4">
+              {/* Shipment ID & Status */}
+              <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                  <p className="text-sm text-muted-foreground">Tracking Number</p>
+                  <p className="text-sm text-muted-foreground">Shipment ID</p>
                   <p className="font-mono font-medium">{selectedShipment.trackingNumber}</p>
                 </div>
                 <StatusBadge status={selectedShipment.status} />
               </div>
+              {selectedShipment.carrierTrackingNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
+                  <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
+                </div>
+              )}
 
               {/* Origin */}
               <div className="p-4 rounded-lg bg-muted/50">

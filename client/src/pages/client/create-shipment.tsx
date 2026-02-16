@@ -1131,7 +1131,7 @@ export default function CreateShipment() {
               <div className="rounded-lg bg-muted p-4">
                 <h4 className="font-medium mb-2">Order Summary</h4>
                 <div className="flex justify-between text-sm">
-                  <span>Tracking Number</span>
+                  <span>Shipment ID</span>
                   <span className="font-mono">{checkoutData.trackingNumber}</span>
                 </div>
                 <div className="flex justify-between text-sm mt-2">
@@ -1200,7 +1200,7 @@ export default function CreateShipment() {
             <CardContent className="space-y-4">
               <div className="rounded-lg bg-muted p-4 space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span>Internal Tracking</span>
+                  <span>Shipment ID</span>
                   <span className="font-mono">{confirmData.shipment?.trackingNumber}</span>
                 </div>
                 <div className="flex justify-between text-sm">

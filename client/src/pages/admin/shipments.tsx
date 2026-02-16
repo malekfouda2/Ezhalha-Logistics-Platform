@@ -184,7 +184,7 @@ export default function AdminShipments() {
               <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by tracking #, name, or city..."
+                  placeholder="Search by shipment ID, name, or city..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
@@ -215,7 +215,7 @@ export default function AdminShipments() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Tracking #</TableHead>
+                      <TableHead>Shipment ID</TableHead>
                       <TableHead>Origin</TableHead>
                       <TableHead>Destination</TableHead>
                       <TableHead>Status</TableHead>
@@ -274,13 +274,19 @@ export default function AdminShipments() {
           </SheetHeader>
           {selectedShipment && (
             <div className="mt-6 space-y-6">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                  <p className="text-sm text-muted-foreground">Tracking Number</p>
+                  <p className="text-sm text-muted-foreground">Shipment ID</p>
                   <p className="font-mono font-medium">{selectedShipment.trackingNumber}</p>
                 </div>
                 <StatusBadge status={selectedShipment.status} />
               </div>
+              {selectedShipment.carrierTrackingNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
+                  <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
+                </div>
+              )}
               <div className="p-4 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 mb-3">
                   <MapPin className="h-4 w-4 text-muted-foreground" />

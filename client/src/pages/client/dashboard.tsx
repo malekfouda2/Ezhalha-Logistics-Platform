@@ -271,7 +271,7 @@ export default function ClientDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Tracking #</TableHead>
+                    <TableHead>Shipment ID</TableHead>
                     <TableHead>Destination</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Date</TableHead>

@@ -274,7 +274,7 @@ export const shipments = pgTable("shipments", {
   numberOfPackages: integer("number_of_packages").default(1),
   shipmentType: text("shipment_type").default("domestic"),
   serviceType: text("service_type"),
-  currency: text("currency").default("USD"),
+  currency: text("currency").default("SAR"),
   status: text("status").notNull().default("draft"),
   baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
   marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }),

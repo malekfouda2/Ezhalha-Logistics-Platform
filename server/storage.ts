@@ -234,11 +234,10 @@ export interface IStorage {
   initializeDefaults(): Promise<void>;
 }
 
-function generateTrackingNumber(): string {
+function generateShipmentId(): string {
   const prefix = "EZH";
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `${prefix}${timestamp}${random}`;
+  const num = Math.floor(Math.random() * 1000000000).toString().padStart(9, "0");
+  return `${prefix}${num}`;
 }
 
 function generateInvoiceNumber(): string {
@@ -500,7 +499,7 @@ export class DatabaseStorage implements IStorage {
   async createShipment(shipment: InsertShipment): Promise<Shipment> {
     const [newShipment] = await db.insert(shipments).values({
       ...shipment,
-      trackingNumber: generateTrackingNumber(),
+      trackingNumber: generateShipmentId(),
     }).returning();
     return newShipment;
   }
@@ -1160,7 +1159,7 @@ export class DatabaseStorage implements IStorage {
         const baseRate = 50 + Math.random() * 100;
         const margin = baseRate * 0.2;
         await db.insert(shipments).values({
-          trackingNumber: generateTrackingNumber(),
+          trackingNumber: generateShipmentId(),
           clientAccountId: demoClientAccount.id,
           senderName: "John Sender",
           senderAddress: "123 Main St",

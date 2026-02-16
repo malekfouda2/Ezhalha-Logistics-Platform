@@ -214,7 +214,7 @@ export default function AdminDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Tracking #</TableHead>
+                      <TableHead>Shipment ID</TableHead>
                       <TableHead>Destination</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
