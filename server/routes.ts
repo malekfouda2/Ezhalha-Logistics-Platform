@@ -403,6 +403,43 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/policies/:slug/versions", async (req, res) => {
+    try {
+      const policy = await storage.getPolicyBySlug(req.params.slug);
+      if (!policy || !policy.isPublished) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      const versions = await storage.getPolicyVersions(policy.id);
+      res.json(versions.map(v => ({
+        id: v.id,
+        versionNumber: v.versionNumber,
+        title: v.title,
+        changeNote: v.changeNote,
+        createdAt: v.createdAt,
+      })));
+    } catch (error) {
+      logError("Error fetching policy versions", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/policies/:slug/versions/:versionId", async (req, res) => {
+    try {
+      const policy = await storage.getPolicyBySlug(req.params.slug);
+      if (!policy || !policy.isPublished) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      const version = await storage.getPolicyVersion(req.params.versionId);
+      if (!version || version.policyId !== policy.id) {
+        return res.status(404).json({ error: "Version not found" });
+      }
+      res.json(version);
+    } catch (error) {
+      logError("Error fetching policy version", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // ============================================
   // AUTH ROUTES
   // ============================================
@@ -1964,6 +2001,7 @@ export async function registerRoutes(
     title: z.string().min(1).max(255).optional(),
     content: z.string().min(1).optional(),
     isPublished: z.boolean().optional(),
+    changeNote: z.string().max(500).optional(),
   });
 
   const sanitizeOptions: sanitizeHtml.IOptions = {
@@ -2023,7 +2061,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: parsed.error.errors[0].message });
       }
 
-      const { title, content, isPublished } = parsed.data;
+      const { title, content, isPublished, changeNote } = parsed.data;
+      const hasContentChange = (title !== undefined && title.trim() !== policy.title) ||
+                               (content !== undefined && content !== policy.content);
+
+      if (hasContentChange) {
+        const currentVersion = await storage.getLatestPolicyVersionNumber(req.params.id);
+        await storage.createPolicyVersion({
+          policyId: req.params.id,
+          versionNumber: currentVersion + 1,
+          title: policy.title,
+          content: policy.content,
+          changedBy: req.session.userId,
+          changeNote: changeNote || null,
+        });
+      }
+
       const updates: Record<string, any> = { updatedBy: req.session.userId };
       if (title !== undefined) updates.title = title.trim();
       if (content !== undefined) updates.content = sanitizeHtml(content, sanitizeOptions);
@@ -2034,6 +2087,33 @@ export async function registerRoutes(
       res.json(updated);
     } catch (error) {
       logError("Error updating policy", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/policies/:id/versions", requireAdmin, async (req, res) => {
+    try {
+      const policy = await storage.getPolicy(req.params.id);
+      if (!policy) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      const versions = await storage.getPolicyVersions(req.params.id);
+      res.json(versions);
+    } catch (error) {
+      logError("Error fetching policy versions", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/policies/:id/versions/:versionId", requireAdmin, async (req, res) => {
+    try {
+      const version = await storage.getPolicyVersion(req.params.versionId);
+      if (!version || version.policyId !== req.params.id) {
+        return res.status(404).json({ error: "Version not found" });
+      }
+      res.json(version);
+    } catch (error) {
+      logError("Error fetching policy version", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
