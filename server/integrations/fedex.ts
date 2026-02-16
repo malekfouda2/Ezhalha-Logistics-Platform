@@ -560,28 +560,28 @@ export class FedExAdapter implements CarrierAdapter {
     const rates: RateResponse[] = [
       {
         baseRate: isInternational ? 45.99 + (baseWeight * 2.5) : 15.99 + (baseWeight * 1.2),
-        currency: "USD",
+        currency: "SAR",
         serviceType: "FEDEX_GROUND",
         transitDays: isInternational ? 7 : 5,
         serviceName: "FedEx Ground",
       },
       {
         baseRate: isInternational ? 89.99 + (baseWeight * 4) : 29.99 + (baseWeight * 2),
-        currency: "USD",
+        currency: "SAR",
         serviceType: "FEDEX_EXPRESS_SAVER",
         transitDays: isInternational ? 4 : 3,
         serviceName: "FedEx Express Saver",
       },
       {
         baseRate: isInternational ? 149.99 + (baseWeight * 6) : 49.99 + (baseWeight * 3),
-        currency: "USD",
+        currency: "SAR",
         serviceType: "FEDEX_2_DAY",
         transitDays: 2,
         serviceName: "FedEx 2Day",
       },
       {
         baseRate: isInternational ? 249.99 + (baseWeight * 10) : 79.99 + (baseWeight * 5),
-        currency: "USD",
+        currency: "SAR",
         serviceType: "FEDEX_PRIORITY_OVERNIGHT",
         transitDays: 1,
         serviceName: "FedEx Priority Overnight",
