@@ -2759,13 +2759,27 @@ export async function registerRoutes(
       const shipmentData = JSON.parse(quote.shipmentData);
       const account = await storage.getClientAccount(user.clientAccountId);
       const pricingRule = await storage.getPricingRuleByProfile(account?.profile || "regular");
-      const marginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
       const baseRate = Number(quote.baseRate);
+      
+      // Use tiered margin if available (same logic as rate discovery)
+      const marginPercentage = pricingRule 
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        : defaultMarginPercentage;
       const recalculatedMargin = baseRate * (marginPercentage / 100);
       const recalculatedFinalPrice = baseRate + recalculatedMargin;
 
-      // Verify price hasn't been tampered with
-      if (Math.abs(recalculatedFinalPrice - Number(quote.finalPrice)) > 0.01) {
+      // Verify price hasn't been tampered with (use stored margin for comparison since tiered rates may vary)
+      const storedFinalPrice = Number(quote.finalPrice);
+      if (Math.abs(recalculatedFinalPrice - storedFinalPrice) > 0.01) {
+        logError("Price mismatch in checkout", {
+          baseRate,
+          marginPercentage,
+          recalculatedFinalPrice,
+          storedFinalPrice,
+          quoteMarginPercentage: quote.marginPercentage,
+          diff: Math.abs(recalculatedFinalPrice - storedFinalPrice),
+        });
         return res.status(400).json({ error: "Price mismatch detected" });
       }
 
