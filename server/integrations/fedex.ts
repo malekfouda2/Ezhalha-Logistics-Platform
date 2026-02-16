@@ -500,6 +500,25 @@ export class FedExAdapter implements CarrierAdapter {
     };
   }
 
+  private mapPackagingType(packageType?: string): string {
+    const mapping: Record<string, string> = {
+      "YOUR_PACKAGING": "YOUR_PACKAGING",
+      "ENVELOPE": "FEDEX_ENVELOPE",
+      "PAK": "FEDEX_PAK",
+      "BOX_SMALL": "FEDEX_SMALL_BOX",
+      "BOX_MEDIUM": "FEDEX_MEDIUM_BOX",
+      "BOX_LARGE": "FEDEX_LARGE_BOX",
+      "TUBE": "FEDEX_TUBE",
+      "FEDEX_ENVELOPE": "FEDEX_ENVELOPE",
+      "FEDEX_PAK": "FEDEX_PAK",
+      "FEDEX_SMALL_BOX": "FEDEX_SMALL_BOX",
+      "FEDEX_MEDIUM_BOX": "FEDEX_MEDIUM_BOX",
+      "FEDEX_LARGE_BOX": "FEDEX_LARGE_BOX",
+      "FEDEX_TUBE": "FEDEX_TUBE",
+    };
+    return mapping[packageType || "YOUR_PACKAGING"] || "YOUR_PACKAGING";
+  }
+
   async getRates(request: RateRequest): Promise<RateResponse[]> {
     if (!this.isConfigured()) {
       logInfo("FedEx not configured, using mock rates");
@@ -545,7 +564,7 @@ export class FedExAdapter implements CarrierAdapter {
             } : undefined,
             groupPackageCount: 1,
           })),
-          packagingType: request.packages[0]?.packageType || "YOUR_PACKAGING",
+          packagingType: this.mapPackagingType(request.packages[0]?.packageType),
           packageCount: request.packages.length,
         },
       };
@@ -648,10 +667,11 @@ export class FedExAdapter implements CarrierAdapter {
             },
           }],
           serviceType: request.serviceType,
-          packagingType: "YOUR_PACKAGING",
+          packagingType: this.mapPackagingType(request.packages[0]?.packageType),
           pickupType: "DROPOFF_AT_FEDEX_LOCATION",
           labelSpecification: {
-            labelFormatType: request.labelFormat || "PDF",
+            labelFormatType: "COMMON2D",
+            imageType: request.labelFormat === "PNG" ? "PNG" : "PDF",
             labelStockType: "PAPER_4X6",
           },
           requestedPackageLineItems: request.packages.map((pkg, index) => ({
