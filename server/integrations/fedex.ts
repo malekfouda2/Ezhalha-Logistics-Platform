@@ -301,7 +301,10 @@ export class FedExAdapter implements CarrierAdapter {
     }
 
     const duration = Date.now() - startTime;
-    await this.logIntegration(endpoint, method, body, { error: lastError?.message }, 0, duration, false);
+    const alreadyLogged = lastError?.message?.startsWith("FedEx API error:");
+    if (!alreadyLogged) {
+      await this.logIntegration(endpoint, method, body, { error: lastError?.message }, 0, duration, false);
+    }
     throw lastError || new Error("FedEx API request failed");
   }
 
@@ -581,7 +584,68 @@ export class FedExAdapter implements CarrierAdapter {
           : undefined,
         serviceName: rate.serviceName,
       }));
-    } catch (error) {
+    } catch (error: any) {
+      const errorMsg = error?.message || "";
+      if (errorMsg.includes("PACKAGECOMBINATION") || errorMsg.includes("PACKAGINGTYPE")) {
+        logInfo("FedEx rate request: packaging type incompatible, retrying with YOUR_PACKAGING");
+        try {
+          const fallbackRequest = {
+            accountNumber: { value: this.accountNumber },
+            requestedShipment: {
+              pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+              rateRequestType: ["LIST", "ACCOUNT"],
+              shipper: {
+                address: {
+                  streetLines: [request.shipper.streetLine1],
+                  city: request.shipper.city,
+                  stateOrProvinceCode: request.shipper.stateOrProvince,
+                  postalCode: request.shipper.postalCode,
+                  countryCode: request.shipper.countryCode,
+                },
+              },
+              recipient: {
+                address: {
+                  streetLines: [request.recipient.streetLine1],
+                  city: request.recipient.city,
+                  stateOrProvinceCode: request.recipient.stateOrProvince,
+                  postalCode: request.recipient.postalCode,
+                  countryCode: request.recipient.countryCode,
+                },
+              },
+              requestedPackageLineItems: request.packages.map(pkg => ({
+                weight: {
+                  value: pkg.weight,
+                  units: pkg.weightUnit,
+                },
+                dimensions: pkg.dimensions ? {
+                  length: pkg.dimensions.length,
+                  width: pkg.dimensions.width,
+                  height: pkg.dimensions.height,
+                  units: pkg.dimensions.unit,
+                } : undefined,
+                groupPackageCount: 1,
+              })),
+              packagingType: "YOUR_PACKAGING",
+              packageCount: request.packages.length,
+            },
+          };
+
+          const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", fallbackRequest);
+          return data.output.rateReplyDetails.map((rate: any) => ({
+            baseRate: rate.ratedShipmentDetails[0].totalNetCharge,
+            currency: rate.ratedShipmentDetails[0].currency,
+            serviceType: rate.serviceType,
+            transitDays: rate.operationalDetail?.transitTime || 3,
+            deliveryDate: rate.operationalDetail?.deliveryDate 
+              ? new Date(rate.operationalDetail.deliveryDate) 
+              : undefined,
+            serviceName: rate.serviceName,
+          }));
+        } catch (fallbackError) {
+          logError("FedEx rate fallback also failed, using mock rates", fallbackError);
+          return this.getMockRates(request);
+        }
+      }
       logError("FedEx rate request error - falling back to mock rates", error);
       return this.getMockRates(request);
     }
@@ -669,6 +733,14 @@ export class FedExAdapter implements CarrierAdapter {
           serviceType: request.serviceType,
           packagingType: this.mapPackagingType(request.packages[0]?.packageType),
           pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+          shippingChargesPayment: {
+            paymentType: "SENDER",
+            payor: {
+              responsibleParty: {
+                accountNumber: { value: this.accountNumber },
+              },
+            },
+          },
           labelSpecification: {
             labelFormatType: "COMMON2D",
             imageType: request.labelFormat === "PNG" ? "PNG" : "PDF",
