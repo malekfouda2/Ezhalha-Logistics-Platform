@@ -641,6 +641,26 @@ export const insertPolicySchema = createInsertSchema(policies).omit({
 export type InsertPolicy = z.infer<typeof insertPolicySchema>;
 export type Policy = typeof policies.$inferSelect;
 
+// Policy Versions
+export const policyVersions = pgTable("policy_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  policyId: varchar("policy_id").notNull().references(() => policies.id, { onDelete: "cascade" }),
+  versionNumber: integer("version_number").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  changedBy: varchar("changed_by"),
+  changeNote: varchar("change_note", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertPolicyVersionSchema = createInsertSchema(policyVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPolicyVersion = z.infer<typeof insertPolicyVersionSchema>;
+export type PolicyVersion = typeof policyVersions.$inferSelect;
+
 // Branding config type
 export interface BrandingConfig {
   appName: string;
