@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
 import { LoadingScreen } from "@/components/loading-spinner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,8 +30,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { FileText, Plus, Edit, Trash2, Eye, EyeOff, ExternalLink, Clock } from "lucide-react";
-import type { Policy } from "@shared/schema";
+import { FileText, Plus, Edit, Trash2, Eye, EyeOff, ExternalLink, Clock, History, Calendar, ArrowLeft } from "lucide-react";
+import type { Policy, PolicyVersion } from "@shared/schema";
 
 export default function AdminPolicies() {
   const { toast } = useToast();
@@ -39,15 +39,28 @@ export default function AdminPolicies() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [policyToDelete, setPolicyToDelete] = useState<Policy | null>(null);
+  const [viewingVersionsFor, setViewingVersionsFor] = useState<Policy | null>(null);
+  const [viewingVersionContent, setViewingVersionContent] = useState<PolicyVersion | null>(null);
 
   const [formTitle, setFormTitle] = useState("");
   const [formSlug, setFormSlug] = useState("");
   const [formContent, setFormContent] = useState("");
   const [formIsPublished, setFormIsPublished] = useState(true);
+  const [formChangeNote, setFormChangeNote] = useState("");
   const [activeTab, setActiveTab] = useState("edit");
 
   const { data: policiesList, isLoading } = useQuery<Policy[]>({
     queryKey: ["/api/admin/policies"],
+  });
+
+  const { data: versionsList } = useQuery<PolicyVersion[]>({
+    queryKey: ["/api/admin/policies", viewingVersionsFor?.id, "versions"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/policies/${viewingVersionsFor!.id}/versions`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!viewingVersionsFor,
   });
 
   const createMutation = useMutation({
@@ -67,7 +80,7 @@ export default function AdminPolicies() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, ...data }: { id: string; title: string; content: string; isPublished: boolean }) => {
+    mutationFn: async ({ id, ...data }: { id: string; title: string; content: string; isPublished: boolean; changeNote?: string }) => {
       const res = await apiRequest("PATCH", `/api/admin/policies/${id}`, data);
       return res.json();
     },
@@ -116,6 +129,7 @@ export default function AdminPolicies() {
     setFormSlug("");
     setFormContent("");
     setFormIsPublished(true);
+    setFormChangeNote("");
     setActiveTab("edit");
   }
 
@@ -125,6 +139,7 @@ export default function AdminPolicies() {
     setFormSlug(policy.slug);
     setFormContent(policy.content);
     setFormIsPublished(policy.isPublished);
+    setFormChangeNote("");
     setActiveTab("edit");
   }
 
@@ -145,6 +160,7 @@ export default function AdminPolicies() {
         title: formTitle,
         content: formContent,
         isPublished: formIsPublished,
+        changeNote: formChangeNote.trim() || undefined,
       });
     } else {
       const slug = formSlug.trim() || formTitle.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
@@ -155,6 +171,18 @@ export default function AdminPolicies() {
         isPublished: formIsPublished,
       });
     }
+  }
+
+  function restoreVersion(version: PolicyVersion) {
+    if (!viewingVersionsFor) return;
+    setViewingVersionContent(null);
+    setViewingVersionsFor(null);
+    setEditingPolicy(viewingVersionsFor);
+    setFormTitle(version.title);
+    setFormContent(version.content);
+    setFormIsPublished(viewingVersionsFor.isPublished);
+    setFormChangeNote(`Restored from version ${version.versionNumber}`);
+    setActiveTab("edit");
   }
 
   function formatDate(date: string | Date) {
@@ -236,11 +264,22 @@ export default function AdminPolicies() {
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={policy.isPublished}
-                        onCheckedChange={(checked) =>
+                        onCheckedChange={(checked: boolean) =>
                           togglePublishMutation.mutate({ id: policy.id, isPublished: checked })
                         }
                         data-testid={`switch-publish-${policy.id}`}
                       />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setViewingVersionsFor(policy);
+                          setViewingVersionContent(null);
+                        }}
+                        data-testid={`button-history-${policy.id}`}
+                      >
+                        <History className="w-4 h-4" />
+                      </Button>
                       {policy.isPublished && (
                         <Button
                           size="icon"
@@ -279,7 +318,7 @@ export default function AdminPolicies() {
         )}
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={(open) => {
+      <Dialog open={isDialogOpen} onOpenChange={(open: boolean) => {
         if (!open) {
           setEditingPolicy(null);
           setIsCreateOpen(false);
@@ -291,7 +330,7 @@ export default function AdminPolicies() {
             <DialogTitle>{editingPolicy ? "Edit Policy" : "Create New Policy"}</DialogTitle>
             <DialogDescription>
               {editingPolicy
-                ? "Update the policy content below. Changes are saved when you click Save."
+                ? "Update the policy content below. Previous versions are saved automatically."
                 : "Create a new public policy page. Content supports HTML formatting."}
             </DialogDescription>
           </DialogHeader>
@@ -342,6 +381,22 @@ export default function AdminPolicies() {
               </Label>
             </div>
 
+            {editingPolicy && (
+              <div className="space-y-2">
+                <Label htmlFor="change-note">Change Note (optional)</Label>
+                <Input
+                  id="change-note"
+                  value={formChangeNote}
+                  onChange={(e) => setFormChangeNote(e.target.value)}
+                  placeholder="e.g. Updated section 3 with new terms"
+                  data-testid="input-change-note"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Describe what changed. This note will be visible in the version history.
+                </p>
+              </div>
+            )}
+
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList>
                 <TabsTrigger value="edit" data-testid="tab-edit">Edit HTML</TabsTrigger>
@@ -390,12 +445,117 @@ export default function AdminPolicies() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!viewingVersionsFor} onOpenChange={(open: boolean) => {
+        if (!open) {
+          setViewingVersionsFor(null);
+          setViewingVersionContent(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {viewingVersionContent ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setViewingVersionContent(null)}
+                    data-testid="button-back-to-versions"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </Button>
+                  <span>Version {viewingVersionContent.versionNumber} — {viewingVersionsFor?.title}</span>
+                </div>
+              ) : (
+                `Version History — ${viewingVersionsFor?.title}`
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {viewingVersionContent
+                ? `Saved on ${formatDate(viewingVersionContent.createdAt)}`
+                : "View and restore previous versions of this policy"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewingVersionContent ? (
+            <div className="space-y-4">
+              {viewingVersionContent.changeNote && (
+                <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+                  Change note: {viewingVersionContent.changeNote}
+                </div>
+              )}
+              <Card>
+                <CardContent className="p-6">
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: viewingVersionContent.content }}
+                    data-testid="text-version-content"
+                  />
+                </CardContent>
+              </Card>
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => restoreVersion(viewingVersionContent)}
+                  data-testid="button-restore-version"
+                >
+                  <History className="w-4 h-4 mr-2" />
+                  Restore This Version
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 mt-2">
+              {(!versionsList || versionsList.length === 0) ? (
+                <div className="py-8 text-center text-muted-foreground">
+                  <History className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                  <p className="text-sm">No previous versions yet.</p>
+                  <p className="text-xs mt-1">Versions are saved automatically when you edit the policy content.</p>
+                </div>
+              ) : (
+                versionsList.map((version) => (
+                  <button
+                    key={version.id}
+                    onClick={() => setViewingVersionContent(version)}
+                    className="w-full text-left p-4 rounded-md border hover-elevate"
+                    data-testid={`button-version-${version.versionNumber}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">Version {version.versionNumber}</span>
+                          <Badge variant="secondary" className="text-[10px]">
+                            {version.title}
+                          </Badge>
+                        </div>
+                        {version.changeNote && (
+                          <p className="text-xs text-muted-foreground mt-1 truncate">
+                            {version.changeNote}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {formatDate(version.createdAt)}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" data-testid={`button-view-version-${version.versionNumber}`}>
+                        View
+                      </Button>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Policy</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{policyToDelete?.title}"? This action cannot be undone.
+              Are you sure you want to delete &quot;{policyToDelete?.title}&quot;? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
