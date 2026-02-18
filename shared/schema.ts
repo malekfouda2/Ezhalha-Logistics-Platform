@@ -272,6 +272,7 @@ export const shipments = pgTable("shipments", {
   dimensions: text("dimensions"),
   packageType: text("package_type").notNull(),
   numberOfPackages: integer("number_of_packages").default(1),
+  packagesData: text("packages_data"),
   shipmentType: text("shipment_type").default("domestic"),
   serviceType: text("service_type"),
   currency: text("currency").default("SAR"),
