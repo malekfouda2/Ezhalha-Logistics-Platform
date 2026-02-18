@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2 } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import type { ClientAccount } from "@shared/schema";
@@ -50,16 +50,15 @@ interface ShipmentFormData {
     stateOrProvince?: string;
     shortAddress?: string;
   };
-  package: {
+  packages: Array<{
     weight: number;
-    weightUnit: "LB" | "KG";
     length: number;
     width: number;
     height: number;
-    dimensionUnit: "IN" | "CM";
-    packageType: string;
-    numberOfPackages: number;
-  };
+  }>;
+  weightUnit: "LB" | "KG";
+  dimensionUnit: "IN" | "CM";
+  packageType: string;
   currency: string;
 }
 
@@ -187,16 +186,12 @@ export default function CreateShipment() {
       stateOrProvince: "",
       shortAddress: "",
     },
-    package: {
-      weight: 1,
-      weightUnit: "KG",
-      length: 10,
-      width: 10,
-      height: 10,
-      dimensionUnit: "CM",
-      packageType: "YOUR_PACKAGING",
-      numberOfPackages: 1,
-    },
+    packages: [
+      { weight: 1, length: 10, width: 10, height: 10 },
+    ],
+    weightUnit: "KG",
+    dimensionUnit: "CM",
+    packageType: "YOUR_PACKAGING",
     currency: "SAR",
   });
 
@@ -415,11 +410,30 @@ export default function CreateShipment() {
     }));
   };
 
-  const updatePackage = (field: string, value: string | number) => {
+  const updatePackageItem = (index: number, field: string, value: number) => {
     setFormData(prev => ({
       ...prev,
-      package: { ...prev.package, [field]: value },
+      packages: prev.packages.map((pkg, i) => i === index ? { ...pkg, [field]: value } : pkg),
     }));
+  };
+
+  const addPackage = () => {
+    setFormData(prev => ({
+      ...prev,
+      packages: [...prev.packages, { weight: 1, length: 10, width: 10, height: 10 }],
+    }));
+  };
+
+  const removePackage = (index: number) => {
+    if (formData.packages.length <= 1) return;
+    setFormData(prev => ({
+      ...prev,
+      packages: prev.packages.filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateSharedPackageSetting = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const validateStep = (currentStep: number): boolean => {
@@ -457,10 +471,16 @@ export default function CreateShipment() {
         return false;
       }
     } else if (currentStep === 4) {
-      const { weight, length, width, height, packageType, numberOfPackages } = formData.package;
-      if (!weight || !length || !width || !height || !packageType || !numberOfPackages || numberOfPackages < 1) {
+      if (!formData.packageType || formData.packages.length < 1) {
         toast({ title: "Please fill in all package details", variant: "destructive" });
         return false;
+      }
+      for (let i = 0; i < formData.packages.length; i++) {
+        const pkg = formData.packages[i];
+        if (!pkg.weight || !pkg.length || !pkg.width || !pkg.height) {
+          toast({ title: `Please fill in all details for Package ${i + 1}`, variant: "destructive" });
+          return false;
+        }
       }
     }
     return true;
@@ -924,42 +944,33 @@ export default function CreateShipment() {
                 <Package className="h-5 w-5" />
                 Package Details
               </CardTitle>
-              <CardDescription>Describe your package to get accurate rates</CardDescription>
+              <CardDescription>
+                Describe {formData.packages.length === 1 ? "your package" : `your ${formData.packages.length} packages`} to get accurate rates
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label>Package Type</Label>
-                <Select
-                  value={formData.package.packageType}
-                  onValueChange={(v) => updatePackage("packageType", v)}
-                >
-                  <SelectTrigger data-testid="select-package-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {packageTypes.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <Label>Weight *</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={formData.package.weight}
-                    onChange={(e) => updatePackage("weight", parseFloat(e.target.value) || 0)}
-                    data-testid="input-weight"
-                  />
+                  <Label>Package Type</Label>
+                  <Select
+                    value={formData.packageType}
+                    onValueChange={(v) => updateSharedPackageSetting("packageType", v)}
+                  >
+                    <SelectTrigger data-testid="select-package-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {packageTypes.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label>Weight Unit</Label>
                   <Select
-                    value={formData.package.weightUnit}
-                    onValueChange={(v) => updatePackage("weightUnit", v)}
+                    value={formData.weightUnit}
+                    onValueChange={(v) => updateSharedPackageSetting("weightUnit", v)}
                   >
                     <SelectTrigger data-testid="select-weight-unit">
                       <SelectValue />
@@ -970,48 +981,11 @@ export default function CreateShipment() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label>Length *</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={formData.package.length}
-                    onChange={(e) => updatePackage("length", parseFloat(e.target.value) || 0)}
-                    data-testid="input-length"
-                  />
-                </div>
-                <div>
-                  <Label>Width *</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={formData.package.width}
-                    onChange={(e) => updatePackage("width", parseFloat(e.target.value) || 0)}
-                    data-testid="input-width"
-                  />
-                </div>
-                <div>
-                  <Label>Height *</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={formData.package.height}
-                    onChange={(e) => updatePackage("height", parseFloat(e.target.value) || 0)}
-                    data-testid="input-height"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Dimension Unit</Label>
                   <Select
-                    value={formData.package.dimensionUnit}
-                    onValueChange={(v) => updatePackage("dimensionUnit", v)}
+                    value={formData.dimensionUnit}
+                    onValueChange={(v) => updateSharedPackageSetting("dimensionUnit", v)}
                   >
                     <SelectTrigger data-testid="select-dimension-unit">
                       <SelectValue />
@@ -1022,16 +996,85 @@ export default function CreateShipment() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Number of Packages *</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={formData.package.numberOfPackages}
-                    onChange={(e) => updatePackage("numberOfPackages", parseInt(e.target.value) || 1)}
-                    data-testid="input-number-of-packages"
-                  />
-                </div>
+              </div>
+
+              <div className="space-y-4">
+                {formData.packages.map((pkg, index) => (
+                  <Card key={index} className="relative">
+                    <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4">
+                      <CardTitle className="text-sm font-medium">
+                        Package {index + 1}
+                      </CardTitle>
+                      {formData.packages.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removePackage(index)}
+                          data-testid={`button-remove-package-${index}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent className="px-4 pb-4 pt-0 space-y-3">
+                      <div>
+                        <Label>Weight ({formData.weightUnit}) *</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          value={pkg.weight}
+                          onChange={(e) => updatePackageItem(index, "weight", parseFloat(e.target.value) || 0)}
+                          data-testid={`input-weight-${index}`}
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label>Length ({formData.dimensionUnit}) *</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0.1"
+                            value={pkg.length}
+                            onChange={(e) => updatePackageItem(index, "length", parseFloat(e.target.value) || 0)}
+                            data-testid={`input-length-${index}`}
+                          />
+                        </div>
+                        <div>
+                          <Label>Width ({formData.dimensionUnit}) *</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0.1"
+                            value={pkg.width}
+                            onChange={(e) => updatePackageItem(index, "width", parseFloat(e.target.value) || 0)}
+                            data-testid={`input-width-${index}`}
+                          />
+                        </div>
+                        <div>
+                          <Label>Height ({formData.dimensionUnit}) *</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0.1"
+                            value={pkg.height}
+                            onChange={(e) => updatePackageItem(index, "height", parseFloat(e.target.value) || 0)}
+                            data-testid={`input-height-${index}`}
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Button
+                  variant="outline"
+                  onClick={addPackage}
+                  className="w-full"
+                  data-testid="button-add-package"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Package
+                </Button>
               </div>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">

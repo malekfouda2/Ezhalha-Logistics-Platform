@@ -253,19 +253,40 @@ export default function ClientShipments() {
               </div>
 
               {/* Package Details */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 rounded-lg bg-muted/50">
-                  <p className="text-sm text-muted-foreground">Weight</p>
-                  <p className="text-lg font-medium">
-                    {Number(selectedShipment.weight).toFixed(1)} kg
-                  </p>
+              <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">
+                    {(selectedShipment.numberOfPackages || 1) === 1 ? "Package" : `${selectedShipment.numberOfPackages} Packages`}
+                  </span>
+                  <span className="text-xs text-muted-foreground capitalize">({selectedShipment.packageType})</span>
                 </div>
-                <div className="p-4 rounded-lg bg-muted/50">
-                  <p className="text-sm text-muted-foreground">Package Type</p>
-                  <p className="text-lg font-medium capitalize">
-                    {selectedShipment.packageType}
-                  </p>
-                </div>
+                {selectedShipment.packagesData ? (
+                  <div className="space-y-2">
+                    {JSON.parse(selectedShipment.packagesData).map((pkg: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-sm px-2 py-1.5 rounded bg-background">
+                        <span className="font-medium">Pkg {i + 1}</span>
+                        <span>{Number(pkg.weight).toFixed(1)} {selectedShipment.weightUnit || "KG"}</span>
+                        <span className="text-muted-foreground">{pkg.length} x {pkg.width} x {pkg.height} {selectedShipment.dimensionUnit || "CM"}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-sm pt-1 border-t">
+                      <span className="text-muted-foreground">Total Weight</span>
+                      <span className="font-medium">{Number(selectedShipment.weight).toFixed(1)} {selectedShipment.weightUnit || "KG"}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Weight</p>
+                      <p className="font-medium">{Number(selectedShipment.weight).toFixed(1)} {selectedShipment.weightUnit || "KG"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Dimensions</p>
+                      <p className="font-medium">{selectedShipment.length} x {selectedShipment.width} x {selectedShipment.height} {selectedShipment.dimensionUnit || "CM"}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Total Cost (Client only sees final price) */}

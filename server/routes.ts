@@ -2661,16 +2661,15 @@ export async function registerRoutes(
       stateOrProvince: z.string().optional(),
       shortAddress: z.string().optional(),
     }),
-    package: z.object({
+    packages: z.array(z.object({
       weight: z.number().positive("Weight must be positive"),
-      weightUnit: z.enum(["LB", "KG"]),
       length: z.number().positive("Length must be positive"),
       width: z.number().positive("Width must be positive"),
       height: z.number().positive("Height must be positive"),
-      dimensionUnit: z.enum(["IN", "CM"]),
-      packageType: z.string().default("YOUR_PACKAGING"),
-      numberOfPackages: z.number().int().min(1, "Must have at least 1 package").default(1),
-    }),
+    })).min(1, "At least one package is required"),
+    weightUnit: z.enum(["LB", "KG"]).default("KG"),
+    dimensionUnit: z.enum(["IN", "CM"]).default("CM"),
+    packageType: z.string().default("YOUR_PACKAGING"),
     currency: z.string().default("SAR"),
   });
 
@@ -2716,17 +2715,17 @@ export async function registerRoutes(
           countryCode: data.recipient.countryCode,
           phone: data.recipient.phone,
         },
-        packages: [{
-          weight: data.package.weight,
-          weightUnit: data.package.weightUnit,
+        packages: data.packages.map(pkg => ({
+          weight: pkg.weight,
+          weightUnit: data.weightUnit,
           dimensions: {
-            length: data.package.length,
-            width: data.package.width,
-            height: data.package.height,
-            unit: data.package.dimensionUnit,
+            length: pkg.length,
+            width: pkg.width,
+            height: pkg.height,
+            unit: data.dimensionUnit,
           },
-          packageType: data.package.packageType,
-        }],
+          packageType: data.packageType,
+        })),
         serviceType: data.serviceType,
       };
 
@@ -2880,14 +2879,15 @@ export async function registerRoutes(
         recipientCountry: shipmentData.recipient.countryCode,
         recipientPhone: shipmentData.recipient.phone,
         recipientShortAddress: shipmentData.recipient.shortAddress,
-        weight: shipmentData.package.weight.toString(),
-        weightUnit: shipmentData.package.weightUnit,
-        length: shipmentData.package.length.toString(),
-        width: shipmentData.package.width.toString(),
-        height: shipmentData.package.height.toString(),
-        dimensionUnit: shipmentData.package.dimensionUnit,
-        packageType: shipmentData.package.packageType,
-        numberOfPackages: shipmentData.package.numberOfPackages,
+        weight: shipmentData.packages.reduce((sum: number, p: { weight: number }) => sum + p.weight, 0).toString(),
+        weightUnit: shipmentData.weightUnit,
+        length: shipmentData.packages[0].length.toString(),
+        width: shipmentData.packages[0].width.toString(),
+        height: shipmentData.packages[0].height.toString(),
+        dimensionUnit: shipmentData.dimensionUnit,
+        packageType: shipmentData.packageType,
+        numberOfPackages: shipmentData.packages.length,
+        packagesData: JSON.stringify(shipmentData.packages),
         shipmentType: shipmentData.shipmentType,
         serviceType: quote.serviceType,
         currency: quote.currency,
@@ -3041,7 +3041,17 @@ export async function registerRoutes(
           countryCode: shipment.recipientCountry,
           phone: shipment.recipientPhone,
         },
-        packages: [{
+        packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
+          weight: Number(pkg.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: {
+            length: Number(pkg.length),
+            width: Number(pkg.width),
+            height: Number(pkg.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          },
+          packageType: shipment.packageType,
+        })) : [{
           weight: Number(shipment.weight),
           weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
           dimensions: shipment.length && shipment.width && shipment.height ? {
