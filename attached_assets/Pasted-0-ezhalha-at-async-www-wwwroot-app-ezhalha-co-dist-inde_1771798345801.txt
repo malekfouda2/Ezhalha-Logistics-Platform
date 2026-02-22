@@ -1,0 +1,50 @@
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:112054
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:545:23179
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "packages_data" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:112054
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:545:23179
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "packages_data" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:112054
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:545:25023
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "packages_data" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:112054
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:545:25302
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "packages_data" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:112054
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:545:25302
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "payment_method" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:113297
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:568:5486
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "payment_method" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:113297
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:568:7295
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "payment_method" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:113297
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:568:7295
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | error: column "payment_method" does not exist
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:70:13330
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:144:113297
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:568:5486
