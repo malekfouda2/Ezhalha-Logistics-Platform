@@ -37,6 +37,10 @@ import {
   type InsertPolicy,
   type PolicyVersion,
   type InsertPolicyVersion,
+  type CreditInvoice,
+  type InsertCreditInvoice,
+  type CreditNotificationEvent,
+  type InsertCreditNotificationEvent,
   users,
   clientAccounts,
   clientApplications,
@@ -56,6 +60,8 @@ import {
   clientUserPermissions,
   policies,
   policyVersions,
+  creditInvoices,
+  creditNotificationEvents,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -238,6 +244,26 @@ export interface IStorage {
   getPolicyVersion(versionId: string): Promise<PolicyVersion | undefined>;
   getLatestPolicyVersionNumber(policyId: string): Promise<number>;
   createPolicyVersion(version: InsertPolicyVersion): Promise<PolicyVersion>;
+
+  // Credit Invoices
+  getCreditInvoices(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    clientAccountId?: string;
+    overdueOnly?: boolean;
+  }): Promise<{ invoices: CreditInvoice[]; total: number; page: number; totalPages: number }>;
+  getCreditInvoicesByClientAccount(clientAccountId: string, status?: string): Promise<CreditInvoice[]>;
+  getCreditInvoice(id: string): Promise<CreditInvoice | undefined>;
+  getCreditInvoiceByShipmentId(shipmentId: string): Promise<CreditInvoice | undefined>;
+  createCreditInvoice(invoice: InsertCreditInvoice): Promise<CreditInvoice>;
+  updateCreditInvoice(id: string, updates: Partial<CreditInvoice>): Promise<CreditInvoice | undefined>;
+  getOverdueCreditInvoices(): Promise<CreditInvoice[]>;
+  getDueForReminderCreditInvoices(): Promise<CreditInvoice[]>;
+
+  // Credit Notification Events
+  createCreditNotificationEvent(event: InsertCreditNotificationEvent): Promise<CreditNotificationEvent>;
+  getCreditNotificationEvents(creditInvoiceId: string): Promise<CreditNotificationEvent[]>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -1441,6 +1467,118 @@ export class DatabaseStorage implements IStorage {
 <p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
         isPublished: true,
       });
+  }
+
+  // Credit Invoices
+  async getCreditInvoices(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    clientAccountId?: string;
+    overdueOnly?: boolean;
+  }): Promise<{ invoices: CreditInvoice[]; total: number; page: number; totalPages: number }> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 25;
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(creditInvoices.status, params.status));
+    }
+    if (params?.clientAccountId) {
+      conditions.push(eq(creditInvoices.clientAccountId, params.clientAccountId));
+    }
+    if (params?.overdueOnly) {
+      conditions.push(eq(creditInvoices.status, "OVERDUE"));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(creditInvoices)
+      .where(whereClause);
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const results = await db
+      .select()
+      .from(creditInvoices)
+      .where(whereClause)
+      .orderBy(desc(creditInvoices.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    return { invoices: results, total, page, totalPages };
+  }
+
+  async getCreditInvoicesByClientAccount(clientAccountId: string, status?: string): Promise<CreditInvoice[]> {
+    const conditions = [eq(creditInvoices.clientAccountId, clientAccountId)];
+    if (status) {
+      conditions.push(eq(creditInvoices.status, status));
+    }
+    return db.select().from(creditInvoices)
+      .where(and(...conditions))
+      .orderBy(desc(creditInvoices.createdAt));
+  }
+
+  async getCreditInvoice(id: string): Promise<CreditInvoice | undefined> {
+    const [invoice] = await db.select().from(creditInvoices).where(eq(creditInvoices.id, id));
+    return invoice || undefined;
+  }
+
+  async getCreditInvoiceByShipmentId(shipmentId: string): Promise<CreditInvoice | undefined> {
+    const [invoice] = await db.select().from(creditInvoices).where(eq(creditInvoices.shipmentId, shipmentId));
+    return invoice || undefined;
+  }
+
+  async createCreditInvoice(invoice: InsertCreditInvoice): Promise<CreditInvoice> {
+    const [created] = await db.insert(creditInvoices).values(invoice).returning();
+    return created;
+  }
+
+  async updateCreditInvoice(id: string, updates: Partial<CreditInvoice>): Promise<CreditInvoice | undefined> {
+    const [updated] = await db.update(creditInvoices)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(creditInvoices.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getOverdueCreditInvoices(): Promise<CreditInvoice[]> {
+    return db.select().from(creditInvoices)
+      .where(
+        and(
+          eq(creditInvoices.status, "UNPAID"),
+          lte(creditInvoices.dueAt, new Date())
+        )
+      );
+  }
+
+  async getDueForReminderCreditInvoices(): Promise<CreditInvoice[]> {
+    return db.select().from(creditInvoices)
+      .where(
+        and(
+          or(
+            eq(creditInvoices.status, "UNPAID"),
+            eq(creditInvoices.status, "OVERDUE")
+          ),
+          lte(creditInvoices.nextReminderAt, new Date())
+        )
+      );
+  }
+
+  // Credit Notification Events
+  async createCreditNotificationEvent(event: InsertCreditNotificationEvent): Promise<CreditNotificationEvent> {
+    const [created] = await db.insert(creditNotificationEvents).values(event).returning();
+    return created;
+  }
+
+  async getCreditNotificationEvents(creditInvoiceId: string): Promise<CreditNotificationEvent[]> {
+    return db.select().from(creditNotificationEvents)
+      .where(eq(creditNotificationEvents.creditInvoiceId, creditInvoiceId))
+      .orderBy(desc(creditNotificationEvents.sentAt));
   }
 }
 

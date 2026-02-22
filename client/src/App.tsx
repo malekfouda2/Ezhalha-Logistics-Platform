@@ -26,6 +26,7 @@ import AdminWebhookEvents from "@/pages/admin/webhook-events";
 import AdminRBAC from "@/pages/admin/rbac";
 import AdminEditClient from "@/pages/admin/edit-client";
 import AdminPolicies from "@/pages/admin/policies";
+import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -36,6 +37,7 @@ import ClientPayments from "@/pages/client/payments";
 import ClientSettings from "@/pages/client/settings";
 import PolicyPage from "@/pages/policy";
 import ClientUsers from "@/pages/client/users";
+import ClientBilling from "@/pages/client/billing";
 
 function ProtectedRoute({
   component: Component,
@@ -132,6 +134,9 @@ function Router() {
       <Route path="/admin/policies">
         <ProtectedRoute component={AdminPolicies} requiredUserType="admin" />
       </Route>
+      <Route path="/admin/credit-invoices">
+        <ProtectedRoute component={AdminCreditInvoices} requiredUserType="admin" />
+      </Route>
 
       {/* Client routes */}
       <Route path="/client">
@@ -154,6 +159,9 @@ function Router() {
       </Route>
       <Route path="/client/users">
         <ProtectedRoute component={ClientUsers} requiredUserType="client" />
+      </Route>
+      <Route path="/client/billing">
+        <ProtectedRoute component={ClientBilling} requiredUserType="client" />
       </Route>
 
       {/* Fallback */}

@@ -8,7 +8,7 @@ import { storage } from "./storage";
 import type { ClientAccount, ClientUserPermission } from "@shared/schema";
 import { ClientPermission, ALL_CLIENT_PERMISSIONS, type ClientPermissionValue } from "@shared/schema";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
-import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication } from "./services/email";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder } from "./services/email";
 import { fedexAdapter } from "./integrations/fedex";
 import { zohoService } from "./integrations/zoho";
 import { stripeService } from "./integrations/stripe";
@@ -1421,6 +1421,146 @@ export async function registerRoutes(
       res.json(result);
     } catch (error) {
       logError("Error fetching payments", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // ADMIN - CREDIT INVOICES
+  // ============================================
+
+  // Admin - List Credit Invoices
+  app.get("/api/admin/credit-invoices", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const status = req.query.status as string | undefined;
+      const clientId = req.query.clientId as string | undefined;
+      const overdueOnly = req.query.overdueOnly === "true";
+
+      const result = await storage.getCreditInvoices({ page, limit, status, clientAccountId: clientId, overdueOnly });
+
+      const enriched = await Promise.all(result.invoices.map(async (inv) => {
+        const shipment = await storage.getShipment(inv.shipmentId);
+        const client = await storage.getClientAccount(inv.clientAccountId);
+        return {
+          ...inv,
+          shipment: shipment ? {
+            id: shipment.id,
+            trackingNumber: shipment.trackingNumber,
+            status: shipment.status,
+            createdAt: shipment.createdAt,
+          } : null,
+          client: client ? {
+            id: client.id,
+            name: client.name,
+            email: client.email,
+            accountNumber: client.accountNumber,
+          } : null,
+        };
+      }));
+
+      res.json({ ...result, invoices: enriched });
+    } catch (error) {
+      logError("Error fetching admin credit invoices", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Get Single Credit Invoice
+  app.get("/api/admin/credit-invoices/:id", requireAdmin, async (req, res) => {
+    try {
+      const invoice = await storage.getCreditInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Credit invoice not found" });
+      }
+
+      const shipment = await storage.getShipment(invoice.shipmentId);
+      const client = await storage.getClientAccount(invoice.clientAccountId);
+      const events = await storage.getCreditNotificationEvents(invoice.id);
+
+      res.json({ ...invoice, shipment, client, events });
+    } catch (error) {
+      logError("Error fetching credit invoice", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Mark Credit Invoice as Paid
+  app.post("/api/admin/credit-invoices/:id/mark-paid", requireAdmin, async (req, res) => {
+    try {
+      const invoice = await storage.getCreditInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Credit invoice not found" });
+      }
+
+      if (invoice.status === "PAID") {
+        return res.status(400).json({ error: "Invoice is already paid" });
+      }
+
+      if (invoice.status === "CANCELLED") {
+        return res.status(400).json({ error: "Cannot mark a cancelled invoice as paid" });
+      }
+
+      const updated = await storage.updateCreditInvoice(invoice.id, {
+        status: "PAID",
+        paidAt: new Date(),
+        nextReminderAt: null,
+      });
+
+      await storage.updateShipment(invoice.shipmentId, {
+        paymentStatus: "paid",
+      });
+
+      await storage.createCreditNotificationEvent({
+        clientAccountId: invoice.clientAccountId,
+        creditInvoiceId: invoice.id,
+        type: "MARKED_PAID",
+        sentAt: new Date(),
+        meta: JSON.stringify({ markedBy: req.session.userId }),
+      });
+
+      await logAudit(req.session.userId, "mark_credit_paid", "credit_invoice", invoice.id,
+        `Marked credit invoice as paid for shipment ${invoice.shipmentId}`, req.ip);
+
+      res.json(updated);
+    } catch (error) {
+      logError("Error marking credit invoice as paid", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Cancel Credit Invoice
+  app.post("/api/admin/credit-invoices/:id/cancel", requireAdmin, async (req, res) => {
+    try {
+      const invoice = await storage.getCreditInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Credit invoice not found" });
+      }
+
+      if (invoice.status === "PAID") {
+        return res.status(400).json({ error: "Cannot cancel a paid invoice" });
+      }
+
+      const updated = await storage.updateCreditInvoice(invoice.id, {
+        status: "CANCELLED",
+        nextReminderAt: null,
+      });
+
+      await storage.createCreditNotificationEvent({
+        clientAccountId: invoice.clientAccountId,
+        creditInvoiceId: invoice.id,
+        type: "CANCELLED",
+        sentAt: new Date(),
+        meta: JSON.stringify({ cancelledBy: req.session.userId }),
+      });
+
+      await logAudit(req.session.userId, "cancel_credit_invoice", "credit_invoice", invoice.id,
+        `Cancelled credit invoice for shipment ${invoice.shipmentId}`, req.ip);
+
+      res.json(updated);
+    } catch (error) {
+      logError("Error cancelling credit invoice", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -3256,6 +3396,223 @@ export async function registerRoutes(
       
       res.json(updated);
     } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // CLIENT - CREDIT INVOICES (Pay Later)
+  // ============================================
+
+  // Client - Pay Later for a shipment (alternative checkout flow)
+  app.post("/api/client/shipments/:id/pay-later", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const { id: shipmentId } = req.params;
+      const shipment = await storage.getShipment(shipmentId);
+
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (shipment.status !== "payment_pending") {
+        return res.status(400).json({ error: "Shipment is not in a payable state" });
+      }
+
+      const existingCredit = await storage.getCreditInvoiceByShipmentId(shipmentId);
+      if (existingCredit) {
+        return res.status(400).json({ error: "A credit invoice already exists for this shipment" });
+      }
+
+      const now = new Date();
+      const dueAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const firstReminderAt = new Date(dueAt.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const creditInvoice = await storage.createCreditInvoice({
+        clientAccountId: user.clientAccountId,
+        shipmentId: shipment.id,
+        amount: shipment.finalPrice,
+        currency: shipment.currency || "SAR",
+        status: "UNPAID",
+        issuedAt: now,
+        dueAt,
+        paidAt: null,
+        remindersSent: 0,
+        lastReminderAt: null,
+        nextReminderAt: firstReminderAt,
+        notes: null,
+      });
+
+      await storage.updateShipment(shipmentId, {
+        paymentMethod: "CREDIT",
+        paymentStatus: "unpaid",
+        status: "credit_pending",
+      });
+
+      const carrierRequest = {
+        shipper: {
+          name: shipment.senderName,
+          streetLine1: shipment.senderAddress,
+          city: shipment.senderCity,
+          stateOrProvince: "",
+          postalCode: shipment.senderPostalCode || "",
+          countryCode: shipment.senderCountry,
+          phone: shipment.senderPhone,
+        },
+        recipient: {
+          name: shipment.recipientName,
+          streetLine1: shipment.recipientAddress,
+          city: shipment.recipientCity,
+          stateOrProvince: "",
+          postalCode: shipment.recipientPostalCode || "",
+          countryCode: shipment.recipientCountry,
+          phone: shipment.recipientPhone,
+        },
+        packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
+          weight: Number(pkg.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: {
+            length: Number(pkg.length),
+            width: Number(pkg.width),
+            height: Number(pkg.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          },
+          packageType: shipment.packageType,
+        })) : [{
+          weight: Number(shipment.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: shipment.length && shipment.width && shipment.height ? {
+            length: Number(shipment.length),
+            width: Number(shipment.width),
+            height: Number(shipment.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          } : undefined,
+          packageType: shipment.packageType,
+        }],
+        serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        labelFormat: "PDF" as const,
+      };
+
+      let carrierTrackingNumber = "";
+      let labelUrl = "";
+      let estimatedDelivery: Date | undefined;
+
+      try {
+        const carrierResponse = await fedexAdapter.createShipment(carrierRequest);
+        carrierTrackingNumber = carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber;
+        labelUrl = carrierResponse.labelUrl || "";
+        estimatedDelivery = carrierResponse.estimatedDelivery;
+
+        await storage.updateShipment(shipmentId, {
+          status: "created",
+          carrierTrackingNumber,
+          carrierShipmentId: carrierResponse.trackingNumber,
+          labelUrl: carrierResponse.labelUrl,
+          estimatedDelivery: carrierResponse.estimatedDelivery,
+        });
+      } catch (carrierError) {
+        logError("Failed to create carrier shipment for pay-later", carrierError);
+        await storage.updateShipment(shipmentId, {
+          status: "processing",
+        });
+      }
+
+      await storage.createCreditNotificationEvent({
+        clientAccountId: user.clientAccountId,
+        creditInvoiceId: creditInvoice.id,
+        type: "INVOICE_CREATED",
+        sentAt: now,
+        meta: JSON.stringify({ shipmentId, amount: shipment.finalPrice }),
+      });
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (account) {
+        const adminEmails = process.env.ADMIN_NOTIFICATION_EMAILS || process.env.ADMIN_EMAIL;
+        await sendCreditInvoiceCreated(
+          account.email,
+          account.name,
+          shipment.trackingNumber,
+          Number(shipment.finalPrice).toFixed(2),
+          shipment.currency || "SAR",
+          dueAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+          adminEmails
+        );
+      }
+
+      await logAudit(req.session.userId, "pay_later", "shipment", shipmentId,
+        `Selected Pay Later for shipment ${shipment.trackingNumber}, due ${dueAt.toISOString()}`, req.ip);
+
+      res.json({
+        creditInvoice,
+        shipment: await storage.getShipment(shipmentId),
+        carrierTrackingNumber,
+        labelUrl,
+        estimatedDelivery,
+      });
+    } catch (error) {
+      logError("Failed to process pay-later", error);
+      res.status(500).json({ error: "Failed to process pay later request" });
+    }
+  });
+
+  // Client - List Credit Invoices
+  app.get("/api/client/credit-invoices", requireClient, requireClientPermission(ClientPermission.VIEW_INVOICES), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const status = req.query.status as string | undefined;
+      const invoices = await storage.getCreditInvoicesByClientAccount(user.clientAccountId, status);
+
+      const enriched = await Promise.all(invoices.map(async (inv) => {
+        const shipment = await storage.getShipment(inv.shipmentId);
+        return {
+          ...inv,
+          shipment: shipment ? {
+            id: shipment.id,
+            trackingNumber: shipment.trackingNumber,
+            status: shipment.status,
+            createdAt: shipment.createdAt,
+          } : null,
+        };
+      }));
+
+      res.json(enriched);
+    } catch (error) {
+      logError("Error fetching client credit invoices", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Client - Get Single Credit Invoice
+  app.get("/api/client/credit-invoices/:id", requireClient, requireClientPermission(ClientPermission.VIEW_INVOICES), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const invoice = await storage.getCreditInvoice(req.params.id);
+      if (!invoice || invoice.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Credit invoice not found" });
+      }
+
+      const shipment = await storage.getShipment(invoice.shipmentId);
+      const events = await storage.getCreditNotificationEvents(invoice.id);
+
+      res.json({ ...invoice, shipment, events });
+    } catch (error) {
+      logError("Error fetching credit invoice", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

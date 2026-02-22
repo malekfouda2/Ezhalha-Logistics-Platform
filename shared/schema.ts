@@ -288,6 +288,7 @@ export const shipments = pgTable("shipments", {
   carrierTrackingNumber: text("carrier_tracking_number"),
   labelUrl: text("label_url"),
   paymentIntentId: text("payment_intent_id"),
+  paymentMethod: text("payment_method").default("PAY_NOW"),
   paymentStatus: text("payment_status").default("pending"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
@@ -661,6 +662,71 @@ export const insertPolicyVersionSchema = createInsertSchema(policyVersions).omit
 
 export type InsertPolicyVersion = z.infer<typeof insertPolicyVersionSchema>;
 export type PolicyVersion = typeof policyVersions.$inferSelect;
+
+// Credit Invoice Status
+export const CreditInvoiceStatus = {
+  UNPAID: "UNPAID",
+  PAID: "PAID",
+  OVERDUE: "OVERDUE",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type CreditInvoiceStatusValue = typeof CreditInvoiceStatus[keyof typeof CreditInvoiceStatus];
+
+// Shipment Payment Method
+export const ShipmentPaymentMethod = {
+  PAY_NOW: "PAY_NOW",
+  CREDIT: "CREDIT",
+} as const;
+
+export type ShipmentPaymentMethodValue = typeof ShipmentPaymentMethod[keyof typeof ShipmentPaymentMethod];
+
+// Credit Invoices table
+export const creditInvoices = pgTable("credit_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  shipmentId: varchar("shipment_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("SAR"),
+  status: text("status").notNull().default("UNPAID"),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  dueAt: timestamp("due_at").notNull(),
+  paidAt: timestamp("paid_at"),
+  remindersSent: integer("reminders_sent").notNull().default(0),
+  lastReminderAt: timestamp("last_reminder_at"),
+  nextReminderAt: timestamp("next_reminder_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCreditInvoiceSchema = createInsertSchema(creditInvoices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCreditInvoice = z.infer<typeof insertCreditInvoiceSchema>;
+export type CreditInvoice = typeof creditInvoices.$inferSelect;
+
+// Credit Notification Events table
+export const creditNotificationEvents = pgTable("credit_notification_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  creditInvoiceId: varchar("credit_invoice_id").notNull(),
+  type: text("type").notNull(),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+  meta: text("meta"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCreditNotificationEventSchema = createInsertSchema(creditNotificationEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCreditNotificationEvent = z.infer<typeof insertCreditNotificationEventSchema>;
+export type CreditNotificationEvent = typeof creditNotificationEvents.$inferSelect;
 
 // Branding config type
 export interface BrandingConfig {

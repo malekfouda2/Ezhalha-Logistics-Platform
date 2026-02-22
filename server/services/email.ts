@@ -240,6 +240,170 @@ export async function notifyAdminNewApplication(
   });
 }
 
+export async function sendCreditInvoiceCreated(
+  email: string,
+  clientName: string,
+  trackingNumber: string,
+  amount: string,
+  currency: string,
+  dueDate: string,
+  adminEmails?: string
+): Promise<boolean> {
+  const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Credit Invoice Created</h1>
+    </div>
+    <div class="content">
+      <p>Dear ${clientName},</p>
+      <p>A credit invoice has been created for your shipment. Payment is due within 30 days.</p>
+      
+      <div class="details">
+        <h3>Invoice Details</h3>
+        <p><strong>Shipment:</strong> ${trackingNumber}</p>
+        <p><strong>Amount:</strong> ${currency} ${amount}</p>
+        <p><strong>Due Date:</strong> ${dueDate}</p>
+        <p><strong>Payment Method:</strong> Pay Later (Credit)</p>
+      </div>
+      
+      <p>Reminders will be sent to your email as the due date approaches.</p>
+      
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="${appUrl}/client/billing" class="button">View Invoice</a>
+      </p>
+      
+      <p>Best regards,<br>The ezhalha Team</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  const sent = await sendEmail({
+    to: email,
+    subject: `Credit Invoice Created - Shipment ${trackingNumber}`,
+    html,
+  });
+
+  if (adminEmails) {
+    const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
+    for (const adminEmail of adminList) {
+      await sendEmail({
+        to: adminEmail,
+        subject: `[Admin] New Credit Invoice - ${clientName} - Shipment ${trackingNumber}`,
+        html: html.replace("Dear " + clientName, "Dear Admin"),
+      });
+    }
+  }
+
+  return sent;
+}
+
+export async function sendCreditInvoiceReminder(
+  email: string,
+  clientName: string,
+  trackingNumber: string,
+  amount: string,
+  currency: string,
+  dueDate: string,
+  daysInfo: string,
+  isOverdue: boolean,
+  adminEmails?: string
+): Promise<boolean> {
+  const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
+  const urgencyColor = isOverdue ? "#dc2626" : "#f59e0b";
+  const urgencyLabel = isOverdue ? "OVERDUE" : "REMINDER";
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: ${urgencyColor}; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    .urgency { background: ${urgencyColor}15; border: 1px solid ${urgencyColor}; padding: 12px; border-radius: 5px; margin: 15px 0; color: ${urgencyColor}; font-weight: bold; text-align: center; }
+    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
+    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Payment ${urgencyLabel}</h1>
+    </div>
+    <div class="content">
+      <p>Dear ${clientName},</p>
+      <p>${isOverdue 
+        ? "Your credit invoice is overdue. Please make payment as soon as possible to avoid service interruption."
+        : "This is a reminder that your credit invoice payment is due soon."}</p>
+      
+      <div class="urgency">${daysInfo}</div>
+      
+      <div class="details">
+        <h3>Invoice Details</h3>
+        <p><strong>Shipment:</strong> ${trackingNumber}</p>
+        <p><strong>Amount Due:</strong> ${currency} ${amount}</p>
+        <p><strong>Due Date:</strong> ${dueDate}</p>
+      </div>
+      
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="${appUrl}/client/billing" class="button">View & Pay Invoice</a>
+      </p>
+      
+      <p>Best regards,<br>The ezhalha Team</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  const sent = await sendEmail({
+    to: email,
+    subject: `${isOverdue ? "OVERDUE" : "Payment Reminder"} - Shipment ${trackingNumber} - ${currency} ${amount}`,
+    html,
+  });
+
+  if (adminEmails) {
+    const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
+    for (const adminEmail of adminList) {
+      await sendEmail({
+        to: adminEmail,
+        subject: `[Admin] ${isOverdue ? "OVERDUE" : "Reminder"} - ${clientName} - Shipment ${trackingNumber}`,
+        html: html.replace("Dear " + clientName, "Dear Admin"),
+      });
+    }
+  }
+
+  return sent;
+}
+
 export async function sendApplicationRejected(
   email: string,
   name: string,

@@ -1,0 +1,139 @@
+You are working on my existing repo “Ezhalha Logistics Platform” (React + TypeScript in /client, Express + TypeScript in /server, Postgres with Drizzle schema in /shared/schema.ts). Implement a complete “Credit / Pay Later” payment workflow for shipments.
+
+GOAL
+When a client creates a shipment, on the payment page they can choose:
+1) Pay Now (existing payment providers logic remains)
+2) Pay Later (Credit): create an invoice/credit record with due date = 30 days from shipment creation date. This must be visible/tracked by both Client portal and Admin portal, with statuses, reminders, and email notifications.
+
+REQUIREMENTS (Functional)
+A) Data model (DB / Drizzle)
+1) Add a new table for credit invoices (or extend existing invoices if present). Use Drizzle in /shared/schema.ts.
+Fields:
+- id (pk)
+- clientId (fk)
+- shipmentId (fk, unique per shipment)
+- amount (numeric)
+- currency (default “EGP” unless existing)
+- status enum: "UNPAID" | "PAID" | "OVERDUE" | "CANCELLED"
+- issuedAt (timestamp) = created when Pay Later selected
+- dueAt (timestamp) = shipment.createdAt + 30 days
+- paidAt (timestamp nullable)
+- remindersSent (int default 0)
+- lastReminderAt (timestamp nullable)
+- nextReminderAt (timestamp nullable)
+- notes (text nullable)
+- createdAt, updatedAt
+
+2) Add minimal fields to shipments table if needed:
+- paymentMethod enum: "PAY_NOW" | "CREDIT"
+- paymentStatus enum or keep existing but must represent credit state
+- invoiceId nullable (fk to credit invoice)
+
+3) Add a “payment events” or “notifications” table if one already exists; otherwise create a small table:
+- id, clientId, invoiceId, type ("REMINDER_EMAIL" etc), sentAt, meta JSON
+
+B) Backend API (Express)
+Create endpoints with proper auth middleware (clients can only access their own; admin can access all):
+1) POST /api/shipments/:id/pay-later
+- Validates shipment belongs to client, shipment not already paid/invoiced
+- Calculates amount from the shipment pricing logic already used in Pay Now
+- Creates credit invoice with dueAt = shipment.createdAt + 30 days
+- Updates shipment paymentMethod="CREDIT" and paymentStatus="UNPAID"
+- Returns invoice details
+
+2) GET /api/client/credit-invoices
+- Paginated list of the client’s invoices
+- Include shipment summary info: tracking, createdAt, dueAt, status, amount
+
+3) GET /api/client/credit-invoices/:id
+- Full invoice details + related shipment
+
+4) POST /api/client/credit-invoices/:id/mark-paid
+- For now allow admin-only OR allow client to “request payment confirmation” depending on current pattern.
+- Implement this as ADMIN endpoint by default:
+  POST /api/admin/credit-invoices/:id/mark-paid
+  Sets status=PAID, paidAt=now, updates shipment paymentStatus=PAID
+  Adds audit log entry if audit exists.
+
+5) Admin endpoints:
+- GET /api/admin/credit-invoices?status=&clientId=&overdueOnly=&from=&to=
+- GET /api/admin/credit-invoices/:id
+- POST /api/admin/credit-invoices/:id/cancel (optional)
+
+6) Status updates:
+- Any invoice past dueAt and still UNPAID becomes OVERDUE.
+Implement:
+- A server-side scheduled job (cron) OR a periodic interval task on server startup (safe for single instance) that runs every hour:
+  - Update overdue invoices
+  - Send reminders
+If the platform can run multiple instances, add a DB-based lock or ensure idempotency (only send reminder if nextReminderAt <= now and status UNPAID/OVERDUE).
+
+C) Reminder Logic
+1) Reminder schedule:
+- First reminder: 7 days before dueAt
+- Second reminder: 1 day before dueAt
+- Third reminder: on due date
+- Overdue reminders: every 3 days after dueAt until paid (cap at e.g. 6 total reminders)
+
+Compute nextReminderAt when invoice is created and after each reminder.
+Update remindersSent, lastReminderAt, nextReminderAt.
+
+2) Emails
+Use the existing email system in the repo (if present). If none exists, implement a simple mailer service under /server/services/email.ts that supports:
+- SMTP via env vars (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)
+and a dev fallback that logs to console (only in development).
+Email templates (simple HTML + text):
+- Credit invoice created (“Pay Later selected”)
+- Reminder emails (7 days before, 1 day before, due today)
+- Overdue email
+
+Email recipients:
+- Client account email
+- Also notify admin email(s) from env var ADMIN_NOTIFICATION_EMAILS (comma-separated)
+
+D) UI (Client Portal)
+1) Payment page for a shipment:
+- Add “Pay Later (Credit)” option beside Pay Now.
+- When selected show:
+  - Amount
+  - Due date (shipment.createdAt + 30 days)
+  - Explanation: “Invoice will be due in 30 days. Reminders will be sent to your email.”
+  - Confirm button calls POST /api/shipments/:id/pay-later
+- After success:
+  - Show invoice status UNPAID and due date
+  - Provide “View Invoice” button
+
+2) Client “Billing / Credit” screen:
+- List of credit invoices: filters (All, Unpaid, Overdue, Paid)
+- Each row: Shipment, Amount, IssuedAt, DueAt, Status, Days left/Overdue by N days
+- Detail page shows invoice and shipment details.
+
+E) UI (Admin Portal)
+1) Add “Credit Invoices” admin page:
+- Table with filters: status, overdue, client
+- Columns: Client, Shipment, Amount, IssuedAt, DueAt, Status, RemindersSent
+- Actions:
+  - “Mark as Paid”
+  - “View”
+  - Optional “Cancel”
+2) On client profile page (if exists) show summary:
+- Total outstanding credit, overdue count, next due invoice.
+
+F) Permissions & Security
+- Protect all endpoints.
+- Client cannot view another client’s invoices.
+- Admin endpoints require admin role (use existing role middleware pattern).
+- Ensure /api/uploads/request-url remains authenticated if you touched it.
+
+G) Tests / Validation
+- Add basic server-side validation with Zod for request bodies.
+- Add a small unit/integration test if a test setup exists; otherwise provide a manual test checklist in README.
+
+H) Environment & Deployment Notes
+Add to README:
+- Required env vars for SMTP
+- Optional admin emails env var
+- Note that reminders job runs hourly; ensure server process stays running.
+
+DELIVERABLE
+Implement the DB changes + migrations (Drizzle) + all endpoints + UI pages + reminder scheduler + email templates. Ensure existing Pay Now flows still work. Keep code style consistent with repo structure.

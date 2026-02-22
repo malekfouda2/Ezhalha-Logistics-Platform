@@ -356,6 +356,36 @@ export default function CreateShipment() {
     },
   });
 
+  const payLaterMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      const res = await apiRequest("POST", `/api/client/shipments/${shipmentId}/pay-later`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setConfirmData({
+        shipment: data.shipment,
+        carrierTrackingNumber: data.carrierTrackingNumber || "",
+        labelUrl: data.labelUrl,
+        estimatedDelivery: data.estimatedDelivery,
+      });
+      setStep(7);
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
+      toast({
+        title: "Credit Invoice Created",
+        description: "Your shipment has been created with Pay Later. Invoice due in 30 days.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to process Pay Later",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
   const { data: myPerms, isLoading: permsLoading } = useQuery<MyPermissions>({
     queryKey: ["/api/client/my-permissions"],
   });
@@ -1162,12 +1192,10 @@ export default function CreateShipment() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
-                {checkoutData.transactionUrl ? "Complete Payment" : "Confirm Shipment"}
+                Payment Options
               </CardTitle>
               <CardDescription>
-                {checkoutData.transactionUrl
-                  ? "You will be redirected to complete payment securely"
-                  : "Review and confirm your shipment"}
+                Choose how you'd like to pay for this shipment
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -1185,48 +1213,93 @@ export default function CreateShipment() {
                 </div>
               </div>
 
-              {checkoutData.transactionUrl ? (
-                <div className="p-4 border rounded-lg space-y-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <CreditCard className="h-4 w-4" />
-                    Moyasar Payment
+              <div className="space-y-3">
+                {checkoutData.transactionUrl ? (
+                  <div className="p-4 border rounded-lg space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <CreditCard className="h-4 w-4" />
+                      Pay Now
+                    </div>
+                    <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Complete your payment securely via Moyasar. You will be redirected to enter your card details.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handlePayment}
+                      disabled={confirmMutation.isPending}
+                      className="w-full"
+                      data-testid="button-pay-now"
+                    >
+                      {confirmMutation.isPending ? (
+                        <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
+                      ) : (
+                        <>Proceed to Payment</>
+                      )}
+                    </Button>
                   </div>
-                  <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
-                    <p className="text-sm text-green-700 dark:text-green-300">
-                      Click the button below to securely complete your payment via Moyasar. You will be redirected to enter your card details.
-                    </p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    After payment, you will be redirected back to complete your shipment.
-                  </p>
-                </div>
-              ) : (
-                <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
-                    <SarSymbol size="xs" />
-                    Demo Mode
-                  </div>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">
-                    Moyasar is not configured. Payment will be simulated for demonstration purposes.
-                  </p>
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
-              <Button
-                onClick={handlePayment}
-                disabled={confirmMutation.isPending}
-                data-testid="button-confirm"
-              >
-                {confirmMutation.isPending ? (
-                  <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
-                ) : checkoutData.transactionUrl ? (
-                  <>Proceed to Payment</>
                 ) : (
-                  <>Confirm & Create Shipment</>
+                  <div className="p-4 border rounded-lg space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <CreditCard className="h-4 w-4" />
+                      Pay Now (Demo)
+                    </div>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-sm text-blue-600 dark:text-blue-400">
+                        Moyasar is not configured. Payment will be simulated for demonstration.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handlePayment}
+                      disabled={confirmMutation.isPending}
+                      className="w-full"
+                      data-testid="button-pay-now"
+                    >
+                      {confirmMutation.isPending ? (
+                        <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
+                      ) : (
+                        <>Confirm & Create Shipment</>
+                      )}
+                    </Button>
+                  </div>
                 )}
-              </Button>
+
+                <div className="relative flex items-center py-2">
+                  <div className="flex-grow border-t" />
+                  <span className="px-3 text-xs text-muted-foreground uppercase">or</span>
+                  <div className="flex-grow border-t" />
+                </div>
+
+                <div className="p-4 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 space-y-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                    <Clock className="h-4 w-4" />
+                    Credit / Pay Later
+                  </div>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    Create your shipment now and receive an invoice with 30-day payment terms. You will receive email reminders before the due date.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (checkoutData?.shipmentId) {
+                        payLaterMutation.mutate(checkoutData.shipmentId);
+                      }
+                    }}
+                    disabled={payLaterMutation.isPending}
+                    className="w-full border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                    data-testid="button-pay-later"
+                  >
+                    {payLaterMutation.isPending ? (
+                      <><LoadingSpinner size="sm" className="mr-2" />Creating Credit Invoice...</>
+                    ) : (
+                      <>Use Credit / Pay Later</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
             </CardFooter>
           </Card>
         )}
