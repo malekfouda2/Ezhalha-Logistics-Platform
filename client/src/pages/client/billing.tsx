@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -14,28 +13,55 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Package, MapPin, Truck } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { format } from "date-fns";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+interface CreditInvoiceShipment {
+  id: string;
+  trackingNumber: string;
+  status: string;
+  createdAt: string;
+  senderName?: string;
+  senderCity?: string;
+  senderCountry?: string;
+  recipientName?: string;
+  recipientCity?: string;
+  recipientCountry?: string;
+  serviceType?: string;
+  carrierTrackingNumber?: string;
+  weight?: string;
+  weightUnit?: string;
+  numberOfPackages?: number;
+  shipmentType?: string;
+}
 
 interface CreditInvoice {
   id: string;
   shipmentId: string;
   clientAccountId: string;
-  invoiceNumber: string;
   amount: string;
   currency: string;
   status: string;
+  issuedAt: string;
   dueAt: string;
   paidAt: string | null;
   remindersSent: number;
   createdAt: string;
+  shipment: CreditInvoiceShipment | null;
 }
 
 function getStatusBadge(status: string) {
   switch (status) {
-    case "PENDING":
-      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800" data-testid={`badge-status-${status}`}><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
+    case "UNPAID":
+      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800" data-testid={`badge-status-${status}`}><Clock className="h-3 w-3 mr-1" />Unpaid</Badge>;
     case "OVERDUE":
       return <Badge variant="destructive" data-testid={`badge-status-${status}`}><AlertTriangle className="h-3 w-3 mr-1" />Overdue</Badge>;
     case "PAID":
@@ -47,25 +73,37 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getDaysUntilDue(dueAt: string): string {
+  const now = new Date();
+  const due = new Date(dueAt);
+  const diffMs = due.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  if (diffDays > 1) return `${diffDays} days left`;
+  if (diffDays === 1) return "Due tomorrow";
+  if (diffDays === 0) return "Due today";
+  return `${Math.abs(diffDays)} days overdue`;
+}
+
 export default function ClientBilling() {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedInvoice, setSelectedInvoice] = useState<CreditInvoice | null>(null);
 
-  const { data, isLoading } = useQuery<{ invoices: CreditInvoice[]; total: number }>({
+  const { data: invoices, isLoading } = useQuery<CreditInvoice[]>({
     queryKey: ["/api/client/credit-invoices"],
   });
 
-  const invoices = data?.invoices || [];
+  const allInvoices = invoices || [];
 
-  const filteredInvoices = invoices.filter((inv) => {
+  const filteredInvoices = allInvoices.filter((inv) => {
     if (statusFilter === "all") return true;
     return inv.status === statusFilter;
   });
 
-  const totalOutstanding = invoices
-    .filter((inv) => inv.status === "PENDING" || inv.status === "OVERDUE")
+  const totalOutstanding = allInvoices
+    .filter((inv) => inv.status === "UNPAID" || inv.status === "OVERDUE")
     .reduce((sum, inv) => sum + Number(inv.amount), 0);
 
-  const overdueCount = invoices.filter((inv) => inv.status === "OVERDUE").length;
+  const overdueCount = allInvoices.filter((inv) => inv.status === "OVERDUE").length;
 
   if (isLoading) return <LoadingScreen />;
 
@@ -89,7 +127,7 @@ export default function ClientBilling() {
           <Card>
             <CardContent className="pt-6">
               <div className="text-sm text-muted-foreground">Credit Invoices</div>
-              <div className="text-2xl font-bold mt-1" data-testid="text-total-invoices">{invoices.length}</div>
+              <div className="text-2xl font-bold mt-1" data-testid="text-total-invoices">{allInvoices.length}</div>
             </CardContent>
           </Card>
           <Card>
@@ -115,7 +153,7 @@ export default function ClientBilling() {
             <Tabs value={statusFilter} onValueChange={setStatusFilter} className="mb-4">
               <TabsList>
                 <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
-                <TabsTrigger value="PENDING" data-testid="tab-pending">Pending</TabsTrigger>
+                <TabsTrigger value="UNPAID" data-testid="tab-unpaid">Unpaid</TabsTrigger>
                 <TabsTrigger value="OVERDUE" data-testid="tab-overdue">Overdue</TabsTrigger>
                 <TabsTrigger value="PAID" data-testid="tab-paid">Paid</TabsTrigger>
               </TabsList>
@@ -131,19 +169,36 @@ export default function ClientBilling() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Invoice #</TableHead>
+                      <TableHead>Shipment</TableHead>
+                      <TableHead>Route</TableHead>
                       <TableHead>Amount</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Due Date</TableHead>
-                      <TableHead>Created</TableHead>
+                      <TableHead>Time Left</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredInvoices.map((inv) => {
                       const isOverdue = inv.status === "OVERDUE";
+                      const isActive = inv.status === "UNPAID" || inv.status === "OVERDUE";
                       return (
                         <TableRow key={inv.id} className={isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""} data-testid={`row-invoice-${inv.id}`}>
-                          <TableCell className="font-mono text-sm" data-testid={`text-invoice-number-${inv.id}`}>{inv.invoiceNumber}</TableCell>
+                          <TableCell data-testid={`text-tracking-${inv.id}`}>
+                            <div className="font-mono text-sm">{inv.shipment?.trackingNumber || "-"}</div>
+                            {inv.shipment?.carrierTrackingNumber && (
+                              <div className="text-xs text-muted-foreground">{inv.shipment.carrierTrackingNumber}</div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {inv.shipment ? (
+                              <div className="text-sm">
+                                <span>{inv.shipment.senderCity || "-"}</span>
+                                <span className="text-muted-foreground mx-1">&rarr;</span>
+                                <span>{inv.shipment.recipientCity || "-"}</span>
+                              </div>
+                            ) : "-"}
+                          </TableCell>
                           <TableCell className="font-medium" data-testid={`text-amount-${inv.id}`}>
                             <SarAmount amount={Number(inv.amount)} /> {inv.currency}
                           </TableCell>
@@ -151,8 +206,20 @@ export default function ClientBilling() {
                           <TableCell data-testid={`text-due-date-${inv.id}`}>
                             {format(new Date(inv.dueAt), "MMM d, yyyy")}
                           </TableCell>
-                          <TableCell data-testid={`text-created-${inv.id}`}>
-                            {format(new Date(inv.createdAt), "MMM d, yyyy")}
+                          <TableCell>
+                            {isActive && (
+                              <span className={`text-sm ${isOverdue ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                                {getDaysUntilDue(inv.dueAt)}
+                              </span>
+                            )}
+                            {inv.status === "PAID" && inv.paidAt && (
+                              <span className="text-sm text-green-600">Paid {format(new Date(inv.paidAt), "MMM d")}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedInvoice(inv)} data-testid={`button-details-${inv.id}`}>
+                              Details
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -164,6 +231,80 @@ export default function ClientBilling() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!selectedInvoice} onOpenChange={() => setSelectedInvoice(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Credit Invoice Details</DialogTitle>
+          </DialogHeader>
+          {selectedInvoice && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Status</span>
+                {getStatusBadge(selectedInvoice.status)}
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-3">
+                <h4 className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" />Invoice</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <span className="text-muted-foreground">Amount</span>
+                  <span className="font-medium"><SarAmount amount={Number(selectedInvoice.amount)} /> {selectedInvoice.currency}</span>
+                  <span className="text-muted-foreground">Issued</span>
+                  <span>{format(new Date(selectedInvoice.issuedAt), "MMM d, yyyy")}</span>
+                  <span className="text-muted-foreground">Due Date</span>
+                  <span className="font-medium">{format(new Date(selectedInvoice.dueAt), "MMM d, yyyy")}</span>
+                  {selectedInvoice.paidAt && (
+                    <>
+                      <span className="text-muted-foreground">Paid At</span>
+                      <span className="text-green-600">{format(new Date(selectedInvoice.paidAt), "MMM d, yyyy")}</span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground">Reminders Sent</span>
+                  <span>{selectedInvoice.remindersSent}</span>
+                </div>
+              </div>
+
+              {selectedInvoice.shipment && (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h4 className="font-medium flex items-center gap-2"><Package className="h-4 w-4" />Shipment</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <span className="text-muted-foreground">Tracking #</span>
+                    <span className="font-mono">{selectedInvoice.shipment.trackingNumber}</span>
+                    {selectedInvoice.shipment.carrierTrackingNumber && (
+                      <>
+                        <span className="text-muted-foreground">Carrier Tracking</span>
+                        <span className="font-mono text-xs">{selectedInvoice.shipment.carrierTrackingNumber}</span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground">Type</span>
+                    <span className="capitalize">{selectedInvoice.shipment.shipmentType || "-"}</span>
+                    <span className="text-muted-foreground">Service</span>
+                    <span>{selectedInvoice.shipment.serviceType?.replace(/_/g, " ") || "-"}</span>
+                    <span className="text-muted-foreground">From</span>
+                    <span>{selectedInvoice.shipment.senderName} - {selectedInvoice.shipment.senderCity}, {selectedInvoice.shipment.senderCountry}</span>
+                    <span className="text-muted-foreground">To</span>
+                    <span>{selectedInvoice.shipment.recipientName} - {selectedInvoice.shipment.recipientCity}, {selectedInvoice.shipment.recipientCountry}</span>
+                    {selectedInvoice.shipment.weight && (
+                      <>
+                        <span className="text-muted-foreground">Weight</span>
+                        <span>{selectedInvoice.shipment.weight} {selectedInvoice.shipment.weightUnit}</span>
+                      </>
+                    )}
+                    {selectedInvoice.shipment.numberOfPackages && (
+                      <>
+                        <span className="text-muted-foreground">Packages</span>
+                        <span>{selectedInvoice.shipment.numberOfPackages}</span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground">Created</span>
+                    <span>{format(new Date(selectedInvoice.shipment.createdAt), "MMM d, yyyy h:mm a")}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </ClientLayout>
   );
 }

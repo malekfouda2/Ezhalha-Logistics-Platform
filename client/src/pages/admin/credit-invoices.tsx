@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
 import { LoadingScreen } from "@/components/loading-spinner";
@@ -29,38 +29,72 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Filter, X, RefreshCw } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Filter, X, RefreshCw, Package, MapPin, User, Eye, Phone, Mail, Building } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
+interface ShipmentDetail {
+  id: string;
+  trackingNumber: string;
+  carrierTrackingNumber: string | null;
+  status: string;
+  shipmentType: string;
+  serviceType: string;
+  carrierCode: string;
+  senderName: string;
+  senderCity: string;
+  senderCountry: string;
+  senderPhone: string;
+  senderAddress: string;
+  senderPostalCode: string;
+  recipientName: string;
+  recipientCity: string;
+  recipientCountry: string;
+  recipientPhone: string;
+  recipientAddress: string;
+  recipientPostalCode: string;
+  weight: string;
+  weightUnit: string;
+  numberOfPackages: number;
+  packageType: string;
+  baseRate: string;
+  marginAmount: string;
+  finalPrice: string;
+  currency: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  createdAt: string;
+}
+
+interface ClientDetail {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  accountNumber: string;
+  accountType: string;
+  companyName: string | null;
+  country: string;
+}
+
 interface CreditInvoiceWithRelations {
   id: string;
   shipmentId: string;
   clientAccountId: string;
-  invoiceNumber: string;
   amount: string;
   currency: string;
   status: string;
+  issuedAt: string;
   dueAt: string;
   paidAt: string | null;
   remindersSent: number;
   lastReminderAt: string | null;
   nextReminderAt: string | null;
   createdAt: string;
-  shipment: {
-    id: string;
-    trackingNumber: string;
-    status: string;
-    createdAt: string;
-  } | null;
-  client: {
-    id: string;
-    name: string;
-    email: string;
-    accountNumber: string;
-  } | null;
+  shipment: ShipmentDetail | null;
+  client: ClientDetail | null;
 }
 
 interface PaginatedResponse {
@@ -72,8 +106,8 @@ interface PaginatedResponse {
 
 function getStatusBadge(status: string) {
   switch (status) {
-    case "PENDING":
-      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
+    case "UNPAID":
+      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800"><Clock className="h-3 w-3 mr-1" />Unpaid</Badge>;
     case "OVERDUE":
       return <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Overdue</Badge>;
     case "PAID":
@@ -85,11 +119,23 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getDaysInfo(dueAt: string): { text: string; isOverdue: boolean } {
+  const now = new Date();
+  const due = new Date(dueAt);
+  const diffMs = due.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  if (diffDays > 1) return { text: `${diffDays} days left`, isOverdue: false };
+  if (diffDays === 1) return { text: "Due tomorrow", isOverdue: false };
+  if (diffDays === 0) return { text: "Due today", isOverdue: false };
+  return { text: `${Math.abs(diffDays)} days overdue`, isOverdue: true };
+}
+
 export default function AdminCreditInvoices() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
   const [actionDialog, setActionDialog] = useState<{ type: "mark_paid" | "cancel"; invoice: CreditInvoiceWithRelations } | null>(null);
+  const [detailInvoice, setDetailInvoice] = useState<CreditInvoiceWithRelations | null>(null);
   const { toast } = useToast();
 
   const buildQueryString = () => {
@@ -141,10 +187,10 @@ export default function AdminCreditInvoices() {
 
   const invoices = data?.invoices || [];
   const totalOutstanding = invoices
-    .filter((inv) => inv.status === "PENDING" || inv.status === "OVERDUE")
+    .filter((inv) => inv.status === "UNPAID" || inv.status === "OVERDUE")
     .reduce((sum, inv) => sum + Number(inv.amount), 0);
   const overdueCount = invoices.filter((inv) => inv.status === "OVERDUE").length;
-  const pendingCount = invoices.filter((inv) => inv.status === "PENDING").length;
+  const unpaidCount = invoices.filter((inv) => inv.status === "UNPAID").length;
 
   if (isLoading) return <LoadingScreen />;
 
@@ -179,8 +225,8 @@ export default function AdminCreditInvoices() {
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="text-sm text-muted-foreground">Pending</div>
-              <div className="text-2xl font-bold mt-1 text-amber-600" data-testid="text-pending">{pendingCount}</div>
+              <div className="text-sm text-muted-foreground">Unpaid</div>
+              <div className="text-2xl font-bold mt-1 text-amber-600" data-testid="text-unpaid">{unpaidCount}</div>
             </CardContent>
           </Card>
           <Card>
@@ -209,7 +255,7 @@ export default function AdminCreditInvoices() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="UNPAID">Unpaid</SelectItem>
                     <SelectItem value="OVERDUE">Overdue</SelectItem>
                     <SelectItem value="PAID">Paid</SelectItem>
                     <SelectItem value="CANCELLED">Cancelled</SelectItem>
@@ -235,9 +281,9 @@ export default function AdminCreditInvoices() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Invoice #</TableHead>
                         <TableHead>Client</TableHead>
-                        <TableHead>Tracking #</TableHead>
+                        <TableHead>Shipment</TableHead>
+                        <TableHead>Route</TableHead>
                         <TableHead>Amount</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Due Date</TableHead>
@@ -248,53 +294,99 @@ export default function AdminCreditInvoices() {
                     <TableBody>
                       {invoices.map((inv) => {
                         const isOverdue = inv.status === "OVERDUE";
+                        const isActive = inv.status === "UNPAID" || inv.status === "OVERDUE";
+                        const daysInfo = isActive ? getDaysInfo(inv.dueAt) : null;
                         return (
                           <TableRow key={inv.id} className={isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""} data-testid={`row-invoice-${inv.id}`}>
-                            <TableCell className="font-mono text-sm" data-testid={`text-invoice-number-${inv.id}`}>{inv.invoiceNumber}</TableCell>
                             <TableCell data-testid={`text-client-${inv.id}`}>
                               {inv.client ? (
                                 <div>
                                   <div className="font-medium text-sm">{inv.client.name}</div>
                                   <div className="text-xs text-muted-foreground">{inv.client.accountNumber}</div>
+                                  <div className="text-xs text-muted-foreground">{inv.client.email}</div>
                                 </div>
                               ) : "-"}
                             </TableCell>
-                            <TableCell className="font-mono text-sm" data-testid={`text-tracking-${inv.id}`}>
-                              {inv.shipment?.trackingNumber || "-"}
-                            </TableCell>
-                            <TableCell className="font-medium" data-testid={`text-amount-${inv.id}`}>
-                              <SarAmount amount={Number(inv.amount)} /> {inv.currency}
-                            </TableCell>
-                            <TableCell>{getStatusBadge(inv.status)}</TableCell>
-                            <TableCell data-testid={`text-due-${inv.id}`}>
-                              {format(new Date(inv.dueAt), "MMM d, yyyy")}
-                            </TableCell>
-                            <TableCell data-testid={`text-reminders-${inv.id}`}>{inv.remindersSent}</TableCell>
-                            <TableCell>
-                              {(inv.status === "PENDING" || inv.status === "OVERDUE") && (
-                                <div className="flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-green-600 border-green-300 hover:bg-green-50 dark:hover:bg-green-950/30"
-                                    onClick={() => setActionDialog({ type: "mark_paid", invoice: inv })}
-                                    data-testid={`button-mark-paid-${inv.id}`}
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                                    Paid
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-destructive"
-                                    onClick={() => setActionDialog({ type: "cancel", invoice: inv })}
-                                    data-testid={`button-cancel-${inv.id}`}
-                                  >
-                                    <XCircle className="h-3.5 w-3.5 mr-1" />
-                                    Cancel
-                                  </Button>
-                                </div>
+                            <TableCell data-testid={`text-tracking-${inv.id}`}>
+                              <div className="font-mono text-sm">{inv.shipment?.trackingNumber || "-"}</div>
+                              {inv.shipment?.carrierTrackingNumber && (
+                                <div className="text-xs text-muted-foreground font-mono">{inv.shipment.carrierTrackingNumber}</div>
                               )}
+                              {inv.shipment?.serviceType && (
+                                <div className="text-xs text-muted-foreground">{inv.shipment.serviceType.replace(/_/g, " ")}</div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {inv.shipment ? (
+                                <div className="text-sm">
+                                  <div>{inv.shipment.senderName}</div>
+                                  <div className="text-xs text-muted-foreground">{inv.shipment.senderCity}, {inv.shipment.senderCountry}</div>
+                                  <div className="text-muted-foreground my-0.5">&darr;</div>
+                                  <div>{inv.shipment.recipientName}</div>
+                                  <div className="text-xs text-muted-foreground">{inv.shipment.recipientCity}, {inv.shipment.recipientCountry}</div>
+                                </div>
+                              ) : "-"}
+                            </TableCell>
+                            <TableCell data-testid={`text-amount-${inv.id}`}>
+                              <div className="font-medium"><SarAmount amount={Number(inv.amount)} /></div>
+                              <div className="text-xs text-muted-foreground">{inv.currency}</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                {getStatusBadge(inv.status)}
+                                {daysInfo && (
+                                  <div className={`text-xs ${daysInfo.isOverdue ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                                    {daysInfo.text}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell data-testid={`text-due-${inv.id}`}>
+                              <div>{format(new Date(inv.dueAt), "MMM d, yyyy")}</div>
+                              <div className="text-xs text-muted-foreground">Issued: {format(new Date(inv.issuedAt || inv.createdAt), "MMM d")}</div>
+                            </TableCell>
+                            <TableCell data-testid={`text-reminders-${inv.id}`}>
+                              <div>{inv.remindersSent}</div>
+                              {inv.lastReminderAt && (
+                                <div className="text-xs text-muted-foreground">Last: {format(new Date(inv.lastReminderAt), "MMM d")}</div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setDetailInvoice(inv)}
+                                  data-testid={`button-view-${inv.id}`}
+                                >
+                                  <Eye className="h-3.5 w-3.5 mr-1" />
+                                  View
+                                </Button>
+                                {isActive && (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-green-600 border-green-300"
+                                      onClick={() => setActionDialog({ type: "mark_paid", invoice: inv })}
+                                      data-testid={`button-mark-paid-${inv.id}`}
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                      Mark Paid
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-destructive"
+                                      onClick={() => setActionDialog({ type: "cancel", invoice: inv })}
+                                      data-testid={`button-cancel-${inv.id}`}
+                                    >
+                                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                                      Cancel
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
@@ -321,6 +413,169 @@ export default function AdminCreditInvoices() {
         </Card>
       </div>
 
+      <Dialog open={!!detailInvoice} onOpenChange={() => setDetailInvoice(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Credit Invoice Details</DialogTitle>
+          </DialogHeader>
+          {detailInvoice && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Status</span>
+                {getStatusBadge(detailInvoice.status)}
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-3">
+                <h4 className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" />Invoice Info</h4>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <span className="text-muted-foreground">Amount</span>
+                  <span className="font-medium"><SarAmount amount={Number(detailInvoice.amount)} /> {detailInvoice.currency}</span>
+                  <span className="text-muted-foreground">Issued</span>
+                  <span>{format(new Date(detailInvoice.issuedAt || detailInvoice.createdAt), "MMM d, yyyy h:mm a")}</span>
+                  <span className="text-muted-foreground">Due Date</span>
+                  <span className="font-medium">{format(new Date(detailInvoice.dueAt), "MMM d, yyyy")}</span>
+                  {detailInvoice.paidAt && (
+                    <>
+                      <span className="text-muted-foreground">Paid At</span>
+                      <span className="text-green-600">{format(new Date(detailInvoice.paidAt), "MMM d, yyyy h:mm a")}</span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground">Reminders Sent</span>
+                  <span>{detailInvoice.remindersSent}</span>
+                  {detailInvoice.lastReminderAt && (
+                    <>
+                      <span className="text-muted-foreground">Last Reminder</span>
+                      <span>{format(new Date(detailInvoice.lastReminderAt), "MMM d, yyyy h:mm a")}</span>
+                    </>
+                  )}
+                  {detailInvoice.nextReminderAt && (
+                    <>
+                      <span className="text-muted-foreground">Next Reminder</span>
+                      <span>{format(new Date(detailInvoice.nextReminderAt), "MMM d, yyyy h:mm a")}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {detailInvoice.client && (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h4 className="font-medium flex items-center gap-2"><User className="h-4 w-4" />Client</h4>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <span className="text-muted-foreground">Name</span>
+                    <span className="font-medium">{detailInvoice.client.name}</span>
+                    <span className="text-muted-foreground">Account #</span>
+                    <span className="font-mono">{detailInvoice.client.accountNumber}</span>
+                    <span className="text-muted-foreground">Type</span>
+                    <span className="capitalize">{detailInvoice.client.accountType}</span>
+                    {detailInvoice.client.companyName && (
+                      <>
+                        <span className="text-muted-foreground">Company</span>
+                        <span>{detailInvoice.client.companyName}</span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground flex items-center gap-1"><Mail className="h-3 w-3" />Email</span>
+                    <span>{detailInvoice.client.email}</span>
+                    <span className="text-muted-foreground flex items-center gap-1"><Phone className="h-3 w-3" />Phone</span>
+                    <span>{detailInvoice.client.phone}</span>
+                    <span className="text-muted-foreground">Country</span>
+                    <span>{detailInvoice.client.country}</span>
+                  </div>
+                </div>
+              )}
+
+              {detailInvoice.shipment && (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h4 className="font-medium flex items-center gap-2"><Package className="h-4 w-4" />Shipment</h4>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <span className="text-muted-foreground">Tracking #</span>
+                    <span className="font-mono">{detailInvoice.shipment.trackingNumber}</span>
+                    {detailInvoice.shipment.carrierTrackingNumber && (
+                      <>
+                        <span className="text-muted-foreground">Carrier Tracking</span>
+                        <span className="font-mono text-xs">{detailInvoice.shipment.carrierTrackingNumber}</span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground">Type</span>
+                    <span className="capitalize">{detailInvoice.shipment.shipmentType}</span>
+                    <span className="text-muted-foreground">Service</span>
+                    <span>{detailInvoice.shipment.serviceType?.replace(/_/g, " ")}</span>
+                    <span className="text-muted-foreground">Carrier</span>
+                    <span>{detailInvoice.shipment.carrierCode}</span>
+                    <span className="text-muted-foreground">Packages</span>
+                    <span>{detailInvoice.shipment.numberOfPackages} x {detailInvoice.shipment.packageType?.replace(/_/g, " ")}</span>
+                    <span className="text-muted-foreground">Weight</span>
+                    <span>{detailInvoice.shipment.weight} {detailInvoice.shipment.weightUnit}</span>
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="capitalize">{detailInvoice.shipment.status}</span>
+                    <span className="text-muted-foreground">Payment Method</span>
+                    <span>{detailInvoice.shipment.paymentMethod}</span>
+                    <span className="text-muted-foreground">Payment Status</span>
+                    <span className="capitalize">{detailInvoice.shipment.paymentStatus}</span>
+                  </div>
+
+                  <div className="border-t pt-3 mt-3">
+                    <h5 className="text-sm font-medium flex items-center gap-1 mb-2"><MapPin className="h-3 w-3" />Pricing</h5>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                      <span className="text-muted-foreground">Base Rate</span>
+                      <span><SarAmount amount={Number(detailInvoice.shipment.baseRate)} /></span>
+                      <span className="text-muted-foreground">Margin</span>
+                      <span><SarAmount amount={Number(detailInvoice.shipment.marginAmount)} /></span>
+                      <span className="text-muted-foreground">Final Price</span>
+                      <span className="font-medium"><SarAmount amount={Number(detailInvoice.shipment.finalPrice)} /></span>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-3 mt-3 grid grid-cols-2 gap-4">
+                    <div>
+                      <h5 className="text-sm font-medium mb-2">Sender</h5>
+                      <div className="text-sm space-y-1">
+                        <div className="font-medium">{detailInvoice.shipment.senderName}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.senderAddress}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.senderCity}, {detailInvoice.shipment.senderPostalCode}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.senderCountry}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.senderPhone}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <h5 className="text-sm font-medium mb-2">Recipient</h5>
+                      <div className="text-sm space-y-1">
+                        <div className="font-medium">{detailInvoice.shipment.recipientName}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.recipientAddress}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.recipientCity}, {detailInvoice.shipment.recipientPostalCode}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.recipientCountry}</div>
+                        <div className="text-muted-foreground">{detailInvoice.shipment.recipientPhone}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(detailInvoice.status === "UNPAID" || detailInvoice.status === "OVERDUE") && (
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    className="bg-green-600 text-white flex-1"
+                    onClick={() => { setDetailInvoice(null); setActionDialog({ type: "mark_paid", invoice: detailInvoice }); }}
+                    data-testid="button-detail-mark-paid"
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    Mark as Paid
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={() => { setDetailInvoice(null); setActionDialog({ type: "cancel", invoice: detailInvoice }); }}
+                    data-testid="button-detail-cancel"
+                  >
+                    <XCircle className="h-4 w-4 mr-2" />
+                    Cancel Invoice
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!actionDialog} onOpenChange={() => setActionDialog(null)}>
         <DialogContent>
           <DialogHeader>
@@ -329,10 +584,26 @@ export default function AdminCreditInvoices() {
             </DialogTitle>
             <DialogDescription>
               {actionDialog?.type === "mark_paid"
-                ? `Are you sure you want to mark invoice ${actionDialog?.invoice.invoiceNumber} as paid? This will update the shipment payment status.`
-                : `Are you sure you want to cancel invoice ${actionDialog?.invoice.invoiceNumber}? This action cannot be undone.`}
+                ? `Are you sure you want to mark the credit invoice for ${actionDialog?.invoice.client?.name || "this client"} (${actionDialog?.invoice.shipment?.trackingNumber || ""}) as paid? This will update the shipment payment status.`
+                : `Are you sure you want to cancel the credit invoice for ${actionDialog?.invoice.client?.name || "this client"} (${actionDialog?.invoice.shipment?.trackingNumber || ""})? This action cannot be undone.`}
             </DialogDescription>
           </DialogHeader>
+          {actionDialog && (
+            <div className="rounded-lg bg-muted p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Client</span>
+                <span>{actionDialog.invoice.client?.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Amount</span>
+                <span className="font-medium"><SarAmount amount={Number(actionDialog.invoice.amount)} /> {actionDialog.invoice.currency}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Due</span>
+                <span>{format(new Date(actionDialog.invoice.dueAt), "MMM d, yyyy")}</span>
+              </div>
+            </div>
+          )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setActionDialog(null)} data-testid="button-dialog-cancel">
               Close
@@ -341,7 +612,7 @@ export default function AdminCreditInvoices() {
               <Button
                 onClick={() => markPaidMutation.mutate(actionDialog.invoice.id)}
                 disabled={markPaidMutation.isPending}
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-green-600 text-white"
                 data-testid="button-confirm-mark-paid"
               >
                 {markPaidMutation.isPending ? "Processing..." : "Confirm Paid"}
