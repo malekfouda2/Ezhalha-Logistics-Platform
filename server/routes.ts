@@ -1426,6 +1426,144 @@ export async function registerRoutes(
   });
 
   // ============================================
+  // ADMIN - CREDIT ACCESS REQUESTS
+  // ============================================
+
+  app.get("/api/admin/credit-requests", requireAdmin, async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const result = await storage.getCreditAccessRequests({ status, page, limit });
+
+      const enrichedRequests = await Promise.all(
+        result.requests.map(async (request) => {
+          const clientAccount = await storage.getClientAccount(request.clientAccountId);
+          const requestedBy = await storage.getUser(request.requestedByUserId);
+          const reviewedBy = request.reviewedByUserId ? await storage.getUser(request.reviewedByUserId) : null;
+          return {
+            ...request,
+            clientName: clientAccount?.name || "Unknown",
+            clientEmail: clientAccount?.email || "",
+            accountNumber: clientAccount?.accountNumber || "",
+            companyName: clientAccount?.companyName || "",
+            requestedByName: requestedBy?.username || "Unknown",
+            reviewedByName: reviewedBy?.username || null,
+          };
+        })
+      );
+
+      res.json({ ...result, requests: enrichedRequests });
+    } catch (error: any) {
+      logError("Error fetching credit access requests", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/credit-requests/:id/approve", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const adminUser = await storage.getUser(req.session.userId!);
+
+      const request = await storage.updateCreditAccessRequest(id, {
+        status: "approved",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+
+      if (!request) {
+        return res.status(404).json({ error: "Request not found" });
+      }
+
+      await storage.updateClientAccount(request.clientAccountId, { creditEnabled: true } as any);
+
+      logAuditToFile({
+        userId: req.session.userId!,
+        action: "approve_credit_access",
+        resource: "credit_access_request",
+        resourceId: id,
+        details: `Admin ${adminUser?.username} approved credit access for client ${request.clientAccountId}`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error approving credit request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/credit-requests/:id/reject", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const adminUser = await storage.getUser(req.session.userId!);
+
+      const request = await storage.updateCreditAccessRequest(id, {
+        status: "rejected",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+
+      if (!request) {
+        return res.status(404).json({ error: "Request not found" });
+      }
+
+      logAuditToFile({
+        userId: req.session.userId!,
+        action: "reject_credit_access",
+        resource: "credit_access_request",
+        resourceId: id,
+        details: `Admin ${adminUser?.username} rejected credit access for client ${request.clientAccountId}`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error rejecting credit request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/credit-requests/:id/revoke", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const adminUser = await storage.getUser(req.session.userId!);
+
+      const request = await storage.updateCreditAccessRequest(id, {
+        status: "revoked",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+
+      if (!request) {
+        return res.status(404).json({ error: "Request not found" });
+      }
+
+      await storage.updateClientAccount(request.clientAccountId, { creditEnabled: false } as any);
+
+      logAuditToFile({
+        userId: req.session.userId!,
+        action: "revoke_credit_access",
+        resource: "credit_access_request",
+        resourceId: id,
+        details: `Admin ${adminUser?.username} revoked credit access for client ${request.clientAccountId}`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error revoking credit request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
   // ADMIN - CREDIT INVOICES
   // ============================================
 
@@ -3434,12 +3572,70 @@ export async function registerRoutes(
   // CLIENT - CREDIT INVOICES (Pay Later)
   // ============================================
 
-  // Client - Pay Later for a shipment (alternative checkout flow)
+  app.get("/api/client/credit-access", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      const request = await storage.getCreditAccessRequestByClient(user.clientAccountId);
+      res.json({
+        creditEnabled: clientAccount?.creditEnabled || false,
+        request: request || null,
+      });
+    } catch (error: any) {
+      logError("Error fetching credit access status", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/client/credit-access/request", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const existing = await storage.getCreditAccessRequestByClient(user.clientAccountId);
+      if (existing && (existing.status === "pending" || existing.status === "approved")) {
+        return res.status(400).json({ error: existing.status === "pending" ? "You already have a pending credit access request" : "Credit access is already enabled for your account" });
+      }
+
+      const { reason } = req.body;
+      const request = await storage.createCreditAccessRequest({
+        clientAccountId: user.clientAccountId,
+        requestedByUserId: user.id,
+        status: "pending",
+        reason: reason || null,
+      });
+
+      logAuditToFile({
+        userId: user.id,
+        action: "request_credit_access",
+        resource: "credit_access_request",
+        resourceId: request.id,
+        details: `Client ${user.username} requested credit access`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error creating credit access request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/client/shipments/:id/pay-later", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
         return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      if (!clientAccount?.creditEnabled) {
+        return res.status(403).json({ error: "Credit access is not enabled for your account. Please request credit access first." });
       }
 
       const { id: shipmentId } = req.params;

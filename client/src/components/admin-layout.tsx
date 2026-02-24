@@ -27,6 +27,7 @@ import {
   Webhook,
   ScrollText,
   Clock,
+  ShieldCheck,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -40,6 +41,7 @@ const navItems = [
   { href: "/admin/shipments", label: "Shipments", icon: Package },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
   { href: "/admin/payments", label: "Financial Statements", icon: CreditCard },
+  { href: "/admin/credit-requests", label: "Credit Requests", icon: ShieldCheck },
   { href: "/admin/credit-invoices", label: "Credit Invoices", icon: Clock },
   { href: "/admin/pricing", label: "Pricing", icon: Banknote },
   { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },

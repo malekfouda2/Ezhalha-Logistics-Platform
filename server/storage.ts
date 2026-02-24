@@ -37,6 +37,8 @@ import {
   type InsertPolicy,
   type PolicyVersion,
   type InsertPolicyVersion,
+  type CreditAccessRequest,
+  type InsertCreditAccessRequest,
   type CreditInvoice,
   type InsertCreditInvoice,
   type CreditNotificationEvent,
@@ -60,6 +62,7 @@ import {
   clientUserPermissions,
   policies,
   policyVersions,
+  creditAccessRequests,
   creditInvoices,
   creditNotificationEvents,
 } from "@shared/schema";
@@ -244,6 +247,12 @@ export interface IStorage {
   getPolicyVersion(versionId: string): Promise<PolicyVersion | undefined>;
   getLatestPolicyVersionNumber(policyId: string): Promise<number>;
   createPolicyVersion(version: InsertPolicyVersion): Promise<PolicyVersion>;
+
+  // Credit Access Requests
+  getCreditAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: CreditAccessRequest[]; total: number; page: number; totalPages: number }>;
+  getCreditAccessRequestByClient(clientAccountId: string): Promise<CreditAccessRequest | undefined>;
+  createCreditAccessRequest(request: InsertCreditAccessRequest): Promise<CreditAccessRequest>;
+  updateCreditAccessRequest(id: string, updates: Partial<CreditAccessRequest>): Promise<CreditAccessRequest | undefined>;
 
   // Credit Invoices
   getCreditInvoices(params?: {
@@ -1467,6 +1476,37 @@ export class DatabaseStorage implements IStorage {
 <p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
         isPublished: true,
       });
+  }
+
+  // Credit Access Requests
+  async getCreditAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: CreditAccessRequest[]; total: number; page: number; totalPages: number }> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 25;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(creditAccessRequests.status, params.status));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [totalResult] = await db.select({ count: count() }).from(creditAccessRequests).where(whereClause);
+    const total = totalResult?.count || 0;
+    const requests = await db.select().from(creditAccessRequests).where(whereClause).orderBy(desc(creditAccessRequests.createdAt)).limit(limit).offset(offset);
+    return { requests, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  async getCreditAccessRequestByClient(clientAccountId: string): Promise<CreditAccessRequest | undefined> {
+    const [request] = await db.select().from(creditAccessRequests).where(eq(creditAccessRequests.clientAccountId, clientAccountId)).orderBy(desc(creditAccessRequests.createdAt)).limit(1);
+    return request;
+  }
+
+  async createCreditAccessRequest(request: InsertCreditAccessRequest): Promise<CreditAccessRequest> {
+    const [created] = await db.insert(creditAccessRequests).values(request).returning();
+    return created;
+  }
+
+  async updateCreditAccessRequest(id: string, updates: Partial<CreditAccessRequest>): Promise<CreditAccessRequest | undefined> {
+    const [updated] = await db.update(creditAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(creditAccessRequests.id, id)).returning();
+    return updated;
   }
 
   // Credit Invoices

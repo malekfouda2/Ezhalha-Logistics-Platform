@@ -390,6 +390,10 @@ export default function CreateShipment() {
     queryKey: ["/api/client/my-permissions"],
   });
 
+  const { data: creditAccess } = useQuery<{ creditEnabled: boolean; request: any }>({
+    queryKey: ["/api/client/credit-access"],
+  });
+
   const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
 
   // Permission check - show access denied if user lacks create_shipments permission
@@ -1270,32 +1274,54 @@ export default function CreateShipment() {
                   <div className="flex-grow border-t" />
                 </div>
 
-                <div className="p-4 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 space-y-4">
-                  <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
-                    <Clock className="h-4 w-4" />
-                    Credit / Pay Later
+                {creditAccess?.creditEnabled ? (
+                  <div className="p-4 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                      <Clock className="h-4 w-4" />
+                      Credit / Pay Later
+                    </div>
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Create your shipment now and receive an invoice with 30-day payment terms. You will receive email reminders before the due date.
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        if (checkoutData?.shipmentId) {
+                          payLaterMutation.mutate(checkoutData.shipmentId);
+                        }
+                      }}
+                      disabled={payLaterMutation.isPending}
+                      className="w-full border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+                      data-testid="button-pay-later"
+                    >
+                      {payLaterMutation.isPending ? (
+                        <><LoadingSpinner size="sm" className="mr-2" />Creating Credit Invoice...</>
+                      ) : (
+                        <>Use Credit / Pay Later</>
+                      )}
+                    </Button>
                   </div>
-                  <p className="text-sm text-amber-600 dark:text-amber-400">
-                    Create your shipment now and receive an invoice with 30-day payment terms. You will receive email reminders before the due date.
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (checkoutData?.shipmentId) {
-                        payLaterMutation.mutate(checkoutData.shipmentId);
-                      }
-                    }}
-                    disabled={payLaterMutation.isPending}
-                    className="w-full border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30"
-                    data-testid="button-pay-later"
-                  >
-                    {payLaterMutation.isPending ? (
-                      <><LoadingSpinner size="sm" className="mr-2" />Creating Credit Invoice...</>
+                ) : (
+                  <div className="p-4 border border-muted rounded-lg bg-muted/30 space-y-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <Clock className="h-4 w-4" />
+                      Credit / Pay Later
+                    </div>
+                    {creditAccess?.request?.status === "pending" ? (
+                      <p className="text-sm text-muted-foreground">
+                        Your credit access request is pending review. You will be notified once it is approved.
+                      </p>
+                    ) : creditAccess?.request?.status === "rejected" ? (
+                      <p className="text-sm text-muted-foreground">
+                        Your credit access request was not approved. Please contact support for more information.
+                      </p>
                     ) : (
-                      <>Use Credit / Pay Later</>
+                      <p className="text-sm text-muted-foreground">
+                        Credit / Pay Later is not enabled for your account. You can request access from your Billing page.
+                      </p>
                     )}
-                  </Button>
-                </div>
+                  </div>
+                )}
               </div>
             </CardContent>
             <CardFooter>

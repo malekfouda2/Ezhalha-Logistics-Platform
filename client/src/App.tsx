@@ -27,6 +27,7 @@ import AdminRBAC from "@/pages/admin/rbac";
 import AdminEditClient from "@/pages/admin/edit-client";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
+import AdminCreditRequests from "@/pages/admin/credit-requests";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -136,6 +137,9 @@ function Router() {
       </Route>
       <Route path="/admin/credit-invoices">
         <ProtectedRoute component={AdminCreditInvoices} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/credit-requests">
+        <ProtectedRoute component={AdminCreditRequests} requiredUserType="admin" />
       </Route>
 
       {/* Client routes */}

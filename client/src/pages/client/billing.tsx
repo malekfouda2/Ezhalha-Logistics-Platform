@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
-import { LoadingScreen } from "@/components/loading-spinner";
+import { LoadingScreen, LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Package, MapPin, Truck } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Package, MapPin, Truck, ShieldCheck, ShieldX, Send } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { format } from "date-fns";
 import {
@@ -21,8 +21,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface CreditInvoiceShipment {
   id: string;
@@ -85,11 +90,34 @@ function getDaysUntilDue(dueAt: string): string {
 }
 
 export default function ClientBilling() {
+  const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedInvoice, setSelectedInvoice] = useState<CreditInvoice | null>(null);
+  const [showRequestDialog, setShowRequestDialog] = useState(false);
+  const [requestReason, setRequestReason] = useState("");
 
   const { data: invoices, isLoading } = useQuery<CreditInvoice[]>({
     queryKey: ["/api/client/credit-invoices"],
+  });
+
+  const { data: creditAccess, isLoading: creditLoading } = useQuery<{ creditEnabled: boolean; request: any }>({
+    queryKey: ["/api/client/credit-access"],
+  });
+
+  const requestCreditMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      const res = await apiRequest("POST", "/api/client/credit-access/request", { reason });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/client/credit-access"] });
+      setShowRequestDialog(false);
+      setRequestReason("");
+      toast({ title: "Request Submitted", description: "Your credit access request has been submitted for review." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to submit request", variant: "destructive" });
+    },
   });
 
   const allInvoices = invoices || [];
@@ -105,7 +133,7 @@ export default function ClientBilling() {
 
   const overdueCount = allInvoices.filter((inv) => inv.status === "OVERDUE").length;
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading || creditLoading) return <LoadingScreen />;
 
   return (
     <ClientLayout>
@@ -114,6 +142,63 @@ export default function ClientBilling() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Credit / Billing</h1>
           <p className="text-muted-foreground">Manage your credit invoices and payment terms</p>
         </div>
+
+        {!creditAccess?.creditEnabled && (
+          <Card className="border-amber-200 dark:border-amber-800">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-950/30">
+                  <ShieldCheck className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="flex-1 space-y-2">
+                  <h3 className="font-semibold">Credit / Pay Later Access</h3>
+                  {!creditAccess?.request || creditAccess.request.status === "rejected" || creditAccess.request.status === "revoked" ? (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        Request credit access to use Pay Later when creating shipments. Once approved, you can ship now and pay within 30 days.
+                      </p>
+                      <Button
+                        onClick={() => setShowRequestDialog(true)}
+                        className="mt-2"
+                        data-testid="button-request-credit"
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        Request Credit Access
+                      </Button>
+                      {creditAccess?.request?.status === "rejected" && (
+                        <p className="text-xs text-muted-foreground mt-1">Your previous request was not approved. You may submit a new request.</p>
+                      )}
+                      {creditAccess?.request?.status === "revoked" && (
+                        <p className="text-xs text-muted-foreground mt-1">Your credit access was revoked. You may submit a new request.</p>
+                      )}
+                    </>
+                  ) : creditAccess?.request?.status === "pending" ? (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />Pending Review</Badge>
+                      <span className="text-sm text-muted-foreground">
+                        Submitted {format(new Date(creditAccess.request.createdAt), "MMM d, yyyy")}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {creditAccess?.creditEnabled && (
+          <Card className="border-green-200 dark:border-green-800">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+                <div>
+                  <p className="text-sm font-medium text-green-700 dark:text-green-400">Credit Access Active</p>
+                  <p className="text-xs text-muted-foreground">You can use Pay Later when creating shipments</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card>
@@ -303,6 +388,48 @@ export default function ClientBilling() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showRequestDialog} onOpenChange={setShowRequestDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5" />
+              Request Credit Access
+            </DialogTitle>
+            <DialogDescription>
+              Submit a request to enable Credit / Pay Later for your account. Once approved, you can create shipments and pay within 30 days.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium">Reason (optional)</label>
+              <Textarea
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                placeholder="Tell us why you'd like credit access..."
+                className="mt-1"
+                data-testid="input-credit-reason"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRequestDialog(false)} data-testid="button-cancel-request">
+              Cancel
+            </Button>
+            <Button
+              disabled={requestCreditMutation.isPending}
+              onClick={() => requestCreditMutation.mutate(requestReason)}
+              data-testid="button-submit-credit-request"
+            >
+              {requestCreditMutation.isPending ? (
+                <><LoadingSpinner size="sm" className="mr-2" />Submitting...</>
+              ) : (
+                <>Submit Request</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </ClientLayout>

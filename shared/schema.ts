@@ -150,6 +150,7 @@ export const clientAccounts = pgTable("client_accounts", {
   documents: text("documents").array(), // Array of document object paths
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
+  creditEnabled: boolean("credit_enabled").notNull().default(false),
   zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"), // Soft delete
@@ -680,6 +681,28 @@ export const ShipmentPaymentMethod = {
 } as const;
 
 export type ShipmentPaymentMethodValue = typeof ShipmentPaymentMethod[keyof typeof ShipmentPaymentMethod];
+
+export const creditAccessRequests = pgTable("credit_access_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  requestedByUserId: varchar("requested_by_user_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  reason: text("reason"),
+  adminNotes: text("admin_notes"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCreditAccessRequestSchema = createInsertSchema(creditAccessRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCreditAccessRequest = z.infer<typeof insertCreditAccessRequestSchema>;
+export type CreditAccessRequest = typeof creditAccessRequests.$inferSelect;
 
 // Credit Invoices table
 export const creditInvoices = pgTable("credit_invoices", {

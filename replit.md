@@ -58,6 +58,16 @@ Preferred communication style: Simple, everyday language.
 - **FedEx**: Address validation, postal code validation, service availability, rate discovery, transit times, shipment creation
 - **Configuration**: All credentials via environment variables (`FEDEX_CLIENT_ID`, `FEDEX_CLIENT_SECRET`, `FEDEX_ACCOUNT_NUMBER`, etc.)
 
+### Credit Access Request Flow
+- Clients must request credit/pay-later access — it is **not enabled by default**
+- `credit_access_requests` table tracks requests with statuses: `pending`, `approved`, `rejected`, `revoked`
+- `creditEnabled` boolean flag on `client_accounts` controls access
+- Client requests from Billing page → Admin reviews on Credit Requests page → Approve/Reject/Revoke
+- Pay Later option in shipment checkout is only shown if `creditEnabled = true`
+- Backend enforces check: `POST /api/client/shipments/:id/pay-later` returns 403 if credit not enabled
+- Admin pages: `/admin/credit-requests` (manage requests), `/admin/credit-invoices` (manage invoices)
+- Client pages: `/client/billing` (request access + view invoices)
+
 ### Shipment Creation Flow
 A 7-step multi-step process:
 1. Shipment type selection (domestic/inbound/outbound)
@@ -65,7 +75,7 @@ A 7-step multi-step process:
 3. Recipient details
 4. Package details (weight, dimensions)
 5. Rate discovery with admin margin application
-6. Payment (Moyasar integration)
+6. Payment (Moyasar integration or Credit/Pay Later if approved)
 7. Confirmation
 
 ### Key Commands
