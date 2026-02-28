@@ -64,6 +64,10 @@ app.use((req, res, next) => {
 (async () => {
   // Initialize database with default data if empty
   await storage.initializeDefaults();
+
+  // Seed email templates
+  const { seedEmailTemplates } = await import("./services/email-templates");
+  await seedEmailTemplates();
   
   await registerRoutes(httpServer, app);
 

@@ -37,6 +37,8 @@ import {
   type InsertPolicy,
   type PolicyVersion,
   type InsertPolicyVersion,
+  type EmailTemplate,
+  type InsertEmailTemplate,
   type CreditAccessRequest,
   type InsertCreditAccessRequest,
   type CreditInvoice,
@@ -62,6 +64,7 @@ import {
   clientUserPermissions,
   policies,
   policyVersions,
+  emailTemplates,
   creditAccessRequests,
   creditInvoices,
   creditNotificationEvents,
@@ -247,6 +250,13 @@ export interface IStorage {
   getPolicyVersion(versionId: string): Promise<PolicyVersion | undefined>;
   getLatestPolicyVersionNumber(policyId: string): Promise<number>;
   createPolicyVersion(version: InsertPolicyVersion): Promise<PolicyVersion>;
+
+  // Email Templates
+  getEmailTemplates(): Promise<EmailTemplate[]>;
+  getEmailTemplate(id: string): Promise<EmailTemplate | undefined>;
+  getEmailTemplateBySlug(slug: string): Promise<EmailTemplate | undefined>;
+  createEmailTemplate(template: InsertEmailTemplate): Promise<EmailTemplate>;
+  updateEmailTemplate(id: string, updates: Partial<EmailTemplate>): Promise<EmailTemplate | undefined>;
 
   // Credit Access Requests
   getCreditAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: CreditAccessRequest[]; total: number; page: number; totalPages: number }>;
@@ -1476,6 +1486,31 @@ export class DatabaseStorage implements IStorage {
 <p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
         isPublished: true,
       });
+  }
+
+  // Email Templates
+  async getEmailTemplates(): Promise<EmailTemplate[]> {
+    return db.select().from(emailTemplates).orderBy(emailTemplates.slug);
+  }
+
+  async getEmailTemplate(id: string): Promise<EmailTemplate | undefined> {
+    const [template] = await db.select().from(emailTemplates).where(eq(emailTemplates.id, id));
+    return template;
+  }
+
+  async getEmailTemplateBySlug(slug: string): Promise<EmailTemplate | undefined> {
+    const [template] = await db.select().from(emailTemplates).where(eq(emailTemplates.slug, slug));
+    return template;
+  }
+
+  async createEmailTemplate(template: InsertEmailTemplate): Promise<EmailTemplate> {
+    const [created] = await db.insert(emailTemplates).values(template).returning();
+    return created;
+  }
+
+  async updateEmailTemplate(id: string, updates: Partial<EmailTemplate>): Promise<EmailTemplate | undefined> {
+    const [updated] = await db.update(emailTemplates).set({ ...updates, updatedAt: new Date() }).where(eq(emailTemplates.id, id)).returning();
+    return updated;
   }
 
   // Credit Access Requests

@@ -1564,6 +1564,142 @@ export async function registerRoutes(
   });
 
   // ============================================
+  // ADMIN - EMAIL TEMPLATES
+  // ============================================
+
+  app.get("/api/admin/email-templates", requireAdmin, async (req, res) => {
+    try {
+      const templates = await storage.getEmailTemplates();
+      res.json(templates);
+    } catch (error: any) {
+      logError("Error fetching email templates", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/email-templates/:id", requireAdmin, async (req, res) => {
+    try {
+      const template = await storage.getEmailTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+      res.json(template);
+    } catch (error: any) {
+      logError("Error fetching email template", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.put("/api/admin/email-templates/:id", requireAdmin, async (req, res) => {
+    try {
+      const { z } = await import("zod");
+      const updateSchema = z.object({
+        subject: z.string().min(1, "Subject is required").max(500),
+        htmlBody: z.string().min(1, "HTML body is required"),
+        isActive: z.boolean().optional().default(true),
+      });
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid input" });
+      }
+      const { subject, htmlBody, isActive } = parsed.data;
+
+      const template = await storage.updateEmailTemplate(req.params.id, {
+        subject,
+        htmlBody,
+        isActive,
+        updatedByUserId: req.session.userId,
+      });
+
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      logAuditToFile({
+        userId: req.session.userId!,
+        action: "update_email_template",
+        resource: "email_template",
+        resourceId: template.id,
+        details: `Updated email template: ${template.slug}`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json(template);
+    } catch (error: any) {
+      logError("Error updating email template", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/email-templates/:id/reset", requireAdmin, async (req, res) => {
+    try {
+      const template = await storage.getEmailTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const { DEFAULT_TEMPLATES } = await import("./services/email-templates");
+      const defaultTemplate = DEFAULT_TEMPLATES.find(t => t.slug === template.slug);
+      if (!defaultTemplate) {
+        return res.status(404).json({ error: "Default template not found for this slug" });
+      }
+
+      const updated = await storage.updateEmailTemplate(req.params.id, {
+        subject: defaultTemplate.subject,
+        htmlBody: defaultTemplate.htmlBody,
+        isActive: true,
+        updatedByUserId: req.session.userId,
+      });
+
+      logAuditToFile({
+        userId: req.session.userId!,
+        action: "reset_email_template",
+        resource: "email_template",
+        resourceId: template.id,
+        details: `Reset email template to default: ${template.slug}`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      logError("Error resetting email template", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/email-templates/:id/preview", requireAdmin, async (req, res) => {
+    try {
+      const { subject, htmlBody } = req.body;
+      const template = await storage.getEmailTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const { renderTemplate } = await import("./services/email-templates");
+      const variables: Record<string, string> = {};
+      const availableVars = JSON.parse(template.availableVariables || "[]");
+      for (const v of availableVars) {
+        variables[v] = `[${v}]`;
+      }
+      variables["year"] = new Date().getFullYear().toString();
+      variables["app_url"] = process.env.APP_URL || "https://app.ezhalha.co";
+      variables["login_url"] = process.env.APP_URL || "https://app.ezhalha.co";
+      variables["urgency_color"] = "#f59e0b";
+
+      const rendered = renderTemplate(
+        htmlBody || template.htmlBody,
+        subject || template.subject,
+        variables
+      );
+
+      res.json({ html: rendered.html, subject: rendered.subject });
+    } catch (error: any) {
+      logError("Error previewing email template", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
   // ADMIN - CREDIT INVOICES
   // ============================================
 

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { logInfo, logError } from "./logger";
+import { getRenderedTemplate } from "./email-templates";
 
 interface EmailConfig {
   host: string;
@@ -72,59 +73,23 @@ export async function sendAccountCredentials(
 ): Promise<boolean> {
   const loginUrl = process.env.APP_URL || "https://ezhalha.com";
   
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .credentials { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
-    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Welcome to ezhalha</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${name},</p>
-      <p>Your account application has been approved! You can now access the ezhalha logistics platform.</p>
-      
-      <div class="credentials">
-        <h3>Your Login Credentials</h3>
-        <p><strong>Username:</strong> ${username}</p>
-        <p><strong>Temporary Password:</strong> ${temporaryPassword}</p>
-      </div>
-      
-      <p><strong>Important:</strong> Please change your password after your first login.</p>
-      
-      <p style="text-align: center; margin: 30px 0;">
-        <a href="${loginUrl}" class="button">Login to ezhalha</a>
-      </p>
-      
-      <p>If you have any questions, please contact our support team.</p>
-      
-      <p>Best regards,<br>The ezhalha Team</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-      <p>This is an automated message. Please do not reply to this email.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("account_credentials", {
+    client_name: name,
+    username,
+    temporary_password: temporaryPassword,
+    login_url: loginUrl,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render account_credentials template");
+    return false;
+  }
 
   return sendEmail({
     to: email,
-    subject: "Your ezhalha Account Has Been Approved",
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 }
 
@@ -133,46 +98,21 @@ export async function sendApplicationReceived(
   name: string,
   applicationId: string
 ): Promise<boolean> {
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Application Received</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${name},</p>
-      <p>Thank you for applying to ezhalha. We have received your application and our team will review it shortly.</p>
-      
-      <p><strong>Application Reference:</strong> ${applicationId}</p>
-      
-      <p>You will receive an email notification once your application has been reviewed. This typically takes 1-2 business days.</p>
-      
-      <p>Best regards,<br>The ezhalha Team</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("application_received", {
+    client_name: name,
+    application_id: applicationId,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render application_received template");
+    return false;
+  }
 
   return sendEmail({
     to: email,
-    subject: "ezhalha Application Received",
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 }
 
@@ -190,53 +130,24 @@ export async function notifyAdminNewApplication(
 
   const appUrl = process.env.APP_URL || "https://ezhalha.com";
   
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
-    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>New Client Application</h1>
-    </div>
-    <div class="content">
-      <p>A new client application has been submitted and requires your review.</p>
-      
-      <div class="details">
-        <h3>Application Details</h3>
-        <p><strong>Application ID:</strong> ${applicationId}</p>
-        <p><strong>Name:</strong> ${applicantName}</p>
-        <p><strong>Email:</strong> ${applicantEmail}</p>
-        ${companyName ? `<p><strong>Company:</strong> ${companyName}</p>` : ""}
-      </div>
-      
-      <p style="text-align: center; margin: 30px 0;">
-        <a href="${appUrl}/admin/applications" class="button">Review Application</a>
-      </p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("admin_new_application", {
+    application_id: applicationId,
+    applicant_name: applicantName,
+    applicant_email: applicantEmail,
+    company_name: companyName ? `<p><strong>Company:</strong> ${companyName}</p>` : "",
+    app_url: appUrl,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render admin_new_application template");
+    return false;
+  }
 
   return sendEmail({
     to: adminEmail,
-    subject: `New Client Application: ${applicantName}`,
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 }
 
@@ -251,68 +162,47 @@ export async function sendCreditInvoiceCreated(
 ): Promise<boolean> {
   const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
-    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Credit Invoice Created</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${clientName},</p>
-      <p>A credit invoice has been created for your shipment. Payment is due within 30 days.</p>
-      
-      <div class="details">
-        <h3>Invoice Details</h3>
-        <p><strong>Shipment:</strong> ${trackingNumber}</p>
-        <p><strong>Amount:</strong> ${currency} ${amount}</p>
-        <p><strong>Due Date:</strong> ${dueDate}</p>
-        <p><strong>Payment Method:</strong> Pay Later (Credit)</p>
-      </div>
-      
-      <p>Reminders will be sent to your email as the due date approaches.</p>
-      
-      <p style="text-align: center; margin: 30px 0;">
-        <a href="${appUrl}/client/billing" class="button">View Invoice</a>
-      </p>
-      
-      <p>Best regards,<br>The ezhalha Team</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("credit_invoice_created", {
+    client_name: clientName,
+    tracking_number: trackingNumber,
+    amount,
+    currency,
+    due_date: dueDate,
+    app_url: appUrl,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render credit_invoice_created template");
+    return false;
+  }
 
   const sent = await sendEmail({
     to: email,
-    subject: `Credit Invoice Created - Shipment ${trackingNumber}`,
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 
   if (adminEmails) {
-    const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
-    for (const adminEmail of adminList) {
-      await sendEmail({
-        to: adminEmail,
-        subject: `[Admin] New Credit Invoice - ${clientName} - Shipment ${trackingNumber}`,
-        html: html.replace("Dear " + clientName, "Dear Admin"),
-      });
+    const adminRendered = await getRenderedTemplate("credit_invoice_created", {
+      client_name: "Admin",
+      tracking_number: trackingNumber,
+      amount,
+      currency,
+      due_date: dueDate,
+      app_url: appUrl,
+      year: new Date().getFullYear().toString(),
+    });
+
+    if (adminRendered) {
+      const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
+      for (const adminEmail of adminList) {
+        await sendEmail({
+          to: adminEmail,
+          subject: `[Admin] New Credit Invoice - ${clientName} - Shipment ${trackingNumber}`,
+          html: adminRendered.html,
+        });
+      }
     }
   }
 
@@ -334,70 +224,53 @@ export async function sendCreditInvoiceReminder(
   const urgencyColor = isOverdue ? "#dc2626" : "#f59e0b";
   const urgencyLabel = isOverdue ? "OVERDUE" : "REMINDER";
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: ${urgencyColor}; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .details { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
-    .urgency { background: ${urgencyColor}15; border: 1px solid ${urgencyColor}; padding: 12px; border-radius: 5px; margin: 15px 0; color: ${urgencyColor}; font-weight: bold; text-align: center; }
-    .button { display: inline-block; background: #fe5200; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Payment ${urgencyLabel}</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${clientName},</p>
-      <p>${isOverdue 
-        ? "Your credit invoice is overdue. Please make payment as soon as possible to avoid service interruption."
-        : "This is a reminder that your credit invoice payment is due soon."}</p>
-      
-      <div class="urgency">${daysInfo}</div>
-      
-      <div class="details">
-        <h3>Invoice Details</h3>
-        <p><strong>Shipment:</strong> ${trackingNumber}</p>
-        <p><strong>Amount Due:</strong> ${currency} ${amount}</p>
-        <p><strong>Due Date:</strong> ${dueDate}</p>
-      </div>
-      
-      <p style="text-align: center; margin: 30px 0;">
-        <a href="${appUrl}/client/billing" class="button">View & Pay Invoice</a>
-      </p>
-      
-      <p>Best regards,<br>The ezhalha Team</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("credit_invoice_reminder", {
+    client_name: clientName,
+    tracking_number: trackingNumber,
+    amount,
+    currency,
+    due_date: dueDate,
+    days_info: daysInfo,
+    urgency_label: urgencyLabel,
+    urgency_color: urgencyColor,
+    app_url: appUrl,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render credit_invoice_reminder template");
+    return false;
+  }
 
   const sent = await sendEmail({
     to: email,
-    subject: `${isOverdue ? "OVERDUE" : "Payment Reminder"} - Shipment ${trackingNumber} - ${currency} ${amount}`,
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 
   if (adminEmails) {
-    const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
-    for (const adminEmail of adminList) {
-      await sendEmail({
-        to: adminEmail,
-        subject: `[Admin] ${isOverdue ? "OVERDUE" : "Reminder"} - ${clientName} - Shipment ${trackingNumber}`,
-        html: html.replace("Dear " + clientName, "Dear Admin"),
-      });
+    const adminRendered = await getRenderedTemplate("credit_invoice_reminder", {
+      client_name: "Admin",
+      tracking_number: trackingNumber,
+      amount,
+      currency,
+      due_date: dueDate,
+      days_info: daysInfo,
+      urgency_label: urgencyLabel,
+      urgency_color: urgencyColor,
+      app_url: appUrl,
+      year: new Date().getFullYear().toString(),
+    });
+
+    if (adminRendered) {
+      const adminList = adminEmails.split(",").map(e => e.trim()).filter(Boolean);
+      for (const adminEmail of adminList) {
+        await sendEmail({
+          to: adminEmail,
+          subject: `[Admin] ${isOverdue ? "OVERDUE" : "Reminder"} - ${clientName} - Shipment ${trackingNumber}`,
+          html: adminRendered.html,
+        });
+      }
     }
   }
 
@@ -409,45 +282,20 @@ export async function sendApplicationRejected(
   name: string,
   reason?: string
 ): Promise<boolean> {
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: #fe5200; color: white; padding: 20px; text-align: center; }
-    .content { padding: 20px; background: #f9f9f9; }
-    .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Application Update</h1>
-    </div>
-    <div class="content">
-      <p>Dear ${name},</p>
-      <p>Thank you for your interest in ezhalha. After reviewing your application, we regret to inform you that we are unable to approve your account at this time.</p>
-      
-      ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
-      
-      <p>If you believe this was in error or would like to submit a new application with additional information, please feel free to apply again.</p>
-      
-      <p>Best regards,<br>The ezhalha Team</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ezhalha. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>
-`;
+  const rendered = await getRenderedTemplate("application_rejected", {
+    client_name: name,
+    rejection_reason: reason ? `<p><strong>Reason:</strong> ${reason}</p>` : "",
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render application_rejected template");
+    return false;
+  }
 
   return sendEmail({
     to: email,
-    subject: "ezhalha Application Status Update",
-    html,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 }

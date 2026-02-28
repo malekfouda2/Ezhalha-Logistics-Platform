@@ -28,6 +28,7 @@ import {
   ScrollText,
   Clock,
   ShieldCheck,
+  Mail,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -48,6 +49,7 @@ const navItems = [
   { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
   { href: "/admin/webhook-events", label: "Webhooks", icon: Webhook },
   { href: "/admin/rbac", label: "Access Control", icon: Shield },
+  { href: "/admin/email-templates", label: "Email Templates", icon: Mail },
   { href: "/admin/policies", label: "Policies", icon: ScrollText },
 ];
 

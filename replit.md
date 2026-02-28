@@ -78,6 +78,14 @@ A 7-step multi-step process:
 6. Payment (Moyasar integration or Credit/Pay Later if approved)
 7. Confirmation
 
+### Email Templates
+- Admin-managed email templates stored in `email_templates` table
+- 6 default templates seeded on startup: account_credentials, application_received, application_rejected, admin_new_application, credit_invoice_created, credit_invoice_reminder
+- Templates use `{{variable}}` placeholders rendered at send time with HTML escaping for user-provided values
+- Admin UI at `/admin/email-templates` with HTML editor, live preview, active/inactive toggle, and reset-to-default
+- Template rendering in `server/services/email-templates.ts`, email sending in `server/services/email.ts`
+- Falls back to built-in defaults if custom template is inactive or missing
+
 ### Key Commands
 - `npm run dev` — Start development server with hot reload
 - `npm run build` — Build for production (client + server)

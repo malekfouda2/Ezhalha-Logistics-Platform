@@ -751,6 +751,29 @@ export const insertCreditNotificationEventSchema = createInsertSchema(creditNoti
 export type InsertCreditNotificationEvent = z.infer<typeof insertCreditNotificationEventSchema>;
 export type CreditNotificationEvent = typeof creditNotificationEvents.$inferSelect;
 
+export const emailTemplates = pgTable("email_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  subject: text("subject").notNull(),
+  htmlBody: text("html_body").notNull(),
+  availableVariables: text("available_variables").notNull().default("[]"),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+
 // Branding config type
 export interface BrandingConfig {
   appName: string;

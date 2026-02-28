@@ -28,6 +28,7 @@ import AdminEditClient from "@/pages/admin/edit-client";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 import AdminCreditRequests from "@/pages/admin/credit-requests";
+import AdminEmailTemplates from "@/pages/admin/email-templates";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -140,6 +141,9 @@ function Router() {
       </Route>
       <Route path="/admin/credit-requests">
         <ProtectedRoute component={AdminCreditRequests} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/email-templates">
+        <ProtectedRoute component={AdminEmailTemplates} requiredUserType="admin" />
       </Route>
 
       {/* Client routes */}
