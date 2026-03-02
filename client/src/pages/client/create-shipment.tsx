@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -18,11 +20,78 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, Sparkles, AlertTriangle, CheckCircle } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
-import type { ClientAccount } from "@shared/schema";
+import type { ClientAccount, ShipmentItem, HsCodeSourceValue, HsCodeConfidenceValue } from "@shared/schema";
+import { ItemCategory } from "@shared/schema";
 import { format } from "date-fns";
+
+interface ItemFormData {
+  itemName: string;
+  itemDescription: string;
+  category: string;
+  material: string;
+  countryOfOrigin: string;
+  hsCode: string;
+  hsCodeSource: HsCodeSourceValue | "";
+  hsCodeConfidence: HsCodeConfidenceValue | "";
+  hsCodeCandidates: Array<{ code: string; description: string; confidence: number }>;
+  price: number;
+  quantity: number;
+  showDetails: boolean;
+  hsManualEntry: boolean;
+}
+
+const GENERIC_NAMES = [
+  "parts", "item", "items", "stuff", "accessories", "product", "products",
+  "goods", "things", "misc", "miscellaneous", "other", "general", "sample",
+  "gift", "package", "box", "shipment", "order",
+];
+
+function isGenericItemName(name: string): boolean {
+  if (!name || name.trim().length < 4) return true;
+  const lower = name.trim().toLowerCase();
+  return GENERIC_NAMES.some(g => lower === g || lower.startsWith(g + " ") || lower.endsWith(" " + g));
+}
+
+function getConfidenceBadge(confidence: HsCodeConfidenceValue | "") {
+  switch (confidence) {
+    case "HIGH": return { label: "High", variant: "default" as const, className: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" };
+    case "MEDIUM": return { label: "Medium", variant: "secondary" as const, className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" };
+    case "LOW": return { label: "Low", variant: "secondary" as const, className: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200" };
+    case "MISSING": return { label: "Missing", variant: "destructive" as const, className: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" };
+    default: return { label: "N/A", variant: "outline" as const, className: "" };
+  }
+}
+
+function confidenceFromNumber(c: number): HsCodeConfidenceValue {
+  if (c >= 0.7) return "HIGH";
+  if (c >= 0.4) return "MEDIUM";
+  if (c > 0) return "LOW";
+  return "MISSING";
+}
+
+const itemCategories = Object.entries(ItemCategory).map(([key, value]) => ({
+  value,
+  label: key.charAt(0) + key.slice(1).toLowerCase(),
+}));
+
+const defaultItem: ItemFormData = {
+  itemName: "",
+  itemDescription: "",
+  category: "",
+  material: "",
+  countryOfOrigin: "SA",
+  hsCode: "",
+  hsCodeSource: "",
+  hsCodeConfidence: "",
+  hsCodeCandidates: [],
+  price: 0,
+  quantity: 1,
+  showDetails: false,
+  hsManualEntry: false,
+};
 
 interface ShipmentFormData {
   shipmentType: "domestic" | "inbound" | "outbound";
@@ -56,6 +125,7 @@ interface ShipmentFormData {
     width: number;
     height: number;
   }>;
+  items: ItemFormData[];
   weightUnit: "LB" | "KG";
   dimensionUnit: "IN" | "CM";
   packageType: string;
@@ -189,11 +259,14 @@ export default function CreateShipment() {
     packages: [
       { weight: 1, length: 10, width: 10, height: 10 },
     ],
+    items: [{ ...defaultItem }],
     weightUnit: "KG",
     dimensionUnit: "CM",
     packageType: "YOUR_PACKAGING",
     currency: "SAR",
   });
+
+  const [hsLookupLoading, setHsLookupLoading] = useState<Record<number, boolean>>({});
 
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
@@ -298,7 +371,23 @@ export default function CreateShipment() {
 
   const getRatesMutation = useMutation({
     mutationFn: async (data: ShipmentFormData) => {
-      const res = await apiRequest("POST", "/api/client/shipments/rates", data);
+      const payload = {
+        ...data,
+        items: data.shipmentType !== "domestic" ? data.items.map(item => ({
+          itemName: item.itemName,
+          itemDescription: item.itemDescription || undefined,
+          category: item.category,
+          material: item.material || undefined,
+          countryOfOrigin: item.countryOfOrigin,
+          hsCode: item.hsCode || undefined,
+          hsCodeSource: item.hsCodeSource || undefined,
+          hsCodeConfidence: item.hsCodeConfidence || undefined,
+          hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
+          price: item.price,
+          quantity: item.quantity,
+        })) : [],
+      };
+      const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
       return res.json() as Promise<RatesResponse>;
     },
     onSuccess: (data) => {
@@ -470,6 +559,94 @@ export default function CreateShipment() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const updateItem = (index: number, field: string, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map((item, i) => i === index ? { ...item, [field]: value } : item),
+    }));
+  };
+
+  const addItem = () => {
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, { ...defaultItem }],
+    }));
+  };
+
+  const removeItem = (index: number) => {
+    if (formData.items.length <= 1) return;
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index),
+    }));
+  };
+
+  const lookupHsCode = async (index: number) => {
+    const item = formData.items[index];
+    if (!item.itemName || !item.category || !item.countryOfOrigin) {
+      toast({ title: "Please fill in item name, category, and origin country first", variant: "destructive" });
+      return;
+    }
+
+    const destinationCountry = formData.shipmentType === "inbound"
+      ? formData.recipient.countryCode || "SA"
+      : formData.recipient.countryCode || formData.shipper.countryCode || "SA";
+
+    setHsLookupLoading(prev => ({ ...prev, [index]: true }));
+    try {
+      const params = new URLSearchParams({
+        itemName: item.itemName,
+        category: item.category,
+        countryOfOrigin: item.countryOfOrigin,
+        destinationCountry,
+      });
+      if (item.itemDescription) params.set("itemDescription", item.itemDescription);
+      if (item.material) params.set("material", item.material);
+
+      const res = await fetch(`/api/hs-lookup?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Lookup failed");
+
+      const data = await res.json() as { candidates: Array<{ code: string; description: string; confidence: number }>; source: string };
+
+      setFormData(prev => ({
+        ...prev,
+        items: prev.items.map((it, i) => {
+          if (i !== index) return it;
+          const needsDetails = data.candidates.length > 1 || isGenericItemName(it.itemName);
+          const topCandidate = data.candidates[0];
+          return {
+            ...it,
+            hsCodeCandidates: data.candidates,
+            hsCode: topCandidate ? topCandidate.code : "",
+            hsCodeSource: data.source as HsCodeSourceValue,
+            hsCodeConfidence: topCandidate ? confidenceFromNumber(topCandidate.confidence) : "MISSING",
+            showDetails: needsDetails || it.showDetails,
+          };
+        }),
+      }));
+    } catch {
+      toast({ title: "HS code lookup failed", variant: "destructive" });
+    } finally {
+      setHsLookupLoading(prev => ({ ...prev, [index]: false }));
+    }
+  };
+
+  const confirmHsCodeSelection = async (index: number) => {
+    const item = formData.items[index];
+    if (!item.hsCode || !item.itemName || !item.category || !item.countryOfOrigin) return;
+
+    try {
+      await apiRequest("POST", "/api/client/hs-code/confirm", {
+        itemName: item.itemName,
+        category: item.category,
+        material: item.material || undefined,
+        countryOfOrigin: item.countryOfOrigin,
+        hsCode: item.hsCode,
+        description: item.hsCodeCandidates.find(c => c.code === item.hsCode)?.description,
+      });
+    } catch {}
+  };
+
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!formData.shipmentType) {
@@ -516,6 +693,15 @@ export default function CreateShipment() {
           return false;
         }
       }
+      if (formData.shipmentType !== "domestic") {
+        for (let i = 0; i < formData.items.length; i++) {
+          const item = formData.items[i];
+          if (!item.itemName || !item.category || !item.countryOfOrigin || item.price <= 0 || item.quantity < 1) {
+            toast({ title: `Please fill in all required fields for Item ${i + 1}`, variant: "destructive" });
+            return false;
+          }
+        }
+      }
     }
     return true;
   };
@@ -553,7 +739,7 @@ export default function CreateShipment() {
     "Shipment Type",
     "Sender Details",
     "Recipient Details",
-    "Package Details",
+    "Package & Items",
     "Select Rate",
     "Payment",
     "Confirmation",
@@ -1110,6 +1296,255 @@ export default function CreateShipment() {
                   Add Package
                 </Button>
               </div>
+
+              {formData.shipmentType !== "domestic" && (
+                <>
+                  <div className="border-t pt-6 mt-2">
+                    <h3 className="text-base font-medium mb-1 flex items-center gap-2">
+                      <Search className="h-4 w-4" />
+                      Shipment Items (Customs)
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Describe the items you're shipping for customs clearance. HS codes help classify goods for international trade.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {formData.items.map((item, index) => {
+                      const confidence = getConfidenceBadge(item.hsCodeConfidence);
+                      const isLoading = hsLookupLoading[index];
+                      const needsDetails = isGenericItemName(item.itemName) || item.hsCodeCandidates.length > 1;
+
+                      return (
+                        <Card key={index} className="relative">
+                          <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4">
+                            <CardTitle className="text-sm font-medium flex items-center gap-2">
+                              Item {index + 1}
+                              {item.hsCode && (
+                                <Badge className={confidence.className} data-testid={`badge-hs-confidence-${index}`}>
+                                  {confidence.label}
+                                </Badge>
+                              )}
+                            </CardTitle>
+                            <div className="flex items-center gap-1">
+                              {formData.items.length > 1 && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => removeItem(index)}
+                                  data-testid={`button-remove-item-${index}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </div>
+                          </CardHeader>
+                          <CardContent className="px-4 pb-4 pt-0 space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="col-span-2">
+                                <Label>Item Name *</Label>
+                                <Input
+                                  value={item.itemName}
+                                  onChange={(e) => updateItem(index, "itemName", e.target.value)}
+                                  placeholder="e.g. Wireless Bluetooth Headphones"
+                                  data-testid={`input-item-name-${index}`}
+                                />
+                                {isGenericItemName(item.itemName) && item.itemName.length > 0 && (
+                                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Name is too generic. Add more detail for better HS accuracy.
+                                  </p>
+                                )}
+                              </div>
+                              <div>
+                                <Label>Category *</Label>
+                                <Select
+                                  value={item.category}
+                                  onValueChange={(v) => updateItem(index, "category", v)}
+                                >
+                                  <SelectTrigger data-testid={`select-item-category-${index}`}>
+                                    <SelectValue placeholder="Select category" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {itemCategories.map((cat) => (
+                                      <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label>Country of Origin *</Label>
+                                <Select
+                                  value={item.countryOfOrigin}
+                                  onValueChange={(v) => updateItem(index, "countryOfOrigin", v)}
+                                >
+                                  <SelectTrigger data-testid={`select-item-origin-${index}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {countries.map((c) => (
+                                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label>Unit Price (SAR) *</Label>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={item.price}
+                                  onChange={(e) => updateItem(index, "price", parseFloat(e.target.value) || 0)}
+                                  data-testid={`input-item-price-${index}`}
+                                />
+                              </div>
+                              <div>
+                                <Label>Quantity *</Label>
+                                <Input
+                                  type="number"
+                                  step="1"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 1)}
+                                  data-testid={`input-item-qty-${index}`}
+                                />
+                              </div>
+                            </div>
+
+                            {(item.showDetails || needsDetails) && (
+                              <div className="space-y-3 pt-2 border-t">
+                                <div>
+                                  <Label>Item Description</Label>
+                                  <Textarea
+                                    value={item.itemDescription}
+                                    onChange={(e) => updateItem(index, "itemDescription", e.target.value)}
+                                    placeholder="Detailed description for customs classification..."
+                                    rows={2}
+                                    data-testid={`input-item-desc-${index}`}
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Material</Label>
+                                  <Input
+                                    value={item.material}
+                                    onChange={(e) => updateItem(index, "material", e.target.value)}
+                                    placeholder="e.g. ABS Plastic, Cotton, Stainless Steel"
+                                    data-testid={`input-item-material-${index}`}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {!item.showDetails && !needsDetails && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => updateItem(index, "showDetails", true)}
+                                className="text-xs"
+                                data-testid={`button-improve-hs-${index}`}
+                              >
+                                <Sparkles className="h-3 w-3 mr-1" />
+                                Improve HS accuracy
+                              </Button>
+                            )}
+
+                            <div className="pt-2 border-t space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm font-medium">HS Code</Label>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => lookupHsCode(index)}
+                                  disabled={isLoading || !item.itemName || !item.category || !item.countryOfOrigin}
+                                  data-testid={`button-lookup-hs-${index}`}
+                                >
+                                  {isLoading ? (
+                                    <><LoadingSpinner size="sm" className="mr-1" /> Looking up...</>
+                                  ) : (
+                                    <><Search className="h-3 w-3 mr-1" /> Lookup HS Code</>
+                                  )}
+                                </Button>
+                              </div>
+
+                              {item.hsCodeCandidates.length > 0 && !item.hsManualEntry && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Suggested codes ({item.hsCodeSource})</Label>
+                                  <Select
+                                    value={item.hsCode}
+                                    onValueChange={(v) => {
+                                      const candidate = item.hsCodeCandidates.find(c => c.code === v);
+                                      updateItem(index, "hsCode", v);
+                                      if (candidate) {
+                                        updateItem(index, "hsCodeConfidence", confidenceFromNumber(candidate.confidence));
+                                      }
+                                      confirmHsCodeSelection(index);
+                                    }}
+                                  >
+                                    <SelectTrigger data-testid={`select-hs-code-${index}`}>
+                                      <SelectValue placeholder="Select HS code" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {item.hsCodeCandidates.map((c) => (
+                                        <SelectItem key={c.code} value={c.code}>
+                                          {c.code} - {c.description.substring(0, 50)}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
+
+                              {item.hsManualEntry && (
+                                <div>
+                                  <Input
+                                    value={item.hsCode}
+                                    onChange={(e) => {
+                                      updateItem(index, "hsCode", e.target.value);
+                                      updateItem(index, "hsCodeSource", "USER");
+                                      updateItem(index, "hsCodeConfidence", e.target.value.length >= 6 ? "HIGH" : "MEDIUM");
+                                    }}
+                                    placeholder="Enter HS code (e.g. 847130)"
+                                    data-testid={`input-hs-manual-${index}`}
+                                  />
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs h-7 px-2"
+                                  onClick={() => updateItem(index, "hsManualEntry", !item.hsManualEntry)}
+                                  data-testid={`button-toggle-manual-hs-${index}`}
+                                >
+                                  {item.hsManualEntry ? "Use suggested" : "Enter manually"}
+                                </Button>
+                                {item.hsCode && (
+                                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                    <CheckCircle className="h-3 w-3 text-green-600" />
+                                    {item.hsCode}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+
+                    <Button
+                      variant="outline"
+                      onClick={addItem}
+                      className="w-full"
+                      data-testid="button-add-item"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Item
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>

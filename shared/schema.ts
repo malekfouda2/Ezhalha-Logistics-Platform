@@ -291,6 +291,7 @@ export const shipments = pgTable("shipments", {
   paymentIntentId: text("payment_intent_id"),
   paymentMethod: text("payment_method").default("PAY_NOW"),
   paymentStatus: text("payment_status").default("pending"),
+  itemsData: text("items_data"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -773,6 +774,85 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
 
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
+
+// HS Code source enum
+export const HsCodeSource = {
+  USER: "USER",
+  FEDEX: "FEDEX",
+  HISTORY: "HISTORY",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
+export type HsCodeSourceValue = typeof HsCodeSource[keyof typeof HsCodeSource];
+
+// HS Code confidence levels
+export const HsCodeConfidence = {
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  LOW: "LOW",
+  MISSING: "MISSING",
+} as const;
+
+export type HsCodeConfidenceValue = typeof HsCodeConfidence[keyof typeof HsCodeConfidence];
+
+// Item categories for HS code classification
+export const ItemCategory = {
+  ELECTRONICS: "electronics",
+  CLOTHING: "clothing",
+  FOOD: "food",
+  COSMETICS: "cosmetics",
+  PHARMACEUTICALS: "pharmaceuticals",
+  MACHINERY: "machinery",
+  CHEMICALS: "chemicals",
+  TEXTILES: "textiles",
+  METALS: "metals",
+  PLASTICS: "plastics",
+  FURNITURE: "furniture",
+  AUTOMOTIVE: "automotive",
+  TOYS: "toys",
+  SPORTS: "sports",
+  DOCUMENTS: "documents",
+  SAMPLES: "samples",
+  OTHER: "other",
+} as const;
+
+export type ItemCategoryValue = typeof ItemCategory[keyof typeof ItemCategory];
+
+// Shipment item interface (stored as JSON in itemsData)
+export interface ShipmentItem {
+  itemName: string;
+  itemDescription?: string;
+  category: string;
+  material?: string;
+  countryOfOrigin: string;
+  hsCode?: string;
+  hsCodeSource?: HsCodeSourceValue;
+  hsCodeConfidence?: HsCodeConfidenceValue;
+  hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
+  price: number;
+  quantity: number;
+}
+
+// HS Code Mappings table (history-based accuracy improvement)
+export const hsCodeMappings = pgTable("hs_code_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id"),
+  normalizedKey: text("normalized_key").notNull(),
+  hsCode: text("hs_code").notNull(),
+  description: text("description"),
+  usedCount: integer("used_count").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertHsCodeMappingSchema = createInsertSchema(hsCodeMappings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertHsCodeMapping = z.infer<typeof insertHsCodeMappingSchema>;
+export type HsCodeMapping = typeof hsCodeMappings.$inferSelect;
 
 // Branding config type
 export interface BrandingConfig {

@@ -29,11 +29,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Shipment } from "@shared/schema";
+import type { Shipment, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -342,6 +343,54 @@ export default function AdminShipments() {
                   </div>
                 )}
               </div>
+              {selectedShipment.itemsData && (() => {
+                try {
+                  const items = JSON.parse(selectedShipment.itemsData) as ShipmentItem[];
+                  if (items.length === 0) return null;
+                  return (
+                    <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Tag className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium">Items ({items.length})</span>
+                      </div>
+                      <div className="space-y-2">
+                        {items.map((item, i) => (
+                          <div key={i} className="px-3 py-2 rounded bg-background space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{item.itemName}</span>
+                              <div className="flex items-center gap-2">
+                                {item.hsCode ? (
+                                  <Badge variant="outline" className="text-xs" data-testid={`badge-hs-${i}`}>
+                                    HS: {item.hsCode}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="text-xs">No HS</Badge>
+                                )}
+                                {item.hsCodeConfidence && (
+                                  <Badge className={
+                                    item.hsCodeConfidence === "HIGH" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs" :
+                                    item.hsCodeConfidence === "MEDIUM" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-xs" :
+                                    item.hsCodeConfidence === "LOW" ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 text-xs" :
+                                    "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs"
+                                  }>
+                                    {item.hsCodeConfidence}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground flex gap-3">
+                              <span>{item.category}</span>
+                              <span>Origin: {item.countryOfOrigin}</span>
+                              <span>Qty: {item.quantity}</span>
+                              <span><SarAmount amount={item.price} /> each</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                } catch { return null; }
+              })()}
               <div className="p-4 rounded-lg border">
                 <div className="flex items-center gap-2 mb-3">
                   <SarSymbol size="xs" className="text-muted-foreground" />

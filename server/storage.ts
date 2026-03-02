@@ -45,6 +45,8 @@ import {
   type InsertCreditInvoice,
   type CreditNotificationEvent,
   type InsertCreditNotificationEvent,
+  type HsCodeMapping,
+  type InsertHsCodeMapping,
   users,
   clientAccounts,
   clientApplications,
@@ -68,6 +70,7 @@ import {
   creditAccessRequests,
   creditInvoices,
   creditNotificationEvents,
+  hsCodeMappings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -283,6 +286,10 @@ export interface IStorage {
   // Credit Notification Events
   createCreditNotificationEvent(event: InsertCreditNotificationEvent): Promise<CreditNotificationEvent>;
   getCreditNotificationEvents(creditInvoiceId: string): Promise<CreditNotificationEvent[]>;
+
+  // HS Code Mappings
+  findHsCodeMapping(normalizedKey: string, clientAccountId?: string): Promise<HsCodeMapping | undefined>;
+  upsertHsCodeMapping(mapping: InsertHsCodeMapping): Promise<HsCodeMapping>;
 
   // Initialization
   initializeDefaults(): Promise<void>;
@@ -1654,6 +1661,51 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(creditNotificationEvents)
       .where(eq(creditNotificationEvents.creditInvoiceId, creditInvoiceId))
       .orderBy(desc(creditNotificationEvents.sentAt));
+  }
+
+  async findHsCodeMapping(normalizedKey: string, clientAccountId?: string): Promise<HsCodeMapping | undefined> {
+    const conditions = [eq(hsCodeMappings.normalizedKey, normalizedKey)];
+    if (clientAccountId) {
+      const results = await db.select().from(hsCodeMappings)
+        .where(and(
+          eq(hsCodeMappings.normalizedKey, normalizedKey),
+          eq(hsCodeMappings.clientAccountId, clientAccountId)
+        ))
+        .orderBy(desc(hsCodeMappings.usedCount))
+        .limit(1);
+      if (results.length > 0) return results[0];
+    }
+    const results = await db.select().from(hsCodeMappings)
+      .where(eq(hsCodeMappings.normalizedKey, normalizedKey))
+      .orderBy(desc(hsCodeMappings.usedCount))
+      .limit(1);
+    return results[0];
+  }
+
+  async upsertHsCodeMapping(mapping: InsertHsCodeMapping): Promise<HsCodeMapping> {
+    const existing = await db.select().from(hsCodeMappings)
+      .where(and(
+        eq(hsCodeMappings.normalizedKey, mapping.normalizedKey),
+        eq(hsCodeMappings.hsCode, mapping.hsCode),
+        mapping.clientAccountId
+          ? eq(hsCodeMappings.clientAccountId, mapping.clientAccountId)
+          : isNull(hsCodeMappings.clientAccountId)
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const [updated] = await db.update(hsCodeMappings)
+        .set({
+          usedCount: (existing[0].usedCount || 0) + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(hsCodeMappings.id, existing[0].id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(hsCodeMappings).values(mapping).returning();
+    return created;
   }
 }
 

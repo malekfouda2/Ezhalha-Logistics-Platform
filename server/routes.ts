@@ -15,6 +15,7 @@ import { stripeService } from "./integrations/stripe";
 import { moyasarService } from "./integrations/moyasar";
 import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
+import { lookupHsCode, confirmHsCode } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
 
 const SALT_ROUNDS = 10;
@@ -36,6 +37,14 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Only count failed attempts
+});
+
+const hsLookupLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { error: "Too many HS code lookup requests, please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Track failed login attempts for additional brute-force protection
@@ -1749,6 +1758,7 @@ export async function registerRoutes(
             currency: shipment.currency,
             paymentMethod: shipment.paymentMethod,
             paymentStatus: shipment.paymentStatus,
+            itemsData: shipment.itemsData,
             createdAt: shipment.createdAt,
           } : null,
           client: client ? {
@@ -3115,6 +3125,23 @@ export async function registerRoutes(
     dimensionUnit: z.enum(["IN", "CM"]).default("CM"),
     packageType: z.string().default("YOUR_PACKAGING"),
     currency: z.string().default("SAR"),
+    items: z.array(z.object({
+      itemName: z.string().min(1),
+      itemDescription: z.string().optional(),
+      category: z.string().min(1),
+      material: z.string().optional(),
+      countryOfOrigin: z.string().length(2),
+      hsCode: z.string().optional(),
+      hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
+      hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
+      hsCodeCandidates: z.array(z.object({
+        code: z.string(),
+        description: z.string(),
+        confidence: z.number(),
+      })).optional(),
+      price: z.number().nonnegative(),
+      quantity: z.number().int().positive(),
+    })).optional().default([]),
   });
 
   // STEP 1: Rate Discovery - Get rates from all carriers
@@ -3332,6 +3359,7 @@ export async function registerRoutes(
         packageType: shipmentData.packageType,
         numberOfPackages: shipmentData.packages.length,
         packagesData: JSON.stringify(shipmentData.packages),
+        itemsData: shipmentData.items ? JSON.stringify(shipmentData.items) : undefined,
         shipmentType: shipmentData.shipmentType,
         serviceType: quote.serviceType,
         currency: quote.currency,
@@ -3508,7 +3536,19 @@ export async function registerRoutes(
         }],
         serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
         labelFormat: "PDF" as const,
+        commodityDescription: undefined as string | undefined,
+        declaredValue: undefined as number | undefined,
       };
+
+      if (shipment.itemsData) {
+        try {
+          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number; hsCode?: string }>;
+          if (items.length > 0) {
+            carrierRequest.commodityDescription = items.map(i => i.itemName).join(", ").substring(0, 450);
+            carrierRequest.declaredValue = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+          }
+        } catch {}
+      }
 
       const carrierResponse = await fedexAdapter.createShipment(carrierRequest);
 
@@ -3861,7 +3901,19 @@ export async function registerRoutes(
         }],
         serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
         labelFormat: "PDF" as const,
+        commodityDescription: undefined as string | undefined,
+        declaredValue: undefined as number | undefined,
       };
+
+      if (shipment.itemsData) {
+        try {
+          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number }>;
+          if (items.length > 0) {
+            carrierRequest.commodityDescription = items.map(i => i.itemName).join(", ").substring(0, 450);
+            carrierRequest.declaredValue = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+          }
+        } catch {}
+      }
 
       let carrierTrackingNumber = "";
       let labelUrl = "";
@@ -3957,6 +4009,7 @@ export async function registerRoutes(
             weightUnit: shipment.weightUnit,
             numberOfPackages: shipment.numberOfPackages,
             shipmentType: shipment.shipmentType,
+            itemsData: shipment.itemsData,
           } : null,
         };
       }));
@@ -4302,6 +4355,74 @@ export async function registerRoutes(
     } catch (error) {
       logError("Failed to get shipment tracking", error);
       res.status(500).json({ error: "Failed to get tracking information" });
+    }
+  });
+
+  // HS Code Lookup
+  app.get("/api/hs-lookup", requireAuth, hsLookupLimiter, async (req, res) => {
+    try {
+      const querySchema = z.object({
+        itemName: z.string().min(1),
+        itemDescription: z.string().optional(),
+        category: z.string().min(1),
+        material: z.string().optional(),
+        countryOfOrigin: z.string().length(2),
+        destinationCountry: z.string().length(2),
+      });
+
+      const params = querySchema.parse(req.query);
+
+      const user = await storage.getUser(req.session.userId!);
+      const clientAccountId = user?.clientAccountId || undefined;
+
+      const result = await lookupHsCode(params, clientAccountId);
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("HS code lookup failed", error);
+      res.status(500).json({ error: "HS code lookup failed" });
+    }
+  });
+
+  // Confirm HS Code selection (saves to history)
+  app.post("/api/client/hs-code/confirm", requireClient, async (req, res) => {
+    try {
+      const confirmSchema = z.object({
+        itemName: z.string().min(1),
+        category: z.string().min(1),
+        material: z.string().optional(),
+        countryOfOrigin: z.string().length(2),
+        hsCode: z.string().min(4),
+        description: z.string().optional(),
+      });
+
+      const data = confirmSchema.parse(req.body);
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      await confirmHsCode(
+        user.clientAccountId,
+        data.itemName,
+        data.category,
+        data.material,
+        data.countryOfOrigin,
+        data.hsCode,
+        data.description,
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("HS code confirm failed", error);
+      res.status(500).json({ error: "Failed to confirm HS code" });
     }
   });
 

@@ -13,9 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Package, MapPin, Truck, ShieldCheck, ShieldX, Send } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle2, XCircle, FileText, Package, MapPin, Truck, ShieldCheck, ShieldX, Send, Tag } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { format } from "date-fns";
+import type { ShipmentItem } from "@shared/schema";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,7 @@ interface CreditInvoiceShipment {
   weightUnit?: string;
   numberOfPackages?: number;
   shipmentType?: string;
+  itemsData?: string | null;
 }
 
 interface CreditInvoice {
@@ -386,6 +388,49 @@ export default function ClientBilling() {
                   </div>
                 </div>
               )}
+
+              {selectedInvoice.shipment?.itemsData && (() => {
+                try {
+                  const items = JSON.parse(selectedInvoice.shipment.itemsData) as ShipmentItem[];
+                  if (items.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border p-4 space-y-3">
+                      <h4 className="font-medium flex items-center gap-2"><Tag className="h-4 w-4" />Items ({items.length})</h4>
+                      <div className="space-y-2">
+                        {items.map((item, i) => (
+                          <div key={i} className="px-3 py-2 rounded bg-muted/50 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">{item.itemName}</span>
+                              <div className="flex items-center gap-2">
+                                {item.hsCode ? (
+                                  <Badge variant="outline" className="text-xs">HS: {item.hsCode}</Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="text-xs">No HS</Badge>
+                                )}
+                                {item.hsCodeConfidence && (
+                                  <Badge className={
+                                    item.hsCodeConfidence === "HIGH" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs" :
+                                    item.hsCodeConfidence === "MEDIUM" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-xs" :
+                                    item.hsCodeConfidence === "LOW" ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 text-xs" :
+                                    "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs"
+                                  }>
+                                    {item.hsCodeConfidence}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground flex gap-3">
+                              <span>{item.category}</span>
+                              <span>Qty: {item.quantity}</span>
+                              <span><SarAmount amount={item.price} /> each</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                } catch { return null; }
+              })()}
             </div>
           )}
         </DialogContent>

@@ -68,12 +68,22 @@ Preferred communication style: Simple, everyday language.
 - Admin pages: `/admin/credit-requests` (manage requests), `/admin/credit-invoices` (manage invoices)
 - Client pages: `/client/billing` (request access + view invoices)
 
+### HS Code Suggestion Feature
+- For international (non-domestic) shipments, items/commodities are collected during shipment creation (step 4)
+- `hs_code_mappings` table stores per-client HS code history for reuse
+- `itemsData` text column on `shipments` stores JSON array of `ShipmentItem` objects
+- HS lookup service (`server/services/hsLookup.ts`): checks client history first → FedEx Global Trade API → category-based fallback
+- Confidence levels: HIGH (≥0.7), MEDIUM (≥0.4), LOW (>0), MISSING (0)
+- API: `GET /api/hs-lookup` (rate-limited), `POST /api/client/hs-code/confirm`
+- Items with HS codes displayed in shipment detail sheets (admin + client), credit invoice detail dialogs, and billing page
+- Consistent badge styling: destructive "No HS" badge, green/yellow/orange/red confidence badges
+
 ### Shipment Creation Flow
 A 7-step multi-step process:
 1. Shipment type selection (domestic/inbound/outbound)
 2. Sender details
 3. Recipient details
-4. Package details (weight, dimensions)
+4. Package & Items details (weight, dimensions, items with HS code lookup for international)
 5. Rate discovery with admin margin application
 6. Payment (Moyasar integration or Credit/Pay Later if approved)
 7. Confirmation

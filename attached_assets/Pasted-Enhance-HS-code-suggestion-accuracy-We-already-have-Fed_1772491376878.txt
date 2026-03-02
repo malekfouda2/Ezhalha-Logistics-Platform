@@ -1,0 +1,50 @@
+Enhance HS code suggestion accuracy. We already have FedEx integrated.
+
+A) Add additional shipment item fields:
+- itemDescription (text nullable)
+- category (enum/text required)
+- material (text nullable but conditionally required by category)
+- countryOfOrigin (ISO2 required)
+- hsCode (text nullable)
+- hsCodeSource ("USER"|"FEDEX"|"HISTORY"|"UNKNOWN")
+- hsCodeConfidence (numeric nullable)
+- hsCodeCandidates (jsonb nullable)
+
+B) UI: Progressive detail collection
+In Create Shipment > Items row:
+1) Always show itemName, price, qty, category, origin country.
+2) Show itemDescription + material only when:
+   - user clicks “Improve HS accuracy”, OR
+   - HS lookup returns ambiguous results (more than 1 candidate) OR
+   - itemName is too generic (short length < 4, or matches a list: "parts", "item", "stuff", "accessories", "product", etc.)
+3) Add an “HS Code” selector:
+   - “Suggested” dropdown from candidates
+   - “Enter manually” input
+Show a confidence badge (High/Medium/Low/Missing).
+
+C) Backend: HS lookup service with FedEx
+Create /server/services/hsLookup.ts:
+- Accept { itemName, itemDescription, category, material, countryOfOrigin, destinationCountry }
+- Build a FedEx HS lookup request from combined description.
+- Normalize FedEx response into candidates [{code, description, confidence}] (confidence can be heuristic if not provided).
+- Return 0..N candidates.
+
+Expose endpoint GET /api/hs-lookup (auth required, rate limited):
+- Uses hsLookup.ts
+- Returns candidates
+
+D) History-based accuracy improvement
+Add table hs_code_mappings:
+- id, clientId, normalizedKey, hsCode, createdAt, updatedAt, usedCount
+normalizedKey should be derived from itemName + category + material + origin.
+When a user confirms/selects an hsCode:
+- Upsert mapping (increment usedCount)
+When searching:
+- First check mapping table for exact match -> return as top candidate with highest confidence and source=HISTORY
+- Otherwise call FedEx and return those.
+
+E) Admin/client tracking
+Show item HS quality (missing/low confidence) in shipment details and admin lists.
+Admin can filter shipments with missing HS code or low confidence.
+
+Keep existing shipment creation and pricing working.
