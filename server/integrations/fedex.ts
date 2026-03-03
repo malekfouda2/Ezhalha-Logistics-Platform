@@ -696,16 +696,50 @@ export class FedExAdapter implements CarrierAdapter {
         recipientAddress.stateOrProvinceCode = request.recipient.stateOrProvince;
       }
 
-      const packagingTypesToTry = [request.packagingType || "YOUR_PACKAGING"];
-      if (packagingTypesToTry[0] === "YOUR_PACKAGING") {
-        packagingTypesToTry.push("FEDEX_BOX", "FEDEX_PAK", "FEDEX_ENVELOPE");
+      let serviceTypesToTry: string[] = [];
+      let packagingTypesToTry: string[] = [];
+
+      if (request.serviceType) {
+        serviceTypesToTry = [request.serviceType];
+      }
+      if (request.packagingType && request.packagingType !== "YOUR_PACKAGING") {
+        packagingTypesToTry = [request.packagingType];
+      } else {
+        packagingTypesToTry = ["YOUR_PACKAGING"];
+      }
+
+      if (serviceTypesToTry.length === 0 || packagingTypesToTry[0] === "YOUR_PACKAGING") {
+        try {
+          const saResult = await this.checkServiceAvailability({
+            origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
+            destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
+          });
+          if (saResult.services.length > 0) {
+            if (serviceTypesToTry.length === 0) {
+              const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
+              serviceTypesToTry = uniqueTypes;
+            }
+            const validPkgs = saResult.services.flatMap(s => s.validPackagingTypes || []);
+            const uniquePkgs = [...new Set(validPkgs)];
+            if (uniquePkgs.length > 0) {
+              if (packagingTypesToTry[0] === "YOUR_PACKAGING" && !uniquePkgs.includes("YOUR_PACKAGING")) {
+                packagingTypesToTry = uniquePkgs;
+              }
+            }
+          }
+        } catch (saErr) {
+          logInfo("Service availability lookup before rates failed, proceeding with defaults", saErr);
+        }
+      }
+
+      if (serviceTypesToTry.length === 0) {
+        serviceTypesToTry = [""];
       }
 
       let lastError: any = null;
-      for (const tryPackaging of packagingTypesToTry) {
-        const rateRequest = {
-          accountNumber: { value: this.accountNumber },
-          requestedShipment: {
+      for (const trySvc of serviceTypesToTry) {
+        for (const tryPkg of packagingTypesToTry) {
+          const requestedShipment: any = {
             pickupType: "DROPOFF_AT_FEDEX_LOCATION",
             rateRequestType: ["LIST", "ACCOUNT"],
             shipper: { address: shipperAddress },
@@ -723,45 +757,54 @@ export class FedExAdapter implements CarrierAdapter {
               } : undefined,
               groupPackageCount: 1,
             })),
-            packagingType: tryPackaging,
+            packagingType: tryPkg,
             packageCount: request.packages.length,
-          },
-        };
-
-        try {
-          const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
-          
-          const rates = data.output.rateReplyDetails.map((rate: any) => {
-            const baseRate = parseMoney(rate.ratedShipmentDetails?.[0]?.totalNetCharge);
-            if (isNaN(baseRate)) {
-              throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
-            }
-            return {
-              baseRate,
-              currency: rate.ratedShipmentDetails[0].currency,
-              serviceType: rate.serviceType,
-              transitDays: rate.operationalDetail?.transitTime || 3,
-              deliveryDate: rate.operationalDetail?.deliveryDate 
-                ? new Date(rate.operationalDetail.deliveryDate) 
-                : undefined,
-              serviceName: rate.serviceName,
-              packagingType: tryPackaging,
-            };
-          });
-          return rates;
-        } catch (retryErr: any) {
-          const errMsg = retryErr?.message || "";
-          const isPackagingError = errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID") ||
-            (retryErr?.response?.data?.errors || []).some((e: any) => e.code === "SERVICE.PACKAGECOMBINATION.INVALID");
-          if (isPackagingError && packagingTypesToTry.indexOf(tryPackaging) < packagingTypesToTry.length - 1) {
-            logInfo(`FedEx rate failed with packaging ${tryPackaging}, trying next option`);
-            lastError = retryErr;
-            continue;
+          };
+          if (trySvc) {
+            requestedShipment.serviceType = trySvc;
           }
-          throw retryErr;
+
+          const rateRequest = {
+            accountNumber: { value: this.accountNumber },
+            requestedShipment,
+          };
+
+          try {
+            const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
+            
+            const rates = data.output.rateReplyDetails.map((rate: any) => {
+              const baseRate = parseMoney(rate.ratedShipmentDetails?.[0]?.totalNetCharge);
+              if (isNaN(baseRate)) {
+                throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
+              }
+              return {
+                baseRate,
+                currency: rate.ratedShipmentDetails[0].currency,
+                serviceType: rate.serviceType,
+                transitDays: rate.operationalDetail?.transitTime || 3,
+                deliveryDate: rate.operationalDetail?.deliveryDate 
+                  ? new Date(rate.operationalDetail.deliveryDate) 
+                  : undefined,
+                serviceName: rate.serviceName,
+                packagingType: tryPkg,
+              };
+            });
+            return rates;
+          } catch (retryErr: any) {
+            const errMsg = retryErr?.message || "";
+            const isRetryable = errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID") || 
+              errMsg.includes("INCOUNTRY.SERVICES.NOTALLOWED") ||
+              errMsg.includes("SYSTEM.UNEXPECTED.ERROR");
+            lastError = retryErr;
+            if (isRetryable) {
+              logInfo(`FedEx rate failed with service=${trySvc || 'auto'} packaging=${tryPkg}, trying next combo`);
+              continue;
+            }
+            throw retryErr;
+          }
         }
       }
-      throw lastError || new CarrierError("RATE_FAILED", "All packaging type attempts failed");
+      throw lastError || new CarrierError("RATE_FAILED", "All service/packaging combinations failed");
     } catch (error: any) {
       logInfo("FedEx rate API unavailable for this route, using calculated rates", {
         from: request.shipper.countryCode,
@@ -1013,18 +1056,60 @@ export class FedExAdapter implements CarrierAdapter {
         },
       };
 
-      const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest, 1);
-      const shipmentData = data.output.transactionShipments[0];
+      let lastShipError: any = null;
+      const serviceTypesToAttempt = [requestedShipment.serviceType];
 
-      return {
-        trackingNumber: shipmentData.masterTrackingNumber,
-        carrierTrackingNumber: shipmentData.masterTrackingNumber,
-        labelData: shipmentData.pieceResponses[0]?.packageDocuments?.[0]?.encodedLabel,
-        estimatedDelivery: shipmentData.completedShipmentDetail?.operationalDetail?.deliveryDate
-          ? new Date(shipmentData.completedShipmentDetail.operationalDetail.deliveryDate)
-          : undefined,
-        serviceType: request.serviceType,
-      };
+      for (const attemptServiceType of serviceTypesToAttempt) {
+        shipRequest.requestedShipment.serviceType = attemptServiceType;
+
+        try {
+          const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest, 1);
+          const shipmentData = data.output.transactionShipments[0];
+
+          return {
+            trackingNumber: shipmentData.masterTrackingNumber,
+            carrierTrackingNumber: shipmentData.masterTrackingNumber,
+            labelData: shipmentData.pieceResponses[0]?.packageDocuments?.[0]?.encodedLabel,
+            estimatedDelivery: shipmentData.completedShipmentDetail?.operationalDetail?.deliveryDate
+              ? new Date(shipmentData.completedShipmentDetail.operationalDetail.deliveryDate)
+              : undefined,
+            serviceType: attemptServiceType,
+          };
+        } catch (shipErr: any) {
+          lastShipError = shipErr;
+          const errMsg = shipErr?.message || "";
+          const isServiceError = errMsg.includes("INCOUNTRY.SERVICES.NOTALLOWED") || 
+            errMsg.includes("SERVICETYPE.NOTSUPPORTED") ||
+            errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID");
+          
+          if (isServiceError && serviceTypesToAttempt.length === 1) {
+            logInfo(`Ship failed with service=${attemptServiceType}, looking up correct service via availability API`);
+            try {
+              const saResult = await this.checkServiceAvailability({
+                origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
+                destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
+              });
+              for (const svc of saResult.services) {
+                if (svc.serviceType !== attemptServiceType) {
+                  serviceTypesToAttempt.push(svc.serviceType);
+                  const validPkgs = svc.validPackagingTypes || [];
+                  if (validPkgs.length > 0 && !validPkgs.includes(shipRequest.requestedShipment.packagingType)) {
+                    shipRequest.requestedShipment.packagingType = this.mapPackagingType(validPkgs[0]);
+                  }
+                }
+              }
+            } catch (saErr) {
+              logInfo("Service availability lookup for ship retry failed", saErr);
+            }
+            continue;
+          }
+          if (isServiceError && serviceTypesToAttempt.indexOf(attemptServiceType) < serviceTypesToAttempt.length - 1) {
+            continue;
+          }
+          throw shipErr;
+        }
+      }
+      throw lastShipError || new CarrierError("SHIP_FAILED", "All service type attempts failed");
     } catch (error) {
       logError("FedEx create shipment error", error);
       if (error instanceof CarrierError) throw error;
