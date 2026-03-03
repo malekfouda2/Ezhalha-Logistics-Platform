@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag, AlertTriangle, RotateCcw } from "lucide-react";
+import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -305,6 +305,17 @@ export default function AdminShipments() {
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
                   <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
                 </div>
+              )}
+              {(selectedShipment as any).carrierLabelBase64 && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="button-download-label"
+                  onClick={() => window.open(`/api/admin/shipments/${selectedShipment.id}/label.pdf`, "_blank")}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download Label (PDF)
+                </Button>
               )}
               <div className="p-4 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 mb-3">

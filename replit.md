@@ -2,12 +2,7 @@
 
 ## Overview
 
-ezhalha is a production-ready enterprise logistics management platform for B2B shipping. It provides two separate portals:
-
-- **Admin Portal**: Full platform management including client accounts, applications, pricing rules, shipments, invoices, payments, audit logs, RBAC, integration monitoring, and policy page management.
-- **Client Portal**: Customer-facing interface for creating shipments (multi-step flow), viewing invoices/payments, managing sub-users with granular permissions, and account settings.
-
-The platform integrates with FedEx for shipping rates/labels, Zoho Books for invoice synchronization, Stripe and Moyasar for payment processing, and Google Cloud Storage for file uploads. It supports bilingual data entry (English/Arabic) with RTL support for Arabic fields.
+ezhalha is a production-ready enterprise logistics management platform for B2B shipping, featuring distinct Admin and Client portals. The platform streamlines logistics operations, offering comprehensive management for client accounts, shipments, invoicing, payments, and integrations for administrators, while providing clients with tools for shipment creation, invoice management, and sub-user administration. It integrates with major shipping carriers and financial services, supporting bilingual data entry (English/Arabic) with RTL capabilities.
 
 ## User Preferences
 
@@ -16,148 +11,69 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 
 ### Frontend
-- **Framework**: React 18 with TypeScript, built with Vite
-- **Routing**: Wouter (lightweight client-side router)
-- **State Management**: TanStack React Query v5 for server state; React context for auth and theme
-- **UI Components**: shadcn/ui (New York style) with Radix UI primitives, styled with Tailwind CSS
-- **Form Handling**: React Hook Form with Zod validation (schemas shared between client and server via `@shared/schema`)
-- **Layout Pattern**: Dual-layout architecture — `AdminLayout` (fixed left sidebar, w-64) and `ClientLayout` (top navigation bar). Navigation items are dynamically filtered based on user type and permissions.
-- **Path Aliases**: `@/` maps to `client/src/`, `@shared/` maps to `shared/`, `@assets/` maps to `attached_assets/`
-- **Entry Point**: `client/src/main.tsx` → `client/src/App.tsx`
+- **Framework**: React 18 with TypeScript and Vite.
+- **Routing**: Wouter for client-side navigation.
+- **State Management**: TanStack React Query for server state; React context for global state.
+- **UI Components**: shadcn/ui built on Radix UI primitives, styled with Tailwind CSS.
+- **Form Handling**: React Hook Form with Zod for validation.
+- **Layout**: Dual-layout architecture (`AdminLayout`, `ClientLayout`) with dynamic navigation filtering based on user permissions.
 
 ### Backend
-- **Runtime**: Node.js with TypeScript (tsx for development, esbuild for production builds)
-- **Framework**: Express.js with RESTful API design
-- **Entry Point**: `server/index.ts` → routes registered in `server/routes.ts`
-- **Session Management**: express-session with connect-pg-simple for PostgreSQL session store
-- **Security**: Helmet for HTTP headers, bcrypt for password hashing, express-rate-limit with brute-force protection on auth endpoints, HTML sanitization (sanitize-html) for policy content, Zod validation on all inputs
-- **API Features**: Idempotency keys for POST endpoints (stored in DB with TTL), health checks, branding configuration endpoint
-- **Logging**: Winston with daily-rotate-file transport — separate files for combined logs (14 days), error logs (30 days), and audit logs (90 days) in `./logs/`
-- **Email**: Nodemailer for transactional emails (account credentials, application notifications) configured via SMTP environment variables
-- **Build Output**: `dist/index.cjs` (server) and `dist/public/` (client static files)
+- **Runtime**: Node.js with TypeScript (Express.js framework).
+- **Security**: Helmet, bcrypt, express-rate-limit, HTML sanitization, Zod input validation.
+- **API Features**: RESTful design, idempotency keys, health checks, branding configuration.
+- **Logging**: Winston for structured logging with daily rotation.
+- **Email**: Nodemailer for transactional emails.
 
 ### Data Layer
-- **Database**: PostgreSQL (required — `DATABASE_URL` environment variable)
-- **ORM**: Drizzle ORM with drizzle-kit for migrations
-- **Schema**: Defined in `shared/schema.ts` — approximately 19+ tables covering users, client accounts, client applications, shipments, shipment rate quotes, invoices, payments, pricing rules, pricing tiers, audit logs, roles, permissions, user roles, role permissions, integration logs, webhook events, client user permissions, policies, and idempotency records
-- **Storage Pattern**: `IStorage` interface implemented by `DatabaseStorage` class in `server/storage.ts`, providing a clean abstraction over all database operations
-- **Migrations**: Run via `npm run db:push` (drizzle-kit push)
+- **Database**: PostgreSQL.
+- **ORM**: Drizzle ORM with drizzle-kit for migrations.
+- **Schema**: Comprehensive schema covering users, shipments, invoices, payments, pricing, and audit logs.
+- **Storage Pattern**: `IStorage` interface for database operations abstraction.
 
 ### Authentication & Authorization
-- Session-based auth with secure cookies (no JWT — switched from original spec to sessions)
-- Two user types: `admin` and `client`
-- RBAC with database-backed roles and permissions tables
-- Client-level granular permissions: `view_shipments`, `create_shipments`, `view_invoices`, `view_payments`, `make_payments`, `manage_users`
-- Primary contact concept for client accounts (has full access)
-- Middleware functions: `requireAuth`, `requireAdmin`, `requireClient`, `requirePrimaryContact`, `requireClientPermission`
-- Default admin account seeded on first run (username: `admin`, password: `admin123`)
+- **Mechanism**: Session-based authentication with secure cookies.
+- **User Types**: `admin` and `client`.
+- **RBAC**: Database-backed roles and permissions.
+- **Client Permissions**: Granular permissions for client users (e.g., `view_shipments`, `create_shipments`).
 
 ### Carrier Integration Architecture
-- **Adapter Pattern**: `CarrierAdapter` interface with implementations per carrier (FedEx first)
-- **Flow**: Controller → ShipmentsService → CarrierService (router) → CarrierAdapter → FedEx API
-- **FedEx**: Address validation, postal code validation, service availability, rate discovery, transit times, shipment creation
-- **Configuration**: All credentials via environment variables (`FEDEX_CLIENT_ID`, `FEDEX_CLIENT_SECRET`, `FEDEX_ACCOUNT_NUMBER`, etc.)
-- **Global Shipping**: Shipper/sender origin is fully dynamic — not locked to KSA. Domestic shipments default both sides to SA. International shipments allow any country. Service types are discovered dynamically per lane via FedEx Service Availability API (with Rates API fallback), cached 10 minutes. No hardcoded service list.
-- **Payment Model**: Customers pay the platform (Pay Now or Pay Later/Credit). FedEx charges go to our FedEx account (SENDER payment type with FEDEX_ACCOUNT_NUMBER). FedEx never collects from customers.
-- **API Endpoints**:
-  - `GET /api/fedex/service-options` — Dynamic lane-based service discovery (cached 10min)
-  - `POST /api/fedex/validate-address` — Address validation with suggestions
-  - `GET /api/fedex/validate-postal` — Postal code validation
-- **Address Validation**: Server-side Zod validation requires countryCode, city, addressLine1. PostalCode required for most countries (exempt: AE, QA, BH, OM, HK, IE, etc.). StateOrProvince required for US, CA. Returns 400 with actionable messages.
-- **Currency**: Platform billing uses SAR by default. Each shipment stores its own `currency` field. FedEx/customs use `shipment.currency` consistently — no hardcoded SAR in adapter logic.
-- **Production Hardening** (v2):
-  - `FEDEX_MOCK_MODE` env var: if `true` or `NODE_ENV !== "production"`, mock fallbacks allowed; otherwise production throws `CarrierError`
-  - `FEDEX_REQUIRE_HS` env var: if `true`, blocks international shipments missing HS codes
-  - Startup validation: crashes if required env vars missing in production, or if FEDEX_BASE_URL is sandbox
-  - OAuth token auto-refresh on 401 responses
-  - Ship date defaults to today (not tomorrow), accepts optional `shipDate` from request
-  - International customs: per-item commodities from `items` array with individual HS codes, quantities, prices, country of manufacture
-  - Carrier error tracking: `carrierStatus`, `carrierErrorCode`, `carrierErrorMessage`, `carrierLastAttemptAt`, `carrierAttempts` on shipments table
-  - Retry endpoint: `POST /api/admin/shipments/:id/retry-carrier` for retrying failed carrier submissions
-  - Cancel hardened: calls FedEx cancel API, stores error if fails, doesn't mark cancelled on failure
-  - Webhook signature uses base64 HMAC SHA256 with constant-time comparison
-  - `parseMoney()` helper normalizes rate response values
-  - Address validation: state/province required for US/CA, postal code validated server-side
-  - **stateOrProvinceCode sanitization**: `sanitizeStateCode()` helper omits the field for countries that don't use 2-letter state codes (SA, etc.), only includes for US/CA/AU/IN/BR/MX/CN/JP and values ≤2 chars
-  - **No mock fallback when FedEx is configured**: When FedEx credentials are present, rate/ship errors throw `CarrierError` instead of silently returning fake mock data with wrong US service types
-  - **Sandbox calculated rates**: When on FedEx sandbox and ALL rate combos fail (sandbox limitation for SA→SA), generates calculated rates using correct service types from Service Availability API
-  - **Comprehensive retry on service errors**: Both `getRates` and `createShipment` retry on: `SERVICE.PACKAGECOMBINATION.INVALID`, `INCOUNTRY.SERVICES.NOTALLOWED`, `SYSTEM.UNEXPECTED.ERROR`, `SYSTEM.UNAVAILABLE`, `SERVICETYPE.NOT.ALLOWED`, `SERVICETYPE.NOTSUPPORTED`, `SELECTED.DESTINATION.SERVICETYPE.INVALID`, `SERVICETYPE.INVALID`
-  - **Always calls Service Availability first**: `getRates` always queries Service Availability API to discover valid service types and packaging types per lane, tries all combos including auto-detect (no service type specified)
-  - **No hardcoded FEDEX_GROUND/YOUR_PACKAGING**: All carrier request fallbacks use `FEDEX_INTERNATIONAL_PRIORITY` and `FEDEX_BOX` (valid for SA account)
+- **Pattern**: Adapter pattern (`CarrierAdapter`) for integrating various carriers (e.g., FedEx).
+- **Features**: Address/postal validation, service availability, rate discovery, shipment creation, international customs support, carrier error tracking and retry mechanisms.
+- **Configuration**: Dynamic and environment-variable driven for flexibility and production hardening.
 
 ### Credit Access Request Flow
-- Clients must request credit/pay-later access — it is **not enabled by default**
-- `credit_access_requests` table tracks requests with statuses: `pending`, `approved`, `rejected`, `revoked`
-- `creditEnabled` boolean flag on `client_accounts` controls access
-- Client requests from Billing page → Admin reviews on Credit Requests page → Approve/Reject/Revoke
-- Pay Later option in shipment checkout is only shown if `creditEnabled = true`
-- Backend enforces check: `POST /api/client/shipments/:id/pay-later` returns 403 if credit not enabled
-- Admin pages: `/admin/credit-requests` (manage requests), `/admin/credit-invoices` (manage invoices)
-- Client pages: `/client/billing` (request access + view invoices)
+- **Process**: Clients request credit/pay-later access, which admins review and approve/reject.
+- **Control**: `creditEnabled` flag on client accounts and specific admin/client pages for management and requests.
 
 ### HS Code Suggestion Feature
-- For international (non-domestic) shipments, items/commodities are collected during shipment creation (step 4)
-- `hs_code_mappings` table stores per-client HS code history for reuse
-- `itemsData` text column on `shipments` stores JSON array of `ShipmentItem` objects
-- HS lookup service (`server/services/hsLookup.ts`): checks client history first → FedEx Global Trade API → category-based fallback
-- Confidence levels: HIGH (≥0.7), MEDIUM (≥0.4), LOW (>0), MISSING (0)
-- API: `GET /api/hs-lookup` (rate-limited), `POST /api/client/hs-code/confirm`
-- Items with HS codes displayed in shipment detail sheets (admin + client), credit invoice detail dialogs, and billing page
-- Consistent badge styling: destructive "No HS" badge, green/yellow/orange/red confidence badges
+- **Purpose**: Assists with Harmonized System (HS) code lookup for international shipments.
+- **Mechanism**: Uses client history, FedEx Global Trade API, and category-based fallbacks for suggestions with confidence levels.
 
 ### Shipment Creation Flow
-A 7-step multi-step process:
-1. Shipment type selection (domestic/inbound/outbound)
-2. Sender details
-3. Recipient details
-4. Package & Items details (weight, dimensions, items with HS code lookup for international)
-5. Rate discovery with admin margin application
-6. Payment (Moyasar integration or Credit/Pay Later if approved)
-7. Confirmation
+- **Process**: A 7-step multi-step flow covering shipment type, sender/recipient details, package/item specifics, rate discovery, payment, and confirmation.
 
 ### Email Templates
-- Admin-managed email templates stored in `email_templates` table
-- 6 default templates seeded on startup: account_credentials, application_received, application_rejected, admin_new_application, credit_invoice_created, credit_invoice_reminder
-- Templates use `{{variable}}` placeholders rendered at send time with HTML escaping for user-provided values
-- Admin UI at `/admin/email-templates` with HTML editor, live preview, active/inactive toggle, and reset-to-default
-- Template rendering in `server/services/email-templates.ts`, email sending in `server/services/email.ts`
-- Falls back to built-in defaults if custom template is inactive or missing
-
-### Key Commands
-- `npm run dev` — Start development server with hot reload
-- `npm run build` — Build for production (client + server)
-- `npm start` — Run production build
-- `npm run db:push` — Push schema changes to database
-- `npm run check` — TypeScript type checking
-
-### Testing
-- **Framework**: Vitest with supertest for API testing
-- **Test Files**: `tests/` directory with separate files for auth, admin API, client API, security, storage, and schema tests
-- **Setup**: `tests/setup.ts` mocks logger and email services
-- **Run**: Standard vitest configuration in `vitest.config.ts`
+- **Management**: Admin-managed, database-stored email templates with `{{variable}}` placeholders.
+- **Features**: HTML editor, live preview, active/inactive toggle, and reset-to-default options.
 
 ## External Dependencies
 
 ### Database
-- **PostgreSQL** — Primary data store, required. Connection via `DATABASE_URL` environment variable. Also used for session storage.
+- **PostgreSQL** — Primary data store and session storage.
 
 ### Payment Processing
-- **Moyasar** — Primary payment gateway (Saudi Arabia focused). Env vars: `MOYASAR_SECRET_KEY`, `MOYASAR_PUBLISHABLE_KEY`. Uses HTTP Basic Auth.
-- **Stripe** — Alternative payment gateway. Env vars: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`.
+- **Moyasar** — Primary payment gateway (Saudi Arabia focused).
+- **Stripe** — Alternative payment gateway.
 
 ### Shipping
-- **FedEx API** — Carrier integration for rates, labels, tracking. Env vars: `FEDEX_CLIENT_ID`/`FEDEX_API_KEY`, `FEDEX_CLIENT_SECRET`/`FEDEX_SECRET_KEY`, `FEDEX_ACCOUNT_NUMBER`, `FEDEX_WEBHOOK_SECRET`, `FEDEX_BASE_URL`.
+- **FedEx API** — Carrier integration for rates, labels, and tracking.
 
 ### Accounting
-- **Zoho Books** — Invoice and customer synchronization with bilingual (Arabic) support. Env vars: `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, `ZOHO_ORGANIZATION_ID`.
+- **Zoho Books** — Invoice and customer synchronization.
 
 ### File Storage
-- **Google Cloud Storage** — Object storage for file uploads (documents, attachments). Uses `@google-cloud/storage`. Configured via `PUBLIC_OBJECT_SEARCH_PATHS` and `PRIVATE_OBJECT_DIR` environment variables. Presigned URL upload flow.
+- **Google Cloud Storage** — Object storage for file uploads.
 
 ### Email
-- **SMTP (Nodemailer)** — Transactional emails. Env vars: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
-
-### Deployment
-- **Target**: Linux server (aaPanel) with PM2 for process management
-- **PM2 Config**: `ecosystem.config.js` — cluster mode, max instances, log rotation, graceful shutdown
-- All sensitive configuration via environment variables only
+- **SMTP (Nodemailer)** — Transactional email sending.

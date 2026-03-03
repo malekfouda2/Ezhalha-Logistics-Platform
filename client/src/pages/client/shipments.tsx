@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -218,6 +218,17 @@ export default function ClientShipments() {
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
                   <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
                 </div>
+              )}
+              {(selectedShipment as any).carrierLabelBase64 && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="button-download-label"
+                  onClick={() => window.open(`/api/client/shipments/${selectedShipment.id}/label.pdf`, "_blank")}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download Label (PDF)
+                </Button>
               )}
 
               {/* Origin */}

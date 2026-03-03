@@ -508,7 +508,7 @@ export class FedExAdapter implements CarrierAdapter {
         streetLines: [request.address.streetLine1, request.address.streetLine2].filter(Boolean) as string[],
         city: request.address.city || "Unknown City",
         stateOrProvince: request.address.stateOrProvince || "XX",
-        postalCode: request.address.postalCode || "00000",
+        postalCode: request.address.postalCode || "",
         countryCode: request.address.countryCode,
         residential: false,
       }],
@@ -718,8 +718,8 @@ export class FedExAdapter implements CarrierAdapter {
 
       try {
         const saResult = await this.checkServiceAvailability({
-          origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
-          destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
+          origin: { postalCode: request.shipper.postalCode || "", countryCode: request.shipper.countryCode },
+          destination: { postalCode: request.recipient.postalCode || "", countryCode: request.recipient.countryCode },
         });
         if (saResult.services.length > 0) {
           const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
@@ -1178,8 +1178,8 @@ export class FedExAdapter implements CarrierAdapter {
             logInfo(`Ship failed with service=${attemptServiceType}, looking up correct service via availability API`);
             try {
               const saResult = await this.checkServiceAvailability({
-                origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
-                destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
+                origin: { postalCode: request.shipper.postalCode || "", countryCode: request.shipper.countryCode },
+                destination: { postalCode: request.recipient.postalCode || "", countryCode: request.recipient.countryCode },
               });
               for (const svc of saResult.services) {
                 if (svc.serviceType !== attemptServiceType) {

@@ -1,0 +1,137 @@
+You are working on my existing repo “Ezhalha Logistics Platform” (React + TypeScript in /client, Express + TypeScript in /server, Postgres with Drizzle in /shared/schema.ts). Apply the following fixes. IMPORTANT: Do ALL points below, but IGNORE removing the SA defaults in the UI (keep whatever defaults exist today). Everything else must be fixed.
+
+GOAL
+- Make FedEx service discovery reliable (no fake postal codes).
+- Enforce address/postal validation gates server-side before calling FedEx Rates/Ship.
+- Ensure Pay-Later never returns success if FedEx creation failed.
+- Persist the FedEx label and expose a downloadable PDF endpoint suitable for FedEx “Shipping Label Validation” upload.
+
+====================================================
+A) FIX FEDEX SERVICE OPTIONS ENDPOINT (REMOVE "00000" POSTAL HACK)
+====================================================
+Current issue: /api/fedex/service-options substitutes missing postals with "00000", causing FedEx to reject or return invalid results.
+
+1) Update GET /api/fedex/service-options behavior:
+- If shipperPostalCode is missing and the shipperCountry is not in a known “no-postal” allowlist, return 400:
+  { message: "Shipper postal code is required to fetch FedEx services for this lane." }
+- If recipientPostalCode is missing and recipientCountry is not in allowlist, return 400 similarly.
+- Do NOT ever send "00000" to FedEx.
+
+2) Define a small allowlist constant in server code for countries where postal codes may be absent (keep short and conservative). For all other countries, require postal code.
+
+3) Keep the lane-based strategy:
+- First attempt Service Availability API
+- If that fails, attempt Rates API and derive unique serviceType values from quotes
+- Return empty list only if both fail AND provide a clear error message.
+
+4) Add simple caching (TTL 10 minutes) for service-options results keyed by:
+  shipperCountry|shipperPostal|shipperCity|recipientCountry|recipientPostal|recipientCity|packagingType|weight|shipDate
+
+====================================================
+B) ENFORCE SERVER-SIDE ADDRESS VALIDATION GATES (BEFORE RATES AND BEFORE SHIP)
+====================================================
+Current issue: UI may call validate endpoints but the server still calls FedEx with incomplete/invalid addresses.
+
+1) Create a shared validator (e.g., /server/validation/shippingAddress.ts) used by:
+- rates request handler
+- ship/confirm handler
+- pay-later ship creation handler
+
+2) Validation rules (Zod + custom):
+- For shipper and recipient:
+  - countryCode required (ISO2)
+  - city required
+  - addressLine1 required
+  - postalCode required unless country is in no-postal allowlist
+- stateOrProvinceCode required for US and CA only (at minimum)
+- phone required for shipper/recipient (FedEx often requires contact phone)
+Return 400 with actionable per-field messages. DO NOT call FedEx if validation fails.
+
+3) Add an optional “strict mode” env flag:
+- FEDEX_STRICT_ADDRESS=true/false (default true in production)
+If strict mode is false, allow missing postal only for allowlist countries.
+
+4) Ensure these validations run in:
+- POST /api/client/shipments/rates
+- POST /api/client/shipments/checkout
+- POST /api/client/shipments/:id/confirm
+- POST /api/client/shipments/:id/pay-later
+- Any admin retry-carrier endpoint
+
+====================================================
+C) PAY-LATER MUST NOT RETURN SUCCESS IF FEDEX CREATION FAILED (CRITICAL)
+====================================================
+Current issue: pay-later returns 200 even if FedEx createShipment fails.
+
+Fix:
+- In POST /api/client/shipments/:id/pay-later:
+  - If carrier createShipment fails:
+    - update shipment carrierStatus="error", status="carrier_error"
+    - store carrierErrorCode/message/attempts/lastAttemptAt
+    - return HTTP 502 with:
+      { message: "Carrier creation failed. Invoice created, but shipment was not created in FedEx yet.", carrierErrorCode, carrierErrorMessage }
+  - Only return 200 if FedEx createShipment succeeded (tracking number + label generated).
+
+====================================================
+D) PERSIST FEDEX LABEL AND PROVIDE DOWNLOADABLE PDF ENDPOINTS (FOR FEDEX VALIDATION)
+====================================================
+Goal: After a shipment is successfully created in FedEx, the platform must store the label and allow downloading a PDF file that can be uploaded to FedEx Shipping Label Validation.
+
+1) Database changes (Drizzle):
+- Add one of the following to shipments table (preferred: store base64 + optional mime):
+  - carrierLabelBase64 (text nullable)  // base64 string WITHOUT data: prefix
+  - carrierLabelMimeType (text nullable) default "application/pdf"
+  - carrierLabelFormat (text nullable) e.g. "PDF"
+If you prefer files:
+  - carrierLabelPath (text nullable)
+But base64 storage is acceptable for now.
+
+2) Update FedEx adapter + ship handlers:
+- Ensure FedEx createShipment returns:
+  - trackingNumber
+  - labelDataBase64 (PDF base64)
+- When successful:
+  - store trackingNumber
+  - store carrierLabelBase64
+  - store carrierStatus="created"
+  - set status appropriately (created/confirmed etc.)
+
+3) Add endpoints:
+- GET /api/client/shipments/:id/label.pdf
+  - requireClient auth and ownership
+  - load shipment
+  - ensure carrierLabelBase64 exists; if not, 404 with message
+  - stream decoded PDF bytes with headers:
+    Content-Type: application/pdf
+    Content-Disposition: attachment; filename="fedex-label-<tracking>.pdf"
+- GET /api/admin/shipments/:id/label.pdf
+  - admin auth
+  - same behavior
+
+4) UI:
+- In shipment details (client and admin):
+  - If carrierStatus="created" and label exists, show “Download Label (PDF)” button linking to the endpoint.
+  - If carrier error, show error details + retry (admin only).
+
+5) Safety / Size:
+- If storing base64 in DB, be mindful of size:
+  - store only the primary label document
+  - do not store multiple duplicates
+- Optionally, if label is too large, store in uploads storage instead and keep URL/path.
+
+====================================================
+E) UPDATE README FOR FEDEX VALIDATION STEPS
+====================================================
+Add a short section: “FedEx Shipping Label Validation”
+- Explain that Ship/Open Ship APIs require label validation for production enablement.
+- Explain how to generate 2 sample labels in sandbox (one domestic, one international).
+- Explain how to download labels from:
+  /api/client/shipments/:id/label.pdf
+and upload to FedEx portal.
+
+DELIVERABLE
+Implement all changes above. Keep SA defaults as-is (do not change default country behavior in UI). Ensure:
+- No "00000" postal hack
+- Strict server-side validation gates exist
+- Pay-later returns 502 on carrier failure
+- Labels are stored and downloadable as real PDF files for FedEx validation upload

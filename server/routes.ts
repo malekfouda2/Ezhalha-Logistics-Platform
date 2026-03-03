@@ -18,6 +18,7 @@ import Stripe from "stripe";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
+import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 
 const SALT_ROUNDS = 10;
 
@@ -56,45 +57,9 @@ const fedexApiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
-  "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
-  "BF", "BI", "CM", "CF", "TD", "KM", "CG", "CD", "CI", "DJ", "DM", "GQ",
-  "ER", "FJ", "GA", "GM", "GH", "GD", "GN", "GW", "GY", "KI", "KP", "LY",
-  "MW", "ML", "MR", "NA", "NR", "PA", "QA", "RW", "KN", "LC", "ST", "SC",
-  "SL", "SB", "SO", "SR", "SY", "TL", "TG", "TO", "TV", "UG", "VU", "YE", "ZW",
-]);
-
-const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
-
 const serviceOptionsCache = new Map<string, { data: any; expiresAt: number }>();
 const SERVICE_OPTIONS_CACHE_TTL = 10 * 60 * 1000;
 
-const shipperRecipientAddressSchema = z.object({
-  countryCode: z.string().min(2, "Country code is required").max(2, "Country code must be 2 characters"),
-  city: z.string().min(1, "City is required"),
-  addressLine1: z.string().min(1, "Address line 1 is required"),
-  addressLine2: z.string().optional(),
-  postalCode: z.string().optional(),
-  stateOrProvince: z.string().optional(),
-  email: z.string().email("Invalid email address").optional().or(z.literal("")),
-  phone: z.string().optional(),
-  name: z.string().optional(),
-});
-
-function validateShipperRecipientAddress(address: z.infer<typeof shipperRecipientAddressSchema>, label: string): string[] {
-  const errors: string[] = [];
-  const cc = address.countryCode.toUpperCase();
-
-  if (!POSTAL_CODE_EXEMPT_COUNTRIES.has(cc) && (!address.postalCode || address.postalCode.trim() === "")) {
-    errors.push(`${label}: Postal code is required for country ${cc}`);
-  }
-
-  if (STATE_REQUIRED_COUNTRIES.has(cc) && (!address.stateOrProvince || address.stateOrProvince.trim() === "")) {
-    errors.push(`${label}: State/Province is required for country ${cc}`);
-  }
-
-  return errors;
-}
 
 // Track failed login attempts for additional brute-force protection
 const failedLoginAttempts = new Map<string, { count: number; lastAttempt: number }>();
@@ -893,6 +858,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Shipment is not in carrier_error state" });
       }
 
+      const retryAddrValidation = validateShippingAddresses(
+        { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
+        { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
+      );
+      if (!retryAddrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: retryAddrValidation.errors });
+      }
+
       const carrierRequest: any = {
         shipper: {
           name: shipment.senderName,
@@ -992,13 +965,15 @@ export async function registerRoutes(
         });
       }
 
-      const previousStatus = shipment.paymentMethod === "CREDIT" ? "created" : "created";
       const updatedShipment = await storage.updateShipment(id, {
-        status: previousStatus,
+        status: "created",
         carrierStatus: "created",
         carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
+        carrierLabelBase64: carrierResponse.labelData || null,
+        carrierLabelMimeType: "application/pdf",
+        carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
         carrierErrorCode: null,
         carrierErrorMessage: null,
@@ -1017,6 +992,27 @@ export async function registerRoutes(
       });
     } catch (error) {
       logError("Failed to retry carrier creation", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/shipments/:id/label.pdf", requireAdmin, async (req, res) => {
+    try {
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (!shipment.carrierLabelBase64) {
+        return res.status(404).json({ error: "No label available for this shipment. The shipment may not have been created in FedEx yet." });
+      }
+      const pdfBuffer = Buffer.from(shipment.carrierLabelBase64, "base64");
+      const trackingNum = shipment.carrierTrackingNumber || shipment.trackingNumber || "unknown";
+      res.setHeader("Content-Type", shipment.carrierLabelMimeType || "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="fedex-label-${trackingNum}.pdf"`);
+      res.setHeader("Content-Length", pdfBuffer.length.toString());
+      res.send(pdfBuffer);
+    } catch (error) {
+      logError("Failed to download admin label", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -3375,6 +3371,11 @@ export async function registerRoutes(
 
       const data = shipmentInputSchema.parse(req.body);
 
+      const addrValidation = validateShippingAddresses(data.shipper, data.recipient);
+      if (!addrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: addrValidation.errors });
+      }
+
       // Get client account for pricing
       const account = await storage.getClientAccount(user.clientAccountId);
       if (!account) {
@@ -3722,6 +3723,14 @@ export async function registerRoutes(
         logError("Confirm shipment: No payment ID available", { shipmentId });
       }
 
+      const confirmAddrValidation = validateShippingAddresses(
+        { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
+        { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
+      );
+      if (!confirmAddrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: confirmAddrValidation.errors });
+      }
+
       // Create shipment with carrier
       const carrierRequest = {
         shipper: {
@@ -3833,6 +3842,9 @@ export async function registerRoutes(
         carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
+        carrierLabelBase64: carrierResponse.labelData || null,
+        carrierLabelMimeType: "application/pdf",
+        carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
         carrierLastAttemptAt: new Date(),
         carrierAttempts: (shipment.carrierAttempts || 0) + 1,
@@ -4043,6 +4055,34 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/client/shipments/:id/label.pdf", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (!shipment.carrierLabelBase64) {
+        return res.status(404).json({ error: "No label available for this shipment. The shipment may not have been created in FedEx yet." });
+      }
+      const pdfBuffer = Buffer.from(shipment.carrierLabelBase64, "base64");
+      const trackingNum = shipment.carrierTrackingNumber || shipment.trackingNumber || "unknown";
+      res.setHeader("Content-Type", shipment.carrierLabelMimeType || "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="fedex-label-${trackingNum}.pdf"`);
+      res.setHeader("Content-Length", pdfBuffer.length.toString());
+      res.send(pdfBuffer);
+    } catch (error) {
+      logError("Failed to download client label", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // ============================================
   // CLIENT - CREDIT INVOICES (Pay Later)
   // ============================================
@@ -4158,6 +4198,14 @@ export async function registerRoutes(
         status: "credit_pending",
       });
 
+      const payLaterAddrValidation = validateShippingAddresses(
+        { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
+        { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
+      );
+      if (!payLaterAddrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: payLaterAddrValidation.errors });
+      }
+
       const carrierRequest = {
         shipper: {
           name: shipment.senderName,
@@ -4249,6 +4297,9 @@ export async function registerRoutes(
           carrierTrackingNumber,
           carrierShipmentId: carrierResponse.trackingNumber,
           labelUrl: carrierResponse.labelUrl,
+          carrierLabelBase64: carrierResponse.labelData || null,
+          carrierLabelMimeType: "application/pdf",
+          carrierLabelFormat: "PDF",
           estimatedDelivery: carrierResponse.estimatedDelivery,
           carrierLastAttemptAt: new Date(),
           carrierAttempts: (shipment.carrierAttempts || 0) + 1,
@@ -4266,6 +4317,21 @@ export async function registerRoutes(
           carrierErrorMessage: errMsg,
           carrierLastAttemptAt: new Date(),
           carrierAttempts: (shipment.carrierAttempts || 0) + 1,
+        });
+
+        await storage.createCreditNotificationEvent({
+          clientAccountId: user.clientAccountId,
+          creditInvoiceId: creditInvoice.id,
+          type: "INVOICE_CREATED",
+          sentAt: now,
+          meta: JSON.stringify({ shipmentId, amount: shipment.finalPrice }),
+        });
+
+        return res.status(502).json({
+          message: "Carrier creation failed. Invoice created, but shipment was not created in FedEx yet.",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+          creditInvoice,
         });
       }
 
@@ -4777,7 +4843,7 @@ export async function registerRoutes(
           name: "Origin",
           streetLine1: "",
           city: data.senderCity,
-          postalCode: data.senderPostalCode || "00000",
+          postalCode: data.senderPostalCode || "",
           countryCode: data.senderCountry,
           phone: "",
         },
@@ -4785,7 +4851,7 @@ export async function registerRoutes(
           name: "Destination",
           streetLine1: "",
           city: data.recipientCity,
-          postalCode: data.recipientPostalCode || "00000",
+          postalCode: data.recipientPostalCode || "",
           countryCode: data.recipientCountry,
           phone: "",
         },
@@ -5015,11 +5081,20 @@ export async function registerRoutes(
       });
 
       const params = querySchema.parse(req.query);
-      const isInternational = params.shipperCountry.toUpperCase() !== params.recipientCountry.toUpperCase();
+      const shipperCC = params.shipperCountry.toUpperCase();
+      const recipientCC = params.recipientCountry.toUpperCase();
+      const isInternational = shipperCC !== recipientCC;
+
+      if (!params.shipperPostal && !POSTAL_CODE_EXEMPT_COUNTRIES.has(shipperCC)) {
+        return res.status(400).json({ message: "Shipper postal code is required to fetch FedEx services for this lane." });
+      }
+      if (!params.recipientPostal && !POSTAL_CODE_EXEMPT_COUNTRIES.has(recipientCC)) {
+        return res.status(400).json({ message: "Recipient postal code is required to fetch FedEx services for this lane." });
+      }
 
       const cacheKey = [
-        params.shipperCountry, params.shipperPostal, params.shipperCity,
-        params.recipientCountry, params.recipientPostal, params.recipientCity,
+        shipperCC, params.shipperPostal, params.shipperCity,
+        recipientCC, params.recipientPostal, params.recipientCity,
         params.packagingType, params.weight,
       ].join("|").toUpperCase();
 
@@ -5033,12 +5108,12 @@ export async function registerRoutes(
       try {
         const saResult = await fedexAdapter.checkServiceAvailability({
           origin: {
-            postalCode: params.shipperPostal || "00000",
-            countryCode: params.shipperCountry,
+            postalCode: params.shipperPostal || "",
+            countryCode: shipperCC,
           },
           destination: {
-            postalCode: params.recipientPostal || "00000",
-            countryCode: params.recipientCountry,
+            postalCode: params.recipientPostal || "",
+            countryCode: recipientCC,
           },
           shipDate: params.shipDate,
         });
@@ -5073,16 +5148,16 @@ export async function registerRoutes(
               name: "Origin",
               streetLine1: "",
               city: params.shipperCity,
-              postalCode: params.shipperPostal || "00000",
-              countryCode: params.shipperCountry,
+              postalCode: params.shipperPostal || "",
+              countryCode: shipperCC,
               phone: "",
             },
             recipient: {
               name: "Destination",
               streetLine1: "",
               city: params.recipientCity,
-              postalCode: params.recipientPostal || "00000",
-              countryCode: params.recipientCountry,
+              postalCode: params.recipientPostal || "",
+              countryCode: recipientCC,
               phone: "",
             },
             packages: [{
