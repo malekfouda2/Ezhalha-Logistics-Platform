@@ -253,6 +253,7 @@ interface ServiceOption {
   packagingType: string;
   displayName: string;
   isInternational: boolean;
+  validPackagingTypes?: string[];
 }
 
 interface AddressValidationResult {
@@ -270,13 +271,20 @@ interface AddressValidationResult {
 
 const packageTypes = [
   { value: "YOUR_PACKAGING", label: "Your Own Packaging" },
-  { value: "ENVELOPE", label: "Envelope" },
-  { value: "PAK", label: "Pak / Pouch" },
-  { value: "BOX_SMALL", label: "Small Box" },
-  { value: "BOX_MEDIUM", label: "Medium Box" },
-  { value: "BOX_LARGE", label: "Large Box" },
-  { value: "TUBE", label: "Tube / Cylinder" },
+  { value: "FEDEX_ENVELOPE", label: "FedEx Envelope" },
+  { value: "FEDEX_PAK", label: "FedEx Pak" },
+  { value: "FEDEX_BOX", label: "FedEx Box" },
+  { value: "FEDEX_SMALL_BOX", label: "FedEx Small Box" },
+  { value: "FEDEX_MEDIUM_BOX", label: "FedEx Medium Box" },
+  { value: "FEDEX_LARGE_BOX", label: "FedEx Large Box" },
+  { value: "FEDEX_10KG_BOX", label: "FedEx 10kg Box" },
+  { value: "FEDEX_25KG_BOX", label: "FedEx 25kg Box" },
+  { value: "FEDEX_TUBE", label: "FedEx Tube" },
 ];
+
+const packageTypeLabels: Record<string, string> = Object.fromEntries(
+  packageTypes.map(p => [p.value, p.label])
+);
 
 const carriers = [
   { code: "FEDEX", name: "FedEx" },
@@ -757,6 +765,12 @@ export default function CreateShipment() {
       setAvailableServices(data.services);
       if (data.services.length === 0) {
         setServicesError("No shipping services available for this lane. Please check addresses and try again.");
+      } else if (data.services.length > 0) {
+        const firstService = data.services[0];
+        const validPkgs = firstService.validPackagingTypes || [];
+        if (validPkgs.length > 0 && !validPkgs.includes(packageType)) {
+          setFormData(prev => ({ ...prev, packageType: validPkgs[0] }));
+        }
       }
     } catch {
       setServicesError("Could not load available services. Rates will still be fetched.");
@@ -1462,9 +1476,18 @@ export default function CreateShipment() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {packageTypes.map((p) => (
-                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                      ))}
+                      {(() => {
+                        const allValidPkgs = new Set<string>();
+                        availableServices.forEach(svc => {
+                          (svc.validPackagingTypes || []).forEach(p => allValidPkgs.add(p));
+                        });
+                        const filtered = allValidPkgs.size > 0 
+                          ? packageTypes.filter(p => allValidPkgs.has(p.value))
+                          : packageTypes;
+                        return (filtered.length > 0 ? filtered : packageTypes).map((p) => (
+                          <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>

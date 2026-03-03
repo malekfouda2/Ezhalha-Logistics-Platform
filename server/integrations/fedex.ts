@@ -107,6 +107,7 @@ export interface ServiceAvailabilityResponse {
     isInternational: boolean;
     transitDays?: number;
     deliveryDate?: string;
+    validPackagingTypes?: string[];
   }>;
 }
 
@@ -126,6 +127,7 @@ export interface RateResponse {
   transitDays: number;
   deliveryDate?: Date;
   serviceName: string;
+  packagingType?: string;
 }
 
 export interface CreateShipmentRequest {
@@ -133,6 +135,7 @@ export interface CreateShipmentRequest {
   recipient: ShippingAddress;
   packages: PackageDetails[];
   serviceType: string;
+  packagingType?: string;
   labelFormat?: "PDF" | "PNG" | "ZPL";
   commodityDescription?: string;
   declaredValue?: number;
@@ -576,16 +579,39 @@ export class FedExAdapter implements CarrierAdapter {
       const { data } = await this.makeRequest<any>("/availability/v1/packageandserviceoptions", "POST", fedexRequest);
       
       const isInternational = request.origin.countryCode !== request.destination.countryCode;
-      const services = data.output?.packageOptions || [];
+      const packageOptions = data.output?.packageOptions || [];
+      
+      const serviceMap = new Map<string, { displayName: string; packagingTypes: Set<string>; transitDays?: number; deliveryDate?: string }>();
+      for (const opt of packageOptions) {
+        const svcKey = typeof opt.serviceType === "object" ? opt.serviceType.key : opt.serviceType;
+        const svcName = typeof opt.serviceType === "object" ? opt.serviceType.displayText : (opt.serviceDescription || svcKey);
+        const pkgKey = typeof opt.packageType === "object" ? opt.packageType.key : opt.packageType;
+        
+        if (!svcKey) continue;
+        
+        if (!serviceMap.has(svcKey)) {
+          serviceMap.set(svcKey, {
+            displayName: svcName || svcKey,
+            packagingTypes: new Set<string>(),
+            transitDays: opt.transitTime?.minimumTransitTime,
+            deliveryDate: opt.deliveryDay,
+          });
+        }
+        if (pkgKey) {
+          serviceMap.get(svcKey)!.packagingTypes.add(pkgKey);
+        }
+      }
+      
       return {
-        services: services.map((svc: any) => ({
-          serviceType: svc.serviceType,
-          serviceName: svc.serviceDescription,
-          displayName: svc.serviceDescription || svc.serviceType,
+        services: Array.from(serviceMap.entries()).map(([serviceType, info]) => ({
+          serviceType,
+          serviceName: info.displayName,
+          displayName: info.displayName,
           available: true,
           isInternational,
-          transitDays: svc.transitTime?.minimumTransitTime,
-          deliveryDate: svc.deliveryDay,
+          transitDays: info.transitDays,
+          deliveryDate: info.deliveryDate,
+          validPackagingTypes: Array.from(info.packagingTypes),
         })),
       };
     } catch (error) {
@@ -628,8 +654,12 @@ export class FedExAdapter implements CarrierAdapter {
       "FEDEX_MEDIUM_BOX": "FEDEX_MEDIUM_BOX",
       "FEDEX_LARGE_BOX": "FEDEX_LARGE_BOX",
       "FEDEX_TUBE": "FEDEX_TUBE",
+      "FEDEX_BOX": "FEDEX_BOX",
+      "FEDEX_10KG_BOX": "FEDEX_10KG_BOX",
+      "FEDEX_25KG_BOX": "FEDEX_25KG_BOX",
+      "FEDEX_EXTRA_LARGE_BOX": "FEDEX_EXTRA_LARGE_BOX",
     };
-    return mapping[packageType || "YOUR_PACKAGING"] || "YOUR_PACKAGING";
+    return mapping[packageType || "YOUR_PACKAGING"] || packageType || "YOUR_PACKAGING";
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
@@ -666,50 +696,72 @@ export class FedExAdapter implements CarrierAdapter {
         recipientAddress.stateOrProvinceCode = request.recipient.stateOrProvince;
       }
 
-      const rateRequest = {
-        accountNumber: { value: this.accountNumber },
-        requestedShipment: {
-          pickupType: "DROPOFF_AT_FEDEX_LOCATION",
-          rateRequestType: ["LIST", "ACCOUNT"],
-          shipper: { address: shipperAddress },
-          recipient: { address: recipientAddress },
-          requestedPackageLineItems: request.packages.map(pkg => ({
-            weight: {
-              value: pkg.weight,
-              units: pkg.weightUnit,
-            },
-            dimensions: pkg.dimensions ? {
-              length: pkg.dimensions.length,
-              width: pkg.dimensions.width,
-              height: pkg.dimensions.height,
-              units: pkg.dimensions.unit,
-            } : undefined,
-            groupPackageCount: 1,
-          })),
-          packagingType: request.packagingType || "YOUR_PACKAGING",
-          packageCount: request.packages.length,
-        },
-      };
+      const packagingTypesToTry = [request.packagingType || "YOUR_PACKAGING"];
+      if (packagingTypesToTry[0] === "YOUR_PACKAGING") {
+        packagingTypesToTry.push("FEDEX_BOX", "FEDEX_PAK", "FEDEX_ENVELOPE");
+      }
 
-      const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
-      
-      const rates = data.output.rateReplyDetails.map((rate: any) => {
-        const baseRate = parseMoney(rate.ratedShipmentDetails?.[0]?.totalNetCharge);
-        if (isNaN(baseRate)) {
-          throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
-        }
-        return {
-          baseRate,
-          currency: rate.ratedShipmentDetails[0].currency,
-          serviceType: rate.serviceType,
-          transitDays: rate.operationalDetail?.transitTime || 3,
-          deliveryDate: rate.operationalDetail?.deliveryDate 
-            ? new Date(rate.operationalDetail.deliveryDate) 
-            : undefined,
-          serviceName: rate.serviceName,
+      let lastError: any = null;
+      for (const tryPackaging of packagingTypesToTry) {
+        const rateRequest = {
+          accountNumber: { value: this.accountNumber },
+          requestedShipment: {
+            pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+            rateRequestType: ["LIST", "ACCOUNT"],
+            shipper: { address: shipperAddress },
+            recipient: { address: recipientAddress },
+            requestedPackageLineItems: request.packages.map(pkg => ({
+              weight: {
+                value: pkg.weight,
+                units: pkg.weightUnit,
+              },
+              dimensions: pkg.dimensions ? {
+                length: pkg.dimensions.length,
+                width: pkg.dimensions.width,
+                height: pkg.dimensions.height,
+                units: pkg.dimensions.unit,
+              } : undefined,
+              groupPackageCount: 1,
+            })),
+            packagingType: tryPackaging,
+            packageCount: request.packages.length,
+          },
         };
-      });
-      return rates;
+
+        try {
+          const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
+          
+          const rates = data.output.rateReplyDetails.map((rate: any) => {
+            const baseRate = parseMoney(rate.ratedShipmentDetails?.[0]?.totalNetCharge);
+            if (isNaN(baseRate)) {
+              throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
+            }
+            return {
+              baseRate,
+              currency: rate.ratedShipmentDetails[0].currency,
+              serviceType: rate.serviceType,
+              transitDays: rate.operationalDetail?.transitTime || 3,
+              deliveryDate: rate.operationalDetail?.deliveryDate 
+                ? new Date(rate.operationalDetail.deliveryDate) 
+                : undefined,
+              serviceName: rate.serviceName,
+              packagingType: tryPackaging,
+            };
+          });
+          return rates;
+        } catch (retryErr: any) {
+          const errMsg = retryErr?.message || "";
+          const isPackagingError = errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID") ||
+            (retryErr?.response?.data?.errors || []).some((e: any) => e.code === "SERVICE.PACKAGECOMBINATION.INVALID");
+          if (isPackagingError && packagingTypesToTry.indexOf(tryPackaging) < packagingTypesToTry.length - 1) {
+            logInfo(`FedEx rate failed with packaging ${tryPackaging}, trying next option`);
+            lastError = retryErr;
+            continue;
+          }
+          throw retryErr;
+        }
+      }
+      throw lastError || new CarrierError("RATE_FAILED", "All packaging type attempts failed");
     } catch (error: any) {
       logInfo("FedEx rate API unavailable for this route, using calculated rates", {
         from: request.shipper.countryCode,
@@ -847,7 +899,9 @@ export class FedExAdapter implements CarrierAdapter {
         }],
         shipDatestamp,
         serviceType: request.serviceType,
-        packagingType: this.mapPackagingType(request.packages[0]?.packageType),
+        packagingType: request.packagingType 
+          ? this.mapPackagingType(request.packagingType) 
+          : this.mapPackagingType(request.packages[0]?.packageType),
         pickupType: "DROPOFF_AT_FEDEX_LOCATION",
         shippingChargesPayment: {
           paymentType: "SENDER",

@@ -938,6 +938,7 @@ export async function registerRoutes(
           packageType: shipment.packageType,
         }],
         serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        packagingType: shipment.packageType || "YOUR_PACKAGING",
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
@@ -3449,10 +3450,10 @@ export async function registerRoutes(
         const marginAmount = rate.baseRate * (marginPercentage / 100);
         const finalPrice = rate.baseRate + marginAmount;
 
-        // Store quote in database
+        const quoteShipmentData = { ...data, effectivePackagingType: rate.packagingType || data.packageType };
         const quote = await storage.createShipmentRateQuote({
           clientAccountId: user.clientAccountId,
-          shipmentData: JSON.stringify(data),
+          shipmentData: JSON.stringify(quoteShipmentData),
           carrierCode: fedexAdapter.carrierCode,
           carrierName: fedexAdapter.name,
           serviceType: rate.serviceType,
@@ -3584,7 +3585,7 @@ export async function registerRoutes(
         width: shipmentData.packages[0].width.toString(),
         height: shipmentData.packages[0].height.toString(),
         dimensionUnit: shipmentData.dimensionUnit,
-        packageType: shipmentData.packageType,
+        packageType: shipmentData.effectivePackagingType || shipmentData.packageType,
         numberOfPackages: shipmentData.packages.length,
         packagesData: JSON.stringify(shipmentData.packages),
         itemsData: shipmentData.items ? JSON.stringify(shipmentData.items) : undefined,
@@ -3767,6 +3768,7 @@ export async function registerRoutes(
           packageType: shipment.packageType,
         }],
         serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        packagingType: shipment.packageType || "YOUR_PACKAGING",
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
@@ -4201,6 +4203,7 @@ export async function registerRoutes(
           packageType: shipment.packageType,
         }],
         serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        packagingType: shipment.packageType || "YOUR_PACKAGING",
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
@@ -5025,7 +5028,7 @@ export async function registerRoutes(
         return res.json(cached.data);
       }
 
-      let services: Array<{ serviceType: string; packagingType: string; displayName: string; isInternational: boolean }> = [];
+      let services: Array<{ serviceType: string; packagingType: string; displayName: string; isInternational: boolean; validPackagingTypes?: string[] }> = [];
 
       try {
         const saResult = await fedexAdapter.checkServiceAvailability({
@@ -5043,12 +5046,20 @@ export async function registerRoutes(
         if (saResult.services && saResult.services.length > 0) {
           services = saResult.services
             .filter(s => s.available !== false)
-            .map(s => ({
-              serviceType: s.serviceType,
-              packagingType: params.packagingType || "YOUR_PACKAGING",
-              displayName: s.serviceName,
-              isInternational,
-            }));
+            .map(s => {
+              const validPkgs = s.validPackagingTypes || [];
+              const requestedPkg = params.packagingType || "YOUR_PACKAGING";
+              const effectivePkg = validPkgs.length > 0
+                ? (validPkgs.includes(requestedPkg) ? requestedPkg : validPkgs[0])
+                : requestedPkg;
+              return {
+                serviceType: s.serviceType,
+                packagingType: effectivePkg,
+                displayName: s.serviceName || s.displayName,
+                isInternational,
+                validPackagingTypes: validPkgs,
+              };
+            });
         }
       } catch (saError) {
         logError("FedEx service availability failed, falling back to rates API", saError);
