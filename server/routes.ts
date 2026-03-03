@@ -3418,6 +3418,7 @@ export async function registerRoutes(
           packageType: data.packageType,
         })),
         serviceType: data.serviceType,
+        packagingType: data.packageType,
         currency: data.currency,
       };
 
@@ -5078,6 +5079,7 @@ export async function registerRoutes(
               weightUnit: "KG",
               packageType: params.packagingType || "YOUR_PACKAGING",
             }],
+            packagingType: params.packagingType || "YOUR_PACKAGING",
           });
 
           const seen = new Set<string>();

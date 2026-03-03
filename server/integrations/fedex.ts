@@ -115,6 +115,7 @@ export interface RateRequest {
   recipient: ShippingAddress;
   packages: PackageDetails[];
   serviceType?: string;
+  packagingType?: string;
   currency?: string;
 }
 
@@ -685,7 +686,7 @@ export class FedExAdapter implements CarrierAdapter {
             } : undefined,
             groupPackageCount: 1,
           })),
-          packagingType: "YOUR_PACKAGING",
+          packagingType: request.packagingType || "YOUR_PACKAGING",
           packageCount: request.packages.length,
         },
       };
@@ -867,31 +868,44 @@ export class FedExAdapter implements CarrierAdapter {
         let commodities: any[];
 
         if (request.items && request.items.length > 0) {
-          commodities = request.items.map(item => ({
-            description: (item.description || "General Merchandise").substring(0, 450),
-            quantity: item.quantity || 1,
-            quantityUnits: "PCS",
-            customsValue: {
-              amount: parseMoney(item.unitPrice * (item.quantity || 1)),
-              currency: item.currency || requestCurrency,
-            },
-            weight: {
-              units: request.packages[0]?.weightUnit || "KG",
-              value: request.packages.reduce((sum, pkg) => sum + pkg.weight, 0) / (request.items?.length || 1),
-            },
-            countryOfManufacture: item.countryOfOrigin || request.shipper.countryCode,
-            numberOfPieces: item.quantity || 1,
-            harmonizedCode: item.hsCode || undefined,
-          }));
+          commodities = request.items.map(item => {
+            const qty = item.quantity || 1;
+            const price = parseMoney(item.unitPrice) || 0;
+            return {
+              description: (item.description || "General Merchandise").substring(0, 450),
+              quantity: qty,
+              quantityUnits: "PCS",
+              unitPrice: {
+                amount: price,
+                currency: item.currency || requestCurrency,
+              },
+              customsValue: {
+                amount: parseMoney(price * qty),
+                currency: item.currency || requestCurrency,
+              },
+              weight: {
+                units: request.packages[0]?.weightUnit || "KG",
+                value: request.packages.reduce((sum, pkg) => sum + pkg.weight, 0) / (request.items?.length || 1),
+              },
+              countryOfManufacture: item.countryOfOrigin || request.shipper.countryCode,
+              numberOfPieces: qty,
+              harmonizedCode: item.hsCode || undefined,
+            };
+          });
         } else {
           const totalWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
           const weightUnit = request.packages[0]?.weightUnit || "KG";
+          const declaredValue = parseMoney(request.declaredValue || 100);
           commodities = [{
             description: (request.commodityDescription || "General Merchandise").substring(0, 450),
             quantity: request.packages.length || 1,
             quantityUnits: "PCS",
+            unitPrice: {
+              amount: declaredValue,
+              currency: requestCurrency,
+            },
             customsValue: {
-              amount: parseMoney(request.declaredValue || 100),
+              amount: declaredValue,
               currency: requestCurrency,
             },
             weight: {
