@@ -1,0 +1,73 @@
+0|ezhalha  | 2026-03-03 05:09:53 +00:00: Database already initialized
+0|ezhalha  | 2026-03-03 05:09:53 +00:00: 5:09:53 AM [express] serving on port 5000
+0|ezhalha  | 2026-03-03 05:09:53 +00:00: 2026-03-03 05:09:53 [INFO] Starting credit reminder scheduler (hourly)
+0|ezhalha  | 2026-03-03 05:10:03 +00:00: 2026-03-03 05:10:03 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 05:10:03 +00:00: 2026-03-03 05:10:03 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 05:10:03 +00:00: 2026-03-03 05:10:03 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 05:10:13 +00:00: 2026-03-03 05:10:13 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 05:10:13 +00:00: 2026-03-03 05:10:13 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 05:10:13 +00:00: 2026-03-03 05:10:13 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 05:10:16 +00:00: 5:10:16 AM [express] GET /api/auth/me 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:19 +00:00: 2026-03-03 05:10:19 [INFO] AUDIT {"userId":"0e51f628-9bb7-4368-940b-650666aa4dfd","action":"login","resource":"user","resourceId":"0e51f628-9bb7-4368-940b-650666aa4dfd","details":"User admin logged in","ipAddress":"105.197.127.153"}
+0|ezhalha  | 2026-03-03 05:10:19 +00:00: 5:10:19 AM [express] POST /api/auth/login 200 in 84ms
+0|ezhalha  | 2026-03-03 05:10:19 +00:00: 5:10:19 AM [express] GET /api/admin/applications/pending 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:19 +00:00: 5:10:19 AM [express] GET /api/admin/shipments/recent 401 in 0ms
+0|ezhalha  | 2026-03-03 05:10:19 +00:00: 5:10:19 AM [express] GET /api/admin/stats 401 in 4ms
+0|ezhalha  | 2026-03-03 05:10:23 +00:00: 2026-03-03 05:10:23 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 05:10:23 +00:00: 2026-03-03 05:10:23 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 05:10:23 +00:00: 2026-03-03 05:10:23 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 05:10:23 +00:00: 5:10:23 AM [express] GET /api/admin/clients 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:23 +00:00: 5:10:23 AM [express] GET /api/admin/pricing 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:24 +00:00: 5:10:24 AM [express] GET /api/admin/applications 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:24 +00:00: 5:10:24 AM [express] GET /api/admin/pricing 401 in 0ms
+0|ezhalha  | 2026-03-03 05:10:24 +00:00: 5:10:24 AM [express] GET /api/admin/shipments 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:25 +00:00: 5:10:25 AM [express] GET /api/admin/invoices 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:26 +00:00: 5:10:26 AM [express] GET /api/admin/credit-requests 401 in 6ms
+0|ezhalha  | 2026-03-03 05:10:26 +00:00: 5:10:26 AM [express] GET /api/admin/credit-invoices 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:27 +00:00: 5:10:27 AM [express] GET /api/admin/audit-logs/stats 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:27 +00:00: 5:10:27 AM [express] GET /api/admin/audit-logs 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:28 +00:00: 5:10:28 AM [express] GET /api/admin/pricing 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:29 +00:00: 5:10:29 AM [express] GET /api/admin/integration-logs 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:30 +00:00: 5:10:30 AM [express] GET /api/admin/webhook-events 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:30 +00:00: 5:10:30 AM [express] GET /api/admin/roles 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:30 +00:00: 5:10:30 AM [express] GET /api/admin/permissions 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:31 +00:00: 5:10:31 AM [express] GET /api/admin/email-templates 401 in 0ms
+0|ezhalha  | 2026-03-03 05:10:31 +00:00: 5:10:31 AM [express] GET /api/admin/policies 401 in 2ms
+0|ezhalha  | 2026-03-03 05:10:37 +00:00: 5:10:37 AM [express] GET /api/admin/stats 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:37 +00:00: 5:10:37 AM [express] GET /api/admin/shipments/recent 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:37 +00:00: 5:10:37 AM [express] GET /api/admin/applications/pending 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:37 +00:00: 5:10:37 AM [express] GET /api/admin/clients 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:37 +00:00: 5:10:37 AM [express] GET /api/admin/pricing 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:38 +00:00: 5:10:38 AM [express] GET /api/admin/applications 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:38 +00:00: 5:10:38 AM [express] GET /api/admin/pricing 401 in 0ms
+0|ezhalha  | 2026-03-03 05:10:39 +00:00: 5:10:39 AM [express] GET /api/admin/invoices 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:39 +00:00: 5:10:39 AM [express] GET /api/admin/shipments 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:40 +00:00: 5:10:40 AM [express] GET /api/admin/payments 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:41 +00:00: 5:10:41 AM [express] GET /api/admin/credit-invoices 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:41 +00:00: 5:10:41 AM [express] GET /api/admin/credit-requests 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:42 +00:00: 5:10:42 AM [express] GET /api/admin/pricing 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:42 +00:00: 5:10:42 AM [express] GET /api/admin/audit-logs 401 in 1ms
+0|ezhalha  | 2026-03-03 05:10:42 +00:00: 5:10:42 AM [express] GET /api/admin/audit-logs/stats 401 in 1ms
+
+3|ezhalha  | 2026-03-03 05:11:17 +00:00: 5:11:17 AM [express] GET /api/admin/clients 401 in 1ms
+2|ezhalha  | 2026-03-03 05:11:17 +00:00: 5:11:17 AM [express] GET /api/admin/pricing 401 in 1ms
+0|ezhalha  | 2026-03-03 05:11:27 +00:00: 5:11:27 AM [express] POST /api/auth/logout 200 in 9ms
+1|ezhalha  | 2026-03-03 05:12:19 +00:00: 2026-03-03 05:12:19 [INFO] Email sent successfully {"to":"malekfouda2000@gmail.com","subject":"ezhalha Application Received"}
+1|ezhalha  | 2026-03-03 05:12:19 +00:00: 2026-03-03 05:12:19 [INFO] Admin email not configured, skipping notification
+1|ezhalha  | 2026-03-03 05:12:19 +00:00: 2026-03-03 05:12:19 [INFO] New client application received {"applicationId":"868c1668-5a3b-415d-a425-c53f825772dd","email":"malekfouda2000@gmail.com","name":"Malek FOuda"}
+1|ezhalha  | 2026-03-03 05:12:19 +00:00: 5:12:19 AM [express] POST /api/applications 201 in 510ms
+1|ezhalha  | 2026-03-03 05:12:42 +00:00: 2026-03-03 05:12:42 [INFO] AUDIT {"userId":"0e51f628-9bb7-4368-940b-650666aa4dfd","action":"login","resource":"user","resourceId":"0e51f628-9bb7-4368-940b-650666aa4dfd","details":"User admin logged in","ipAddress":"105.197.127.153"}
+1|ezhalha  | 2026-03-03 05:12:42 +00:00: 5:12:42 AM [express] POST /api/auth/login 200 in 71ms
+3|ezhalha  | 2026-03-03 05:12:42 +00:00: 5:12:42 AM [express] GET /api/admin/stats 401 in 1ms
+1|ezhalha  | 2026-03-03 05:12:42 +00:00: 5:12:42 AM [express] GET /api/admin/shipments/recent 401 in 1ms
+0|ezhalha  | 2026-03-03 05:12:42 +00:00: 5:12:42 AM [express] GET /api/admin/applications/pending 401 in 1ms
+0|ezhalha  | 2026-03-03 05:12:45 +00:00: 5:12:45 AM [express] GET /api/admin/email-templates 401 in 1ms
+2|ezhalha  | 2026-03-03 05:13:01 +00:00: 5:13:01 AM [express] GET /api/admin/applications 401 in 1ms
+2|ezhalha  | 2026-03-03 05:13:01 +00:00: 5:13:01 AM [express] GET /api/admin/pricing 401 in 1ms
+2|ezhalha  | 2026-03-03 05:13:02 +00:00: 5:13:02 AM [express] GET /api/admin/applications 401 in 0ms
+3|ezhalha  | 2026-03-03 05:13:03 +00:00: 5:13:03 AM [express] GET /api/admin/applications 401 in 0ms
+3|ezhalha  | 2026-03-03 05:13:03 +00:00: 5:13:03 AM [express] GET /api/admin/applications 401 in 0ms
+0|ezhalha  | 2026-03-03 05:13:04 +00:00: 5:13:04 AM [express] GET /api/admin/applications 401 in 1ms
+0|ezhalha  | 2026-03-03 05:13:14 +00:00: 5:13:14 AM [express] GET /api/admin/audit-logs 401 in 1ms
+1|ezhalha  | 2026-03-03 05:13:14 +00:00: 5:13:14 AM [express] GET /api/admin/audit-logs/stats 401 in 1ms
+2|ezhalha  | 2026-03-03 05:13:17 +00:00: 5:13:17 AM [express] GET /api/admin/audit-logs 401 in 1ms
