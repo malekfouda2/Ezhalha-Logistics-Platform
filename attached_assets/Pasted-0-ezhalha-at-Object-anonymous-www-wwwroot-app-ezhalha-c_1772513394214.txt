@@ -1,0 +1,42 @@
+0|ezhalha  |     at Object.<anonymous> (/www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23500)
+0|ezhalha  |     at Module._compile (node:internal/modules/cjs/loader:1804:14)
+0|ezhalha  |     at Object..js (node:internal/modules/cjs/loader:1936:10)
+0|ezhalha  |     at Module.load (node:internal/modules/cjs/loader:1525:32)
+0|ezhalha  |     at Module._load (node:internal/modules/cjs/loader:1327:12)
+0|ezhalha  |     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+0|ezhalha  |     at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+0|ezhalha  |     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:339:3)
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | Error: FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL
+0|ezhalha  |     at Yj (/www/wwwroot/app.ezhalha.co/dist/index.cjs:495:27073)
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23059
+0|ezhalha  |     at Object.<anonymous> (/www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23500)
+0|ezhalha  |     at Module._compile (node:internal/modules/cjs/loader:1804:14)
+0|ezhalha  |     at Object..js (node:internal/modules/cjs/loader:1936:10)
+0|ezhalha  |     at Module.load (node:internal/modules/cjs/loader:1525:32)
+0|ezhalha  |     at Module._load (node:internal/modules/cjs/loader:1327:12)
+0|ezhalha  |     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+0|ezhalha  |     at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+0|ezhalha  |     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:339:3)
+
+/www/wwwroot/app.ezhalha.co/logs/pm2-out.log last 20 lines:
+0|ezhalha  | 2026-03-03 04:45:50 +00:00: 2026-03-03 04:45:50 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 04:45:50 +00:00: 2026-03-03 04:45:50 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 04:45:50 +00:00: 2026-03-03 04:45:50 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 04:45:50 +00:00: 2026-03-03 04:45:50 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Cleared expired idempotency records
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Starting credit invoice reminder processing...
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Found 0 credit invoices due for reminder
+0|ezhalha  | 2026-03-03 04:46:00 +00:00: 2026-03-03 04:46:00 [INFO] Credit invoice reminder processing completed
+0|ezhalha  | 2026-03-03 04:48:28 +00:00: 2026-03-03 04:48:28 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:28 +00:00: 2026-03-03 04:48:28 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:28 +00:00: 2026-03-03 04:48:28 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:48:28 +00:00: 2026-03-03 04:48:28 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
