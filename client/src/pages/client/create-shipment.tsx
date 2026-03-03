@@ -100,6 +100,7 @@ interface ShipmentFormData {
   shipper: {
     name: string;
     phone: string;
+    email?: string;
     countryCode: string;
     city: string;
     postalCode: string;
@@ -111,6 +112,7 @@ interface ShipmentFormData {
   recipient: {
     name: string;
     phone: string;
+    email?: string;
     countryCode: string;
     city: string;
     postalCode: string;
@@ -174,11 +176,97 @@ const countries = [
   { code: "EG", name: "Egypt" },
   { code: "JO", name: "Jordan" },
   { code: "LB", name: "Lebanon" },
+  { code: "IQ", name: "Iraq" },
+  { code: "YE", name: "Yemen" },
+  { code: "SY", name: "Syria" },
+  { code: "PS", name: "Palestine" },
   { code: "US", name: "United States" },
+  { code: "CA", name: "Canada" },
+  { code: "MX", name: "Mexico" },
   { code: "GB", name: "United Kingdom" },
   { code: "DE", name: "Germany" },
   { code: "FR", name: "France" },
+  { code: "IT", name: "Italy" },
+  { code: "ES", name: "Spain" },
+  { code: "NL", name: "Netherlands" },
+  { code: "BE", name: "Belgium" },
+  { code: "AT", name: "Austria" },
+  { code: "CH", name: "Switzerland" },
+  { code: "SE", name: "Sweden" },
+  { code: "NO", name: "Norway" },
+  { code: "DK", name: "Denmark" },
+  { code: "FI", name: "Finland" },
+  { code: "PL", name: "Poland" },
+  { code: "PT", name: "Portugal" },
+  { code: "IE", name: "Ireland" },
+  { code: "GR", name: "Greece" },
+  { code: "CZ", name: "Czech Republic" },
+  { code: "RO", name: "Romania" },
+  { code: "HU", name: "Hungary" },
+  { code: "TR", name: "Turkey" },
+  { code: "RU", name: "Russia" },
+  { code: "UA", name: "Ukraine" },
+  { code: "CN", name: "China" },
+  { code: "JP", name: "Japan" },
+  { code: "KR", name: "South Korea" },
+  { code: "IN", name: "India" },
+  { code: "PK", name: "Pakistan" },
+  { code: "BD", name: "Bangladesh" },
+  { code: "LK", name: "Sri Lanka" },
+  { code: "TH", name: "Thailand" },
+  { code: "VN", name: "Vietnam" },
+  { code: "MY", name: "Malaysia" },
+  { code: "SG", name: "Singapore" },
+  { code: "ID", name: "Indonesia" },
+  { code: "PH", name: "Philippines" },
+  { code: "HK", name: "Hong Kong" },
+  { code: "TW", name: "Taiwan" },
+  { code: "AU", name: "Australia" },
+  { code: "NZ", name: "New Zealand" },
+  { code: "BR", name: "Brazil" },
+  { code: "AR", name: "Argentina" },
+  { code: "CL", name: "Chile" },
+  { code: "CO", name: "Colombia" },
+  { code: "PE", name: "Peru" },
+  { code: "ZA", name: "South Africa" },
+  { code: "NG", name: "Nigeria" },
+  { code: "KE", name: "Kenya" },
+  { code: "GH", name: "Ghana" },
+  { code: "MA", name: "Morocco" },
+  { code: "TN", name: "Tunisia" },
+  { code: "DZ", name: "Algeria" },
+  { code: "IL", name: "Israel" },
 ];
+
+const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
+  "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
+  "BF", "BI", "CM", "CF", "TD", "KM", "CG", "CD", "CI", "DJ", "DM", "GQ",
+  "ER", "FJ", "GA", "GM", "GH", "GD", "GN", "GW", "GY", "KI", "KP", "LY",
+  "MW", "ML", "MR", "NA", "NR", "PA", "RW", "KN", "LC", "ST", "SC",
+  "SL", "SB", "SO", "SR", "SY", "TL", "TG", "TO", "TV", "UG", "VU", "YE", "ZW",
+]);
+
+const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
+
+interface ServiceOption {
+  serviceType: string;
+  packagingType: string;
+  displayName: string;
+  isInternational: boolean;
+}
+
+interface AddressValidationResult {
+  valid: boolean;
+  classification?: string;
+  suggestions?: Array<{
+    streetLine1?: string;
+    city?: string;
+    stateOrProvince?: string;
+    postalCode?: string;
+    countryCode?: string;
+  }>;
+  errors?: string[];
+}
 
 const packageTypes = [
   { value: "YOUR_PACKAGING", label: "Your Own Packaging" },
@@ -193,20 +281,6 @@ const packageTypes = [
 const carriers = [
   { code: "FEDEX", name: "FedEx" },
 ];
-
-const serviceTypes: Record<string, { value: string; label: string }[]> = {
-  FEDEX: [
-    { value: "FEDEX_GROUND", label: "FedEx Ground" },
-    { value: "FEDEX_EXPRESS_SAVER", label: "FedEx Express Saver" },
-    { value: "FEDEX_2_DAY", label: "FedEx 2Day" },
-    { value: "FEDEX_2_DAY_AM", label: "FedEx 2Day AM" },
-    { value: "STANDARD_OVERNIGHT", label: "FedEx Standard Overnight" },
-    { value: "PRIORITY_OVERNIGHT", label: "FedEx Priority Overnight" },
-    { value: "FIRST_OVERNIGHT", label: "FedEx First Overnight" },
-    { value: "INTERNATIONAL_ECONOMY", label: "FedEx International Economy" },
-    { value: "INTERNATIONAL_PRIORITY", label: "FedEx International Priority" },
-  ],
-};
 
 const shipmentTypeOptions = [
   { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
@@ -237,6 +311,7 @@ export default function CreateShipment() {
     shipper: {
       name: "",
       phone: "",
+      email: "",
       countryCode: "",
       city: "",
       postalCode: "",
@@ -248,6 +323,7 @@ export default function CreateShipment() {
     recipient: {
       name: "",
       phone: "",
+      email: "",
       countryCode: "",
       city: "",
       postalCode: "",
@@ -267,6 +343,11 @@ export default function CreateShipment() {
   });
 
   const [hsLookupLoading, setHsLookupLoading] = useState<Record<number, boolean>>({});
+  const [availableServices, setAvailableServices] = useState<ServiceOption[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+  const [addressValidation, setAddressValidation] = useState<{ shipper?: AddressValidationResult; recipient?: AddressValidationResult }>({});
+  const [addressValidating, setAddressValidating] = useState<{ shipper?: boolean; recipient?: boolean }>({});
 
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
@@ -652,6 +733,85 @@ export default function CreateShipment() {
     } catch {}
   };
 
+  const fetchServiceOptions = useCallback(async () => {
+    const { shipper, recipient, packages, packageType, weightUnit } = formData;
+    if (!shipper.countryCode || !shipper.city || !recipient.countryCode || !recipient.city) return;
+    if (packages.length === 0 || !packages[0].weight) return;
+
+    setServicesLoading(true);
+    setServicesError(null);
+    try {
+      const params = new URLSearchParams({
+        shipperCountry: shipper.countryCode,
+        shipperPostal: shipper.postalCode || "",
+        shipperCity: shipper.city,
+        recipientCountry: recipient.countryCode,
+        recipientPostal: recipient.postalCode || "",
+        recipientCity: recipient.city,
+        packagingType: packageType,
+        weight: String(packages[0].weight),
+      });
+      const res = await fetch(`/api/fedex/service-options?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch service options");
+      const data = await res.json() as { services: ServiceOption[] };
+      setAvailableServices(data.services);
+      if (data.services.length === 0) {
+        setServicesError("No shipping services available for this lane. Please check addresses and try again.");
+      }
+    } catch {
+      setServicesError("Could not load available services. Rates will still be fetched.");
+      setAvailableServices([]);
+    } finally {
+      setServicesLoading(false);
+    }
+  }, [formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
+      formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
+      formData.packageType, formData.packages]);
+
+  useEffect(() => {
+    if (formData.shipper.countryCode && formData.shipper.city &&
+        formData.recipient.countryCode && formData.recipient.city &&
+        formData.packages.length > 0 && formData.packages[0].weight > 0) {
+      fetchServiceOptions();
+    }
+  }, [formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
+      formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
+      formData.packageType]);
+
+  const validateAddressViaApi = async (role: "shipper" | "recipient") => {
+    const addr = formData[role];
+    if (!addr.addressLine1 || !addr.countryCode) return;
+
+    setAddressValidating(prev => ({ ...prev, [role]: true }));
+    try {
+      const res = await apiRequest("POST", "/api/fedex/validate-address", {
+        streetLine1: addr.addressLine1,
+        streetLine2: addr.addressLine2 || undefined,
+        city: addr.city || undefined,
+        stateOrProvince: addr.stateOrProvince || undefined,
+        postalCode: addr.postalCode || undefined,
+        countryCode: addr.countryCode,
+      });
+      const result = await res.json() as AddressValidationResult;
+      setAddressValidation(prev => ({ ...prev, [role]: result }));
+    } catch (err: any) {
+      setAddressValidation(prev => ({
+        ...prev,
+        [role]: { valid: false, errors: [err?.message || "Address validation failed"] },
+      }));
+    } finally {
+      setAddressValidating(prev => ({ ...prev, [role]: false }));
+    }
+  };
+
+  const isPostalRequired = (countryCode: string) => {
+    return countryCode && !POSTAL_CODE_EXEMPT_COUNTRIES.has(countryCode.toUpperCase());
+  };
+
+  const isStateRequired = (countryCode: string) => {
+    return STATE_REQUIRED_COUNTRIES.has(countryCode.toUpperCase());
+  };
+
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!formData.shipmentType) {
@@ -660,7 +820,7 @@ export default function CreateShipment() {
       }
     } else if (currentStep === 2) {
       const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress, stateOrProvince } = formData.shipper;
-      if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
+      if (!name || !phone || !countryCode || !city || !addressLine1) {
         toast({ title: "Please fill in all required sender fields", variant: "destructive" });
         return false;
       }
@@ -668,17 +828,21 @@ export default function CreateShipment() {
         toast({ title: "Domestic shipments must be within Saudi Arabia", variant: "destructive" });
         return false;
       }
+      if (isPostalRequired(countryCode) && !postalCode) {
+        toast({ title: `Postal code is required for ${countryCode}`, variant: "destructive" });
+        return false;
+      }
       if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
       }
-      if ((countryCode === "US" || countryCode === "CA") && !stateOrProvince) {
+      if (isStateRequired(countryCode) && !stateOrProvince) {
         toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 3) {
       const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress, stateOrProvince } = formData.recipient;
-      if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
+      if (!name || !phone || !countryCode || !city || !addressLine1) {
         toast({ title: "Please fill in all required recipient fields", variant: "destructive" });
         return false;
       }
@@ -686,11 +850,15 @@ export default function CreateShipment() {
         toast({ title: "Domestic shipments must be within Saudi Arabia", variant: "destructive" });
         return false;
       }
+      if (isPostalRequired(countryCode) && !postalCode) {
+        toast({ title: `Postal code is required for ${countryCode}`, variant: "destructive" });
+        return false;
+      }
       if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
       }
-      if ((countryCode === "US" || countryCode === "CA") && !stateOrProvince) {
+      if (isStateRequired(countryCode) && !stateOrProvince) {
         toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
         return false;
       }
@@ -811,6 +979,7 @@ export default function CreateShipment() {
                     const emptyAddress = {
                       name: "",
                       phone: "",
+                      email: "",
                       countryCode: "",
                       city: "",
                       postalCode: "",
@@ -821,7 +990,6 @@ export default function CreateShipment() {
                     };
                     
                     if (v === "domestic") {
-                      // Domestic: Both addresses are in SA, use account address for both (deep copy to avoid shared reference)
                       const shipperAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
                       const recipientAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
                       setFormData(prev => ({
@@ -831,7 +999,6 @@ export default function CreateShipment() {
                         recipient: recipientAddress,
                       }));
                     } else if (v === "inbound") {
-                      // Inbound: Recipient is the client's address (deep copy to avoid shared reference)
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
@@ -839,7 +1006,6 @@ export default function CreateShipment() {
                         recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                       }));
                     } else if (v === "outbound") {
-                      // Outbound: Sender is the client's address (deep copy to avoid shared reference)
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
@@ -862,6 +1028,7 @@ export default function CreateShipment() {
                         const emptyAddress = {
                           name: "",
                           phone: "",
+                          email: "",
                           countryCode: "",
                           city: "",
                           postalCode: "",
@@ -974,7 +1141,7 @@ export default function CreateShipment() {
                   />
                 </div>
                 <div>
-                  <Label>State/Province</Label>
+                  <Label>State/Province {isStateRequired(formData.shipper.countryCode) ? "*" : ""}</Label>
                   <Input
                     value={formData.shipper.stateOrProvince || ""}
                     onChange={(e) => updateShipper("stateOrProvince", e.target.value)}
@@ -985,7 +1152,7 @@ export default function CreateShipment() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Postal Code *</Label>
+                  <Label>Postal Code {isPostalRequired(formData.shipper.countryCode) ? "*" : ""}</Label>
                   <Input
                     value={formData.shipper.postalCode}
                     onChange={(e) => updateShipper("postalCode", e.target.value)}
@@ -1014,14 +1181,26 @@ export default function CreateShipment() {
                   )}
                 </div>
               </div>
-              <div>
-                <Label>Phone *</Label>
-                <Input
-                  value={formData.shipper.phone}
-                  onChange={(e) => updateShipper("phone", e.target.value)}
-                  placeholder="+1 234 567 890"
-                  data-testid="input-shipper-phone"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Phone *</Label>
+                  <Input
+                    value={formData.shipper.phone}
+                    onChange={(e) => updateShipper("phone", e.target.value)}
+                    placeholder="+1 234 567 890"
+                    data-testid="input-shipper-phone"
+                  />
+                </div>
+                <div>
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    value={formData.shipper.email || ""}
+                    onChange={(e) => updateShipper("email", e.target.value)}
+                    placeholder="sender@example.com"
+                    data-testid="input-shipper-email"
+                  />
+                </div>
               </div>
               {senderNeedsShortAddress && (
                 <div>
@@ -1035,6 +1214,45 @@ export default function CreateShipment() {
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
               )}
+              <div className="pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => validateAddressViaApi("shipper")}
+                  disabled={addressValidating.shipper || !formData.shipper.addressLine1 || !formData.shipper.countryCode}
+                  data-testid="button-validate-shipper-address"
+                >
+                  {addressValidating.shipper ? (
+                    <><LoadingSpinner size="sm" className="mr-1" /> Validating...</>
+                  ) : (
+                    <><MapPin className="h-3 w-3 mr-1" /> Validate Address</>
+                  )}
+                </Button>
+                {addressValidation.shipper && (
+                  <div className={`mt-2 p-3 rounded-md text-sm ${
+                    addressValidation.shipper.valid
+                      ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
+                      : "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                  }`} data-testid="shipper-address-validation-result">
+                    {addressValidation.shipper.valid ? (
+                      <span className="flex items-center gap-1"><CheckCircle className="h-4 w-4" /> Address validated successfully</span>
+                    ) : (
+                      <div>
+                        <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> Address validation issues</span>
+                        {addressValidation.shipper.errors?.map((e, i) => <p key={i} className="mt-1">{e}</p>)}
+                        {addressValidation.shipper.suggestions && addressValidation.shipper.suggestions.length > 0 && (
+                          <div className="mt-2">
+                            <p className="font-medium">Suggestions:</p>
+                            {addressValidation.shipper.suggestions.map((s, i) => (
+                              <p key={i} className="text-xs mt-1">{[s.streetLine1, s.city, s.stateOrProvince, s.postalCode, s.countryCode].filter(Boolean).join(", ")}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
@@ -1101,7 +1319,7 @@ export default function CreateShipment() {
                   />
                 </div>
                 <div>
-                  <Label>State/Province</Label>
+                  <Label>State/Province {isStateRequired(formData.recipient.countryCode) ? "*" : ""}</Label>
                   <Input
                     value={formData.recipient.stateOrProvince || ""}
                     onChange={(e) => updateRecipient("stateOrProvince", e.target.value)}
@@ -1112,7 +1330,7 @@ export default function CreateShipment() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Postal Code *</Label>
+                  <Label>Postal Code {isPostalRequired(formData.recipient.countryCode) ? "*" : ""}</Label>
                   <Input
                     value={formData.recipient.postalCode}
                     onChange={(e) => updateRecipient("postalCode", e.target.value)}
@@ -1141,14 +1359,26 @@ export default function CreateShipment() {
                   )}
                 </div>
               </div>
-              <div>
-                <Label>Phone *</Label>
-                <Input
-                  value={formData.recipient.phone}
-                  onChange={(e) => updateRecipient("phone", e.target.value)}
-                  placeholder="+1 234 567 890"
-                  data-testid="input-recipient-phone"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Phone *</Label>
+                  <Input
+                    value={formData.recipient.phone}
+                    onChange={(e) => updateRecipient("phone", e.target.value)}
+                    placeholder="+1 234 567 890"
+                    data-testid="input-recipient-phone"
+                  />
+                </div>
+                <div>
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    value={formData.recipient.email || ""}
+                    onChange={(e) => updateRecipient("email", e.target.value)}
+                    placeholder="recipient@example.com"
+                    data-testid="input-recipient-email"
+                  />
+                </div>
               </div>
               {recipientNeedsShortAddress && (
                 <div>
@@ -1162,6 +1392,45 @@ export default function CreateShipment() {
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
               )}
+              <div className="pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => validateAddressViaApi("recipient")}
+                  disabled={addressValidating.recipient || !formData.recipient.addressLine1 || !formData.recipient.countryCode}
+                  data-testid="button-validate-recipient-address"
+                >
+                  {addressValidating.recipient ? (
+                    <><LoadingSpinner size="sm" className="mr-1" /> Validating...</>
+                  ) : (
+                    <><MapPin className="h-3 w-3 mr-1" /> Validate Address</>
+                  )}
+                </Button>
+                {addressValidation.recipient && (
+                  <div className={`mt-2 p-3 rounded-md text-sm ${
+                    addressValidation.recipient.valid
+                      ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
+                      : "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                  }`} data-testid="recipient-address-validation-result">
+                    {addressValidation.recipient.valid ? (
+                      <span className="flex items-center gap-1"><CheckCircle className="h-4 w-4" /> Address validated successfully</span>
+                    ) : (
+                      <div>
+                        <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> Address validation issues</span>
+                        {addressValidation.recipient.errors?.map((e, i) => <p key={i} className="mt-1">{e}</p>)}
+                        {addressValidation.recipient.suggestions && addressValidation.recipient.suggestions.length > 0 && (
+                          <div className="mt-2">
+                            <p className="font-medium">Suggestions:</p>
+                            {addressValidation.recipient.suggestions.map((s, i) => (
+                              <p key={i} className="text-xs mt-1">{[s.streetLine1, s.city, s.stateOrProvince, s.postalCode, s.countryCode].filter(Boolean).join(", ")}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
@@ -1558,10 +1827,42 @@ export default function CreateShipment() {
                   </div>
                 </>
               )}
+              <div className="border-t pt-4 mt-2">
+                <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+                  <Truck className="h-4 w-4" />
+                  Available Services
+                </h3>
+                {servicesLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="services-loading">
+                    <LoadingSpinner size="sm" /> Loading available services...
+                  </div>
+                ) : servicesError && availableServices.length === 0 ? (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="services-error">
+                    <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> {servicesError}</span>
+                  </div>
+                ) : availableServices.length > 0 ? (
+                  <div className="flex flex-wrap gap-2" data-testid="services-list">
+                    {availableServices.map((svc) => (
+                      <Badge key={svc.serviceType} variant="secondary" data-testid={`badge-service-${svc.serviceType}`}>
+                        {svc.displayName}
+                        {svc.isInternational && <span className="ml-1 text-xs opacity-70">(Intl)</span>}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground" data-testid="services-empty">
+                    Fill in sender and recipient addresses above to see available services.
+                  </p>
+                )}
+              </div>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
-              <Button onClick={nextStep} disabled={getRatesMutation.isPending} data-testid="button-get-rates">
+              <Button
+                onClick={nextStep}
+                disabled={getRatesMutation.isPending || (servicesError !== null && availableServices.length === 0 && !servicesLoading && formData.shipper.countryCode !== "" && formData.recipient.countryCode !== "")}
+                data-testid="button-get-rates"
+              >
                 {getRatesMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Getting Rates...</>
                 ) : (

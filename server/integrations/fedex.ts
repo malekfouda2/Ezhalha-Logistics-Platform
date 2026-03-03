@@ -23,6 +23,7 @@ export interface ShippingAddress {
   postalCode: string;
   countryCode: string;
   phone: string;
+  email?: string;
 }
 
 export interface PackageDetails {
@@ -101,7 +102,9 @@ export interface ServiceAvailabilityResponse {
   services: Array<{
     serviceType: string;
     serviceName: string;
+    displayName: string;
     available: boolean;
+    isInternational: boolean;
     transitDays?: number;
     deliveryDate?: string;
   }>;
@@ -112,6 +115,7 @@ export interface RateRequest {
   recipient: ShippingAddress;
   packages: PackageDetails[];
   serviceType?: string;
+  currency?: string;
 }
 
 export interface RateResponse {
@@ -170,7 +174,7 @@ export interface CarrierAdapter {
   getRates(request: RateRequest): Promise<RateResponse[]>;
   createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse>;
   trackShipment(trackingNumber: string): Promise<TrackingResponse>;
-  cancelShipment(trackingNumber: string): Promise<boolean>;
+  cancelShipment(trackingNumber: string, senderCountryCode?: string): Promise<boolean>;
   validateWebhookSignature(payload: string, signature: string): boolean;
 }
 
@@ -570,12 +574,15 @@ export class FedExAdapter implements CarrierAdapter {
 
       const { data } = await this.makeRequest<any>("/availability/v1/packageandserviceoptions", "POST", fedexRequest);
       
+      const isInternational = request.origin.countryCode !== request.destination.countryCode;
       const services = data.output?.packageOptions || [];
       return {
         services: services.map((svc: any) => ({
           serviceType: svc.serviceType,
           serviceName: svc.serviceDescription,
+          displayName: svc.serviceDescription || svc.serviceType,
           available: true,
+          isInternational,
           transitDays: svc.transitTime?.minimumTransitTime,
           deliveryDate: svc.deliveryDay,
         })),
@@ -595,12 +602,12 @@ export class FedExAdapter implements CarrierAdapter {
     
     return {
       services: [
-        { serviceType: "FEDEX_GROUND", serviceName: "FedEx Ground", available: !isInternational, transitDays: 5 },
-        { serviceType: "FEDEX_EXPRESS_SAVER", serviceName: "FedEx Express Saver", available: true, transitDays: 3 },
-        { serviceType: "FEDEX_2_DAY", serviceName: "FedEx 2Day", available: true, transitDays: 2 },
-        { serviceType: "FEDEX_PRIORITY_OVERNIGHT", serviceName: "FedEx Priority Overnight", available: true, transitDays: 1 },
-        { serviceType: "FEDEX_INTERNATIONAL_PRIORITY", serviceName: "FedEx International Priority", available: isInternational, transitDays: 3 },
-        { serviceType: "FEDEX_INTERNATIONAL_ECONOMY", serviceName: "FedEx International Economy", available: isInternational, transitDays: 5 },
+        { serviceType: "FEDEX_GROUND", serviceName: "FedEx Ground", displayName: "FedEx Ground", available: !isInternational, isInternational: false, transitDays: 5 },
+        { serviceType: "FEDEX_EXPRESS_SAVER", serviceName: "FedEx Express Saver", displayName: "FedEx Express Saver", available: !isInternational, isInternational: false, transitDays: 3 },
+        { serviceType: "FEDEX_2_DAY", serviceName: "FedEx 2Day", displayName: "FedEx 2Day", available: !isInternational, isInternational: false, transitDays: 2 },
+        { serviceType: "FEDEX_PRIORITY_OVERNIGHT", serviceName: "FedEx Priority Overnight", displayName: "FedEx Priority Overnight", available: !isInternational, isInternational: false, transitDays: 1 },
+        { serviceType: "FEDEX_INTERNATIONAL_PRIORITY", serviceName: "FedEx International Priority", displayName: "FedEx International Priority", available: isInternational, isInternational: true, transitDays: 3 },
+        { serviceType: "FEDEX_INTERNATIONAL_ECONOMY", serviceName: "FedEx International Economy", displayName: "FedEx International Economy", available: isInternational, isInternational: true, transitDays: 5 },
       ].filter(s => s.available),
     };
   }
@@ -636,8 +643,9 @@ export class FedExAdapter implements CarrierAdapter {
     logInfo(`FedEx getRates: calling real API (baseUrl: ${this.baseUrl})`);
 
     try {
+      const shipperStreetLines = [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean) as string[];
       const shipperAddress: any = {
-        streetLines: [request.shipper.streetLine1],
+        streetLines: shipperStreetLines,
         city: request.shipper.city,
         postalCode: request.shipper.postalCode,
         countryCode: request.shipper.countryCode,
@@ -646,8 +654,9 @@ export class FedExAdapter implements CarrierAdapter {
         shipperAddress.stateOrProvinceCode = request.shipper.stateOrProvince;
       }
 
+      const recipientStreetLines = [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean) as string[];
       const recipientAddress: any = {
-        streetLines: [request.recipient.streetLine1],
+        streetLines: recipientStreetLines,
         city: request.recipient.city,
         postalCode: request.recipient.postalCode,
         countryCode: request.recipient.countryCode,
@@ -715,25 +724,26 @@ export class FedExAdapter implements CarrierAdapter {
   private getMockRates(request: RateRequest): RateResponse[] {
     const baseWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
+    const rateCurrency = request.currency || "SAR";
     
     const rates: RateResponse[] = isInternational ? [
       {
         baseRate: parseMoney(89.99 + (baseWeight * 4)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "INTERNATIONAL_ECONOMY",
         transitDays: 5,
         serviceName: "FedEx International Economy",
       },
       {
         baseRate: parseMoney(149.99 + (baseWeight * 6)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "INTERNATIONAL_PRIORITY",
         transitDays: 3,
         serviceName: "FedEx International Priority",
       },
       {
         baseRate: parseMoney(249.99 + (baseWeight * 10)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "FEDEX_INTERNATIONAL_PRIORITY_EXPRESS",
         transitDays: 1,
         serviceName: "FedEx International Priority Express",
@@ -741,28 +751,28 @@ export class FedExAdapter implements CarrierAdapter {
     ] : [
       {
         baseRate: parseMoney(15.99 + (baseWeight * 1.2)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "FEDEX_GROUND",
         transitDays: 5,
         serviceName: "FedEx Ground",
       },
       {
         baseRate: parseMoney(29.99 + (baseWeight * 2)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "FEDEX_EXPRESS_SAVER",
         transitDays: 3,
         serviceName: "FedEx Express Saver",
       },
       {
         baseRate: parseMoney(49.99 + (baseWeight * 3)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "FEDEX_2_DAY",
         transitDays: 2,
         serviceName: "FedEx 2Day",
       },
       {
         baseRate: parseMoney(79.99 + (baseWeight * 5)),
-        currency: "SAR",
+        currency: rateCurrency,
         serviceType: "FEDEX_PRIORITY_OVERNIGHT",
         transitDays: 1,
         serviceName: "FedEx Priority Overnight",
@@ -801,14 +811,23 @@ export class FedExAdapter implements CarrierAdapter {
       const shipDatestamp = request.shipDate || new Date().toISOString().split("T")[0];
       const requestCurrency = request.currency || "SAR";
 
+      const shipperContact: any = {
+        personName: request.shipper.name,
+        phoneNumber: request.shipper.phone,
+      };
+      if (request.shipper.email) shipperContact.emailAddress = request.shipper.email;
+
+      const recipientContact: any = {
+        personName: request.recipient.name,
+        phoneNumber: request.recipient.phone,
+      };
+      if (request.recipient.email) recipientContact.emailAddress = request.recipient.email;
+
       const requestedShipment: any = {
         shipper: {
-          contact: {
-            personName: request.shipper.name,
-            phoneNumber: request.shipper.phone,
-          },
+          contact: shipperContact,
           address: {
-            streetLines: [request.shipper.streetLine1],
+            streetLines: [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean),
             city: request.shipper.city,
             stateOrProvinceCode: request.shipper.stateOrProvince || undefined,
             postalCode: request.shipper.postalCode,
@@ -816,12 +835,9 @@ export class FedExAdapter implements CarrierAdapter {
           },
         },
         recipients: [{
-          contact: {
-            personName: request.recipient.name,
-            phoneNumber: request.recipient.phone,
-          },
+          contact: recipientContact,
           address: {
-            streetLines: [request.recipient.streetLine1],
+            streetLines: [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean),
             city: request.recipient.city,
             stateOrProvinceCode: request.recipient.stateOrProvince || undefined,
             postalCode: request.recipient.postalCode,
@@ -1049,7 +1065,7 @@ export class FedExAdapter implements CarrierAdapter {
     };
   }
 
-  async cancelShipment(trackingNumber: string): Promise<boolean> {
+  async cancelShipment(trackingNumber: string, senderCountryCode?: string): Promise<boolean> {
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
@@ -1061,7 +1077,7 @@ export class FedExAdapter implements CarrierAdapter {
     try {
       await this.makeRequest<any>("/ship/v1/shipments/cancel", "PUT", {
         accountNumber: { value: this.accountNumber },
-        senderCountryCode: "SA",
+        senderCountryCode: senderCountryCode || "SA",
         deletionControl: "DELETE_ALL_PACKAGES",
         trackingNumber: {
           trackingNumber,

@@ -1,0 +1,149 @@
+You are working on my existing repo “Ezhalha Logistics Platform” (React + TypeScript in /client, Express + TypeScript in /server, Postgres with Drizzle in /shared/schema.ts). Update the system so the shipment origin (shipper) is TOTALLY DYNAMIC: sender and recipient can be anywhere in the world. Remove any assumptions that origin is KSA. Keep main currency SAR as the platform default for customer billing, but do NOT hardcode shipper country.
+
+Customers pay OUR COMPANY (Pay Now or Pay Later/Credit). FedEx should NOT collect money from customers. FedEx is billed to our FedEx account (monthly invoicing is handled by FedEx account terms, not the API). In the FedEx Ship request, keep shippingChargesPayment.paymentType="SENDER" and payor.accountNumber=FEDEX_ACCOUNT_NUMBER.
+
+Implement all changes below and ensure production never reports success unless a real FedEx shipment is created.
+
+====================================================
+1) REMOVE ORIGIN ASSUMPTIONS (SHIPPER IS DYNAMIC)
+====================================================
+A) Data model + validation
+- Ensure shipment stores full shipper address fields as first-class data:
+  shipperName, shipperPhone, shipperEmail (optional), shipperAddress1, shipperAddress2, shipperCity, shipperStateOrProvince, shipperPostalCode, shipperCountryCode
+- Ensure recipient address fields are similarly stored.
+- Ensure country codes are ISO2 (e.g., "SA", "AE", "US").
+
+B) Frontend (Create Shipment flow)
+- Shipper country is a selectable field (no default lock to SA).
+- Recipient country is a selectable field.
+- When shipperCountry changes, clear/reset dependent fields if needed (state/province lists etc).
+- Do not show a hardcoded FedEx service list.
+
+====================================================
+2) FEDEX: SERVICE TYPES MUST BE LANE-BASED (NO HARDCODED SERVICES)
+====================================================
+Problem: Hardcoded service types break globally. Fix: service options must be derived dynamically for the lane (shipper->recipient).
+
+A) Backend endpoint:
+GET /api/fedex/service-options?shipperCountry=..&shipperPostal=..&shipperCity=..&recipientCountry=..&recipientPostal=..&recipientCity=..&packagingType=..&weight=..&shipDate=..
+Returns:
+{
+  services: [
+    { serviceType, packagingType, displayName, isInternational }
+  ]
+}
+
+Implementation details:
+- Primary method: FedEx Service Availability API using the provided lane and package info.
+- Fallback method: call FedEx Rates API and derive available serviceType values from returned rate quotes.
+- Cache responses for 10 minutes by lane+package key.
+
+B) Frontend:
+- After shipper+recipient address basics + package info are present, call /api/fedex/service-options and populate the dropdown.
+- If no services, block progressing and show a clear message.
+
+====================================================
+3) FEDEX: ADDRESS & POSTAL VALIDATION GATES (GLOBAL)
+====================================================
+Before calling FedEx Rates or Ship, enforce validation to reduce failures.
+
+A) Server-side validation (Zod) for both shipper and recipient:
+- Required: countryCode, city, addressLine1
+- Postal code:
+  - Require postalCode for most countries.
+  - Maintain a small allowlist of countries where postal code is generally not used; only those can omit.
+- State/province:
+  - Require stateOrProvinceCode at minimum for US and CA, and any other countries you already know require it.
+Return 400 with actionable messages if invalid.
+
+B) Add/ensure endpoints:
+- POST /api/fedex/validate-address (auth required, rate limited)
+- GET  /api/fedex/validate-postal?country=..&postal=..
+- Use these in UI when user clicks “Get Rates” (or automatically).
+- If validation fails, show returned suggestions/errors and stop.
+
+====================================================
+4) CURRENCY RULES (PLATFORM DEFAULT SAR, BUT NO HARD-CODING IN FEDEX PAYLOADS)
+====================================================
+A) Platform billing currency:
+- Keep SAR as the default currency for customer payments/invoices in your platform.
+- Display amounts in SAR unless the system already supports multi-currency.
+
+B) FedEx request currency / customs currency:
+- Add shipment.currency to DB (default "SAR" for now).
+- Use shipment.currency consistently for:
+  - declared/customs values
+  - invoice display
+- Remove any remaining hardcoded currency like “SAR” inside adapter logic except as a default from shipment.currency.
+
+====================================================
+5) PAYMENTS: CUSTOMER PAYS PLATFORM; FEDEX BILLED TO OUR ACCOUNT
+====================================================
+A) Ensure FedEx Ship request always uses:
+- shippingChargesPayment.paymentType = "SENDER"
+- payor.responsibleParty.accountNumber = FEDEX_ACCOUNT_NUMBER
+
+B) Payment logic separation:
+- Pay Now and Pay Later/credit only affect platform invoices and shipment paymentStatus.
+- FedEx creation success is independent of customer payment status.
+- NEVER mark shipment as “carrier_created” unless FedEx createShipment succeeded.
+
+C) Critical behavior:
+- If FedEx shipment creation fails in ANY flow (pay now OR pay later):
+  - return HTTP 502 (do NOT return 200)
+  - shipment.status="carrier_error"
+  - shipment.carrierStatus="error"
+  - store carrierErrorCode/message/attempt count/lastAttemptAt
+- Add Admin retry endpoint:
+  POST /api/admin/shipments/:id/retry-carrier
+
+====================================================
+6) INTERNATIONAL CUSTOMS DETAILS FROM ITEMS (GLOBAL)
+====================================================
+If shipperCountry != recipientCountry, treat as international and require proper customs.
+
+A) Build customsClearanceDetail using shipment items:
+- For each item:
+  - description = itemDescription || itemName
+  - quantity = item.quantity
+  - unitPrice = item.price (in shipment.currency)
+  - customsValue = item.price * quantity (shipment.currency)
+  - countryOfManufacture = item.countryOfOrigin (required for international)
+  - harmonizedCode = item.hsCode if present
+- declaredValue = sum(items.price * qty). Block if missing/zero.
+
+B) HS code enforcement toggle:
+- FEDEX_REQUIRE_HS=true/false
+- If true and international and any item missing hsCode => 400 listing missing items.
+- If false allow but warn in UI.
+
+C) CommodityDescription:
+- First 3 item names + “and N more”.
+
+====================================================
+7) WEBHOOKS SAFETY
+====================================================
+We are not fixing signature format details now; keep it safe:
+- If FEDEX_WEBHOOK_SECRET missing in production, webhook route returns 500 and does nothing.
+- Do not accept webhooks silently.
+
+====================================================
+8) ADMIN/CLIENT VISIBILITY
+====================================================
+A) Client shipment details:
+- Show carrierStatus (pending/created/error)
+- Show tracking number when created
+- On carrier error, show friendly message and “Contact support” (no client retry unless safe)
+
+B) Admin shipment details:
+- Show carrier error details + raw FedEx error code/message
+- Provide Retry button calling retry endpoint
+
+====================================================
+DELIVERABLES
+- Remove all assumptions that shipper origin is SA/KSA; make shipper fully dynamic.
+- Replace hardcoded service list with dynamic lane-based services (Service Availability + Rates fallback).
+- Implement strict validation gates and clear UI messaging.
+- Ensure platform billing is SAR by default, but FedEx/customs use shipment.currency (default SAR) and are consistent.
+- Ensure no flow returns success if FedEx shipment creation failed (including pay later).
+- Update README with required env vars and a global shipping note: services vary by lane and may be restricted by FedEx account capabilities.

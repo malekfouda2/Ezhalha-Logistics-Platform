@@ -48,6 +48,54 @@ const hsLookupLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const fedexApiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { error: "Too many FedEx API requests, please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
+  "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
+  "BF", "BI", "CM", "CF", "TD", "KM", "CG", "CD", "CI", "DJ", "DM", "GQ",
+  "ER", "FJ", "GA", "GM", "GH", "GD", "GN", "GW", "GY", "KI", "KP", "LY",
+  "MW", "ML", "MR", "NA", "NR", "PA", "QA", "RW", "KN", "LC", "ST", "SC",
+  "SL", "SB", "SO", "SR", "SY", "TL", "TG", "TO", "TV", "UG", "VU", "YE", "ZW",
+]);
+
+const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
+
+const serviceOptionsCache = new Map<string, { data: any; expiresAt: number }>();
+const SERVICE_OPTIONS_CACHE_TTL = 10 * 60 * 1000;
+
+const shipperRecipientAddressSchema = z.object({
+  countryCode: z.string().min(2, "Country code is required").max(2, "Country code must be 2 characters"),
+  city: z.string().min(1, "City is required"),
+  addressLine1: z.string().min(1, "Address line 1 is required"),
+  addressLine2: z.string().optional(),
+  postalCode: z.string().optional(),
+  stateOrProvince: z.string().optional(),
+  email: z.string().email("Invalid email address").optional().or(z.literal("")),
+  phone: z.string().optional(),
+  name: z.string().optional(),
+});
+
+function validateShipperRecipientAddress(address: z.infer<typeof shipperRecipientAddressSchema>, label: string): string[] {
+  const errors: string[] = [];
+  const cc = address.countryCode.toUpperCase();
+
+  if (!POSTAL_CODE_EXEMPT_COUNTRIES.has(cc) && (!address.postalCode || address.postalCode.trim() === "")) {
+    errors.push(`${label}: Postal code is required for country ${cc}`);
+  }
+
+  if (STATE_REQUIRED_COUNTRIES.has(cc) && (!address.stateOrProvince || address.stateOrProvince.trim() === "")) {
+    errors.push(`${label}: State/Province is required for country ${cc}`);
+  }
+
+  return errors;
+}
+
 // Track failed login attempts for additional brute-force protection
 const failedLoginAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
@@ -796,7 +844,7 @@ export async function registerRoutes(
 
       if (shipment.carrierTrackingNumber) {
         try {
-          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber);
+          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber, shipment.senderCountry);
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
@@ -849,20 +897,24 @@ export async function registerRoutes(
         shipper: {
           name: shipment.senderName,
           streetLine1: shipment.senderAddress,
+          streetLine2: shipment.senderAddressLine2 || undefined,
           city: shipment.senderCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.senderStateOrProvince || "",
           postalCode: shipment.senderPostalCode || "",
           countryCode: shipment.senderCountry,
           phone: shipment.senderPhone,
+          email: shipment.senderEmail || undefined,
         },
         recipient: {
           name: shipment.recipientName,
           streetLine1: shipment.recipientAddress,
+          streetLine2: shipment.recipientAddressLine2 || undefined,
           city: shipment.recipientCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.recipientStateOrProvince || "",
           postalCode: shipment.recipientPostalCode || "",
           countryCode: shipment.recipientCountry,
           phone: shipment.recipientPhone,
+          email: shipment.recipientEmail || undefined,
         },
         packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
           weight: Number(pkg.weight),
@@ -889,6 +941,7 @@ export async function registerRoutes(
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
+        currency: shipment.currency || "SAR",
       };
 
       const isInternationalRetry = shipment.senderCountry !== shipment.recipientCountry;
@@ -909,7 +962,6 @@ export async function registerRoutes(
                 unitPrice: i.price,
                 currency: shipment.currency || "SAR",
               }));
-              carrierRequest.currency = shipment.currency || "SAR";
             }
           }
         } catch {}
@@ -3259,6 +3311,7 @@ export async function registerRoutes(
   const addressSchema = z.object({
     name: z.string().min(1, "Name is required"),
     phone: z.string().min(1, "Phone is required"),
+    email: z.string().email("Invalid email address").optional().or(z.literal("")),
     countryCode: z.string().length(2, "Country code must be 2 characters"),
     city: z.string().min(1, "City is required"),
     postalCode: z.string().min(1, "Postal code is required"),
@@ -3365,6 +3418,7 @@ export async function registerRoutes(
           packageType: data.packageType,
         })),
         serviceType: data.serviceType,
+        currency: data.currency,
       };
 
       // Get rates from FedEx adapter
@@ -3505,17 +3559,23 @@ export async function registerRoutes(
         clientAccountId: user.clientAccountId,
         senderName: shipmentData.shipper.name,
         senderAddress: shipmentData.shipper.addressLine1,
+        senderAddressLine2: shipmentData.shipper.addressLine2 || null,
         senderCity: shipmentData.shipper.city,
+        senderStateOrProvince: shipmentData.shipper.stateOrProvince || null,
         senderPostalCode: shipmentData.shipper.postalCode,
         senderCountry: shipmentData.shipper.countryCode,
         senderPhone: shipmentData.shipper.phone,
+        senderEmail: shipmentData.shipper.email || null,
         senderShortAddress: shipmentData.shipper.shortAddress,
         recipientName: shipmentData.recipient.name,
         recipientAddress: shipmentData.recipient.addressLine1,
+        recipientAddressLine2: shipmentData.recipient.addressLine2 || null,
         recipientCity: shipmentData.recipient.city,
+        recipientStateOrProvince: shipmentData.recipient.stateOrProvince || null,
         recipientPostalCode: shipmentData.recipient.postalCode,
         recipientCountry: shipmentData.recipient.countryCode,
         recipientPhone: shipmentData.recipient.phone,
+        recipientEmail: shipmentData.recipient.email || null,
         recipientShortAddress: shipmentData.recipient.shortAddress,
         weight: shipmentData.packages.reduce((sum: number, p: { weight: number }) => sum + p.weight, 0).toString(),
         weightUnit: shipmentData.weightUnit,
@@ -3665,20 +3725,24 @@ export async function registerRoutes(
         shipper: {
           name: shipment.senderName,
           streetLine1: shipment.senderAddress,
+          streetLine2: shipment.senderAddressLine2 || undefined,
           city: shipment.senderCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.senderStateOrProvince || "",
           postalCode: shipment.senderPostalCode || "",
           countryCode: shipment.senderCountry,
           phone: shipment.senderPhone,
+          email: shipment.senderEmail || undefined,
         },
         recipient: {
           name: shipment.recipientName,
           streetLine1: shipment.recipientAddress,
+          streetLine2: shipment.recipientAddressLine2 || undefined,
           city: shipment.recipientCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.recipientStateOrProvince || "",
           postalCode: shipment.recipientPostalCode || "",
           countryCode: shipment.recipientCountry,
           phone: shipment.recipientPhone,
+          email: shipment.recipientEmail || undefined,
         },
         packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
           weight: Number(pkg.weight),
@@ -3705,6 +3769,7 @@ export async function registerRoutes(
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
+        currency: shipment.currency || "SAR",
       };
 
       const isInternational = shipment.senderCountry !== shipment.recipientCountry;
@@ -3727,7 +3792,6 @@ export async function registerRoutes(
                 currency: shipment.currency || "SAR",
               }));
               (carrierRequest as any).items = parsedItems;
-              (carrierRequest as any).currency = shipment.currency || "SAR";
             }
           }
         } catch {}
@@ -3900,7 +3964,7 @@ export async function registerRoutes(
 
       // Log shipment creation
       await logAudit(req.session.userId, "create_shipment", "shipment", shipment.id,
-        `Created shipment ${shipment.trackingNumber} for SAR ${finalPrice.toFixed(2)}`, req.ip);
+        `Created shipment ${shipment.trackingNumber} for ${shipment.currency || "SAR"} ${finalPrice.toFixed(2)}`, req.ip);
 
       // Store idempotency record
       if (idempotencyKey) {
@@ -3941,7 +4005,7 @@ export async function registerRoutes(
 
       if (shipment.carrierTrackingNumber) {
         try {
-          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber);
+          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber, shipment.senderCountry);
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
@@ -4095,20 +4159,24 @@ export async function registerRoutes(
         shipper: {
           name: shipment.senderName,
           streetLine1: shipment.senderAddress,
+          streetLine2: shipment.senderAddressLine2 || undefined,
           city: shipment.senderCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.senderStateOrProvince || "",
           postalCode: shipment.senderPostalCode || "",
           countryCode: shipment.senderCountry,
           phone: shipment.senderPhone,
+          email: shipment.senderEmail || undefined,
         },
         recipient: {
           name: shipment.recipientName,
           streetLine1: shipment.recipientAddress,
+          streetLine2: shipment.recipientAddressLine2 || undefined,
           city: shipment.recipientCity,
-          stateOrProvince: "",
+          stateOrProvince: shipment.recipientStateOrProvince || "",
           postalCode: shipment.recipientPostalCode || "",
           countryCode: shipment.recipientCountry,
           phone: shipment.recipientPhone,
+          email: shipment.recipientEmail || undefined,
         },
         packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
           weight: Number(pkg.weight),
@@ -4135,6 +4203,7 @@ export async function registerRoutes(
         labelFormat: "PDF" as const,
         commodityDescription: undefined as string | undefined,
         declaredValue: undefined as number | undefined,
+        currency: shipment.currency || "SAR",
       };
 
       const isInternationalPayLater = shipment.senderCountry !== shipment.recipientCountry;
@@ -4155,7 +4224,6 @@ export async function registerRoutes(
                 unitPrice: i.price,
                 currency: shipment.currency || "SAR",
               }));
-              (carrierRequest as any).currency = shipment.currency || "SAR";
             }
           }
         } catch {}
@@ -4923,6 +4991,199 @@ export async function registerRoutes(
       return false;
     }
   }
+
+  // ============================================
+  // FEDEX API ENDPOINTS (Dynamic Service Discovery & Validation)
+  // ============================================
+
+  app.get("/api/fedex/service-options", requireAuth, fedexApiLimiter, async (req, res) => {
+    try {
+      const querySchema = z.object({
+        shipperCountry: z.string().min(2).max(2),
+        shipperPostal: z.string().optional().default(""),
+        shipperCity: z.string().min(1),
+        recipientCountry: z.string().min(2).max(2),
+        recipientPostal: z.string().optional().default(""),
+        recipientCity: z.string().min(1),
+        packagingType: z.string().optional().default("YOUR_PACKAGING"),
+        weight: z.string().optional().default("1"),
+        shipDate: z.string().optional(),
+      });
+
+      const params = querySchema.parse(req.query);
+      const isInternational = params.shipperCountry.toUpperCase() !== params.recipientCountry.toUpperCase();
+
+      const cacheKey = [
+        params.shipperCountry, params.shipperPostal, params.shipperCity,
+        params.recipientCountry, params.recipientPostal, params.recipientCity,
+        params.packagingType, params.weight,
+      ].join("|").toUpperCase();
+
+      const cached = serviceOptionsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return res.json(cached.data);
+      }
+
+      let services: Array<{ serviceType: string; packagingType: string; displayName: string; isInternational: boolean }> = [];
+
+      try {
+        const saResult = await fedexAdapter.checkServiceAvailability({
+          origin: {
+            postalCode: params.shipperPostal || "00000",
+            countryCode: params.shipperCountry,
+          },
+          destination: {
+            postalCode: params.recipientPostal || "00000",
+            countryCode: params.recipientCountry,
+          },
+          shipDate: params.shipDate,
+        });
+
+        if (saResult.services && saResult.services.length > 0) {
+          services = saResult.services
+            .filter(s => s.available !== false)
+            .map(s => ({
+              serviceType: s.serviceType,
+              packagingType: params.packagingType || "YOUR_PACKAGING",
+              displayName: s.serviceName,
+              isInternational,
+            }));
+        }
+      } catch (saError) {
+        logError("FedEx service availability failed, falling back to rates API", saError);
+      }
+
+      if (services.length === 0) {
+        try {
+          const weightNum = parseFloat(params.weight) || 1;
+          const rateResult = await fedexAdapter.getRates({
+            shipper: {
+              name: "Origin",
+              streetLine1: "",
+              city: params.shipperCity,
+              postalCode: params.shipperPostal || "00000",
+              countryCode: params.shipperCountry,
+              phone: "",
+            },
+            recipient: {
+              name: "Destination",
+              streetLine1: "",
+              city: params.recipientCity,
+              postalCode: params.recipientPostal || "00000",
+              countryCode: params.recipientCountry,
+              phone: "",
+            },
+            packages: [{
+              weight: weightNum,
+              weightUnit: "KG",
+              packageType: params.packagingType || "YOUR_PACKAGING",
+            }],
+          });
+
+          const seen = new Set<string>();
+          services = rateResult
+            .filter(r => {
+              if (seen.has(r.serviceType)) return false;
+              seen.add(r.serviceType);
+              return true;
+            })
+            .map(r => ({
+              serviceType: r.serviceType,
+              packagingType: params.packagingType || "YOUR_PACKAGING",
+              displayName: r.serviceName,
+              isInternational,
+            }));
+        } catch (rateError) {
+          logError("FedEx rates fallback also failed", rateError);
+        }
+      }
+
+      const responseData = { services };
+      serviceOptionsCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + SERVICE_OPTIONS_CACHE_TTL });
+
+      res.json(responseData);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors.map(e => e.message).join(", ") });
+      }
+      logError("Failed to get service options", error);
+      res.status(500).json({ error: "Failed to get service options" });
+    }
+  });
+
+  app.post("/api/fedex/validate-address", requireAuth, fedexApiLimiter, async (req, res) => {
+    try {
+      const addressSchema = z.object({
+        streetLine1: z.string().min(1, "Street address is required"),
+        streetLine2: z.string().optional(),
+        city: z.string().optional(),
+        stateOrProvince: z.string().optional(),
+        postalCode: z.string().optional(),
+        countryCode: z.string().min(2, "Country code is required").max(2, "Country code must be 2 characters"),
+      });
+
+      const address = addressSchema.parse(req.body);
+
+      const validationErrors: string[] = [];
+      const cc = address.countryCode.toUpperCase();
+      if (!POSTAL_CODE_EXEMPT_COUNTRIES.has(cc) && (!address.postalCode || address.postalCode.trim() === "")) {
+        validationErrors.push(`Postal code is required for country ${cc}`);
+      }
+      if (STATE_REQUIRED_COUNTRIES.has(cc) && (!address.stateOrProvince || address.stateOrProvince.trim() === "")) {
+        validationErrors.push(`State/Province is required for country ${cc}`);
+      }
+
+      if (validationErrors.length > 0) {
+        return res.status(400).json({ error: validationErrors.join("; "), validationErrors });
+      }
+
+      const result = await fedexAdapter.validateAddress({ address });
+
+      await logAudit(req.session.userId!, "validate_address", "fedex", undefined,
+        `Address validation: ${address.streetLine1}, ${address.city || "N/A"}, ${cc}`, req.ip);
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors.map(e => e.message).join(", ") });
+      }
+      if (error instanceof CarrierError) {
+        return res.status(502).json({ error: error.carrierMessage });
+      }
+      logError("Failed to validate address", error);
+      res.status(500).json({ error: "Failed to validate address" });
+    }
+  });
+
+  app.get("/api/fedex/validate-postal", requireAuth, fedexApiLimiter, async (req, res) => {
+    try {
+      const querySchema = z.object({
+        country: z.string().min(2, "Country code is required").max(2, "Country code must be 2 characters"),
+        postal: z.string().min(1, "Postal code is required"),
+      });
+
+      const params = querySchema.parse(req.query);
+
+      const result = await fedexAdapter.validatePostalCode({
+        postalCode: params.postal,
+        countryCode: params.country,
+      });
+
+      await logAudit(req.session.userId!, "validate_postal_code", "fedex", undefined,
+        `Postal code validation: ${params.postal}, ${params.country}`, req.ip);
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors.map(e => e.message).join(", ") });
+      }
+      if (error instanceof CarrierError) {
+        return res.status(502).json({ error: error.carrierMessage });
+      }
+      logError("Failed to validate postal code", error);
+      res.status(500).json({ error: "Failed to validate postal code" });
+    }
+  });
 
   // FedEx Webhook Handler
   app.post("/api/webhooks/fedex", async (req, res) => {

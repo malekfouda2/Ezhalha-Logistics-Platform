@@ -57,6 +57,14 @@ Preferred communication style: Simple, everyday language.
 - **Flow**: Controller → ShipmentsService → CarrierService (router) → CarrierAdapter → FedEx API
 - **FedEx**: Address validation, postal code validation, service availability, rate discovery, transit times, shipment creation
 - **Configuration**: All credentials via environment variables (`FEDEX_CLIENT_ID`, `FEDEX_CLIENT_SECRET`, `FEDEX_ACCOUNT_NUMBER`, etc.)
+- **Global Shipping**: Shipper/sender origin is fully dynamic — not locked to KSA. Domestic shipments default both sides to SA. International shipments allow any country. Service types are discovered dynamically per lane via FedEx Service Availability API (with Rates API fallback), cached 10 minutes. No hardcoded service list.
+- **Payment Model**: Customers pay the platform (Pay Now or Pay Later/Credit). FedEx charges go to our FedEx account (SENDER payment type with FEDEX_ACCOUNT_NUMBER). FedEx never collects from customers.
+- **API Endpoints**:
+  - `GET /api/fedex/service-options` — Dynamic lane-based service discovery (cached 10min)
+  - `POST /api/fedex/validate-address` — Address validation with suggestions
+  - `GET /api/fedex/validate-postal` — Postal code validation
+- **Address Validation**: Server-side Zod validation requires countryCode, city, addressLine1. PostalCode required for most countries (exempt: AE, QA, BH, OM, HK, IE, etc.). StateOrProvince required for US, CA. Returns 400 with actionable messages.
+- **Currency**: Platform billing uses SAR by default. Each shipment stores its own `currency` field. FedEx/customs use `shipment.currency` consistently — no hardcoded SAR in adapter logic.
 - **Production Hardening** (v2):
   - `FEDEX_MOCK_MODE` env var: if `true` or `NODE_ENV !== "production"`, mock fallbacks allowed; otherwise production throws `CarrierError`
   - `FEDEX_REQUIRE_HS` env var: if `true`, blocks international shipments missing HS codes
