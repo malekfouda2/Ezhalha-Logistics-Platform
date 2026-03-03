@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -338,6 +338,18 @@ export default function ClientShipments() {
                   );
                 } catch { return null; }
               })()}
+
+              {selectedShipment.status === "carrier_error" && (
+                <div className="p-4 rounded-lg border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/30 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Carrier Error</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    There was an issue submitting this shipment to the carrier. Please contact support or try again later.
+                  </p>
+                </div>
+              )}
 
               {/* Total Cost (Client only sees final price) */}
               <div className="p-4 rounded-lg border">

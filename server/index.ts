@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
 import { startCreditReminderScheduler } from "./services/credit-reminder";
+import { validateFedExEnvOnStartup } from "./integrations/fedex";
 
 const app = express();
 const httpServer = createServer(app);
@@ -50,7 +51,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      if (capturedJsonResponse && process.env.NODE_ENV !== "production") {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 
@@ -62,6 +63,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  validateFedExEnvOnStartup();
+
   // Initialize database with default data if empty
   await storage.initializeDefaults();
 

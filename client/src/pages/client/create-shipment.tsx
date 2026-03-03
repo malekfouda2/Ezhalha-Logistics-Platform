@@ -434,13 +434,15 @@ export default function CreateShipment() {
       // Clear URL params after successful confirmation
       navigate("/client/create-shipment", { replace: true });
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      const is502 = error?.status === 502 || (error instanceof Error && error.message?.includes("carrier"));
       toast({
-        title: "Failed to confirm shipment",
-        description: error instanceof Error ? error.message : "Please try again",
+        title: is502 ? "Carrier Error" : "Failed to confirm shipment",
+        description: is502
+          ? "The carrier could not process this shipment. Please retry or contact support."
+          : (error instanceof Error ? error.message : "Please try again"),
         variant: "destructive",
       });
-      // Clear URL params on error too
       navigate("/client/shipments", { replace: true });
     },
   });
@@ -466,10 +468,13 @@ export default function CreateShipment() {
         description: "Your shipment has been created with Pay Later. Invoice due in 30 days.",
       });
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      const is502 = error?.status === 502 || (error instanceof Error && error.message?.includes("carrier"));
       toast({
-        title: "Failed to process Pay Later",
-        description: error instanceof Error ? error.message : "Please try again",
+        title: is502 ? "Carrier Error" : "Failed to process Pay Later",
+        description: is502
+          ? "The carrier could not process this shipment. Please retry or contact support."
+          : (error instanceof Error ? error.message : "Please try again"),
         variant: "destructive",
       });
     },
@@ -654,7 +659,7 @@ export default function CreateShipment() {
         return false;
       }
     } else if (currentStep === 2) {
-      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress } = formData.shipper;
+      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress, stateOrProvince } = formData.shipper;
       if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
         toast({ title: "Please fill in all required sender fields", variant: "destructive" });
         return false;
@@ -667,8 +672,12 @@ export default function CreateShipment() {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
         return false;
       }
+      if ((countryCode === "US" || countryCode === "CA") && !stateOrProvince) {
+        toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
+        return false;
+      }
     } else if (currentStep === 3) {
-      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress } = formData.recipient;
+      const { name, phone, countryCode, city, postalCode, addressLine1, shortAddress, stateOrProvince } = formData.recipient;
       if (!name || !phone || !countryCode || !city || !postalCode || !addressLine1) {
         toast({ title: "Please fill in all required recipient fields", variant: "destructive" });
         return false;
@@ -679,6 +688,10 @@ export default function CreateShipment() {
       }
       if (countryCode === "SA" && !shortAddress) {
         toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
+        return false;
+      }
+      if ((countryCode === "US" || countryCode === "CA") && !stateOrProvince) {
+        toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 4) {

@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag } from "lucide-react";
+import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag, AlertTriangle, RotateCcw } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -94,6 +94,23 @@ export default function AdminShipments() {
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const retryCarrierMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/admin/shipments/${id}/retry-carrier`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/shipments"] });
+      if (selectedShipment) {
+        setSelectedShipment({ ...selectedShipment, status: data.shipment?.status || "processing", carrierStatus: data.shipment?.carrierStatus || "created", carrierErrorCode: null, carrierErrorMessage: null } as any);
+      }
+      toast({ title: "Carrier Retry Successful", description: "Shipment has been re-submitted to the carrier." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Carrier Retry Failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -203,6 +220,7 @@ export default function AdminShipments() {
                   <SelectItem value="in_transit">In Transit</SelectItem>
                   <SelectItem value="delivered">Delivered</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
+                  <SelectItem value="carrier_error">Carrier Error</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -415,6 +433,35 @@ export default function AdminShipments() {
                 <Calendar className="h-4 w-4" />
                 Created {format(new Date(selectedShipment.createdAt), "MMM d, yyyy 'at' h:mm a")}
               </div>
+              {selectedShipment.status === "carrier_error" && (
+                <div className="p-4 rounded-lg border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/30 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Carrier Error</span>
+                  </div>
+                  {(selectedShipment as any).carrierErrorCode && (
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Error Code: </span>
+                      <span className="font-mono">{(selectedShipment as any).carrierErrorCode}</span>
+                    </div>
+                  )}
+                  {(selectedShipment as any).carrierErrorMessage && (
+                    <p className="text-sm text-muted-foreground">{(selectedShipment as any).carrierErrorMessage}</p>
+                  )}
+                  {(selectedShipment as any).carrierAttempts > 0 && (
+                    <p className="text-xs text-muted-foreground">Attempts: {(selectedShipment as any).carrierAttempts}</p>
+                  )}
+                  <Button
+                    className="w-full"
+                    onClick={() => retryCarrierMutation.mutate(selectedShipment.id)}
+                    disabled={retryCarrierMutation.isPending}
+                    data-testid="button-retry-carrier"
+                  >
+                    {retryCarrierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                    Retry Carrier Submission
+                  </Button>
+                </div>
+              )}
               {selectedShipment.status !== "cancelled" && selectedShipment.status !== "delivered" && (
                 <div className="p-4 rounded-lg border space-y-4">
                   <p className="text-sm font-medium">Update Status</p>

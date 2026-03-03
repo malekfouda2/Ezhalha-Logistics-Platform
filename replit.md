@@ -57,6 +57,19 @@ Preferred communication style: Simple, everyday language.
 - **Flow**: Controller → ShipmentsService → CarrierService (router) → CarrierAdapter → FedEx API
 - **FedEx**: Address validation, postal code validation, service availability, rate discovery, transit times, shipment creation
 - **Configuration**: All credentials via environment variables (`FEDEX_CLIENT_ID`, `FEDEX_CLIENT_SECRET`, `FEDEX_ACCOUNT_NUMBER`, etc.)
+- **Production Hardening** (v2):
+  - `FEDEX_MOCK_MODE` env var: if `true` or `NODE_ENV !== "production"`, mock fallbacks allowed; otherwise production throws `CarrierError`
+  - `FEDEX_REQUIRE_HS` env var: if `true`, blocks international shipments missing HS codes
+  - Startup validation: crashes if required env vars missing in production, or if FEDEX_BASE_URL is sandbox
+  - OAuth token auto-refresh on 401 responses
+  - Ship date defaults to today (not tomorrow), accepts optional `shipDate` from request
+  - International customs: per-item commodities from `items` array with individual HS codes, quantities, prices, country of manufacture
+  - Carrier error tracking: `carrierStatus`, `carrierErrorCode`, `carrierErrorMessage`, `carrierLastAttemptAt`, `carrierAttempts` on shipments table
+  - Retry endpoint: `POST /api/admin/shipments/:id/retry-carrier` for retrying failed carrier submissions
+  - Cancel hardened: calls FedEx cancel API, stores error if fails, doesn't mark cancelled on failure
+  - Webhook signature uses base64 HMAC SHA256 with constant-time comparison
+  - `parseMoney()` helper normalizes rate response values
+  - Address validation: state/province required for US/CA, postal code validated server-side
 
 ### Credit Access Request Flow
 - Clients must request credit/pay-later access — it is **not enabled by default**

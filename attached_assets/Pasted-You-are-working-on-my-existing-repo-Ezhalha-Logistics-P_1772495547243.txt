@@ -1,0 +1,184 @@
+You are working on my existing repo “Ezhalha Logistics Platform” (React + TS in /client, Express + TS in /server, Postgres with Drizzle in /shared/schema.ts). I already have a FedEx integration. I need you to HARDEN the FedEx integration for real PRODUCTION use, ensuring that when my system says “shipment created”, it actually exists in FedEx, has a real tracking number + label, and can be delivered if physically tendered.
+
+IMPORTANT: Follow FedEx official API docs requirements for OAuth, Rates, Ship, and Webhooks. The current code has dangerous fallbacks (mock shipment creation) and missing validation/customs detail. Fix ALL issues below.
+
+========================
+A) ELIMINATE MOCK FALLBACKS IN PRODUCTION (CRITICAL)
+========================
+1) In FedExAdapter.createShipment(), DO NOT fall back to createMockShipment() on errors in production.
+- Add env flag FEDEX_MOCK_MODE=true/false.
+- Behavior:
+  - If FEDEX_MOCK_MODE=true OR NODE_ENV !== "production": allow mock shipments for dev/demo.
+  - If NODE_ENV === "production" and FEDEX_MOCK_MODE !== "true": NEVER create mock shipments. Throw a typed error and return a failure response to client.
+
+2) Update the shipment confirm flow:
+- If FedEx create shipment fails:
+  - DO NOT mark shipment as “created/paid”.
+  - Store failure state: shipment.status = "carrier_error" (or similar), carrierErrorCode, carrierErrorMessage, carrierLastAttemptAt.
+  - Return HTTP 502 with a safe message: “Carrier creation failed. Please retry.”
+- Add an endpoint for retry:
+  - POST /api/admin/shipments/:id/retry-carrier
+  - It retries createShipment and updates shipment if success.
+
+3) Logging:
+- Log FedEx errors in a structured way (status code, FedEx error codes/messages), but do not leak secrets.
+
+========================
+B) ENVIRONMENT SANITY CHECKS (CRITICAL)
+========================
+Add startup checks that FAIL FAST in production if required env vars are missing.
+1) Required for production FedEx:
+- FEDEX_CLIENT_ID
+- FEDEX_CLIENT_SECRET
+- FEDEX_ACCOUNT_NUMBER
+- FEDEX_BASE_URL must be set explicitly in production:
+  - Production: https://apis.fedex.com
+  - Sandbox: https://apis-sandbox.fedex.com
+If NODE_ENV=production and FEDEX_BASE_URL is sandbox, crash with a clear error.
+
+2) Token handling:
+- Ensure OAuth token caching is correct (token + expiresAt).
+- Refresh token automatically when expired or if request gets 401 from FedEx.
+
+========================
+C) ADDRESS VALIDATION BEFORE CALLING FEDEX (CRITICAL)
+========================
+FedEx shipment creation can fail if address fields are invalid/missing. Implement strict validation rules:
+
+1) Validate:
+- countryCode (ISO2) required for shipper and recipient.
+- postalCode required for countries where it is mandatory (at minimum enforce for US, CA, GB, DE, FR, IT, ES, NL, AU, etc. If you can’t maintain a country list, enforce “postalCode required unless country is known to not use it” and allow manual override).
+- stateOrProvinceCode required for US and CA at minimum.
+- city required.
+- address line1 required.
+
+2) UI adjustments:
+- In create shipment UI, require State/Province when destination country is US or CA.
+- Show clear inline errors before allowing “Confirm shipment”.
+
+3) Server enforcement:
+- Implement server-side validation with Zod:
+  - If US/CA and missing stateOrProvinceCode -> 400.
+  - If missing postalCode for countries requiring it -> 400.
+Return explicit error messages.
+
+========================
+D) SHIP DATE / PICKUP TYPE CORRECTNESS
+========================
+1) The current code sets shipDatestamp to “tomorrow”. Change:
+- default shipDatestamp = today (in local server timezone) unless the user selected a future ship date.
+- Add optional “shipDate” field to shipment model; use it if present.
+
+2) pickupType:
+- Keep DROPOFF_AT_FEDEX_LOCATION as default.
+- Add support for “SCHEDULED_PICKUP” later but do not break current flow.
+- Ensure pickupType is consistent with service type and your operations.
+
+========================
+E) INTERNATIONAL CUSTOMS DETAILS HARDENING (VERY IMPORTANT)
+========================
+FedEx international clearance needs good customs data. Update customs logic to use the shipment items that we now collect (itemName, description, hsCode, origin, quantity, price).
+
+1) Currency
+- Remove hardcoded customs currency like “SAR”.
+- Use a shipment.currency field (default EGP if your system uses it) and use it consistently:
+  - customsValue currency
+  - item unit price currency
+  - total declared value currency
+
+2) Commodity line-item breakdown
+- Instead of sending ONE combined commodity, build a commodity per item (or per unique HS code) with:
+  - description = itemDescription or itemName
+  - quantity = item.quantity
+  - unitPrice = item.price
+  - customsValue = item.price * quantity
+  - countryOfManufacture = item.countryOfOrigin (NOT shipper country by default)
+  - harmonizedCode = item.hsCode (if present)
+  - weight: allocate weights sensibly:
+    - if you don’t have per-item weight, omit per-item weight or distribute proportionally by value; do not invent extreme values.
+- Sum declared value = sum(item.price * qty). If empty, block international shipment confirmation.
+
+3) HS codes
+- If international shipment and hsCode is missing for any item, do:
+  - allow with warning OR block based on env FEDEX_REQUIRE_HS=true/false.
+  - If FEDEX_REQUIRE_HS=true, return 400 listing items missing HS code.
+
+4) Better commodityDescription
+- Use a compact string: first 3 item names + “and N more”, not a huge concatenation.
+
+========================
+F) RATES RESPONSE NORMALIZATION (BUG HARDENING)
+========================
+In the rate quote code, normalize the response because FedEx can return totals in different shapes depending on API/fields.
+
+- Implement a helper parseMoney(value):
+  - if number -> {amount:number, currency: shipment currency or response currency}
+  - if object like { amount, currency } -> parse
+  - if string -> parseFloat
+- Ensure baseRate and currency are always stored as primitives.
+
+If parsing fails, return 502 with “Carrier rates unavailable”.
+
+========================
+G) CANCEL SHIPMENT HARDENING
+========================
+Ensure cancel shipment request matches FedEx expected payload for your Ship API version.
+- Include tracking number and tracking number type if required.
+- Only allow cancel if shipment is not tendered.
+- If cancel fails, do not mark shipment cancelled; store cancel error.
+
+========================
+H) WEBHOOK SIGNATURE VERIFICATION (CRITICAL)
+========================
+The current webhook verifier likely uses wrong encoding/headers (hex HMAC). Fix it to match FedEx’s webhook docs:
+- Identify the correct signature header name used by the FedEx webhook product you are integrating (do NOT guess).
+- If signature is base64, compute HMAC SHA256 and compare in base64.
+- Use constant-time comparison.
+- If FEDEX_WEBHOOK_SECRET is missing in production, DISABLE the webhook route entirely or return 500 “Webhook not configured”, do NOT accept unauthenticated webhooks.
+
+Also:
+- Log webhook events safely.
+- Validate webhook payload schema minimally.
+- Ensure idempotency: store webhook eventId, ignore duplicates.
+
+========================
+I) STORAGE: TRACK REAL CARRIER DATA + ERROR STATES
+========================
+Extend DB schema (Drizzle) to store:
+- carrierTrackingNumber (text)
+- carrierLabelUrl or label data reference (text/json)
+- carrierShipmentId (text) if FedEx returns one
+- carrierStatus (enum: pending, created, error, cancelled)
+- carrierErrorCode, carrierErrorMessage
+- carrierLastAttemptAt (timestamp)
+- carrierAttempts (int)
+
+Update all relevant code paths to populate these fields.
+
+========================
+J) SECURITY / OPERATIONS
+========================
+1) Do not log full API response bodies in production (remove the middleware that captures JSON responses).
+2) Ensure SESSION_SECRET has no fallback in production.
+3) Ensure /api/uploads/request-url is authenticated (if still present).
+
+========================
+K) MANUAL TEST CHECKLIST (ADD TO README)
+========================
+Add a “FedEx Production Readiness Checklist” section:
+1) Confirm FEDEX_BASE_URL = https://apis.fedex.com
+2) Create a domestic shipment with full address requirements (postal/state).
+3) Create an international shipment with items:
+   - with hs codes
+   - correct origin per item
+   - declared value matches sum of items
+4) Verify:
+   - A real tracking number exists on FedEx site
+   - Label generated
+5) Verify failure behavior:
+   - Temporarily break credentials -> confirm shipment returns 502 and does NOT mark created
+   - Retry endpoint works when credentials restored
+6) Verify webhook signature rejects invalid signatures and accepts valid ones.
+
+DELIVERABLE
+Implement all changes above with clean, consistent code style. Keep sandbox support for development but ensure production never fakes shipments. Ensure that when the UI shows “Shipment created”, it truly exists in FedEx.

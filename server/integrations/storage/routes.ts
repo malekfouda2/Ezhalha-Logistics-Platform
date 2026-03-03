@@ -45,7 +45,7 @@ export function registerObjectStorageRoutes(app: Express): void {
 function registerCloudRoutes(app: Express): void {
   const objectStorageService = new ObjectStorageService();
 
-  app.post("/api/uploads/request-url", async (req, res) => {
+  app.post("/api/uploads/request-url", requireAuthenticated, async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
 
@@ -111,7 +111,7 @@ function registerLocalRoutes(app: Express): void {
   localStorageService.initialize().catch(console.error);
   const maxFileSize = localStorageService.getMaxFileSize();
 
-  app.post("/api/uploads/request-url", async (req, res) => {
+  app.post("/api/uploads/request-url", requireAuthenticated, async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
 

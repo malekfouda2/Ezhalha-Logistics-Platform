@@ -1,21 +1,18 @@
-/**
- * FedEx Carrier Adapter for ezhalha
- * 
- * This module provides FedEx shipping integration capabilities.
- * Implements the Carrier Adapter pattern for extensibility.
- * 
- * Configure the following environment variables:
- * - FEDEX_CLIENT_ID or FEDEX_API_KEY
- * - FEDEX_CLIENT_SECRET or FEDEX_SECRET_KEY
- * - FEDEX_ACCOUNT_NUMBER
- * - FEDEX_WEBHOOK_SECRET (for webhook signature validation)
- * - FEDEX_BASE_URL (optional, defaults to sandbox)
- * 
- * FedEx API Documentation: https://developer.fedex.com/
- */
-
+import crypto from "crypto";
 import { logInfo, logError } from "../services/logger";
 import { storage } from "../storage";
+
+export class CarrierError extends Error {
+  public code: string;
+  public carrierMessage: string;
+
+  constructor(code: string, message: string) {
+    super(`CarrierError [${code}]: ${message}`);
+    this.name = "CarrierError";
+    this.code = code;
+    this.carrierMessage = message;
+  }
+}
 
 export interface ShippingAddress {
   name: string;
@@ -38,6 +35,15 @@ export interface PackageDetails {
     unit: "IN" | "CM";
   };
   packageType: string;
+}
+
+export interface ShipmentItem {
+  description: string;
+  hsCode?: string;
+  countryOfOrigin?: string;
+  quantity: number;
+  unitPrice: number;
+  currency?: string;
 }
 
 export interface AddressValidationRequest {
@@ -125,6 +131,9 @@ export interface CreateShipmentRequest {
   labelFormat?: "PDF" | "PNG" | "ZPL";
   commodityDescription?: string;
   declaredValue?: number;
+  currency?: string;
+  shipDate?: string;
+  items?: ShipmentItem[];
 }
 
 export interface CreateShipmentResponse {
@@ -172,6 +181,28 @@ async function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function isProduction(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+function isMockAllowed(): boolean {
+  if (process.env.FEDEX_MOCK_MODE === "true") return true;
+  return !isProduction();
+}
+
+export function parseMoney(value: any): number {
+  if (typeof value === "number") return Math.round(value * 100) / 100;
+  if (typeof value === "string") {
+    const parsed = parseFloat(value.replace(/[^0-9.\-]/g, ""));
+    if (isNaN(parsed)) return NaN;
+    return Math.round(parsed * 100) / 100;
+  }
+  if (typeof value === "object" && value !== null && "amount" in value) {
+    return parseMoney(value.amount);
+  }
+  return NaN;
+}
+
 function maskSensitiveData(data: any): any {
   if (!data) return data;
   const masked = JSON.parse(JSON.stringify(data));
@@ -189,6 +220,25 @@ function maskSensitiveData(data: any): any {
   
   maskObject(masked);
   return masked;
+}
+
+export function validateFedExEnvOnStartup(): void {
+  if (!isProduction()) return;
+
+  const required = ["FEDEX_CLIENT_ID", "FEDEX_CLIENT_SECRET", "FEDEX_ACCOUNT_NUMBER", "FEDEX_BASE_URL"];
+  const missing = required.filter(k => !process.env[k]);
+  if (missing.length > 0) {
+    const msg = `FATAL: Missing required FedEx env vars in production: ${missing.join(", ")}`;
+    logError(msg, {});
+    throw new Error(msg);
+  }
+
+  const baseUrl = process.env.FEDEX_BASE_URL || "";
+  if (baseUrl.toLowerCase().includes("sandbox")) {
+    const msg = "FATAL: FEDEX_BASE_URL contains 'sandbox' in production environment. This is not allowed.";
+    logError(msg, {});
+    throw new Error(msg);
+  }
 }
 
 export class FedExAdapter implements CarrierAdapter {
@@ -222,6 +272,11 @@ export class FedExAdapter implements CarrierAdapter {
     return !!(this.clientId && this.clientSecret && this.accountNumber);
   }
 
+  private invalidateToken(): void {
+    this.accessToken = undefined;
+    this.tokenExpiry = 0;
+  }
+
   private async logIntegration(
     endpoint: string, 
     method: string, 
@@ -232,11 +287,21 @@ export class FedExAdapter implements CarrierAdapter {
     success: boolean
   ): Promise<void> {
     try {
+      const maskedRequest = maskSensitiveData(requestBody);
+      let maskedResponse: any;
+      if (isProduction()) {
+        maskedResponse = responseBody?.error
+          ? { error: responseBody.error }
+          : { logged: false, reason: "production" };
+      } else {
+        maskedResponse = maskSensitiveData(responseBody);
+      }
+
       await storage.createIntegrationLog({
         serviceName: "fedex",
         operation: `${method} ${endpoint}`,
-        requestPayload: JSON.stringify(maskSensitiveData(requestBody)),
-        responsePayload: JSON.stringify(maskSensitiveData(responseBody)),
+        requestPayload: JSON.stringify(maskedRequest),
+        responsePayload: JSON.stringify(maskedResponse),
         statusCode,
         duration,
         success,
@@ -254,6 +319,7 @@ export class FedExAdapter implements CarrierAdapter {
   ): Promise<{ data: T; statusCode: number }> {
     const startTime = Date.now();
     let lastError: Error | null = null;
+    let didRetryAuth = false;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -272,6 +338,13 @@ export class FedExAdapter implements CarrierAdapter {
         const duration = Date.now() - startTime;
         const responseData = await response.json();
 
+        if (response.status === 401 && !didRetryAuth) {
+          didRetryAuth = true;
+          this.invalidateToken();
+          logInfo(`FedEx API 401, invalidating token and retrying for ${endpoint}`);
+          continue;
+        }
+
         await this.logIntegration(
           endpoint,
           method,
@@ -283,7 +356,10 @@ export class FedExAdapter implements CarrierAdapter {
         );
 
         if (!response.ok) {
-          const err = new Error(`FedEx API error: ${response.status} - ${JSON.stringify(responseData)}`);
+          const errMsg = isProduction()
+            ? `FedEx API error: ${response.status}`
+            : `FedEx API error: ${response.status} - ${JSON.stringify(responseData)}`;
+          const err = new Error(errMsg);
           if (response.status >= 500 && attempt < retries) {
             logInfo(`FedEx API retry ${attempt}/${retries} for ${endpoint}`, { status: response.status });
             lastError = err;
@@ -361,6 +437,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async validateAddress(request: AddressValidationRequest): Promise<AddressValidationResponse> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       return this.getMockAddressValidation(request);
     }
 
@@ -394,6 +473,9 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx address validation error", error);
+      if (!isMockAllowed()) {
+        throw new CarrierError("ADDRESS_VALIDATION_FAILED", (error as Error).message);
+      }
       return this.getMockAddressValidation(request);
     }
   }
@@ -416,6 +498,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async validatePostalCode(request: PostalCodeValidationRequest): Promise<PostalCodeValidationResponse> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       return this.getMockPostalCodeValidation(request);
     }
 
@@ -438,6 +523,9 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx postal code validation error", error);
+      if (!isMockAllowed()) {
+        throw new CarrierError("POSTAL_VALIDATION_FAILED", (error as Error).message);
+      }
       return this.getMockPostalCodeValidation(request);
     }
   }
@@ -454,6 +542,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async checkServiceAvailability(request: ServiceAvailabilityRequest): Promise<ServiceAvailabilityResponse> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       return this.getMockServiceAvailability(request);
     }
 
@@ -491,6 +582,9 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx service availability error", error);
+      if (!isMockAllowed()) {
+        throw new CarrierError("SERVICE_AVAILABILITY_FAILED", (error as Error).message);
+      }
       return this.getMockServiceAvailability(request);
     }
   }
@@ -532,6 +626,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       logInfo("FedEx not configured, using mock rates");
       return this.getMockRates(request);
     }
@@ -586,21 +683,31 @@ export class FedExAdapter implements CarrierAdapter {
 
       const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
       
-      return data.output.rateReplyDetails.map((rate: any) => ({
-        baseRate: rate.ratedShipmentDetails[0].totalNetCharge,
-        currency: rate.ratedShipmentDetails[0].currency,
-        serviceType: rate.serviceType,
-        transitDays: rate.operationalDetail?.transitTime || 3,
-        deliveryDate: rate.operationalDetail?.deliveryDate 
-          ? new Date(rate.operationalDetail.deliveryDate) 
-          : undefined,
-        serviceName: rate.serviceName,
-      }));
+      const rates = data.output.rateReplyDetails.map((rate: any) => {
+        const baseRate = parseMoney(rate.ratedShipmentDetails?.[0]?.totalNetCharge);
+        if (isNaN(baseRate)) {
+          throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
+        }
+        return {
+          baseRate,
+          currency: rate.ratedShipmentDetails[0].currency,
+          serviceType: rate.serviceType,
+          transitDays: rate.operationalDetail?.transitTime || 3,
+          deliveryDate: rate.operationalDetail?.deliveryDate 
+            ? new Date(rate.operationalDetail.deliveryDate) 
+            : undefined,
+          serviceName: rate.serviceName,
+        };
+      });
+      return rates;
     } catch (error: any) {
       logInfo("FedEx rate API unavailable for this route, using calculated rates", {
         from: request.shipper.countryCode,
         to: request.recipient.countryCode,
       });
+      if (!isMockAllowed()) {
+        throw new CarrierError("RATE_FAILED", error.message);
+      }
       return this.getMockRates(request);
     }
   }
@@ -611,21 +718,21 @@ export class FedExAdapter implements CarrierAdapter {
     
     const rates: RateResponse[] = isInternational ? [
       {
-        baseRate: 89.99 + (baseWeight * 4),
+        baseRate: parseMoney(89.99 + (baseWeight * 4)),
         currency: "SAR",
         serviceType: "INTERNATIONAL_ECONOMY",
         transitDays: 5,
         serviceName: "FedEx International Economy",
       },
       {
-        baseRate: 149.99 + (baseWeight * 6),
+        baseRate: parseMoney(149.99 + (baseWeight * 6)),
         currency: "SAR",
         serviceType: "INTERNATIONAL_PRIORITY",
         transitDays: 3,
         serviceName: "FedEx International Priority",
       },
       {
-        baseRate: 249.99 + (baseWeight * 10),
+        baseRate: parseMoney(249.99 + (baseWeight * 10)),
         currency: "SAR",
         serviceType: "FEDEX_INTERNATIONAL_PRIORITY_EXPRESS",
         transitDays: 1,
@@ -633,28 +740,28 @@ export class FedExAdapter implements CarrierAdapter {
       },
     ] : [
       {
-        baseRate: 15.99 + (baseWeight * 1.2),
+        baseRate: parseMoney(15.99 + (baseWeight * 1.2)),
         currency: "SAR",
         serviceType: "FEDEX_GROUND",
         transitDays: 5,
         serviceName: "FedEx Ground",
       },
       {
-        baseRate: 29.99 + (baseWeight * 2),
+        baseRate: parseMoney(29.99 + (baseWeight * 2)),
         currency: "SAR",
         serviceType: "FEDEX_EXPRESS_SAVER",
         transitDays: 3,
         serviceName: "FedEx Express Saver",
       },
       {
-        baseRate: 49.99 + (baseWeight * 3),
+        baseRate: parseMoney(49.99 + (baseWeight * 3)),
         currency: "SAR",
         serviceType: "FEDEX_2_DAY",
         transitDays: 2,
         serviceName: "FedEx 2Day",
       },
       {
-        baseRate: 79.99 + (baseWeight * 5),
+        baseRate: parseMoney(79.99 + (baseWeight * 5)),
         currency: "SAR",
         serviceType: "FEDEX_PRIORITY_OVERNIGHT",
         transitDays: 1,
@@ -672,15 +779,27 @@ export class FedExAdapter implements CarrierAdapter {
 
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       return this.createMockShipment(request);
     }
 
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
 
+    if (isInternational && process.env.FEDEX_REQUIRE_HS === "true" && request.items) {
+      const missingHs = request.items.filter(item => !item.hsCode);
+      if (missingHs.length > 0) {
+        throw new CarrierError(
+          "HS_CODE_REQUIRED",
+          `HS code is required for international shipments. Missing for: ${missingHs.map(i => i.description).join(", ")}`
+        );
+      }
+    }
+
     try {
-      const shipDate = new Date();
-      shipDate.setDate(shipDate.getDate() + 1);
-      const shipDatestamp = shipDate.toISOString().split("T")[0];
+      const shipDatestamp = request.shipDate || new Date().toISOString().split("T")[0];
+      const requestCurrency = request.currency || "SAR";
 
       const requestedShipment: any = {
         shipper: {
@@ -729,8 +848,45 @@ export class FedExAdapter implements CarrierAdapter {
       };
 
       if (isInternational) {
-        const totalWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
-        const weightUnit = request.packages[0]?.weightUnit || "KG";
+        let commodities: any[];
+
+        if (request.items && request.items.length > 0) {
+          commodities = request.items.map(item => ({
+            description: (item.description || "General Merchandise").substring(0, 450),
+            quantity: item.quantity || 1,
+            quantityUnits: "PCS",
+            customsValue: {
+              amount: parseMoney(item.unitPrice * (item.quantity || 1)),
+              currency: item.currency || requestCurrency,
+            },
+            weight: {
+              units: request.packages[0]?.weightUnit || "KG",
+              value: request.packages.reduce((sum, pkg) => sum + pkg.weight, 0) / (request.items?.length || 1),
+            },
+            countryOfManufacture: item.countryOfOrigin || request.shipper.countryCode,
+            numberOfPieces: item.quantity || 1,
+            harmonizedCode: item.hsCode || undefined,
+          }));
+        } else {
+          const totalWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+          const weightUnit = request.packages[0]?.weightUnit || "KG";
+          commodities = [{
+            description: (request.commodityDescription || "General Merchandise").substring(0, 450),
+            quantity: request.packages.length || 1,
+            quantityUnits: "PCS",
+            customsValue: {
+              amount: parseMoney(request.declaredValue || 100),
+              currency: requestCurrency,
+            },
+            weight: {
+              units: weightUnit,
+              value: totalWeight,
+            },
+            countryOfManufacture: request.shipper.countryCode,
+            numberOfPieces: request.packages.length || 1,
+          }];
+        }
+
         requestedShipment.customsClearanceDetail = {
           dutiesPayment: {
             paymentType: "SENDER",
@@ -741,21 +897,7 @@ export class FedExAdapter implements CarrierAdapter {
             },
           },
           isDocumentOnly: false,
-          commodities: [{
-            description: request.commodityDescription || "General Merchandise",
-            quantity: request.packages.length || 1,
-            quantityUnits: "PCS",
-            customsValue: {
-              amount: request.declaredValue || 100,
-              currency: "SAR",
-            },
-            weight: {
-              units: weightUnit,
-              value: totalWeight,
-            },
-            countryOfManufacture: request.shipper.countryCode,
-            numberOfPieces: request.packages.length || 1,
-          }],
+          commodities,
         };
       }
 
@@ -801,6 +943,10 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx create shipment error", error);
+      if (error instanceof CarrierError) throw error;
+      if (!isMockAllowed()) {
+        throw new CarrierError("CREATE_SHIPMENT_FAILED", (error as Error).message);
+      }
       return this.createMockShipment(request);
     }
   }
@@ -828,6 +974,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async trackShipment(trackingNumber: string): Promise<TrackingResponse> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       return this.getMockTracking(trackingNumber);
     }
 
@@ -859,6 +1008,9 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx tracking error", error);
+      if (!isMockAllowed()) {
+        throw new CarrierError("TRACKING_FAILED", (error as Error).message);
+      }
       return this.getMockTracking(trackingNumber);
     }
   }
@@ -899,6 +1051,9 @@ export class FedExAdapter implements CarrierAdapter {
 
   async cancelShipment(trackingNumber: string): Promise<boolean> {
     if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
       logInfo("Mock FedEx cancellation (not configured)", { trackingNumber });
       return true;
     }
@@ -906,13 +1061,20 @@ export class FedExAdapter implements CarrierAdapter {
     try {
       await this.makeRequest<any>("/ship/v1/shipments/cancel", "PUT", {
         accountNumber: { value: this.accountNumber },
-        trackingNumber,
+        senderCountryCode: "SA",
+        deletionControl: "DELETE_ALL_PACKAGES",
+        trackingNumber: {
+          trackingNumber,
+        },
       });
 
       logInfo("FedEx shipment cancelled", { trackingNumber });
       return true;
     } catch (error) {
       logError("FedEx cancel shipment error", error);
+      if (!isMockAllowed()) {
+        throw new CarrierError("CANCEL_FAILED", (error as Error).message);
+      }
       return false;
     }
   }
@@ -922,17 +1084,16 @@ export class FedExAdapter implements CarrierAdapter {
       return true;
     }
 
-    const crypto = require("crypto");
     const expectedSignature = crypto
       .createHmac("sha256", this.webhookSecret)
       .update(payload)
-      .digest("hex");
+      .digest("base64");
 
     try {
-      return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSignature)
-      );
+      const sigBuf = Buffer.from(signature, "base64");
+      const expectedBuf = Buffer.from(expectedSignature, "base64");
+      if (sigBuf.length !== expectedBuf.length) return false;
+      return crypto.timingSafeEqual(sigBuf, expectedBuf);
     } catch {
       return false;
     }

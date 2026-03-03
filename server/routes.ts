@@ -9,7 +9,8 @@ import type { ClientAccount, ClientUserPermission } from "@shared/schema";
 import { ClientPermission, ALL_CLIENT_PERMISSIONS, type ClientPermissionValue } from "@shared/schema";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder } from "./services/email";
-import { fedexAdapter } from "./integrations/fedex";
+import { fedexAdapter, CarrierError } from "./integrations/fedex";
+import type { ShipmentItem } from "./integrations/fedex";
 import { zohoService } from "./integrations/zoho";
 import { stripeService } from "./integrations/stripe";
 import { moyasarService } from "./integrations/moyasar";
@@ -346,7 +347,9 @@ export async function registerRoutes(
 
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "ezhalha-secret-key-dev",
+      secret: process.env.NODE_ENV === "production"
+        ? (process.env.SESSION_SECRET || (() => { throw new Error("SESSION_SECRET is required in production"); })())
+        : (process.env.SESSION_SECRET || "ezhalha-secret-key-dev"),
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
@@ -791,14 +794,176 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Shipment already cancelled" });
       }
 
-      const updated = await storage.updateShipment(id, { status: "cancelled" });
+      if (shipment.carrierTrackingNumber) {
+        try {
+          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber);
+        } catch (cancelError) {
+          const isCarrierErr = cancelError instanceof CarrierError;
+          const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
+          const errMsg = isCarrierErr ? (cancelError as CarrierError).carrierMessage : (cancelError as Error).message;
+
+          logError("Carrier cancel failed", cancelError);
+          await storage.updateShipment(id, {
+            carrierErrorCode: errCode,
+            carrierErrorMessage: `Cancel failed: ${errMsg}`,
+            carrierLastAttemptAt: new Date(),
+          });
+
+          return res.status(502).json({
+            error: "Failed to cancel with carrier",
+            carrierErrorCode: errCode,
+            carrierErrorMessage: errMsg,
+          });
+        }
+      }
+
+      const updated = await storage.updateShipment(id, {
+        status: "cancelled",
+        carrierStatus: "cancelled",
+      });
       
-      // Log cancellation
       await logAudit(req.session.userId, "cancel_shipment", "shipment", id,
         `Cancelled shipment ${shipment.trackingNumber}`, req.ip);
       
       res.json(updated);
     } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - Retry carrier creation for failed shipments
+  app.post("/api/admin/shipments/:id/retry-carrier", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const shipment = await storage.getShipment(id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (shipment.status !== "carrier_error") {
+        return res.status(400).json({ error: "Shipment is not in carrier_error state" });
+      }
+
+      const carrierRequest: any = {
+        shipper: {
+          name: shipment.senderName,
+          streetLine1: shipment.senderAddress,
+          city: shipment.senderCity,
+          stateOrProvince: "",
+          postalCode: shipment.senderPostalCode || "",
+          countryCode: shipment.senderCountry,
+          phone: shipment.senderPhone,
+        },
+        recipient: {
+          name: shipment.recipientName,
+          streetLine1: shipment.recipientAddress,
+          city: shipment.recipientCity,
+          stateOrProvince: "",
+          postalCode: shipment.recipientPostalCode || "",
+          countryCode: shipment.recipientCountry,
+          phone: shipment.recipientPhone,
+        },
+        packages: shipment.packagesData ? JSON.parse(shipment.packagesData).map((pkg: any) => ({
+          weight: Number(pkg.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: {
+            length: Number(pkg.length),
+            width: Number(pkg.width),
+            height: Number(pkg.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          },
+          packageType: shipment.packageType,
+        })) : [{
+          weight: Number(shipment.weight),
+          weightUnit: (shipment.weightUnit || "LB") as "LB" | "KG",
+          dimensions: shipment.length && shipment.width && shipment.height ? {
+            length: Number(shipment.length),
+            width: Number(shipment.width),
+            height: Number(shipment.height),
+            unit: (shipment.dimensionUnit || "IN") as "IN" | "CM",
+          } : undefined,
+          packageType: shipment.packageType,
+        }],
+        serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_GROUND",
+        labelFormat: "PDF" as const,
+        commodityDescription: undefined as string | undefined,
+        declaredValue: undefined as number | undefined,
+      };
+
+      const isInternationalRetry = shipment.senderCountry !== shipment.recipientCountry;
+
+      if (shipment.itemsData) {
+        try {
+          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number; hsCode?: string; countryOfOrigin?: string }>;
+          if (items.length > 0) {
+            carrierRequest.commodityDescription = items.map(i => i.itemName).join(", ").substring(0, 450);
+            carrierRequest.declaredValue = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
+            if (isInternationalRetry) {
+              carrierRequest.items = items.map(i => ({
+                description: i.itemName,
+                hsCode: i.hsCode,
+                countryOfOrigin: i.countryOfOrigin || shipment.senderCountry,
+                quantity: i.quantity,
+                unitPrice: i.price,
+                currency: shipment.currency || "SAR",
+              }));
+              carrierRequest.currency = shipment.currency || "SAR";
+            }
+          }
+        } catch {}
+      }
+
+      let carrierResponse;
+      try {
+        carrierResponse = await fedexAdapter.createShipment(carrierRequest);
+      } catch (carrierError) {
+        const isCarrierErr = carrierError instanceof CarrierError;
+        const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
+        const errMsg = isCarrierErr ? (carrierError as CarrierError).carrierMessage : (carrierError as Error).message;
+
+        await storage.updateShipment(id, {
+          carrierStatus: "error",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+          carrierLastAttemptAt: new Date(),
+          carrierAttempts: (shipment.carrierAttempts || 0) + 1,
+        });
+
+        logError("Carrier retry failed", carrierError);
+        return res.status(502).json({
+          error: "Carrier error on retry",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+        });
+      }
+
+      const previousStatus = shipment.paymentMethod === "CREDIT" ? "created" : "created";
+      const updatedShipment = await storage.updateShipment(id, {
+        status: previousStatus,
+        carrierStatus: "created",
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
+        carrierShipmentId: carrierResponse.trackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+        carrierErrorCode: null,
+        carrierErrorMessage: null,
+        carrierLastAttemptAt: new Date(),
+        carrierAttempts: (shipment.carrierAttempts || 0) + 1,
+      });
+
+      await logAudit(req.session.userId, "retry_carrier", "shipment", id,
+        `Retried carrier creation for shipment ${shipment.trackingNumber}, new carrier tracking ${carrierResponse.carrierTrackingNumber}`, req.ip);
+
+      res.json({
+        shipment: updatedShipment,
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+      });
+    } catch (error) {
+      logError("Failed to retry carrier creation", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -3089,32 +3254,34 @@ export async function registerRoutes(
   // ============================================
 
   // Canonical Shipment Input Schema
+  const COUNTRIES_REQUIRING_STATE = ["US", "CA"];
+
+  const addressSchema = z.object({
+    name: z.string().min(1, "Name is required"),
+    phone: z.string().min(1, "Phone is required"),
+    countryCode: z.string().length(2, "Country code must be 2 characters"),
+    city: z.string().min(1, "City is required"),
+    postalCode: z.string().min(1, "Postal code is required"),
+    addressLine1: z.string().min(1, "Address is required"),
+    addressLine2: z.string().optional(),
+    stateOrProvince: z.string().optional(),
+    shortAddress: z.string().optional(),
+  }).superRefine((data, ctx) => {
+    if (COUNTRIES_REQUIRING_STATE.includes(data.countryCode) && !data.stateOrProvince) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `State/Province is required for ${data.countryCode}`,
+        path: ["stateOrProvince"],
+      });
+    }
+  });
+
   const shipmentInputSchema = z.object({
     shipmentType: z.enum(["domestic", "inbound", "outbound"]),
     carrier: z.string().optional(),
     serviceType: z.string().optional(),
-    shipper: z.object({
-      name: z.string().min(1, "Shipper name is required"),
-      phone: z.string().min(1, "Shipper phone is required"),
-      countryCode: z.string().length(2, "Country code must be 2 characters"),
-      city: z.string().min(1, "Shipper city is required"),
-      postalCode: z.string().min(1, "Shipper postal code is required"),
-      addressLine1: z.string().min(1, "Shipper address is required"),
-      addressLine2: z.string().optional(),
-      stateOrProvince: z.string().optional(),
-      shortAddress: z.string().optional(),
-    }),
-    recipient: z.object({
-      name: z.string().min(1, "Recipient name is required"),
-      phone: z.string().min(1, "Recipient phone is required"),
-      countryCode: z.string().length(2, "Country code must be 2 characters"),
-      city: z.string().min(1, "Recipient city is required"),
-      postalCode: z.string().min(1, "Recipient postal code is required"),
-      addressLine1: z.string().min(1, "Recipient address is required"),
-      addressLine2: z.string().optional(),
-      stateOrProvince: z.string().optional(),
-      shortAddress: z.string().optional(),
-    }),
+    shipper: addressSchema,
+    recipient: addressSchema,
     packages: z.array(z.object({
       weight: z.number().positive("Weight must be positive"),
       length: z.number().positive("Length must be positive"),
@@ -3540,26 +3707,68 @@ export async function registerRoutes(
         declaredValue: undefined as number | undefined,
       };
 
+      const isInternational = shipment.senderCountry !== shipment.recipientCountry;
+      let parsedItems: ShipmentItem[] = [];
+
       if (shipment.itemsData) {
         try {
-          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number; hsCode?: string }>;
+          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number; hsCode?: string; countryOfOrigin?: string }>;
           if (items.length > 0) {
             carrierRequest.commodityDescription = items.map(i => i.itemName).join(", ").substring(0, 450);
             carrierRequest.declaredValue = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
+            if (isInternational) {
+              parsedItems = items.map(i => ({
+                description: i.itemName,
+                hsCode: i.hsCode,
+                countryOfOrigin: i.countryOfOrigin || shipment.senderCountry,
+                quantity: i.quantity,
+                unitPrice: i.price,
+                currency: shipment.currency || "SAR",
+              }));
+              (carrierRequest as any).items = parsedItems;
+              (carrierRequest as any).currency = shipment.currency || "SAR";
+            }
           }
         } catch {}
       }
 
-      const carrierResponse = await fedexAdapter.createShipment(carrierRequest);
+      let carrierResponse;
+      try {
+        carrierResponse = await fedexAdapter.createShipment(carrierRequest);
+      } catch (carrierError) {
+        const isCarrierErr = carrierError instanceof CarrierError;
+        const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
+        const errMsg = isCarrierErr ? (carrierError as CarrierError).carrierMessage : (carrierError as Error).message;
+
+        await storage.updateShipment(shipmentId, {
+          status: "carrier_error",
+          carrierStatus: "error",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+          carrierLastAttemptAt: new Date(),
+          carrierAttempts: (shipment.carrierAttempts || 0) + 1,
+        });
+
+        logError("Carrier error during confirm", carrierError);
+        return res.status(502).json({
+          error: "Carrier error, please retry",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+        });
+      }
 
       // Update shipment with carrier response
       const updatedShipment = await storage.updateShipment(shipmentId, {
         status: "created",
         paymentStatus: "paid",
+        carrierStatus: "created",
         carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         estimatedDelivery: carrierResponse.estimatedDelivery,
+        carrierLastAttemptAt: new Date(),
+        carrierAttempts: (shipment.carrierAttempts || 0) + 1,
       });
 
       // Create invoice
@@ -3722,19 +3931,42 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Shipment not found" });
       }
 
-      // Verify shipment belongs to client
       if (shipment.clientAccountId !== user.clientAccountId) {
         return res.status(403).json({ error: "Not authorized" });
       }
 
-      // Only allow cancellation of processing shipments
-      if (shipment.status !== "processing") {
-        return res.status(400).json({ error: "Can only cancel shipments that are still processing" });
+      if (shipment.status !== "processing" && shipment.status !== "carrier_error") {
+        return res.status(400).json({ error: "Can only cancel shipments that are still processing or in carrier error" });
       }
 
-      const updated = await storage.updateShipment(id, { status: "cancelled" });
+      if (shipment.carrierTrackingNumber) {
+        try {
+          await fedexAdapter.cancelShipment(shipment.carrierTrackingNumber);
+        } catch (cancelError) {
+          const isCarrierErr = cancelError instanceof CarrierError;
+          const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
+          const errMsg = isCarrierErr ? (cancelError as CarrierError).carrierMessage : (cancelError as Error).message;
+
+          logError("Client carrier cancel failed", cancelError);
+          await storage.updateShipment(id, {
+            carrierErrorCode: errCode,
+            carrierErrorMessage: `Cancel failed: ${errMsg}`,
+            carrierLastAttemptAt: new Date(),
+          });
+
+          return res.status(502).json({
+            error: "Failed to cancel with carrier",
+            carrierErrorCode: errCode,
+            carrierErrorMessage: errMsg,
+          });
+        }
+      }
+
+      const updated = await storage.updateShipment(id, {
+        status: "cancelled",
+        carrierStatus: "cancelled",
+      });
       
-      // Log cancellation
       await logAudit(req.session.userId, "cancel_shipment", "shipment", id,
         `Client cancelled shipment ${shipment.trackingNumber}`, req.ip);
       
@@ -3905,12 +4137,26 @@ export async function registerRoutes(
         declaredValue: undefined as number | undefined,
       };
 
+      const isInternationalPayLater = shipment.senderCountry !== shipment.recipientCountry;
+
       if (shipment.itemsData) {
         try {
-          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number }>;
+          const items = JSON.parse(shipment.itemsData) as Array<{ itemName: string; price: number; quantity: number; hsCode?: string; countryOfOrigin?: string }>;
           if (items.length > 0) {
             carrierRequest.commodityDescription = items.map(i => i.itemName).join(", ").substring(0, 450);
             carrierRequest.declaredValue = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
+            if (isInternationalPayLater) {
+              (carrierRequest as any).items = items.map(i => ({
+                description: i.itemName,
+                hsCode: i.hsCode,
+                countryOfOrigin: i.countryOfOrigin || shipment.senderCountry,
+                quantity: i.quantity,
+                unitPrice: i.price,
+                currency: shipment.currency || "SAR",
+              }));
+              (carrierRequest as any).currency = shipment.currency || "SAR";
+            }
           }
         } catch {}
       }
@@ -3927,15 +4173,27 @@ export async function registerRoutes(
 
         await storage.updateShipment(shipmentId, {
           status: "created",
+          carrierStatus: "created",
           carrierTrackingNumber,
           carrierShipmentId: carrierResponse.trackingNumber,
           labelUrl: carrierResponse.labelUrl,
           estimatedDelivery: carrierResponse.estimatedDelivery,
+          carrierLastAttemptAt: new Date(),
+          carrierAttempts: (shipment.carrierAttempts || 0) + 1,
         });
       } catch (carrierError) {
+        const isCarrierErr = carrierError instanceof CarrierError;
+        const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
+        const errMsg = isCarrierErr ? (carrierError as CarrierError).carrierMessage : (carrierError as Error).message;
+
         logError("Failed to create carrier shipment for pay-later", carrierError);
         await storage.updateShipment(shipmentId, {
-          status: "processing",
+          status: "carrier_error",
+          carrierStatus: "error",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+          carrierLastAttemptAt: new Date(),
+          carrierAttempts: (shipment.carrierAttempts || 0) + 1,
         });
       }
 
@@ -4669,13 +4927,16 @@ export async function registerRoutes(
   // FedEx Webhook Handler
   app.post("/api/webhooks/fedex", async (req, res) => {
     try {
-      // Use raw body for signature validation if available
+      const webhookSecret = process.env.FEDEX_WEBHOOK_SECRET;
+
+      if (process.env.NODE_ENV === "production" && !webhookSecret) {
+        return res.status(500).json({ error: "Webhook not configured" });
+      }
+
       const rawBody = (req as any).rawBody;
       const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
       const signature = req.headers["x-fedex-signature"] as string | undefined;
-      const webhookSecret = process.env.FEDEX_WEBHOOK_SECRET;
 
-      // Validate signature if secret is configured
       if (webhookSecret && !validateWebhookSignature(payload, signature, webhookSecret)) {
         await storage.createWebhookEvent({
           source: "fedex",
@@ -4692,7 +4953,30 @@ export async function registerRoutes(
       const event = req.body;
       const eventType = event.eventType || "unknown";
 
-      // Store webhook event
+      const fedexWebhookPayloadSchema = z.object({
+        eventType: z.string().optional(),
+        trackingNumber: z.string().optional(),
+        status: z.string().optional(),
+        deliveryDate: z.string().optional(),
+        eventId: z.string().optional(),
+      }).passthrough();
+
+      const parseResult = fedexWebhookPayloadSchema.safeParse(event);
+      if (!parseResult.success) {
+        return res.status(400).json({ error: "Invalid webhook payload" });
+      }
+
+      const eventId = event.eventId;
+      if (eventId) {
+        const existingEvents = await storage.getWebhookEvents();
+        const duplicate = existingEvents.find(
+          e => e.source === "fedex" && e.payload.includes(eventId) && e.processed
+        );
+        if (duplicate) {
+          return res.json({ received: true, eventId: duplicate.id, duplicate: true });
+        }
+      }
+
       const webhookEvent = await storage.createWebhookEvent({
         source: "fedex",
         eventType,
@@ -4702,10 +4986,8 @@ export async function registerRoutes(
         retryCount: 0,
       });
 
-      // Process shipment status updates
       if (eventType === "shipment.status_update" && event.trackingNumber) {
         const shipments = await storage.getShipments();
-        // Find by our tracking number OR carrier tracking number
         const shipment = shipments.find(s => 
           s.trackingNumber === event.trackingNumber || 
           s.carrierTrackingNumber === event.trackingNumber
@@ -4727,7 +5009,6 @@ export async function registerRoutes(
             updates.status = newStatus;
           }
           
-          // Set actual delivery date if delivered
           if (newStatus === "delivered" && !shipment.actualDelivery) {
             updates.actualDelivery = event.deliveryDate ? new Date(event.deliveryDate) : new Date();
           }
