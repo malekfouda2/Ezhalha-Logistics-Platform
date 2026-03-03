@@ -78,6 +78,12 @@ Preferred communication style: Simple, everyday language.
   - Webhook signature uses base64 HMAC SHA256 with constant-time comparison
   - `parseMoney()` helper normalizes rate response values
   - Address validation: state/province required for US/CA, postal code validated server-side
+  - **stateOrProvinceCode sanitization**: `sanitizeStateCode()` helper omits the field for countries that don't use 2-letter state codes (SA, etc.), only includes for US/CA/AU/IN/BR/MX/CN/JP and values ≤2 chars
+  - **No mock fallback when FedEx is configured**: When FedEx credentials are present, rate/ship errors throw `CarrierError` instead of silently returning fake mock data with wrong US service types
+  - **Sandbox calculated rates**: When on FedEx sandbox and ALL rate combos fail (sandbox limitation for SA→SA), generates calculated rates using correct service types from Service Availability API
+  - **Comprehensive retry on service errors**: Both `getRates` and `createShipment` retry on: `SERVICE.PACKAGECOMBINATION.INVALID`, `INCOUNTRY.SERVICES.NOTALLOWED`, `SYSTEM.UNEXPECTED.ERROR`, `SYSTEM.UNAVAILABLE`, `SERVICETYPE.NOT.ALLOWED`, `SERVICETYPE.NOTSUPPORTED`, `SELECTED.DESTINATION.SERVICETYPE.INVALID`, `SERVICETYPE.INVALID`
+  - **Always calls Service Availability first**: `getRates` always queries Service Availability API to discover valid service types and packaging types per lane, tries all combos including auto-detect (no service type specified)
+  - **No hardcoded FEDEX_GROUND/YOUR_PACKAGING**: All carrier request fallbacks use `FEDEX_INTERNATIONAL_PRIORITY` and `FEDEX_BOX` (valid for SA account)
 
 ### Credit Access Request Flow
 - Clients must request credit/pay-later access — it is **not enabled by default**

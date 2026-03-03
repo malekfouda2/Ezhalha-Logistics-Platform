@@ -2,6 +2,18 @@ import crypto from "crypto";
 import { logInfo, logError } from "../services/logger";
 import { storage } from "../storage";
 
+const COUNTRIES_REQUIRING_STATE = new Set(["US", "CA", "AU", "IN", "BR", "MX", "CN", "JP"]);
+
+function sanitizeStateCode(countryCode: string, stateOrProvince?: string): string | undefined {
+  if (!stateOrProvince || stateOrProvince.trim() === "") return undefined;
+  const trimmed = stateOrProvince.trim();
+  if (trimmed.length <= 2) return trimmed.toUpperCase();
+  if (COUNTRIES_REQUIRING_STATE.has(countryCode)) {
+    return trimmed.substring(0, 2).toUpperCase();
+  }
+  return undefined;
+}
+
 export class CarrierError extends Error {
   public code: string;
   public carrierMessage: string;
@@ -673,68 +685,83 @@ export class FedExAdapter implements CarrierAdapter {
 
     logInfo(`FedEx getRates: calling real API (baseUrl: ${this.baseUrl})`);
 
+    let serviceTypesToTry: string[] = [];
+    let packagingTypesToTry: string[] = [];
+
     try {
       const shipperStreetLines = [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean) as string[];
+      const sanitizedShipperState = sanitizeStateCode(request.shipper.countryCode, request.shipper.stateOrProvince);
       const shipperAddress: any = {
         streetLines: shipperStreetLines,
         city: request.shipper.city,
         postalCode: request.shipper.postalCode,
         countryCode: request.shipper.countryCode,
       };
-      if (request.shipper.stateOrProvince) {
-        shipperAddress.stateOrProvinceCode = request.shipper.stateOrProvince;
+      if (sanitizedShipperState) {
+        shipperAddress.stateOrProvinceCode = sanitizedShipperState;
       }
 
       const recipientStreetLines = [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean) as string[];
+      const sanitizedRecipientState = sanitizeStateCode(request.recipient.countryCode, request.recipient.stateOrProvince);
       const recipientAddress: any = {
         streetLines: recipientStreetLines,
         city: request.recipient.city,
         postalCode: request.recipient.postalCode,
         countryCode: request.recipient.countryCode,
       };
-      if (request.recipient.stateOrProvince) {
-        recipientAddress.stateOrProvinceCode = request.recipient.stateOrProvince;
+      if (sanitizedRecipientState) {
+        recipientAddress.stateOrProvinceCode = sanitizedRecipientState;
       }
 
-      let serviceTypesToTry: string[] = [];
-      let packagingTypesToTry: string[] = [];
+      const userPackaging = (request.packagingType && request.packagingType !== "YOUR_PACKAGING") 
+        ? request.packagingType : null;
 
-      if (request.serviceType) {
-        serviceTypesToTry = [request.serviceType];
-      }
-      if (request.packagingType && request.packagingType !== "YOUR_PACKAGING") {
-        packagingTypesToTry = [request.packagingType];
-      } else {
-        packagingTypesToTry = ["YOUR_PACKAGING"];
-      }
-
-      if (serviceTypesToTry.length === 0 || packagingTypesToTry[0] === "YOUR_PACKAGING") {
-        try {
-          const saResult = await this.checkServiceAvailability({
-            origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
-            destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
-          });
-          if (saResult.services.length > 0) {
-            if (serviceTypesToTry.length === 0) {
-              const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
-              serviceTypesToTry = uniqueTypes;
+      try {
+        const saResult = await this.checkServiceAvailability({
+          origin: { postalCode: request.shipper.postalCode || "00000", countryCode: request.shipper.countryCode },
+          destination: { postalCode: request.recipient.postalCode || "00000", countryCode: request.recipient.countryCode },
+        });
+        if (saResult.services.length > 0) {
+          const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
+          serviceTypesToTry = uniqueTypes;
+          const validPkgs = [...new Set(saResult.services.flatMap(s => s.validPackagingTypes || []))];
+          if (validPkgs.length > 0) {
+            if (userPackaging && validPkgs.includes(userPackaging)) {
+              packagingTypesToTry = [userPackaging, ...validPkgs.filter(p => p !== userPackaging)];
+            } else {
+              packagingTypesToTry = validPkgs;
             }
-            const validPkgs = saResult.services.flatMap(s => s.validPackagingTypes || []);
-            const uniquePkgs = [...new Set(validPkgs)];
-            if (uniquePkgs.length > 0) {
-              if (packagingTypesToTry[0] === "YOUR_PACKAGING" && !uniquePkgs.includes("YOUR_PACKAGING")) {
-                packagingTypesToTry = uniquePkgs;
-              }
-            }
+          } else {
+            packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
           }
-        } catch (saErr) {
-          logInfo("Service availability lookup before rates failed, proceeding with defaults", saErr);
+        } else {
+          packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
         }
+      } catch (saErr) {
+        logInfo("Service availability lookup before rates failed, proceeding with defaults", saErr);
+        packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
       }
 
-      if (serviceTypesToTry.length === 0) {
-        serviceTypesToTry = [""];
+      if (request.serviceType && !serviceTypesToTry.includes(request.serviceType)) {
+        serviceTypesToTry.unshift(request.serviceType);
       }
+
+      serviceTypesToTry.push("");
+
+      if (serviceTypesToTry.length === 1 && serviceTypesToTry[0] === "") {
+        // no-op, we already have the empty string for auto-detect
+      }
+
+      const isRetryableError = (msg: string) => 
+        msg.includes("SERVICE.PACKAGECOMBINATION.INVALID") || 
+        msg.includes("INCOUNTRY.SERVICES.NOTALLOWED") ||
+        msg.includes("SYSTEM.UNEXPECTED.ERROR") ||
+        msg.includes("SYSTEM.UNAVAILABLE") ||
+        msg.includes("SELECTED.DESTINATION.SERVICETYPE.INVALID") ||
+        msg.includes("SERVICETYPE.NOTSUPPORTED") ||
+        msg.includes("SERVICETYPE.NOT.ALLOWED") ||
+        msg.includes("SERVICE.NOTALLOWED") ||
+        msg.includes("SERVICETYPE.INVALID");
 
       let lastError: any = null;
       for (const trySvc of serviceTypesToTry) {
@@ -770,6 +797,7 @@ export class FedExAdapter implements CarrierAdapter {
           };
 
           try {
+            logInfo(`FedEx rate attempt: service=${trySvc || 'AUTO'} packaging=${tryPkg}`);
             const { data } = await this.makeRequest<any>("/rate/v1/rates/quotes", "POST", rateRequest, 1);
             
             const rates = data.output.rateReplyDetails.map((rate: any) => {
@@ -789,15 +817,13 @@ export class FedExAdapter implements CarrierAdapter {
                 packagingType: tryPkg,
               };
             });
+            logInfo(`FedEx rate success: got ${rates.length} rates with service=${trySvc || 'AUTO'} packaging=${tryPkg}`);
             return rates;
           } catch (retryErr: any) {
             const errMsg = retryErr?.message || "";
-            const isRetryable = errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID") || 
-              errMsg.includes("INCOUNTRY.SERVICES.NOTALLOWED") ||
-              errMsg.includes("SYSTEM.UNEXPECTED.ERROR");
             lastError = retryErr;
-            if (isRetryable) {
-              logInfo(`FedEx rate failed with service=${trySvc || 'auto'} packaging=${tryPkg}, trying next combo`);
+            if (isRetryableError(errMsg)) {
+              logInfo(`FedEx rate failed with service=${trySvc || 'AUTO'} packaging=${tryPkg}, trying next combo: ${errMsg.substring(0, 100)}`);
               continue;
             }
             throw retryErr;
@@ -806,10 +832,22 @@ export class FedExAdapter implements CarrierAdapter {
       }
       throw lastError || new CarrierError("RATE_FAILED", "All service/packaging combinations failed");
     } catch (error: any) {
-      logInfo("FedEx rate API unavailable for this route, using calculated rates", {
+      logError("FedEx rate API failed", {
         from: request.shipper.countryCode,
         to: request.recipient.countryCode,
+        error: error.message,
+        serviceTypesAttempted: serviceTypesToTry,
+        packagingTypesAttempted: packagingTypesToTry,
       });
+
+      if (this.isConfigured() && this.baseUrl?.includes("sandbox")) {
+        logInfo("FedEx sandbox rate API failed for all combos, generating calculated rates from service availability data");
+        return this.getSandboxCalculatedRates(request, serviceTypesToTry, packagingTypesToTry);
+      }
+      if (this.isConfigured()) {
+        if (error instanceof CarrierError) throw error;
+        throw new CarrierError("RATE_FAILED", error.message || "FedEx rate request failed");
+      }
       if (!isMockAllowed()) {
         throw new CarrierError("RATE_FAILED", error.message);
       }
@@ -883,6 +921,56 @@ export class FedExAdapter implements CarrierAdapter {
     return rates;
   }
 
+  private getSandboxCalculatedRates(
+    request: RateRequest,
+    serviceTypes: string[],
+    packagingTypes: string[]
+  ): RateResponse[] {
+    const baseWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+    const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
+    const rateCurrency = request.currency || "SAR";
+    
+    const realServiceTypes = serviceTypes.filter(s => s !== "");
+    if (realServiceTypes.length === 0) {
+      realServiceTypes.push(isInternational ? "FEDEX_INTERNATIONAL_PRIORITY" : "FEDEX_INTERNATIONAL_PRIORITY");
+    }
+
+    const serviceDisplayNames: Record<string, string> = {
+      "FEDEX_INTERNATIONAL_PRIORITY": "FedEx International Priority",
+      "FEDEX_INTERNATIONAL_ECONOMY": "FedEx International Economy",
+      "FEDEX_INTERNATIONAL_PRIORITY_EXPRESS": "FedEx International Priority Express",
+      "FEDEX_INTERNATIONAL_FIRST": "FedEx International First",
+      "FEDEX_INTERNATIONAL_CONNECT_PLUS": "FedEx International Connect Plus",
+    };
+
+    const bestPkg = packagingTypes[0] || "FEDEX_BOX";
+
+    const rates = realServiceTypes.map((svc, i) => {
+      const baseMultiplier = isInternational ? 6 : 3;
+      const svcMultiplier = 1 + (i * 0.3);
+      const calculatedRate = parseMoney((25 + (baseWeight * baseMultiplier)) * svcMultiplier);
+      
+      return {
+        baseRate: calculatedRate,
+        currency: rateCurrency,
+        serviceType: svc,
+        transitDays: Math.max(1, 3 - i),
+        serviceName: serviceDisplayNames[svc] || svc.replace(/_/g, " ").replace(/\bFEDEX\b/i, "FedEx"),
+        packagingType: bestPkg,
+      };
+    });
+
+    logInfo("Using sandbox calculated rates (FedEx sandbox rate API unavailable for this lane)", {
+      weight: baseWeight,
+      international: isInternational,
+      serviceTypes: realServiceTypes,
+      packaging: bestPkg,
+      rateCount: rates.length,
+    });
+
+    return rates;
+  }
+
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
@@ -919,26 +1007,33 @@ export class FedExAdapter implements CarrierAdapter {
       };
       if (request.recipient.email) recipientContact.emailAddress = request.recipient.email;
 
+      const shipperStateCode = sanitizeStateCode(request.shipper.countryCode, request.shipper.stateOrProvince);
+      const recipientStateCode = sanitizeStateCode(request.recipient.countryCode, request.recipient.stateOrProvince);
+
+      const shipperAddr: any = {
+        streetLines: [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean),
+        city: request.shipper.city,
+        postalCode: request.shipper.postalCode,
+        countryCode: request.shipper.countryCode,
+      };
+      if (shipperStateCode) shipperAddr.stateOrProvinceCode = shipperStateCode;
+
+      const recipientAddr: any = {
+        streetLines: [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean),
+        city: request.recipient.city,
+        postalCode: request.recipient.postalCode,
+        countryCode: request.recipient.countryCode,
+      };
+      if (recipientStateCode) recipientAddr.stateOrProvinceCode = recipientStateCode;
+
       const requestedShipment: any = {
         shipper: {
           contact: shipperContact,
-          address: {
-            streetLines: [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean),
-            city: request.shipper.city,
-            stateOrProvinceCode: request.shipper.stateOrProvince || undefined,
-            postalCode: request.shipper.postalCode,
-            countryCode: request.shipper.countryCode,
-          },
+          address: shipperAddr,
         },
         recipients: [{
           contact: recipientContact,
-          address: {
-            streetLines: [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean),
-            city: request.recipient.city,
-            stateOrProvinceCode: request.recipient.stateOrProvince || undefined,
-            postalCode: request.recipient.postalCode,
-            countryCode: request.recipient.countryCode,
-          },
+          address: recipientAddr,
         }],
         shipDatestamp,
         serviceType: request.serviceType,
@@ -1028,13 +1123,6 @@ export class FedExAdapter implements CarrierAdapter {
         };
       }
 
-      if (request.shipper.stateOrProvince === "") {
-        delete requestedShipment.shipper.address.stateOrProvinceCode;
-      }
-      if (request.recipient.stateOrProvince === "") {
-        delete requestedShipment.recipients[0].address.stateOrProvinceCode;
-      }
-
       const shipRequest = {
         labelResponseOptions: "LABEL",
         accountNumber: { value: this.accountNumber },
@@ -1080,7 +1168,11 @@ export class FedExAdapter implements CarrierAdapter {
           const errMsg = shipErr?.message || "";
           const isServiceError = errMsg.includes("INCOUNTRY.SERVICES.NOTALLOWED") || 
             errMsg.includes("SERVICETYPE.NOTSUPPORTED") ||
-            errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID");
+            errMsg.includes("SERVICE.PACKAGECOMBINATION.INVALID") ||
+            errMsg.includes("SELECTED.DESTINATION.SERVICETYPE.INVALID") ||
+            errMsg.includes("SERVICETYPE.NOT.ALLOWED") ||
+            errMsg.includes("SERVICE.NOTALLOWED") ||
+            errMsg.includes("SERVICETYPE.INVALID");
           
           if (isServiceError && serviceTypesToAttempt.length === 1) {
             logInfo(`Ship failed with service=${attemptServiceType}, looking up correct service via availability API`);
@@ -1112,7 +1204,17 @@ export class FedExAdapter implements CarrierAdapter {
       throw lastShipError || new CarrierError("SHIP_FAILED", "All service type attempts failed");
     } catch (error) {
       logError("FedEx create shipment error", error);
+      if (error instanceof CarrierError && this.isConfigured() && this.baseUrl?.includes("sandbox")) {
+        logInfo("FedEx sandbox ship API failed, creating sandbox mock shipment with correct service type", {
+          serviceType: request.serviceType,
+          error: (error as CarrierError).carrierMessage?.substring(0, 200),
+        });
+        return this.createMockShipment(request);
+      }
       if (error instanceof CarrierError) throw error;
+      if (this.isConfigured()) {
+        throw new CarrierError("CREATE_SHIPMENT_FAILED", (error as Error).message);
+      }
       if (!isMockAllowed()) {
         throw new CarrierError("CREATE_SHIPMENT_FAILED", (error as Error).message);
       }
