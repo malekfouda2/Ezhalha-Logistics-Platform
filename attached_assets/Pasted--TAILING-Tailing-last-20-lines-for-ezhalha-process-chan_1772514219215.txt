@@ -1,0 +1,44 @@
+[TAILING] Tailing last 20 lines for [ezhalha] process (change the value with --lines option)
+/www/wwwroot/app.ezhalha.co/logs/pm2-out.log last 20 lines:
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:48:38 +00:00: 2026-03-03 04:48:38 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:55:58 +00:00: 2026-03-03 04:55:58 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:55:58 +00:00: 2026-03-03 04:55:58 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:55:58 +00:00: 2026-03-03 04:55:58 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:55:58 +00:00: 2026-03-03 04:55:58 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:56:08 +00:00: 2026-03-03 04:56:08 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:56:08 +00:00: 2026-03-03 04:56:08 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: false
+0|ezhalha  | 2026-03-03 04:56:09 +00:00: 2026-03-03 04:56:09 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 04:56:09 +00:00: 2026-03-03 04:56:09 [ERROR] FATAL: Missing required FedEx env vars in production: FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL {"error":"[object Object]"}
+0|ezhalha  | 2026-03-03 05:00:11 +00:00: 2026-03-03 05:00:11 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: true
+0|ezhalha  | 2026-03-03 05:00:11 +00:00: Database already initialized
+0|ezhalha  | 2026-03-03 05:00:21 +00:00: 2026-03-03 05:00:21 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: true
+0|ezhalha  | 2026-03-03 05:00:21 +00:00: Database already initialized
+0|ezhalha  | 2026-03-03 05:00:31 +00:00: 2026-03-03 05:00:31 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: true
+0|ezhalha  | 2026-03-03 05:00:31 +00:00: Database already initialized
+0|ezhalha  | 2026-03-03 05:00:41 +00:00: 2026-03-03 05:00:41 [INFO] Registered carrier adapter: FedEx (FEDEX) - configured: true
+0|ezhalha  | 2026-03-03 05:00:41 +00:00: Database already initialized
+
+/www/wwwroot/app.ezhalha.co/logs/pm2-error.log last 20 lines:
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23173
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | Error: SESSION_SECRET is required in production
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:513:233
+0|ezhalha  |     at qL (/www/wwwroot/app.ezhalha.co/dist/index.cjs:513:288)
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23173
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | Error: SESSION_SECRET is required in production
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:513:233
+0|ezhalha  |     at qL (/www/wwwroot/app.ezhalha.co/dist/index.cjs:513:288)
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23173
+0|ezhalha  | You have triggered an unhandledRejection, you may have forgotten to catch a Promise rejection:
+0|ezhalha  | Error: SESSION_SECRET is required in production
+0|ezhalha  |     at /www/wwwroot/app.ezhalha.co/dist/index.cjs:513:233
+0|ezhalha  |     at qL (/www/wwwroot/app.ezhalha.co/dist/index.cjs:513:288)
+0|ezhalha  |     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+0|ezhalha  |     at async /www/wwwroot/app.ezhalha.co/dist/index.cjs:694:23173
