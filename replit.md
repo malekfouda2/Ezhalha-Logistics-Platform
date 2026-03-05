@@ -42,6 +42,19 @@ Preferred communication style: Simple, everyday language.
 - **Features**: Address/postal validation, service availability, rate discovery, shipment creation, international customs support, carrier error tracking and retry mechanisms.
 - **Configuration**: Dynamic and environment-variable driven for flexibility and production hardening.
 
+### Address Validation
+- **File**: `server/validation/shippingAddress.ts` — shared server-side address validator.
+- **Constants**: `POSTAL_CODE_EXEMPT_COUNTRIES` (AE, QA, BH, OM, etc.), `STATE_REQUIRED_COUNTRIES` (US, CA).
+- **Gate**: `validateShippingAddresses()` called in all shipment endpoints (rates, confirm, pay-later, admin retry) before any FedEx API call.
+- **Behavior**: Returns 400 with per-field error messages for missing/invalid fields. Postal code required for all non-exempt countries.
+
+### FedEx Label Storage & Download
+- **Schema**: `carrierLabelBase64` (text), `carrierLabelMimeType` (default "application/pdf"), `carrierLabelFormat` columns on `shipments` table.
+- **Storage**: Label base64 data persisted on successful FedEx `createShipment` (confirm, pay-later, admin retry handlers).
+- **Endpoints**: `GET /api/client/shipments/:id/label.pdf` (client auth + ownership), `GET /api/admin/shipments/:id/label.pdf` (admin auth) — decode base64 and stream PDF.
+- **UI**: "Download Label (PDF)" button in both admin and client shipment detail sheets when carrier status is "created".
+- **Pay-Later Error Handling**: Returns 502 with `carrierErrorCode`/`carrierErrorMessage` on FedEx failure (not silent 200).
+
 ### Credit Access Request Flow
 - **Process**: Clients request credit/pay-later access, which admins review and approve/reject.
 - **Control**: `creditEnabled` flag on client accounts and specific admin/client pages for management and requests.
