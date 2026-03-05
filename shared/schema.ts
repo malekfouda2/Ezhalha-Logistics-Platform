@@ -925,3 +925,27 @@ export interface ClientDashboardStats {
   shipmentsByMonth: ChartDataPoint[];
   statusDistribution: StatusDistribution[];
 }
+
+export const systemLogs = pgTable("system_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  level: varchar("level", { length: 20 }).notNull(),
+  message: text("message").notNull(),
+  source: varchar("source", { length: 100 }),
+  errorCode: varchar("error_code", { length: 100 }),
+  stack: text("stack"),
+  metadata: text("metadata"),
+  endpoint: varchar("endpoint", { length: 500 }),
+  userId: varchar("user_id", { length: 255 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: varchar("resolved_by", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertSystemLogSchema = createInsertSchema(systemLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type SystemLog = typeof systemLogs.$inferSelect;
+export type InsertSystemLog = z.infer<typeof insertSystemLogSchema>;

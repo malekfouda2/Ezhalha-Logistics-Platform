@@ -47,6 +47,8 @@ import {
   type InsertCreditNotificationEvent,
   type HsCodeMapping,
   type InsertHsCodeMapping,
+  type SystemLog,
+  type InsertSystemLog,
   users,
   clientAccounts,
   clientApplications,
@@ -71,6 +73,7 @@ import {
   creditInvoices,
   creditNotificationEvents,
   hsCodeMappings,
+  systemLogs,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
@@ -293,6 +296,19 @@ export interface IStorage {
 
   // Initialization
   initializeDefaults(): Promise<void>;
+
+  // System Logs
+  createSystemLog(log: InsertSystemLog): Promise<SystemLog>;
+  getSystemLogsPaginated(params: {
+    page: number;
+    limit: number;
+    level?: string;
+    source?: string;
+    search?: string;
+    resolved?: string;
+  }): Promise<{ logs: SystemLog[]; total: number; page: number; totalPages: number }>;
+  getSystemLogStats(): Promise<{ total: number; errors: number; warnings: number; unresolved: number }>;
+  resolveSystemLog(id: string, resolvedBy: string): Promise<SystemLog | undefined>;
 }
 
 function generateShipmentId(): string {
@@ -1706,6 +1722,88 @@ export class DatabaseStorage implements IStorage {
 
     const [created] = await db.insert(hsCodeMappings).values(mapping).returning();
     return created;
+  }
+
+  async createSystemLog(log: InsertSystemLog): Promise<SystemLog> {
+    const [created] = await db.insert(systemLogs).values(log).returning();
+    return created;
+  }
+
+  async getSystemLogsPaginated(params: {
+    page: number;
+    limit: number;
+    level?: string;
+    source?: string;
+    search?: string;
+    resolved?: string;
+  }): Promise<{ logs: SystemLog[]; total: number; page: number; totalPages: number }> {
+    const conditions = [];
+
+    if (params.level && params.level !== "all") {
+      conditions.push(eq(systemLogs.level, params.level));
+    }
+    if (params.source && params.source !== "all") {
+      conditions.push(eq(systemLogs.source, params.source));
+    }
+    if (params.search) {
+      conditions.push(
+        or(
+          ilike(systemLogs.message, `%${params.search}%`),
+          ilike(systemLogs.errorCode, `%${params.search}%`),
+          ilike(systemLogs.endpoint, `%${params.search}%`),
+          ilike(systemLogs.stack, `%${params.search}%`)
+        )
+      );
+    }
+    if (params.resolved === "true") {
+      conditions.push(sql`${systemLogs.resolvedAt} IS NOT NULL`);
+    } else if (params.resolved === "false") {
+      conditions.push(isNull(systemLogs.resolvedAt));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(systemLogs)
+      .where(whereClause);
+
+    const total = totalResult?.count || 0;
+    const totalPages = Math.ceil(total / params.limit);
+    const offset = (params.page - 1) * params.limit;
+
+    const logs = await db
+      .select()
+      .from(systemLogs)
+      .where(whereClause)
+      .orderBy(desc(systemLogs.createdAt))
+      .limit(params.limit)
+      .offset(offset);
+
+    return { logs, total, page: params.page, totalPages };
+  }
+
+  async getSystemLogStats(): Promise<{ total: number; errors: number; warnings: number; unresolved: number }> {
+    const [totalResult] = await db.select({ count: count() }).from(systemLogs);
+    const [errorsResult] = await db.select({ count: count() }).from(systemLogs).where(eq(systemLogs.level, "error"));
+    const [warningsResult] = await db.select({ count: count() }).from(systemLogs).where(eq(systemLogs.level, "warn"));
+    const [unresolvedResult] = await db.select({ count: count() }).from(systemLogs).where(isNull(systemLogs.resolvedAt));
+
+    return {
+      total: totalResult?.count || 0,
+      errors: errorsResult?.count || 0,
+      warnings: warningsResult?.count || 0,
+      unresolved: unresolvedResult?.count || 0,
+    };
+  }
+
+  async resolveSystemLog(id: string, resolvedBy: string): Promise<SystemLog | undefined> {
+    const [updated] = await db
+      .update(systemLogs)
+      .set({ resolvedAt: new Date(), resolvedBy })
+      .where(eq(systemLogs.id, id))
+      .returning();
+    return updated;
   }
 }
 

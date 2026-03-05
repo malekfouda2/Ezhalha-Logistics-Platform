@@ -29,6 +29,7 @@ import {
   Clock,
   ShieldCheck,
   Mail,
+  Bug,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -45,6 +46,7 @@ const navItems = [
   { href: "/admin/credit-requests", label: "Credit Requests", icon: ShieldCheck },
   { href: "/admin/credit-invoices", label: "Credit Invoices", icon: Clock },
   { href: "/admin/pricing", label: "Pricing", icon: Banknote },
+  { href: "/admin/system-logs", label: "Bugs & Errors", icon: Bug },
   { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },
   { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
   { href: "/admin/webhook-events", label: "Webhooks", icon: Webhook },

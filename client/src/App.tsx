@@ -29,6 +29,7 @@ import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 import AdminCreditRequests from "@/pages/admin/credit-requests";
 import AdminEmailTemplates from "@/pages/admin/email-templates";
+import AdminSystemLogs from "@/pages/admin/system-logs";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -117,6 +118,9 @@ function Router() {
       </Route>
       <Route path="/admin/pricing">
         <ProtectedRoute component={AdminPricing} requiredUserType="admin" />
+      </Route>
+      <Route path="/admin/system-logs">
+        <ProtectedRoute component={AdminSystemLogs} requiredUserType="admin" />
       </Route>
       <Route path="/admin/audit-logs">
         <ProtectedRoute component={AdminAuditLogs} requiredUserType="admin" />

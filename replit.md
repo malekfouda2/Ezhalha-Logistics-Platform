@@ -57,6 +57,17 @@ Preferred communication style: Simple, everyday language.
 - **Management**: Admin-managed, database-stored email templates with `{{variable}}` placeholders.
 - **Features**: HTML editor, live preview, active/inactive toggle, and reset-to-default options.
 
+### System Logs (Bugs & Errors)
+- **Page**: `/admin/system-logs` — Admin page for monitoring system errors and warnings.
+- **Database Table**: `system_logs` — Persists errors from `logError()` calls with level, message, source, stack trace, metadata, endpoint, user, and IP.
+- **Features**: Filterable by level (error/warn/info), source (FedEx/Zoho/carrier/auth/system/etc.), and resolution status. Click to view full stack trace and metadata. Admins can mark logs as resolved.
+- **Auto-Capture**: All `logError()` calls automatically persist to database via Winston logger integration.
+
+### Shipment Item Sheet
+- **Pattern**: Item entry in shipment creation (step 4) uses a Sheet sidebar instead of inline forms.
+- **Currency**: Each item has its own currency field (SAR default, supports 17 currencies).
+- **Flow**: Summary list of items with Add/Edit/Delete → Sheet sidebar opens for full item form including HS code lookup.
+
 ## External Dependencies
 
 ### Database

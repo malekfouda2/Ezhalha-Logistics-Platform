@@ -2325,6 +2325,46 @@ export async function registerRoutes(
     }
   });
 
+  // Admin - System Logs (Bugs & Errors)
+  app.get("/api/admin/system-logs", requireAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const level = req.query.level as string | undefined;
+      const source = req.query.source as string | undefined;
+      const search = req.query.search as string | undefined;
+      const resolved = req.query.resolved as string | undefined;
+
+      const result = await storage.getSystemLogsPaginated({ page, limit, level, source, search, resolved });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch system logs" });
+    }
+  });
+
+  app.get("/api/admin/system-logs/stats", requireAdmin, async (req, res) => {
+    try {
+      const stats = await storage.getSystemLogStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch system log stats" });
+    }
+  });
+
+  app.patch("/api/admin/system-logs/:id/resolve", requireAdmin, async (req, res) => {
+    try {
+      const log = await storage.resolveSystemLog(req.params.id, req.session.userId!);
+      if (!log) {
+        return res.status(404).json({ error: "Log not found" });
+      }
+      await logAudit(req.session.userId!, "resolve_bug", "system_log", req.params.id,
+        `Resolved system log: ${log.message.substring(0, 100)}`, req.ip);
+      res.json(log);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to resolve system log" });
+    }
+  });
+
   // Admin - Audit Logs (paginated)
   app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
     try {

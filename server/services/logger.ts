@@ -85,6 +85,51 @@ export function logError(message: string, error?: Error | unknown, metadata?: Re
     ? { error: error.message, stack: error.stack } 
     : { error: String(error) };
   logger.error(message, { ...errorMeta, ...metadata });
+
+  persistSystemLog("error", message, error, metadata);
+}
+
+export function logWarnPersist(message: string, metadata?: Record<string, any>) {
+  logger.warn(message, metadata);
+  persistSystemLog("warn", message, undefined, metadata);
+}
+
+function persistSystemLog(level: string, message: string, error?: Error | unknown, metadata?: Record<string, any>) {
+  try {
+    const { storage: storageInstance } = require("../storage");
+    if (!storageInstance) return;
+    const stack = error instanceof Error ? error.stack : undefined;
+    const errorCode = error instanceof Error ? error.name : undefined;
+    const metaStr = metadata && Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined;
+    const source = metadata?.source || metadata?.service || extractSource(message);
+    const endpoint = metadata?.endpoint || metadata?.path || undefined;
+    const userId = metadata?.userId || undefined;
+    const ipAddress = metadata?.ipAddress || metadata?.ip || undefined;
+
+    storageInstance.createSystemLog({
+      level,
+      message,
+      source,
+      errorCode,
+      stack,
+      metadata: metaStr,
+      endpoint,
+      userId,
+      ipAddress,
+    }).catch(() => {});
+  } catch {}
+}
+
+function extractSource(message: string): string {
+  if (message.includes("FedEx") || message.includes("FEDEX") || message.includes("fedex")) return "fedex";
+  if (message.includes("Zoho") || message.includes("ZOHO") || message.includes("zoho")) return "zoho";
+  if (message.includes("Moyasar") || message.includes("moyasar")) return "moyasar";
+  if (message.includes("Stripe") || message.includes("stripe")) return "stripe";
+  if (message.includes("SMTP") || message.includes("email") || message.includes("Email")) return "email";
+  if (message.includes("carrier")) return "carrier";
+  if (message.includes("database") || message.includes("Database") || message.includes("SQL")) return "database";
+  if (message.includes("auth") || message.includes("login") || message.includes("session")) return "auth";
+  return "system";
 }
 
 export function logWarn(message: string, metadata?: Record<string, any>) {
