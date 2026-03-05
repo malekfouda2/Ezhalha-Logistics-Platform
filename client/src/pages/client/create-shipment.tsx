@@ -18,9 +18,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, Sparkles, AlertTriangle, CheckCircle } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, Sparkles, AlertTriangle, CheckCircle, Pencil } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import type { ClientAccount, ShipmentItem, HsCodeSourceValue, HsCodeConfidenceValue } from "@shared/schema";
@@ -38,6 +46,7 @@ interface ItemFormData {
   hsCodeConfidence: HsCodeConfidenceValue | "";
   hsCodeCandidates: Array<{ code: string; description: string; confidence: number }>;
   price: number;
+  currency: string;
   quantity: number;
   showDetails: boolean;
   hsManualEntry: boolean;
@@ -77,6 +86,26 @@ const itemCategories = Object.entries(ItemCategory).map(([key, value]) => ({
   label: key.charAt(0) + key.slice(1).toLowerCase(),
 }));
 
+const itemCurrencies = [
+  { value: "SAR", label: "SAR - Saudi Riyal" },
+  { value: "USD", label: "USD - US Dollar" },
+  { value: "EUR", label: "EUR - Euro" },
+  { value: "GBP", label: "GBP - British Pound" },
+  { value: "AED", label: "AED - UAE Dirham" },
+  { value: "KWD", label: "KWD - Kuwaiti Dinar" },
+  { value: "QAR", label: "QAR - Qatari Riyal" },
+  { value: "BHD", label: "BHD - Bahraini Dinar" },
+  { value: "OMR", label: "OMR - Omani Rial" },
+  { value: "EGP", label: "EGP - Egyptian Pound" },
+  { value: "JOD", label: "JOD - Jordanian Dinar" },
+  { value: "CNY", label: "CNY - Chinese Yuan" },
+  { value: "JPY", label: "JPY - Japanese Yen" },
+  { value: "INR", label: "INR - Indian Rupee" },
+  { value: "TRY", label: "TRY - Turkish Lira" },
+  { value: "CAD", label: "CAD - Canadian Dollar" },
+  { value: "AUD", label: "AUD - Australian Dollar" },
+];
+
 const defaultItem: ItemFormData = {
   itemName: "",
   itemDescription: "",
@@ -88,6 +117,7 @@ const defaultItem: ItemFormData = {
   hsCodeConfidence: "",
   hsCodeCandidates: [],
   price: 0,
+  currency: "SAR",
   quantity: 1,
   showDetails: false,
   hsManualEntry: false,
@@ -351,6 +381,9 @@ export default function CreateShipment() {
   });
 
   const [hsLookupLoading, setHsLookupLoading] = useState<Record<number, boolean>>({});
+  const [itemSheetOpen, setItemSheetOpen] = useState(false);
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [editingItem, setEditingItem] = useState<ItemFormData>({ ...defaultItem });
   const [availableServices, setAvailableServices] = useState<ServiceOption[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [servicesError, setServicesError] = useState<string | null>(null);
@@ -462,19 +495,22 @@ export default function CreateShipment() {
     mutationFn: async (data: ShipmentFormData) => {
       const payload = {
         ...data,
-        items: data.shipmentType !== "domestic" ? data.items.map(item => ({
-          itemName: item.itemName,
-          itemDescription: item.itemDescription || undefined,
-          category: item.category,
-          material: item.material || undefined,
-          countryOfOrigin: item.countryOfOrigin,
-          hsCode: item.hsCode || undefined,
-          hsCodeSource: item.hsCodeSource || undefined,
-          hsCodeConfidence: item.hsCodeConfidence || undefined,
-          hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
-          price: item.price,
-          quantity: item.quantity,
-        })) : [],
+        items: data.shipmentType !== "domestic" ? data.items
+          .filter(item => item.itemName.trim() !== "")
+          .map(item => ({
+            itemName: item.itemName,
+            itemDescription: item.itemDescription || undefined,
+            category: item.category,
+            material: item.material || undefined,
+            countryOfOrigin: item.countryOfOrigin,
+            hsCode: item.hsCode || undefined,
+            hsCodeSource: item.hsCodeSource || undefined,
+            hsCodeConfidence: item.hsCodeConfidence || undefined,
+            hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
+            price: item.price,
+            currency: item.currency,
+            quantity: item.quantity,
+          })) : [],
       };
       const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
       return res.json() as Promise<RatesResponse>;
@@ -668,11 +704,121 @@ export default function CreateShipment() {
   };
 
   const removeItem = (index: number) => {
-    if (formData.items.length <= 1) return;
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== index),
-    }));
+    setFormData(prev => {
+      const remaining = prev.items.filter((_, i) => i !== index);
+      return {
+        ...prev,
+        items: remaining.length === 0 ? [{ ...defaultItem }] : remaining,
+      };
+    });
+  };
+
+  const openAddItemSheet = () => {
+    setEditingItemIndex(null);
+    setEditingItem({ ...defaultItem });
+    setItemSheetOpen(true);
+  };
+
+  const openEditItemSheet = (index: number) => {
+    setEditingItemIndex(index);
+    setEditingItem({ ...formData.items[index] });
+    setItemSheetOpen(true);
+  };
+
+  const updateEditingItem = (field: string, value: any) => {
+    setEditingItem(prev => ({ ...prev, [field]: value }));
+  };
+
+  const saveItemFromSheet = () => {
+    if (!editingItem.itemName.trim()) {
+      toast({ title: "Item name is required", variant: "destructive" });
+      return;
+    }
+    if (!editingItem.category) {
+      toast({ title: "Category is required", variant: "destructive" });
+      return;
+    }
+    if (editingItem.price <= 0) {
+      toast({ title: "Unit price must be greater than 0", variant: "destructive" });
+      return;
+    }
+    if (editingItem.quantity < 1) {
+      toast({ title: "Quantity must be at least 1", variant: "destructive" });
+      return;
+    }
+
+    if (editingItemIndex !== null) {
+      setFormData(prev => ({
+        ...prev,
+        items: prev.items.map((item, i) => i === editingItemIndex ? { ...editingItem } : item),
+      }));
+    } else {
+      setFormData(prev => {
+        const hasOnlyBlank = prev.items.length === 1 && !prev.items[0].itemName.trim();
+        return {
+          ...prev,
+          items: hasOnlyBlank ? [{ ...editingItem }] : [...prev.items, { ...editingItem }],
+        };
+      });
+    }
+    setItemSheetOpen(false);
+  };
+
+  const lookupHsCodeForSheet = async () => {
+    if (!editingItem.itemName || !editingItem.category || !editingItem.countryOfOrigin) {
+      toast({ title: "Please fill in item name, category, and origin country first", variant: "destructive" });
+      return;
+    }
+
+    const destinationCountry = formData.shipmentType === "inbound"
+      ? formData.recipient.countryCode || "SA"
+      : formData.recipient.countryCode || formData.shipper.countryCode || "SA";
+
+    setHsLookupLoading(prev => ({ ...prev, sheet: true }));
+    try {
+      const params = new URLSearchParams({
+        itemName: editingItem.itemName,
+        category: editingItem.category,
+        countryOfOrigin: editingItem.countryOfOrigin,
+        destinationCountry,
+      });
+      if (editingItem.itemDescription) params.set("itemDescription", editingItem.itemDescription);
+      if (editingItem.material) params.set("material", editingItem.material);
+
+      const res = await fetch(`/api/hs-lookup?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Lookup failed");
+
+      const data = await res.json() as { candidates: Array<{ code: string; description: string; confidence: number }>; source: string };
+      const needsDetails = data.candidates.length > 1 || isGenericItemName(editingItem.itemName);
+      const topCandidate = data.candidates[0];
+      setEditingItem(prev => ({
+        ...prev,
+        hsCodeCandidates: data.candidates,
+        hsCode: topCandidate ? topCandidate.code : "",
+        hsCodeSource: data.source as HsCodeSourceValue,
+        hsCodeConfidence: topCandidate ? confidenceFromNumber(topCandidate.confidence) : "MISSING",
+        showDetails: needsDetails || prev.showDetails,
+      }));
+    } catch {
+      toast({ title: "HS code lookup failed", variant: "destructive" });
+    } finally {
+      setHsLookupLoading(prev => ({ ...prev, sheet: false }));
+    }
+  };
+
+  const confirmHsCodeForSheet = async (selectedCode?: string) => {
+    const code = selectedCode || editingItem.hsCode;
+    if (!code || !editingItem.itemName || !editingItem.category || !editingItem.countryOfOrigin) return;
+    try {
+      await apiRequest("POST", "/api/client/hs-code/confirm", {
+        itemName: editingItem.itemName,
+        category: editingItem.category,
+        material: editingItem.material || undefined,
+        countryOfOrigin: editingItem.countryOfOrigin,
+        hsCode: code,
+        description: editingItem.hsCodeCandidates.find(c => c.code === code)?.description,
+      });
+    } catch {}
   };
 
   const lookupHsCode = async (index: number) => {
@@ -889,10 +1035,15 @@ export default function CreateShipment() {
         }
       }
       if (formData.shipmentType !== "domestic") {
-        for (let i = 0; i < formData.items.length; i++) {
-          const item = formData.items[i];
-          if (!item.itemName || !item.category || !item.countryOfOrigin || item.price <= 0 || item.quantity < 1) {
-            toast({ title: `Please fill in all required fields for Item ${i + 1}`, variant: "destructive" });
+        const validItems = formData.items.filter(item => item.itemName.trim() !== "");
+        if (validItems.length === 0) {
+          toast({ title: "Please add at least one item for customs", variant: "destructive" });
+          return false;
+        }
+        for (let i = 0; i < validItems.length; i++) {
+          const item = validItems[i];
+          if (!item.category || !item.countryOfOrigin || item.price <= 0 || item.quantity < 1) {
+            toast({ title: `Please fill in all required fields for "${item.itemName}"`, variant: "destructive" });
             return false;
           }
         }
@@ -1605,249 +1756,102 @@ export default function CreateShipment() {
               {formData.shipmentType !== "domestic" && (
                 <>
                   <div className="border-t pt-6 mt-2">
-                    <h3 className="text-base font-medium mb-1 flex items-center gap-2">
-                      <Search className="h-4 w-4" />
-                      Shipment Items (Customs)
-                    </h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Describe the items you're shipping for customs clearance. HS codes help classify goods for international trade.
-                    </p>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-base font-medium flex items-center gap-2">
+                          <Search className="h-4 w-4" />
+                          Shipment Items (Customs)
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Add items for customs clearance
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={openAddItemSheet}
+                        data-testid="button-add-item"
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add Item
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="space-y-4">
-                    {formData.items.map((item, index) => {
-                      const confidence = getConfidenceBadge(item.hsCodeConfidence);
-                      const isLoading = hsLookupLoading[index];
-                      const needsDetails = isGenericItemName(item.itemName) || item.hsCodeCandidates.length > 1;
-
-                      return (
-                        <Card key={index} className="relative">
-                          <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4">
-                            <CardTitle className="text-sm font-medium flex items-center gap-2">
-                              Item {index + 1}
-                              {item.hsCode && (
-                                <Badge className={confidence.className} data-testid={`badge-hs-confidence-${index}`}>
-                                  {confidence.label}
-                                </Badge>
-                              )}
-                            </CardTitle>
-                            <div className="flex items-center gap-1">
-                              {formData.items.length > 1 && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => removeItem(index)}
-                                  data-testid={`button-remove-item-${index}`}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              )}
-                            </div>
-                          </CardHeader>
-                          <CardContent className="px-4 pb-4 pt-0 space-y-3">
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="col-span-2">
-                                <Label>Item Name *</Label>
-                                <Input
-                                  value={item.itemName}
-                                  onChange={(e) => updateItem(index, "itemName", e.target.value)}
-                                  placeholder="e.g. Wireless Bluetooth Headphones"
-                                  data-testid={`input-item-name-${index}`}
-                                />
-                                {isGenericItemName(item.itemName) && item.itemName.length > 0 && (
-                                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Name is too generic. Add more detail for better HS accuracy.
-                                  </p>
+                  {formData.items.length > 0 && formData.items[0].itemName ? (
+                    <div className="space-y-2">
+                      {formData.items.map((item, index) => {
+                        const confidence = getConfidenceBadge(item.hsCodeConfidence);
+                        return (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-3 border rounded-lg"
+                            data-testid={`item-row-${index}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-sm truncate">{item.itemName}</span>
+                                {item.hsCode && (
+                                  <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-hs-${index}`}>
+                                    HS: {item.hsCode}
+                                  </Badge>
+                                )}
+                                {item.hsCode && (
+                                  <Badge className={`text-xs shrink-0 ${confidence.className}`} data-testid={`badge-hs-confidence-${index}`}>
+                                    {confidence.label}
+                                  </Badge>
                                 )}
                               </div>
-                              <div>
-                                <Label>Category *</Label>
-                                <Select
-                                  value={item.category}
-                                  onValueChange={(v) => updateItem(index, "category", v)}
-                                >
-                                  <SelectTrigger data-testid={`select-item-category-${index}`}>
-                                    <SelectValue placeholder="Select category" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {itemCategories.map((cat) => (
-                                      <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div>
-                                <Label>Country of Origin *</Label>
-                                <Select
-                                  value={item.countryOfOrigin}
-                                  onValueChange={(v) => updateItem(index, "countryOfOrigin", v)}
-                                >
-                                  <SelectTrigger data-testid={`select-item-origin-${index}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {countries.map((c) => (
-                                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div>
-                                <Label>Unit Price (SAR) *</Label>
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={item.price}
-                                  onChange={(e) => updateItem(index, "price", parseFloat(e.target.value) || 0)}
-                                  data-testid={`input-item-price-${index}`}
-                                />
-                              </div>
-                              <div>
-                                <Label>Quantity *</Label>
-                                <Input
-                                  type="number"
-                                  step="1"
-                                  min="1"
-                                  value={item.quantity}
-                                  onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 1)}
-                                  data-testid={`input-item-qty-${index}`}
-                                />
-                              </div>
-                            </div>
-
-                            {(item.showDetails || needsDetails) && (
-                              <div className="space-y-3 pt-2 border-t">
-                                <div>
-                                  <Label>Item Description</Label>
-                                  <Textarea
-                                    value={item.itemDescription}
-                                    onChange={(e) => updateItem(index, "itemDescription", e.target.value)}
-                                    placeholder="Detailed description for customs classification..."
-                                    rows={2}
-                                    data-testid={`input-item-desc-${index}`}
-                                  />
-                                </div>
-                                <div>
-                                  <Label>Material</Label>
-                                  <Input
-                                    value={item.material}
-                                    onChange={(e) => updateItem(index, "material", e.target.value)}
-                                    placeholder="e.g. ABS Plastic, Cotton, Stainless Steel"
-                                    data-testid={`input-item-material-${index}`}
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                            {!item.showDetails && !needsDetails && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => updateItem(index, "showDetails", true)}
-                                className="text-xs"
-                                data-testid={`button-improve-hs-${index}`}
-                              >
-                                <Sparkles className="h-3 w-3 mr-1" />
-                                Improve HS accuracy
-                              </Button>
-                            )}
-
-                            <div className="pt-2 border-t space-y-2">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-sm font-medium">HS Code</Label>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => lookupHsCode(index)}
-                                  disabled={isLoading || !item.itemName || !item.category || !item.countryOfOrigin}
-                                  data-testid={`button-lookup-hs-${index}`}
-                                >
-                                  {isLoading ? (
-                                    <><LoadingSpinner size="sm" className="mr-1" /> Looking up...</>
-                                  ) : (
-                                    <><Search className="h-3 w-3 mr-1" /> Lookup HS Code</>
-                                  )}
-                                </Button>
-                              </div>
-
-                              {item.hsCodeCandidates.length > 0 && !item.hsManualEntry && (
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Suggested codes ({item.hsCodeSource})</Label>
-                                  <Select
-                                    value={item.hsCode}
-                                    onValueChange={(v) => {
-                                      const candidate = item.hsCodeCandidates.find(c => c.code === v);
-                                      updateItem(index, "hsCode", v);
-                                      if (candidate) {
-                                        updateItem(index, "hsCodeConfidence", confidenceFromNumber(candidate.confidence));
-                                      }
-                                      confirmHsCodeSelection(index);
-                                    }}
-                                  >
-                                    <SelectTrigger data-testid={`select-hs-code-${index}`}>
-                                      <SelectValue placeholder="Select HS code" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {item.hsCodeCandidates.map((c) => (
-                                        <SelectItem key={c.code} value={c.code}>
-                                          {c.code} - {c.description.substring(0, 50)}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-
-                              {item.hsManualEntry && (
-                                <div>
-                                  <Input
-                                    value={item.hsCode}
-                                    onChange={(e) => {
-                                      updateItem(index, "hsCode", e.target.value);
-                                      updateItem(index, "hsCodeSource", "USER");
-                                      updateItem(index, "hsCodeConfidence", e.target.value.length >= 6 ? "HIGH" : "MEDIUM");
-                                    }}
-                                    placeholder="Enter HS code (e.g. 847130)"
-                                    data-testid={`input-hs-manual-${index}`}
-                                  />
-                                </div>
-                              )}
-
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs h-7 px-2"
-                                  onClick={() => updateItem(index, "hsManualEntry", !item.hsManualEntry)}
-                                  data-testid={`button-toggle-manual-hs-${index}`}
-                                >
-                                  {item.hsManualEntry ? "Use suggested" : "Enter manually"}
-                                </Button>
-                                {item.hsCode && (
-                                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                    <CheckCircle className="h-3 w-3 text-green-600" />
-                                    {item.hsCode}
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
+                                {item.category && (
+                                  <span className="ml-2">
+                                    · {itemCategories.find(c => c.value === item.category)?.label || item.category}
                                   </span>
                                 )}
                               </div>
                             </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-
-                    <Button
-                      variant="outline"
-                      onClick={addItem}
-                      className="w-full"
-                      data-testid="button-add-item"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Item
-                    </Button>
-                  </div>
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openEditItemSheet(index)}
+                                data-testid={`button-edit-item-${index}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              {formData.items.length > 1 && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => removeItem(index)}
+                                  data-testid={`button-remove-item-${index}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 border rounded-lg border-dashed">
+                      <Package className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">No items added yet</p>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={openAddItemSheet}
+                        className="mt-1"
+                        data-testid="button-add-first-item"
+                      >
+                        Add your first item
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
               <div className="border-t pt-4 mt-2">
@@ -2144,6 +2148,222 @@ export default function CreateShipment() {
           </Card>
         )}
       </div>
+
+      <Sheet open={itemSheetOpen} onOpenChange={setItemSheetOpen}>
+        <SheetContent className="sm:max-w-lg overflow-y-auto" data-testid="sheet-item-form">
+          <SheetHeader>
+            <SheetTitle>{editingItemIndex !== null ? "Edit Item" : "Add Item"}</SheetTitle>
+            <SheetDescription>
+              Fill in the item details for customs clearance
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Item Name *</Label>
+              <Input
+                value={editingItem.itemName}
+                onChange={(e) => updateEditingItem("itemName", e.target.value)}
+                placeholder="e.g. Wireless Bluetooth Headphones"
+                data-testid="input-sheet-item-name"
+              />
+              {isGenericItemName(editingItem.itemName) && editingItem.itemName.length > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Name is too generic. Add more detail for better HS accuracy.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label>Category *</Label>
+              <Select
+                value={editingItem.category}
+                onValueChange={(v) => updateEditingItem("category", v)}
+              >
+                <SelectTrigger data-testid="select-sheet-item-category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {itemCategories.map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Country of Origin *</Label>
+              <Select
+                value={editingItem.countryOfOrigin}
+                onValueChange={(v) => updateEditingItem("countryOfOrigin", v)}
+              >
+                <SelectTrigger data-testid="select-sheet-item-origin">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {countries.map((c) => (
+                    <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Unit Price *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editingItem.price}
+                  onChange={(e) => updateEditingItem("price", parseFloat(e.target.value) || 0)}
+                  data-testid="input-sheet-item-price"
+                />
+              </div>
+              <div>
+                <Label>Currency *</Label>
+                <Select
+                  value={editingItem.currency}
+                  onValueChange={(v) => updateEditingItem("currency", v)}
+                >
+                  <SelectTrigger data-testid="select-sheet-item-currency">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {itemCurrencies.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <Label>Quantity *</Label>
+              <Input
+                type="number"
+                step="1"
+                min="1"
+                value={editingItem.quantity}
+                onChange={(e) => updateEditingItem("quantity", parseInt(e.target.value) || 1)}
+                data-testid="input-sheet-item-qty"
+              />
+            </div>
+
+            <div className="border-t pt-4 space-y-3">
+              <div>
+                <Label>Item Description</Label>
+                <Textarea
+                  value={editingItem.itemDescription}
+                  onChange={(e) => updateEditingItem("itemDescription", e.target.value)}
+                  placeholder="Detailed description for customs classification..."
+                  rows={2}
+                  data-testid="input-sheet-item-desc"
+                />
+              </div>
+              <div>
+                <Label>Material</Label>
+                <Input
+                  value={editingItem.material}
+                  onChange={(e) => updateEditingItem("material", e.target.value)}
+                  placeholder="e.g. ABS Plastic, Cotton, Stainless Steel"
+                  data-testid="input-sheet-item-material"
+                />
+              </div>
+            </div>
+
+            <div className="border-t pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">HS Code</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={lookupHsCodeForSheet}
+                  disabled={(hsLookupLoading as any).sheet || !editingItem.itemName || !editingItem.category || !editingItem.countryOfOrigin}
+                  data-testid="button-sheet-lookup-hs"
+                >
+                  {(hsLookupLoading as any).sheet ? (
+                    <><LoadingSpinner size="sm" className="mr-1" /> Looking up...</>
+                  ) : (
+                    <><Search className="h-3 w-3 mr-1" /> Lookup HS Code</>
+                  )}
+                </Button>
+              </div>
+
+              {editingItem.hsCodeCandidates.length > 0 && !editingItem.hsManualEntry && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Suggested codes ({editingItem.hsCodeSource})</Label>
+                  <Select
+                    value={editingItem.hsCode}
+                    onValueChange={(v) => {
+                      const candidate = editingItem.hsCodeCandidates.find(c => c.code === v);
+                      updateEditingItem("hsCode", v);
+                      if (candidate) {
+                        updateEditingItem("hsCodeConfidence", confidenceFromNumber(candidate.confidence));
+                      }
+                      confirmHsCodeForSheet(v);
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-sheet-hs-code">
+                      <SelectValue placeholder="Select HS code" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editingItem.hsCodeCandidates.map((c) => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.code} - {c.description.substring(0, 50)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {editingItem.hsManualEntry && (
+                <div>
+                  <Input
+                    value={editingItem.hsCode}
+                    onChange={(e) => {
+                      updateEditingItem("hsCode", e.target.value);
+                      updateEditingItem("hsCodeSource", "USER");
+                      updateEditingItem("hsCodeConfidence", e.target.value.length >= 6 ? "HIGH" : "MEDIUM");
+                    }}
+                    placeholder="Enter HS code (e.g. 847130)"
+                    data-testid="input-sheet-hs-manual"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs h-7 px-2"
+                  onClick={() => updateEditingItem("hsManualEntry", !editingItem.hsManualEntry)}
+                  data-testid="button-sheet-toggle-manual-hs"
+                >
+                  {editingItem.hsManualEntry ? "Use suggested" : "Enter manually"}
+                </Button>
+                {editingItem.hsCode && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-green-600" />
+                    {editingItem.hsCode}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <SheetFooter className="gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setItemSheetOpen(false)} data-testid="button-sheet-cancel">
+              Cancel
+            </Button>
+            <Button onClick={saveItemFromSheet} data-testid="button-sheet-save-item">
+              {editingItemIndex !== null ? "Update Item" : "Add Item"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </ClientLayout>
   );
 }
