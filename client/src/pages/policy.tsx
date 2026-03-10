@@ -92,7 +92,6 @@ export default function PolicyPage() {
   }
 
   const displayContent = viewingVersion ? viewingVersion.content : policy.content;
-  const displayDate = viewingVersion ? viewingVersion.createdAt : policy.updatedAt;
   const hasVersions = versions && versions.length > 0;
 
   return (
@@ -148,14 +147,6 @@ export default function PolicyPage() {
               <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-policy-title">
                 {viewingVersion ? viewingVersion.title : policy.title}
               </h1>
-              <div className="text-sm text-muted-foreground mt-1" data-testid="text-policy-updated">
-                {viewingVersion ? "Version date" : "Last updated"}:{" "}
-                {new Date(displayDate).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
-              </div>
             </div>
             {hasVersions && (
               <Button
