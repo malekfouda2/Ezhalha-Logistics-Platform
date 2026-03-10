@@ -143,23 +143,19 @@ export default function PolicyPage() {
         )}
 
         <article>
-          <h1 className="text-2xl sm:text-3xl font-bold mb-6" data-testid="text-policy-title">
-            {viewingVersion ? viewingVersion.title : policy.title}
-          </h1>
-          <div
-            className="prose prose-sm sm:prose dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: displayContent }}
-            data-testid="text-policy-content"
-          />
-
-          <div className="mt-8 pt-6 border-t flex items-center justify-between gap-4 flex-wrap">
-            <div className="text-sm text-muted-foreground" data-testid="text-policy-updated">
-              {viewingVersion ? "Version date" : "Last updated"}:{" "}
-              {new Date(displayDate).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+          <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold" data-testid="text-policy-title">
+                {viewingVersion ? viewingVersion.title : policy.title}
+              </h1>
+              <div className="text-sm text-muted-foreground mt-1" data-testid="text-policy-updated">
+                {viewingVersion ? "Version date" : "Last updated"}:{" "}
+                {new Date(displayDate).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </div>
             </div>
             {hasVersions && (
               <Button
@@ -173,6 +169,11 @@ export default function PolicyPage() {
               </Button>
             )}
           </div>
+          <div
+            className="prose prose-sm sm:prose dark:prose-invert max-w-none"
+            dangerouslySetInnerHTML={{ __html: displayContent }}
+            data-testid="text-policy-content"
+          />
         </article>
       </main>
 
@@ -226,11 +227,6 @@ export default function PolicyPage() {
                     <span className="font-medium text-sm">
                       Version {version.versionNumber}
                     </span>
-                    {version.changeNote && (
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                        {version.changeNote}
-                      </p>
-                    )}
                     <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
                       {new Date(version.createdAt).toLocaleDateString("en-US", {

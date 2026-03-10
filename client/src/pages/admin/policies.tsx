@@ -522,17 +522,7 @@ export default function AdminPolicies() {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">Version {version.versionNumber}</span>
-                          <Badge variant="secondary" className="text-[10px]">
-                            {version.title}
-                          </Badge>
-                        </div>
-                        {version.changeNote && (
-                          <p className="text-xs text-muted-foreground mt-1 truncate">
-                            {version.changeNote}
-                          </p>
-                        )}
+                        <span className="font-medium text-sm">Version {version.versionNumber}</span>
                         <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {formatDate(version.createdAt)}
