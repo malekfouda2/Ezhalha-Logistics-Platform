@@ -16,6 +16,7 @@ interface UploadResponse {
 interface UseUploadOptions {
   onSuccess?: (response: UploadResponse) => void;
   onError?: (error: Error) => void;
+  requestUrlEndpoint?: string;
 }
 
 /**
@@ -55,6 +56,7 @@ export function useUpload(options: UseUploadOptions = {}) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [progress, setProgress] = useState(0);
+  const requestUrlEndpoint = options.requestUrlEndpoint || "/api/uploads/request-url";
 
   /**
    * Request a presigned URL from the backend.
@@ -62,7 +64,7 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const requestUploadUrl = useCallback(
     async (file: File): Promise<UploadResponse> => {
-      const response = await fetch("/api/uploads/request-url", {
+      const response = await fetch(requestUrlEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,7 +83,7 @@ export function useUpload(options: UseUploadOptions = {}) {
 
       return response.json();
     },
-    []
+    [requestUrlEndpoint]
   );
 
   /**
@@ -162,7 +164,7 @@ export function useUpload(options: UseUploadOptions = {}) {
       headers?: Record<string, string>;
     }> => {
       // Use the actual file properties to request a per-file presigned URL
-      const response = await fetch("/api/uploads/request-url", {
+      const response = await fetch(requestUrlEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -185,7 +187,7 @@ export function useUpload(options: UseUploadOptions = {}) {
         headers: { "Content-Type": file.type || "application/octet-stream" },
       };
     },
-    []
+    [requestUrlEndpoint]
   );
 
   return {
@@ -196,4 +198,3 @@ export function useUpload(options: UseUploadOptions = {}) {
     progress,
   };
 }
-

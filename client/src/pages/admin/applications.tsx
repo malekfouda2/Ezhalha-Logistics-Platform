@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, Check, X, Building2, User, Mail, Phone, MapPin, FileText, Hash, Download, RefreshCw, Filter, Inbox } from "lucide-react";
 import type { ClientApplication, PricingRule } from "@shared/schema";
@@ -48,6 +49,7 @@ interface PaginatedResponse {
 
 export default function AdminApplications() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -85,8 +87,13 @@ export default function AdminApplications() {
     },
   });
 
+  const canApproveApplications = adminAccess.hasPermission("applications", "approve");
+  const canRejectApplications = adminAccess.hasPermission("applications", "reject");
+  const canReadPricingRules = adminAccess.hasPermission("pricing-rules", "read");
+
   const { data: pricingRules } = useQuery<PricingRule[]>({
     queryKey: ["/api/admin/pricing"],
+    enabled: isReviewOpen && reviewAction === "approve" && canReadPricingRules,
   });
 
   const reviewMutation = useMutation({
@@ -299,24 +306,31 @@ export default function AdminApplications() {
                         <TableCell>
                           {app.status === "pending" ? (
                             <div className="flex items-center gap-1">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100 dark:hover:bg-green-900/30"
-                                onClick={() => handleReview(app, "approve")}
-                                data-testid={`button-approve-${app.id}`}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/30"
-                                onClick={() => handleReview(app, "reject")}
-                                data-testid={`button-reject-${app.id}`}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
+                              {canApproveApplications && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100 dark:hover:bg-green-900/30"
+                                  onClick={() => handleReview(app, "approve")}
+                                  data-testid={`button-approve-${app.id}`}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canRejectApplications && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/30"
+                                  onClick={() => handleReview(app, "reject")}
+                                  data-testid={`button-reject-${app.id}`}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {!canApproveApplications && !canRejectApplications && (
+                                <span className="text-sm text-muted-foreground">Read only</span>
+                              )}
                             </div>
                           ) : (
                             <span className="text-sm text-muted-foreground">-</span>
@@ -447,13 +461,22 @@ export default function AdminApplications() {
                     <SelectValue placeholder="Select profile" />
                   </SelectTrigger>
                   <SelectContent>
-                    {pricingRules?.map((rule) => (
-                      <SelectItem key={rule.id} value={rule.profile}>
-                        {rule.displayName || rule.profile}
-                      </SelectItem>
-                    ))}
+                    {pricingRules && pricingRules.length > 0 ? (
+                      pricingRules.map((rule) => (
+                        <SelectItem key={rule.id} value={rule.profile}>
+                          {rule.displayName || rule.profile}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="regular">Regular</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+                {!canReadPricingRules && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Pricing-rule access is not assigned to this admin, so new accounts will use the default `regular` profile.
+                  </p>
+                )}
               </div>
             )}
             <div>

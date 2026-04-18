@@ -34,6 +34,7 @@ import { SarAmount } from "@/components/sar-symbol";
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import type { ShipmentItem } from "@shared/schema";
 
 interface ShipmentDetail {
@@ -133,12 +134,16 @@ function getDaysInfo(dueAt: string): { text: string; isOverdue: boolean } {
 }
 
 export default function AdminCreditInvoices() {
+  const adminAccess = useAdminAccess();
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
   const [actionDialog, setActionDialog] = useState<{ type: "mark_paid" | "cancel"; invoice: CreditInvoiceWithRelations } | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<CreditInvoiceWithRelations | null>(null);
   const { toast } = useToast();
+
+  const canUpdateCreditInvoices = adminAccess.hasPermission("credit-invoices", "update");
+  const canCancelCreditInvoices = adminAccess.hasPermission("credit-invoices", "cancel");
 
   const buildQueryString = () => {
     const params = new URLSearchParams();
@@ -364,28 +369,32 @@ export default function AdminCreditInvoices() {
                                   <Eye className="h-3.5 w-3.5 mr-1" />
                                   View
                                 </Button>
-                                {isActive && (
+                                {isActive && (canUpdateCreditInvoices || canCancelCreditInvoices) && (
                                   <>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-green-600 border-green-300"
-                                      onClick={() => setActionDialog({ type: "mark_paid", invoice: inv })}
-                                      data-testid={`button-mark-paid-${inv.id}`}
-                                    >
-                                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                                      Mark Paid
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="text-destructive"
-                                      onClick={() => setActionDialog({ type: "cancel", invoice: inv })}
-                                      data-testid={`button-cancel-${inv.id}`}
-                                    >
-                                      <XCircle className="h-3.5 w-3.5 mr-1" />
-                                      Cancel
-                                    </Button>
+                                    {canUpdateCreditInvoices && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-green-600 border-green-300"
+                                        onClick={() => setActionDialog({ type: "mark_paid", invoice: inv })}
+                                        data-testid={`button-mark-paid-${inv.id}`}
+                                      >
+                                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                        Mark Paid
+                                      </Button>
+                                    )}
+                                    {canCancelCreditInvoices && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-destructive"
+                                        onClick={() => setActionDialog({ type: "cancel", invoice: inv })}
+                                        data-testid={`button-cancel-${inv.id}`}
+                                      >
+                                        <XCircle className="h-3.5 w-3.5 mr-1" />
+                                        Cancel
+                                      </Button>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -596,25 +605,30 @@ export default function AdminCreditInvoices() {
                 } catch { return null; }
               })()}
 
-              {(detailInvoice.status === "UNPAID" || detailInvoice.status === "OVERDUE") && (
+              {(detailInvoice.status === "UNPAID" || detailInvoice.status === "OVERDUE") &&
+                (canUpdateCreditInvoices || canCancelCreditInvoices) && (
                 <div className="flex gap-2 pt-2">
-                  <Button
-                    className="bg-green-600 text-white flex-1"
-                    onClick={() => { setDetailInvoice(null); setActionDialog({ type: "mark_paid", invoice: detailInvoice }); }}
-                    data-testid="button-detail-mark-paid"
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Mark as Paid
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="flex-1"
-                    onClick={() => { setDetailInvoice(null); setActionDialog({ type: "cancel", invoice: detailInvoice }); }}
-                    data-testid="button-detail-cancel"
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Cancel Invoice
-                  </Button>
+                  {canUpdateCreditInvoices && (
+                    <Button
+                      className="bg-green-600 text-white flex-1"
+                      onClick={() => { setDetailInvoice(null); setActionDialog({ type: "mark_paid", invoice: detailInvoice }); }}
+                      data-testid="button-detail-mark-paid"
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Mark as Paid
+                    </Button>
+                  )}
+                  {canCancelCreditInvoices && (
+                    <Button
+                      variant="destructive"
+                      className="flex-1"
+                      onClick={() => { setDetailInvoice(null); setActionDialog({ type: "cancel", invoice: detailInvoice }); }}
+                      data-testid="button-detail-cancel"
+                    >
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Cancel Invoice
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

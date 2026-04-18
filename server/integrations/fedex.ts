@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import type { FedExTradeDocumentTypeValue } from "@shared/schema";
 import { logInfo, logError } from "../services/logger";
 import { storage } from "../storage";
 
@@ -30,6 +31,7 @@ export interface ShippingAddress {
   name: string;
   streetLine1: string;
   streetLine2?: string;
+  streetLine3?: string;
   city: string;
   stateOrProvince?: string;
   postalCode: string;
@@ -57,6 +59,26 @@ export interface ShipmentItem {
   quantity: number;
   unitPrice: number;
   currency?: string;
+}
+
+export interface TradeDocumentUploadRequest {
+  fileName: string;
+  contentType: string;
+  documentType: FedExTradeDocumentTypeValue;
+  originCountryCode: string;
+  destinationCountryCode: string;
+  fileBuffer: Buffer;
+}
+
+export interface TradeDocumentUploadResponse {
+  documentId: string;
+  fileName: string;
+  documentType: FedExTradeDocumentTypeValue;
+}
+
+export interface TradeDocumentReference {
+  documentType: FedExTradeDocumentTypeValue;
+  uploadedDocumentId: string;
 }
 
 export interface AddressValidationRequest {
@@ -148,12 +170,14 @@ export interface CreateShipmentRequest {
   packages: PackageDetails[];
   serviceType: string;
   packagingType?: string;
+  incoterm?: string;
   labelFormat?: "PDF" | "PNG" | "ZPL";
   commodityDescription?: string;
   declaredValue?: number;
   currency?: string;
   shipDate?: string;
   items?: ShipmentItem[];
+  tradeDocuments?: TradeDocumentReference[];
 }
 
 export interface CreateShipmentResponse {
@@ -286,6 +310,15 @@ export class FedExAdapter implements CarrierAdapter {
 
   private get baseUrl(): string {
     return process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
+  }
+
+  private get documentBaseUrl(): string {
+    if (process.env.FEDEX_DOCUMENT_BASE_URL) {
+      return process.env.FEDEX_DOCUMENT_BASE_URL;
+    }
+    return this.baseUrl.includes("sandbox")
+      ? "https://documentapitest.prod.fedex.com/sandbox"
+      : "https://documentapi.prod.fedex.com";
   }
 
   isConfigured(): boolean {
@@ -738,7 +771,9 @@ export class FedExAdapter implements CarrierAdapter {
           packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
         }
       } catch (saErr) {
-        logInfo("Service availability lookup before rates failed, proceeding with defaults", saErr);
+        logInfo("Service availability lookup before rates failed, proceeding with defaults", {
+          error: saErr instanceof Error ? saErr.message : String(saErr),
+        });
         packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
       }
 
@@ -971,6 +1006,158 @@ export class FedExAdapter implements CarrierAdapter {
     return rates;
   }
 
+  private createMockTradeDocumentUpload(
+    request: TradeDocumentUploadRequest,
+  ): TradeDocumentUploadResponse {
+    return {
+      documentId: `mock-doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName: request.fileName,
+      documentType: request.documentType,
+    };
+  }
+
+  async uploadTradeDocument(
+    request: TradeDocumentUploadRequest,
+  ): Promise<TradeDocumentUploadResponse> {
+    if (!this.isConfigured()) {
+      if (!isMockAllowed()) {
+        throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
+      }
+      logInfo("FedEx not configured, using mock trade document upload", {
+        fileName: request.fileName,
+        documentType: request.documentType,
+      });
+      return this.createMockTradeDocumentUpload(request);
+    }
+
+    const startTime = Date.now();
+    let didRetryAuth = false;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const token = await this.getAccessToken();
+        const formData = new FormData();
+        const documentPayload = {
+          workflowName: "ETDPreShipment",
+          carrierCode: "FDXE",
+          name: request.fileName,
+          contentType: request.contentType,
+          meta: {
+            shipDocumentType: request.documentType,
+            originCountryCode: request.originCountryCode,
+            destinationCountryCode: request.destinationCountryCode,
+          },
+        };
+
+        formData.append("document", JSON.stringify(documentPayload));
+        formData.append(
+          "attachment",
+          new Blob([request.fileBuffer], { type: request.contentType || "application/octet-stream" }),
+          request.fileName,
+        );
+
+        const response = await fetch(`${this.documentBaseUrl}/documents/v1/etds/upload`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-locale": "en_US",
+          },
+          body: formData,
+        });
+
+        const duration = Date.now() - startTime;
+        const responseContentType = response.headers.get("content-type") || "";
+        const responseData = responseContentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+
+        if (response.status === 401 && !didRetryAuth) {
+          didRetryAuth = true;
+          this.invalidateToken();
+          logInfo("FedEx document API 401, invalidating token and retrying", {
+            fileName: request.fileName,
+          });
+          continue;
+        }
+
+        await this.logIntegration(
+          "/documents/v1/etds/upload",
+          "POST",
+          {
+            fileName: request.fileName,
+            contentType: request.contentType,
+            documentType: request.documentType,
+            originCountryCode: request.originCountryCode,
+            destinationCountryCode: request.destinationCountryCode,
+          },
+          responseData,
+          response.status,
+          duration,
+          response.ok,
+        );
+
+        if (!response.ok) {
+          const errorMessage = typeof responseData === "string"
+            ? responseData
+            : JSON.stringify(responseData);
+          const error = new CarrierError(
+            "UPLOAD_TRADE_DOCUMENT_FAILED",
+            `FedEx document upload failed: ${response.status} - ${errorMessage}`,
+          );
+
+          if (response.status >= 500 && attempt < MAX_RETRIES) {
+            await delay(RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          throw error;
+        }
+
+        const documentId = responseData?.output?.docId
+          || responseData?.output?.documentId
+          || responseData?.docId
+          || responseData?.documentId
+          || responseData?.output?.documents?.[0]?.docId;
+
+        if (!documentId) {
+          throw new CarrierError(
+            "UPLOAD_TRADE_DOCUMENT_FAILED",
+            "FedEx document upload succeeded but no document ID was returned",
+          );
+        }
+
+        return {
+          documentId,
+          fileName: request.fileName,
+          documentType: request.documentType,
+        };
+      } catch (error) {
+        if (error instanceof CarrierError && this.documentBaseUrl.includes("sandbox")) {
+          logInfo("FedEx sandbox document API failed, using mock trade document upload", {
+            fileName: request.fileName,
+            error: error.carrierMessage,
+          });
+          return this.createMockTradeDocumentUpload(request);
+        }
+
+        if (attempt < MAX_RETRIES && !(error instanceof CarrierError)) {
+          await delay(RETRY_DELAY_MS * attempt);
+          continue;
+        }
+
+        logError("FedEx trade document upload error", error);
+
+        if (error instanceof CarrierError) {
+          throw error;
+        }
+
+        throw new CarrierError("UPLOAD_TRADE_DOCUMENT_FAILED", (error as Error).message);
+      }
+    }
+
+    throw new CarrierError("UPLOAD_TRADE_DOCUMENT_FAILED", "FedEx trade document upload failed");
+  }
+
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
@@ -1055,6 +1242,18 @@ export class FedExAdapter implements CarrierAdapter {
           labelStockType: "PAPER_4X6",
         },
       };
+
+      if (request.tradeDocuments && request.tradeDocuments.length > 0) {
+        requestedShipment.shipmentSpecialServices = {
+          specialServiceTypes: ["ELECTRONIC_TRADE_DOCUMENTS"],
+          etdDetail: {
+            attachedDocuments: request.tradeDocuments.map((document) => ({
+              documentType: document.documentType,
+              documentId: document.uploadedDocumentId,
+            })),
+          },
+        };
+      }
 
       if (isInternational) {
         let commodities: any[];
@@ -1191,7 +1390,9 @@ export class FedExAdapter implements CarrierAdapter {
                 }
               }
             } catch (saErr) {
-              logInfo("Service availability lookup for ship retry failed", saErr);
+              logInfo("Service availability lookup for ship retry failed", {
+                error: saErr instanceof Error ? saErr.message : String(saErr),
+              });
             }
             continue;
           }

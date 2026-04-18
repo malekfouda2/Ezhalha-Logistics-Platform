@@ -3,6 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
 import { LoadingSpinner, LoadingScreen } from "@/components/loading-spinner";
+import { SearchableSelect } from "@/components/searchable-select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Sheet,
   SheetContent,
@@ -27,12 +29,22 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
+import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, Sparkles, AlertTriangle, CheckCircle, Pencil } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
-import type { ClientAccount, ShipmentItem, HsCodeSourceValue, HsCodeConfidenceValue } from "@shared/schema";
-import { ItemCategory } from "@shared/schema";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
+import type {
+  ClientAccount,
+  HsCodeSourceValue,
+  HsCodeConfidenceValue,
+  ShipmentTradeDocument,
+} from "@shared/schema";
+import {
+  FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES,
+  ItemCategory,
+} from "@shared/schema";
 import { format } from "date-fns";
 
 interface ItemFormData {
@@ -106,6 +118,53 @@ const itemCurrencies = [
   { value: "AUD", label: "AUD - Australian Dollar" },
 ];
 
+const INVOICE_ACCEPT = ".pdf,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.gif";
+
+const SUPPORTED_INVOICE_CONTENT_TYPES = new Set<string>([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+]);
+
+const DOCUMENT_MIME_BY_EXTENSION: Record<string, string> = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  pdf: "application/pdf",
+  png: "image/png",
+  txt: "text/plain",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+
+function getFileExtension(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf(".");
+  return dotIndex >= 0 ? fileName.slice(dotIndex + 1).toLowerCase() : "";
+}
+
+function normalizeTradeDocumentContentType(contentType: string | undefined, fileName: string): string {
+  const normalized = (contentType || "").split(";")[0].trim().toLowerCase();
+  if (normalized && normalized !== "application/octet-stream") {
+    return normalized;
+  }
+
+  const extension = getFileExtension(fileName);
+  return DOCUMENT_MIME_BY_EXTENSION[extension] || "application/octet-stream";
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const defaultItem: ItemFormData = {
   itemName: "",
   itemDescription: "",
@@ -125,6 +184,7 @@ const defaultItem: ItemFormData = {
 
 interface ShipmentFormData {
   shipmentType: "domestic" | "inbound" | "outbound";
+  isDdp: boolean;
   carrier: string;
   serviceType: string;
   shipper: {
@@ -158,6 +218,7 @@ interface ShipmentFormData {
     height: number;
   }>;
   items: ItemFormData[];
+  tradeDocuments: ShipmentTradeDocument[];
   weightUnit: "LB" | "KG";
   dimensionUnit: "IN" | "CM";
   packageType: string;
@@ -180,6 +241,26 @@ interface RatesResponse {
   expiresAt: string;
 }
 
+interface InvoiceExtractionResponse {
+  items: Array<{
+    itemName: string;
+    itemDescription: string;
+    category: string;
+    material: string;
+    countryOfOrigin: string;
+    hsCode: string;
+    hsCodeSource: HsCodeSourceValue;
+    hsCodeConfidence: HsCodeConfidenceValue;
+    hsCodeCandidates: Array<{ code: string; description: string; confidence: number }>;
+    price: number;
+    currency: string;
+    quantity: number;
+  }>;
+  warnings: string[];
+  detectedCurrency: string;
+  extractionMethod: "deterministic" | "openai";
+}
+
 interface CheckoutResponse {
   shipmentId: string;
   trackingNumber: string;
@@ -195,78 +276,6 @@ interface ConfirmResponse {
   labelUrl?: string;
   estimatedDelivery?: string;
 }
-
-const countries = [
-  { code: "SA", name: "Saudi Arabia" },
-  { code: "AE", name: "United Arab Emirates" },
-  { code: "QA", name: "Qatar" },
-  { code: "KW", name: "Kuwait" },
-  { code: "BH", name: "Bahrain" },
-  { code: "OM", name: "Oman" },
-  { code: "EG", name: "Egypt" },
-  { code: "JO", name: "Jordan" },
-  { code: "LB", name: "Lebanon" },
-  { code: "IQ", name: "Iraq" },
-  { code: "YE", name: "Yemen" },
-  { code: "SY", name: "Syria" },
-  { code: "PS", name: "Palestine" },
-  { code: "US", name: "United States" },
-  { code: "CA", name: "Canada" },
-  { code: "MX", name: "Mexico" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "DE", name: "Germany" },
-  { code: "FR", name: "France" },
-  { code: "IT", name: "Italy" },
-  { code: "ES", name: "Spain" },
-  { code: "NL", name: "Netherlands" },
-  { code: "BE", name: "Belgium" },
-  { code: "AT", name: "Austria" },
-  { code: "CH", name: "Switzerland" },
-  { code: "SE", name: "Sweden" },
-  { code: "NO", name: "Norway" },
-  { code: "DK", name: "Denmark" },
-  { code: "FI", name: "Finland" },
-  { code: "PL", name: "Poland" },
-  { code: "PT", name: "Portugal" },
-  { code: "IE", name: "Ireland" },
-  { code: "GR", name: "Greece" },
-  { code: "CZ", name: "Czech Republic" },
-  { code: "RO", name: "Romania" },
-  { code: "HU", name: "Hungary" },
-  { code: "TR", name: "Turkey" },
-  { code: "RU", name: "Russia" },
-  { code: "UA", name: "Ukraine" },
-  { code: "CN", name: "China" },
-  { code: "JP", name: "Japan" },
-  { code: "KR", name: "South Korea" },
-  { code: "IN", name: "India" },
-  { code: "PK", name: "Pakistan" },
-  { code: "BD", name: "Bangladesh" },
-  { code: "LK", name: "Sri Lanka" },
-  { code: "TH", name: "Thailand" },
-  { code: "VN", name: "Vietnam" },
-  { code: "MY", name: "Malaysia" },
-  { code: "SG", name: "Singapore" },
-  { code: "ID", name: "Indonesia" },
-  { code: "PH", name: "Philippines" },
-  { code: "HK", name: "Hong Kong" },
-  { code: "TW", name: "Taiwan" },
-  { code: "AU", name: "Australia" },
-  { code: "NZ", name: "New Zealand" },
-  { code: "BR", name: "Brazil" },
-  { code: "AR", name: "Argentina" },
-  { code: "CL", name: "Chile" },
-  { code: "CO", name: "Colombia" },
-  { code: "PE", name: "Peru" },
-  { code: "ZA", name: "South Africa" },
-  { code: "NG", name: "Nigeria" },
-  { code: "KE", name: "Kenya" },
-  { code: "GH", name: "Ghana" },
-  { code: "MA", name: "Morocco" },
-  { code: "TN", name: "Tunisia" },
-  { code: "DZ", name: "Algeria" },
-  { code: "IL", name: "Israel" },
-];
 
 const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
   "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
@@ -318,13 +327,40 @@ const packageTypeLabels: Record<string, string> = Object.fromEntries(
 
 const carriers = [
   { code: "FEDEX", name: "FedEx" },
+  { code: "DHL", name: "DHL" },
 ];
+
+function CarrierMark({ carrierCode }: { carrierCode: string }) {
+  if (carrierCode === "FEDEX") {
+    return (
+      <div className="inline-flex items-center justify-center" aria-label="FedEx">
+        <span className="text-2xl font-black tracking-tight">
+          <span className="text-[#4D148C]">Fed</span>
+          <span className="text-[#FF6600]">Ex</span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="relative inline-flex min-w-[120px] items-center justify-center overflow-hidden rounded-md bg-[#FFCC00] px-5 py-2"
+      aria-label="DHL"
+    >
+      <span className="absolute inset-x-0 top-2 h-0.5 bg-[#D40511]" />
+      <span className="absolute inset-x-0 bottom-2 h-0.5 bg-[#D40511]" />
+      <span className="text-xl font-black tracking-[0.28em] text-[#D40511]">DHL</span>
+    </div>
+  );
+}
 
 const shipmentTypeOptions = [
   { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
   { value: "inbound", label: "Inbound", description: "International shipping into a country" },
   { value: "outbound", label: "Outbound", description: "International shipping out of a country" },
 ];
+
+const DDP_DESTINATION_COUNTRIES = new Set(["SA", "AE"]);
 
 interface MyPermissions {
   permissions: string[];
@@ -344,7 +380,8 @@ export default function CreateShipment() {
 
   const [formData, setFormData] = useState<ShipmentFormData>({
     shipmentType: "" as "domestic" | "inbound" | "outbound",
-    carrier: "",
+    isDdp: false,
+    carrier: "FEDEX",
     serviceType: "",
     shipper: {
       name: "",
@@ -374,6 +411,7 @@ export default function CreateShipment() {
       { weight: 1, length: 10, width: 10, height: 10 },
     ],
     items: [{ ...defaultItem }],
+    tradeDocuments: [],
     weightUnit: "KG",
     dimensionUnit: "CM",
     packageType: "YOUR_PACKAGING",
@@ -389,6 +427,20 @@ export default function CreateShipment() {
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [addressValidation, setAddressValidation] = useState<{ shipper?: AddressValidationResult; recipient?: AddressValidationResult }>({});
   const [addressValidating, setAddressValidating] = useState<{ shipper?: boolean; recipient?: boolean }>({});
+  const [customsInputMode, setCustomsInputMode] = useState<"invoice" | "manual">("manual");
+  const [invoiceExtractionWarnings, setInvoiceExtractionWarnings] = useState<string[]>([]);
+  const [invoiceExtractionMethod, setInvoiceExtractionMethod] = useState<"deterministic" | "openai" | null>(null);
+  const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
+
+  const { uploadFile: uploadInvoiceFile, isUploading: isUploadingInvoice } = useUpload({
+    onError: (error) => {
+      toast({
+        title: "Invoice upload failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
@@ -511,6 +563,10 @@ export default function CreateShipment() {
             currency: item.currency,
             quantity: item.quantity,
           })) : [],
+        tradeDocuments:
+          data.shipmentType !== "domestic" && customsInputMode === "invoice"
+            ? data.tradeDocuments
+            : [],
       };
       const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
       return res.json() as Promise<RatesResponse>;
@@ -614,6 +670,11 @@ export default function CreateShipment() {
   });
 
   const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
+  const ddpEligibleDestination =
+    formData.shipmentType === "inbound" &&
+    DDP_DESTINATION_COUNTRIES.has((formData.recipient.countryCode || "").toUpperCase());
+  const isFedExSelected = formData.carrier === "FEDEX";
+  const invoiceDocument = formData.tradeDocuments[0] ?? null;
 
   // Permission check - show access denied if user lacks create_shipments permission
   if (permsLoading) {
@@ -663,6 +724,20 @@ export default function CreateShipment() {
     }));
   };
 
+  useEffect(() => {
+    if (!ddpEligibleDestination && formData.isDdp) {
+      setFormData((prev) => ({ ...prev, isDdp: false }));
+    }
+  }, [ddpEligibleDestination, formData.isDdp]);
+
+  useEffect(() => {
+    setAvailableServices([]);
+    setServicesError(null);
+    setAddressValidation({});
+    setSelectedQuoteId(null);
+    setRates(null);
+  }, [formData.carrier]);
+
   const updatePackageItem = (index: number, field: string, value: number) => {
     setFormData(prev => ({
       ...prev,
@@ -711,6 +786,130 @@ export default function CreateShipment() {
         items: remaining.length === 0 ? [{ ...defaultItem }] : remaining,
       };
     });
+  };
+
+  const clearInvoiceDocument = () => {
+    setFormData((prev) => ({
+      ...prev,
+      tradeDocuments: [],
+      items: [{ ...defaultItem }],
+    }));
+    setInvoiceExtractionWarnings([]);
+    setInvoiceExtractionMethod(null);
+  };
+
+  const handleInvoiceSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const normalizedContentType = normalizeTradeDocumentContentType(file.type, file.name);
+    if (!SUPPORTED_INVOICE_CONTENT_TYPES.has(normalizedContentType)) {
+      toast({
+        title: "Unsupported invoice format",
+        description: "Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF invoice.",
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES) {
+      toast({
+        title: "Invoice is too large",
+        description: `The invoice exceeds the ${Math.round(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024))}MB limit.`,
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    const fileForUpload = file.type === normalizedContentType
+      ? file
+      : new File([file], file.name, {
+          type: normalizedContentType,
+          lastModified: file.lastModified,
+        });
+
+    const uploadResponse = await uploadInvoiceFile(fileForUpload);
+    if (!uploadResponse) {
+      e.target.value = "";
+      return;
+    }
+
+    setIsExtractingInvoice(true);
+
+    try {
+      const extractionRes = await apiRequest(
+        "POST",
+        "/api/client/shipments/extract-invoice-items",
+        {
+          shipmentType: formData.shipmentType,
+          shipperCountryCode: formData.shipper.countryCode,
+          fileName: uploadResponse.metadata.name,
+          objectPath: uploadResponse.objectPath,
+          contentType: normalizeTradeDocumentContentType(
+            uploadResponse.metadata.contentType,
+            uploadResponse.metadata.name,
+          ),
+        },
+      );
+
+      const extraction = await extractionRes.json() as InvoiceExtractionResponse;
+      const extractedItems: ItemFormData[] = extraction.items.map((item) => ({
+        itemName: item.itemName,
+        itemDescription: item.itemDescription || item.itemName,
+        category: item.category,
+        material: item.material || "",
+        countryOfOrigin: item.countryOfOrigin,
+        hsCode: item.hsCode || "",
+        hsCodeSource: item.hsCodeSource || "",
+        hsCodeConfidence: item.hsCodeConfidence || "",
+        hsCodeCandidates: item.hsCodeCandidates || [],
+        price: item.price,
+        currency: item.currency || extraction.detectedCurrency || "SAR",
+        quantity: item.quantity,
+        showDetails: false,
+        hsManualEntry: false,
+      }));
+
+      setFormData((prev) => ({
+        ...prev,
+        items: extractedItems.length > 0 ? extractedItems : [{ ...defaultItem }],
+        tradeDocuments: [
+          {
+            fileName: uploadResponse.metadata.name,
+            objectPath: uploadResponse.objectPath,
+            contentType: normalizeTradeDocumentContentType(
+              uploadResponse.metadata.contentType,
+              uploadResponse.metadata.name,
+            ),
+            size: uploadResponse.metadata.size,
+            documentType: "COMMERCIAL_INVOICE",
+          },
+        ],
+      }));
+      setInvoiceExtractionWarnings(extraction.warnings || []);
+      setInvoiceExtractionMethod(extraction.extractionMethod);
+
+      toast({
+        title: "Invoice processed",
+        description: `${extractedItems.length} item${extractedItems.length === 1 ? "" : "s"} imported.`,
+      });
+    } catch (error) {
+      setFormData((prev) => ({ ...prev, tradeDocuments: [] }));
+      setInvoiceExtractionWarnings([]);
+      setInvoiceExtractionMethod(null);
+      toast({
+        title: "Could not process invoice",
+        description: error instanceof Error ? error.message : "Please upload another invoice or enter the items manually.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtractingInvoice(false);
+      e.target.value = "";
+    }
   };
 
   const openAddItemSheet = () => {
@@ -889,6 +1088,11 @@ export default function CreateShipment() {
 
   const fetchServiceOptions = useCallback(async () => {
     const { shipper, recipient, packages, packageType, weightUnit } = formData;
+    if (formData.carrier !== "FEDEX") {
+      setAvailableServices([]);
+      setServicesError(null);
+      return;
+    }
     if (!shipper.countryCode || !shipper.city || !recipient.countryCode || !recipient.city) return;
     if (packages.length === 0 || !packages[0].weight) return;
 
@@ -924,17 +1128,20 @@ export default function CreateShipment() {
     } finally {
       setServicesLoading(false);
     }
-  }, [formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
+  }, [formData.carrier, formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
       formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
       formData.packageType, formData.packages]);
 
   useEffect(() => {
+    if (formData.carrier !== "FEDEX") {
+      return;
+    }
     if (formData.shipper.countryCode && formData.shipper.city &&
         formData.recipient.countryCode && formData.recipient.city &&
         formData.packages.length > 0 && formData.packages[0].weight > 0) {
       fetchServiceOptions();
     }
-  }, [formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
+  }, [formData.carrier, formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
       formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
       formData.packageType]);
 
@@ -976,6 +1183,10 @@ export default function CreateShipment() {
     if (currentStep === 1) {
       if (!formData.shipmentType) {
         toast({ title: "Please select a shipment type", variant: "destructive" });
+        return false;
+      }
+      if (!formData.carrier) {
+        toast({ title: "Please select a carrier", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 2) {
@@ -1022,6 +1233,13 @@ export default function CreateShipment() {
         toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
         return false;
       }
+      if (formData.shipmentType === "inbound" && formData.isDdp && !ddpEligibleDestination) {
+        toast({
+          title: "DDP is only available for imports to Saudi Arabia or the UAE",
+          variant: "destructive",
+        });
+        return false;
+      }
     } else if (currentStep === 4) {
       if (!formData.packageType || formData.packages.length < 1) {
         toast({ title: "Please fill in all package details", variant: "destructive" });
@@ -1035,6 +1253,11 @@ export default function CreateShipment() {
         }
       }
       if (formData.shipmentType !== "domestic") {
+        if (customsInputMode === "invoice" && !invoiceDocument) {
+          toast({ title: "Please upload an invoice", variant: "destructive" });
+          return false;
+        }
+
         const validItems = formData.items.filter(item => item.itemName.trim() !== "");
         if (validItems.length === 0) {
           toast({ title: "Please add at least one item for customs", variant: "destructive" });
@@ -1160,6 +1383,7 @@ export default function CreateShipment() {
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
+                        isDdp: false,
                         shipper: shipperAddress,
                         recipient: recipientAddress,
                       }));
@@ -1167,6 +1391,7 @@ export default function CreateShipment() {
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
+                        isDdp: false,
                         shipper: { ...emptyAddress },
                         recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                       }));
@@ -1174,6 +1399,7 @@ export default function CreateShipment() {
                       setFormData(prev => ({
                         ...prev,
                         shipmentType: v,
+                        isDdp: false,
                         shipper: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                         recipient: { ...emptyAddress },
                       }));
@@ -1209,6 +1435,7 @@ export default function CreateShipment() {
                           setFormData(prev => ({
                             ...prev,
                             shipmentType: v,
+                            isDdp: false,
                             shipper: shipperAddress,
                             recipient: recipientAddress,
                           }));
@@ -1216,6 +1443,7 @@ export default function CreateShipment() {
                           setFormData(prev => ({
                             ...prev,
                             shipmentType: v,
+                            isDdp: false,
                             shipper: { ...emptyAddress },
                             recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                           }));
@@ -1223,6 +1451,7 @@ export default function CreateShipment() {
                           setFormData(prev => ({
                             ...prev,
                             shipmentType: v,
+                            isDdp: false,
                             shipper: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                             recipient: { ...emptyAddress },
                           }));
@@ -1239,6 +1468,32 @@ export default function CreateShipment() {
                     </div>
                   ))}
                 </RadioGroup>
+              </div>
+
+              <div>
+                <Label className="text-base font-medium">Carrier *</Label>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {carriers.map((carrier) => (
+                    <button
+                      key={carrier.code}
+                      type="button"
+                      className={`rounded-lg border p-4 transition-colors hover:bg-muted/40 ${
+                        formData.carrier === carrier.code ? "border-primary bg-primary/5" : "border-border"
+                      }`}
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          carrier: carrier.code,
+                        }))
+                      }
+                      data-testid={`select-carrier-${carrier.code.toLowerCase()}`}
+                    >
+                      <div className="flex min-h-14 items-center justify-center">
+                        <CarrierMark carrierCode={carrier.code} />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
             </CardContent>
@@ -1327,20 +1582,15 @@ export default function CreateShipment() {
                 </div>
                 <div>
                   <Label>Country *</Label>
-                  <Select
+                  <SearchableSelect
                     value={formData.shipper.countryCode}
                     onValueChange={(v) => updateShipper("countryCode", v)}
+                    options={COUNTRY_CODE_SELECT_OPTIONS}
+                    placeholder="Select country"
+                    searchPlaceholder="Search countries..."
                     disabled={formData.shipmentType === "domestic"}
-                  >
-                    <SelectTrigger data-testid="select-shipper-country">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {countries.map((c) => (
-                        <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    data-testid="select-shipper-country"
+                  />
                   {formData.shipmentType === "domestic" && (
                     <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
                   )}
@@ -1379,6 +1629,7 @@ export default function CreateShipment() {
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
               )}
+              {isFedExSelected && (
               <div className="pt-2">
                 <Button
                   variant="outline"
@@ -1418,6 +1669,7 @@ export default function CreateShipment() {
                   </div>
                 )}
               </div>
+              )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
@@ -1505,25 +1757,54 @@ export default function CreateShipment() {
                 </div>
                 <div>
                   <Label>Country *</Label>
-                  <Select
+                  <SearchableSelect
                     value={formData.recipient.countryCode}
                     onValueChange={(v) => updateRecipient("countryCode", v)}
+                    options={COUNTRY_CODE_SELECT_OPTIONS}
+                    placeholder="Select country"
+                    searchPlaceholder="Search countries..."
                     disabled={formData.shipmentType === "domestic"}
-                  >
-                    <SelectTrigger data-testid="select-recipient-country">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {countries.map((c) => (
-                        <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    data-testid="select-recipient-country"
+                  />
                   {formData.shipmentType === "domestic" && (
                     <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
                   )}
                 </div>
               </div>
+              {formData.shipmentType === "inbound" && (
+                <div className="rounded-lg border p-4 space-y-3" data-testid="card-ddp-option">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Label htmlFor="ddp-toggle" className="text-sm font-medium cursor-pointer">
+                          Delivered Duty Paid (DDP)
+                        </Label>
+                        <Badge variant={formData.isDdp ? "default" : "secondary"}>
+                          {formData.isDdp ? "DDP Import" : "Standard Import"}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Use DDP when Ezhalha should treat this import as seller-paid delivery responsibility.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Available only for imports to Saudi Arabia or the UAE.
+                      </p>
+                    </div>
+                    <Switch
+                      id="ddp-toggle"
+                      checked={formData.isDdp}
+                      onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, isDdp: checked }))}
+                      disabled={!ddpEligibleDestination}
+                      data-testid="switch-ddp"
+                    />
+                  </div>
+                  {!ddpEligibleDestination && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Select Saudi Arabia or UAE as the destination country to enable DDP.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Phone *</Label>
@@ -1557,6 +1838,7 @@ export default function CreateShipment() {
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
               )}
+              {isFedExSelected && (
               <div className="pt-2">
                 <Button
                   variant="outline"
@@ -1596,6 +1878,7 @@ export default function CreateShipment() {
                   </div>
                 )}
               </div>
+              )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
@@ -1755,103 +2038,246 @@ export default function CreateShipment() {
 
               {formData.shipmentType !== "domestic" && (
                 <>
-                  <div className="border-t pt-6 mt-2">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="border-t pt-6 mt-2 space-y-6">
+                    <div className="space-y-4">
                       <div>
                         <h3 className="text-base font-medium flex items-center gap-2">
-                          <Search className="h-4 w-4" />
-                          Shipment Items (Customs)
+                          <FileText className="h-4 w-4" />
+                          Customs Details
                         </h3>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Add items for customs clearance
-                        </p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={openAddItemSheet}
-                        data-testid="button-add-item"
-                      >
-                        <Plus className="h-4 w-4 mr-1" />
-                        Add Item
-                      </Button>
-                    </div>
-                  </div>
 
-                  {formData.items.length > 0 && formData.items[0].itemName ? (
-                    <div className="space-y-2">
-                      {formData.items.map((item, index) => {
-                        const confidence = getConfidenceBadge(item.hsCodeConfidence);
-                        return (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between p-3 border rounded-lg"
-                            data-testid={`item-row-${index}`}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-sm truncate">{item.itemName}</span>
-                                {item.hsCode && (
-                                  <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-hs-${index}`}>
-                                    HS: {item.hsCode}
-                                  </Badge>
-                                )}
-                                {item.hsCode && (
-                                  <Badge className={`text-xs shrink-0 ${confidence.className}`} data-testid={`badge-hs-confidence-${index}`}>
-                                    {confidence.label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
-                                {item.category && (
-                                  <span className="ml-2">
-                                    · {itemCategories.find(c => c.value === item.category)?.label || item.category}
-                                  </span>
-                                )}
-                              </div>
+                      <RadioGroup
+                        value={customsInputMode}
+                        onValueChange={(value) => setCustomsInputMode(value as "invoice" | "manual")}
+                        className="grid gap-3 md:grid-cols-2"
+                        data-testid="customs-input-mode"
+                      >
+                        <Label
+                          htmlFor="customs-mode-invoice"
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
+                            customsInputMode === "invoice"
+                              ? "border-primary bg-primary/5"
+                              : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <RadioGroupItem value="invoice" id="customs-mode-invoice" className="mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="text-sm font-medium">Upload Invoice</span>
+                            <p className="text-xs text-muted-foreground">Extract shipment items from the invoice.</p>
+                          </div>
+                        </Label>
+                        <Label
+                          htmlFor="customs-mode-manual"
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
+                            customsInputMode === "manual"
+                              ? "border-primary bg-primary/5"
+                              : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <RadioGroupItem value="manual" id="customs-mode-manual" className="mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="text-sm font-medium">Enter Items Manually</span>
+                            <p className="text-xs text-muted-foreground">Add and manage the customs items yourself.</p>
+                          </div>
+                        </Label>
+                      </RadioGroup>
+                    </div>
+
+                    {customsInputMode === "invoice" && (
+                      <div className="rounded-lg border p-4 space-y-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="text-sm font-medium flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Invoice
+                            </h4>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF invoice.
+                            </p>
+                          </div>
+                          <label htmlFor="invoice-upload" className="cursor-pointer">
+                            <div className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                              <Upload className="h-4 w-4" />
+                              <span>{isUploadingInvoice || isExtractingInvoice ? "Processing..." : invoiceDocument ? "Replace Invoice" : "Upload Invoice"}</span>
                             </div>
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <input
+                              id="invoice-upload"
+                              type="file"
+                              accept={INVOICE_ACCEPT}
+                              className="hidden"
+                              onChange={handleInvoiceSelect}
+                              disabled={isUploadingInvoice || isExtractingInvoice}
+                              data-testid="input-invoice-upload"
+                            />
+                          </label>
+                        </div>
+
+                        {invoiceDocument ? (
+                          <div
+                            className="rounded-lg border p-3"
+                            data-testid={`invoice-document-${invoiceDocument.objectPath}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  <span className="text-sm font-medium truncate">{invoiceDocument.fileName}</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {invoiceDocument.contentType} · {formatFileSize(invoiceDocument.size)}
+                                </p>
+                              </div>
                               <Button
+                                type="button"
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openEditItemSheet(index)}
-                                data-testid={`button-edit-item-${index}`}
+                                className="h-8 w-8 shrink-0"
+                                onClick={clearInvoiceDocument}
+                                data-testid={`button-remove-invoice-${invoiceDocument.fileName}`}
                               >
-                                <Pencil className="h-3.5 w-3.5" />
+                                <X className="h-4 w-4" />
                               </Button>
-                              {formData.items.length > 1 && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  onClick={() => removeItem(index)}
-                                  data-testid={`button-remove-item-${index}`}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                </Button>
-                              )}
                             </div>
                           </div>
-                        );
-                      })}
+                        ) : (
+                          <div className="rounded-lg border border-dashed px-4 py-6 text-center">
+                            <FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                            <p className="text-sm text-muted-foreground">No invoice uploaded.</p>
+                          </div>
+                        )}
+
+                        {(isUploadingInvoice || isExtractingInvoice) && (
+                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                            <LoadingSpinner size="sm" />
+                            <span>Processing invoice...</span>
+                          </div>
+                        )}
+
+                        {invoiceExtractionWarnings.length > 0 && (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                              <div className="space-y-1">
+                                {invoiceExtractionMethod === "openai" && (
+                                  <p className="font-medium">AI extraction was used. Review the imported items carefully.</p>
+                                )}
+                                {invoiceExtractionWarnings.map((warning) => (
+                                  <p key={warning}>{warning}</p>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-base font-medium flex items-center gap-2">
+                            <Search className="h-4 w-4" />
+                            {customsInputMode === "invoice" ? "Invoice Items" : "Shipment Items"}
+                          </h3>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {customsInputMode === "invoice"
+                              ? "Review the extracted items before continuing."
+                              : "Add items for customs clearance."}
+                          </p>
+                        </div>
+                        {(customsInputMode === "manual" || invoiceDocument) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={openAddItemSheet}
+                            data-testid="button-add-item"
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add Item
+                          </Button>
+                        )}
+                      </div>
+
+                      {formData.items.length > 0 && formData.items[0].itemName ? (
+                        <div className="space-y-2">
+                          {formData.items.map((item, index) => {
+                            const confidence = getConfidenceBadge(item.hsCodeConfidence);
+                            return (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between p-3 border rounded-lg"
+                                data-testid={`item-row-${index}`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-sm truncate">{item.itemName}</span>
+                                    {item.hsCode && (
+                                      <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-hs-${index}`}>
+                                        HS: {item.hsCode}
+                                      </Badge>
+                                    )}
+                                    {item.hsCode && (
+                                      <Badge className={`text-xs shrink-0 ${confidence.className}`} data-testid={`badge-hs-confidence-${index}`}>
+                                        {confidence.label}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
+                                    {item.category && (
+                                      <span className="ml-2">
+                                        · {itemCategories.find(c => c.value === item.category)?.label || item.category}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 ml-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => openEditItemSheet(index)}
+                                    data-testid={`button-edit-item-${index}`}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  {formData.items.length > 1 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => removeItem(index)}
+                                      data-testid={`button-remove-item-${index}`}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-6 border rounded-lg border-dashed">
+                          <Package className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                          <p className="text-sm text-muted-foreground">
+                            {customsInputMode === "invoice" ? "No invoice items available yet." : "No items added yet."}
+                          </p>
+                          {customsInputMode === "manual" && (
+                            <Button
+                              variant="link"
+                              size="sm"
+                              onClick={openAddItemSheet}
+                              className="mt-1"
+                              data-testid="button-add-first-item"
+                            >
+                              Add your first item
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-center py-6 border rounded-lg border-dashed">
-                      <Package className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                      <p className="text-sm text-muted-foreground">No items added yet</p>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={openAddItemSheet}
-                        className="mt-1"
-                        data-testid="button-add-first-item"
-                      >
-                        Add your first item
-                      </Button>
-                    </div>
-                  )}
+                  </div>
                 </>
               )}
               <div className="border-t pt-4 mt-2">
@@ -1859,7 +2285,11 @@ export default function CreateShipment() {
                   <Truck className="h-4 w-4" />
                   Available Services
                 </h3>
-                {servicesLoading ? (
+                {!isFedExSelected ? (
+                  <p className="text-sm text-muted-foreground" data-testid="services-dhl-note">
+                    Live services appear after rate lookup.
+                  </p>
+                ) : servicesLoading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="services-loading">
                     <LoadingSpinner size="sm" /> Loading available services...
                   </div>
@@ -2194,19 +2624,14 @@ export default function CreateShipment() {
 
             <div>
               <Label>Country of Origin *</Label>
-              <Select
+              <SearchableSelect
                 value={editingItem.countryOfOrigin}
                 onValueChange={(v) => updateEditingItem("countryOfOrigin", v)}
-              >
-                <SelectTrigger data-testid="select-sheet-item-origin">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {countries.map((c) => (
-                    <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={COUNTRY_CODE_SELECT_OPTIONS}
+                placeholder="Select origin country"
+                searchPlaceholder="Search countries..."
+                data-testid="select-sheet-item-origin"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

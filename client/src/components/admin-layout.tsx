@@ -1,8 +1,9 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { useAdminAccess } from "@/hooks/use-admin-access";
+import { ADMIN_NAV_ITEMS, hasAdminPermissionAccess } from "@/lib/admin-navigation";
 import { ThemeToggle } from "./theme-toggle";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -36,32 +37,40 @@ interface AdminLayoutProps {
   children: React.ReactNode;
 }
 
-const navItems = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/clients", label: "Clients", icon: Users },
-  { href: "/admin/applications", label: "Applications", icon: ClipboardList },
-  { href: "/admin/shipments", label: "Shipments", icon: Package },
-  { href: "/admin/invoices", label: "Invoices", icon: FileText },
-  { href: "/admin/payments", label: "Financial Statements", icon: CreditCard },
-  { href: "/admin/credit-requests", label: "Credit Requests", icon: ShieldCheck },
-  { href: "/admin/credit-invoices", label: "Credit Invoices", icon: Clock },
-  { href: "/admin/pricing", label: "Pricing", icon: Banknote },
-  { href: "/admin/system-logs", label: "Bugs & Errors", icon: Bug },
-  { href: "/admin/audit-logs", label: "Audit Logs", icon: Shield },
-  { href: "/admin/integration-logs", label: "Integrations", icon: Plug },
-  { href: "/admin/webhook-events", label: "Webhooks", icon: Webhook },
-  { href: "/admin/rbac", label: "Access Control", icon: Shield },
-  { href: "/admin/email-templates", label: "Email Templates", icon: Mail },
-  { href: "/admin/policies", label: "Policies", icon: ScrollText },
-];
+const iconByHref = {
+  "/admin": LayoutDashboard,
+  "/admin/clients": Users,
+  "/admin/applications": ClipboardList,
+  "/admin/shipments": Package,
+  "/admin/invoices": FileText,
+  "/admin/payments": CreditCard,
+  "/admin/credit-requests": ShieldCheck,
+  "/admin/credit-invoices": Clock,
+  "/admin/pricing": Banknote,
+  "/admin/system-logs": Bug,
+  "/admin/audit-logs": Shield,
+  "/admin/integration-logs": Plug,
+  "/admin/webhook-events": Webhook,
+  "/admin/account-managers": Users,
+  "/admin/rbac": Shield,
+  "/admin/email-templates": Mail,
+  "/admin/policies": ScrollText,
+} as const;
 
 export function AdminLayout({ children }: AdminLayoutProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const adminAccess = useAdminAccess();
 
   const handleLogout = async () => {
     await logout();
   };
+
+  const visibleNavItems = adminAccess.isLoading
+    ? []
+    : ADMIN_NAV_ITEMS.filter((item) =>
+        hasAdminPermissionAccess(adminAccess.permissions, item.permissions),
+      );
 
   return (
     <div className="flex h-screen w-full">
@@ -80,10 +89,10 @@ export function AdminLayout({ children }: AdminLayoutProps) {
 
         {/* Navigation */}
         <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = location === item.href || 
               (item.href !== "/admin" && location.startsWith(item.href));
-            const Icon = item.icon;
+            const Icon = iconByHref[item.href];
             
             return (
               <Link key={item.href} href={item.href}>
@@ -102,6 +111,11 @@ export function AdminLayout({ children }: AdminLayoutProps) {
               </Link>
             );
           })}
+          {!adminAccess.isLoading && visibleNavItems.length === 0 && (
+            <div className="px-3 py-4 text-sm text-muted-foreground">
+              No admin sections are assigned to this account yet.
+            </div>
+          )}
         </nav>
 
         {/* User Menu */}
@@ -125,10 +139,17 @@ export function AdminLayout({ children }: AdminLayoutProps) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem data-testid="menu-settings">
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
+              <div className="px-2 py-1.5">
+                <p className="text-sm font-medium">{user?.username}</p>
+                <p className="text-xs text-muted-foreground">{user?.email}</p>
+              </div>
+              <DropdownMenuSeparator />
+              <Link href="/admin/settings">
+                <DropdownMenuItem data-testid="menu-settings">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Settings
+                </DropdownMenuItem>
+              </Link>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
                 <LogOut className="mr-2 h-4 w-4" />

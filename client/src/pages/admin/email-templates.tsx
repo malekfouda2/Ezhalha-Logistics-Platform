@@ -30,6 +30,7 @@ import {
   XCircle,
   Variable,
 } from "lucide-react";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 
 interface EmailTemplate {
   id: string;
@@ -47,6 +48,7 @@ interface EmailTemplate {
 
 export default function AdminEmailTemplates() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
   const [editSubject, setEditSubject] = useState("");
   const [editHtmlBody, setEditHtmlBody] = useState("");
@@ -54,6 +56,8 @@ export default function AdminEmailTemplates() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("editor");
+
+  const canUpdateEmailTemplates = adminAccess.hasPermission("email-templates", "update");
 
   const { data: templates, isLoading } = useQuery<EmailTemplate[]>({
     queryKey: ["/api/admin/email-templates"],
@@ -162,6 +166,7 @@ export default function AdminEmailTemplates() {
                   value={editSubject}
                   onChange={(e) => setEditSubject(e.target.value)}
                   placeholder="Email subject..."
+                  disabled={!canUpdateEmailTemplates}
                   data-testid="input-subject"
                 />
               </div>
@@ -170,6 +175,7 @@ export default function AdminEmailTemplates() {
                 <Switch
                   checked={editIsActive}
                   onCheckedChange={setEditIsActive}
+                  disabled={!canUpdateEmailTemplates}
                   data-testid="switch-active"
                 />
                 <Label>Template Active</Label>
@@ -205,24 +211,28 @@ export default function AdminEmailTemplates() {
                       {previewMutation.isPending ? <LoadingSpinner size="sm" className="mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
                       Preview
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowResetConfirm(editingTemplate.id)}
-                      data-testid="button-reset"
-                    >
-                      <RotateCcw className="h-4 w-4 mr-1" />
-                      Reset to Default
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => updateMutation.mutate({ id: editingTemplate.id, subject: editSubject, htmlBody: editHtmlBody, isActive: editIsActive })}
-                      disabled={updateMutation.isPending}
-                      data-testid="button-save"
-                    >
-                      {updateMutation.isPending ? <LoadingSpinner size="sm" className="mr-1" /> : <Save className="h-4 w-4 mr-1" />}
-                      Save Template
-                    </Button>
+                    {canUpdateEmailTemplates && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowResetConfirm(editingTemplate.id)}
+                        data-testid="button-reset"
+                      >
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Reset to Default
+                      </Button>
+                    )}
+                    {canUpdateEmailTemplates && (
+                      <Button
+                        size="sm"
+                        onClick={() => updateMutation.mutate({ id: editingTemplate.id, subject: editSubject, htmlBody: editHtmlBody, isActive: editIsActive })}
+                        disabled={updateMutation.isPending}
+                        data-testid="button-save"
+                      >
+                        {updateMutation.isPending ? <LoadingSpinner size="sm" className="mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                        Save Template
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -231,6 +241,8 @@ export default function AdminEmailTemplates() {
                     value={editHtmlBody}
                     onChange={(e) => setEditHtmlBody(e.target.value)}
                     className="w-full h-[600px] font-mono text-sm p-4 border rounded-md bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                    disabled={!canUpdateEmailTemplates}
+                    readOnly={!canUpdateEmailTemplates}
                     spellCheck={false}
                     data-testid="textarea-html-body"
                   />
@@ -261,27 +273,29 @@ export default function AdminEmailTemplates() {
           </Card>
         </div>
 
-        <Dialog open={!!showResetConfirm} onOpenChange={() => setShowResetConfirm(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Reset Template to Default</DialogTitle>
-              <DialogDescription>
-                This will replace the current subject and HTML body with the original default template. This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowResetConfirm(null)} data-testid="button-cancel-reset">Cancel</Button>
-              <Button
-                variant="destructive"
-                disabled={resetMutation.isPending}
-                onClick={() => { if (showResetConfirm) resetMutation.mutate(showResetConfirm); }}
-                data-testid="button-confirm-reset"
-              >
-                {resetMutation.isPending ? "Resetting..." : "Reset to Default"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {canUpdateEmailTemplates && (
+          <Dialog open={!!showResetConfirm} onOpenChange={() => setShowResetConfirm(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reset Template to Default</DialogTitle>
+                <DialogDescription>
+                  This will replace the current subject and HTML body with the original default template. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowResetConfirm(null)} data-testid="button-cancel-reset">Cancel</Button>
+                <Button
+                  variant="destructive"
+                  disabled={resetMutation.isPending}
+                  onClick={() => { if (showResetConfirm) resetMutation.mutate(showResetConfirm); }}
+                  data-testid="button-confirm-reset"
+                >
+                  {resetMutation.isPending ? "Resetting..." : "Reset to Default"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </AdminLayout>
     );
   }
@@ -342,7 +356,7 @@ export default function AdminEmailTemplates() {
                   onClick={() => openEditor(template)}
                   data-testid={`button-edit-${template.slug}`}
                 >
-                  Edit Template
+                  {canUpdateEmailTemplates ? "Edit Template" : "View Template"}
                 </Button>
               </CardContent>
             </Card>

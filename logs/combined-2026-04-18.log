@@ -1,0 +1,25 @@
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:51:03.840Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:51:03.841Z"}
+{"level":"info","message":"Registered carrier adapter: DHL (DHL) - configured: false","timestamp":"2026-04-18T18:51:03.842Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-18T18:51:05.787Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-18T18:51:35.798Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-18T18:51:35.873Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-18T18:51:35.873Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:00.872Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:00.873Z"}
+{"level":"info","message":"Registered carrier adapter: DHL (DHL) - configured: false","timestamp":"2026-04-18T18:58:00.874Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-18T18:58:02.473Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:13.043Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:13.045Z"}
+{"level":"info","message":"Registered carrier adapter: DHL (DHL) - configured: false","timestamp":"2026-04-18T18:58:13.045Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-18T18:58:14.443Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-18T18:58:44.445Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-18T18:58:44.453Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-18T18:58:44.453Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:56.058Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-18T18:58:56.060Z"}
+{"level":"info","message":"Registered carrier adapter: DHL (DHL) - configured: false","timestamp":"2026-04-18T18:58:56.060Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-18T18:58:57.699Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-18T18:59:27.701Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-18T18:59:27.716Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-18T18:59:27.716Z"}

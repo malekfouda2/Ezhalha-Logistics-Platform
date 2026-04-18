@@ -29,12 +29,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { FileText, Plus, Edit, Trash2, Eye, EyeOff, ExternalLink, Clock, History, Calendar, ArrowLeft } from "lucide-react";
 import type { Policy, PolicyVersion } from "@shared/schema";
 
 export default function AdminPolicies() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -48,6 +50,10 @@ export default function AdminPolicies() {
   const [formIsPublished, setFormIsPublished] = useState(true);
   const [formChangeNote, setFormChangeNote] = useState("");
   const [activeTab, setActiveTab] = useState("edit");
+
+  const canCreatePolicies = adminAccess.hasPermission("policies", "create");
+  const canUpdatePolicies = adminAccess.hasPermission("policies", "update");
+  const canDeletePolicies = adminAccess.hasPermission("policies", "delete");
 
   const { data: policiesList, isLoading } = useQuery<Policy[]>({
     queryKey: ["/api/admin/policies"],
@@ -216,10 +222,12 @@ export default function AdminPolicies() {
               Manage public-facing policy pages like privacy policy and shipping terms
             </p>
           </div>
-          <Button onClick={openCreate} data-testid="button-create-policy">
-            <Plus className="w-4 h-4 mr-2" />
-            New Policy
-          </Button>
+          {canCreatePolicies && (
+            <Button onClick={openCreate} data-testid="button-create-policy">
+              <Plus className="w-4 h-4 mr-2" />
+              New Policy
+            </Button>
+          )}
         </div>
 
         {!policiesList || policiesList.length === 0 ? (
@@ -228,10 +236,12 @@ export default function AdminPolicies() {
               <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium mb-2">No policies yet</h3>
               <p className="text-muted-foreground mb-4">Create your first policy page to get started.</p>
-              <Button onClick={openCreate}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create Policy
-              </Button>
+              {canCreatePolicies && (
+                <Button onClick={openCreate}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Policy
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -267,6 +277,7 @@ export default function AdminPolicies() {
                         onCheckedChange={(checked: boolean) =>
                           togglePublishMutation.mutate({ id: policy.id, isPublished: checked })
                         }
+                        disabled={!canUpdatePolicies}
                         data-testid={`switch-publish-${policy.id}`}
                       />
                       <Button
@@ -290,25 +301,29 @@ export default function AdminPolicies() {
                           <ExternalLink className="w-4 h-4" />
                         </Button>
                       )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => openEdit(policy)}
-                        data-testid={`button-edit-${policy.id}`}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          setPolicyToDelete(policy);
-                          setDeleteConfirmOpen(true);
-                        }}
-                        data-testid={`button-delete-${policy.id}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      {canUpdatePolicies && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => openEdit(policy)}
+                          data-testid={`button-edit-${policy.id}`}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                      )}
+                      {canDeletePolicies && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => {
+                            setPolicyToDelete(policy);
+                            setDeleteConfirmOpen(true);
+                          }}
+                          data-testid={`button-delete-${policy.id}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -374,6 +389,7 @@ export default function AdminPolicies() {
                 checked={formIsPublished}
                 onCheckedChange={setFormIsPublished}
                 id="policy-published"
+                disabled={!canUpdatePolicies && !!editingPolicy}
                 data-testid="switch-policy-published"
               />
               <Label htmlFor="policy-published" className="cursor-pointer">
@@ -436,7 +452,13 @@ export default function AdminPolicies() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={isSaving || !formTitle.trim() || !formContent.trim()}
+              disabled={
+                isSaving ||
+                (!editingPolicy && !canCreatePolicies) ||
+                (!!editingPolicy && !canUpdatePolicies) ||
+                !formTitle.trim() ||
+                !formContent.trim()
+              }
               data-testid="button-save-policy"
             >
               {isSaving ? "Saving..." : editingPolicy ? "Save Changes" : "Create Policy"}
@@ -494,14 +516,16 @@ export default function AdminPolicies() {
                 </CardContent>
               </Card>
               <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => restoreVersion(viewingVersionContent)}
-                  data-testid="button-restore-version"
-                >
-                  <History className="w-4 h-4 mr-2" />
-                  Restore This Version
-                </Button>
+                {canUpdatePolicies && (
+                  <Button
+                    variant="outline"
+                    onClick={() => restoreVersion(viewingVersionContent)}
+                    data-testid="button-restore-version"
+                  >
+                    <History className="w-4 h-4 mr-2" />
+                    Restore This Version
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
@@ -540,26 +564,28 @@ export default function AdminPolicies() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Policy</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete &quot;{policyToDelete?.title}&quot;? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => policyToDelete && deleteMutation.mutate(policyToDelete.id)}
-              className="bg-destructive text-destructive-foreground"
-              data-testid="button-confirm-delete"
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {canDeletePolicies && (
+        <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Policy</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete &quot;{policyToDelete?.title}&quot;? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => policyToDelete && deleteMutation.mutate(policyToDelete.id)}
+                className="bg-destructive text-destructive-foreground"
+                data-testid="button-confirm-delete"
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </AdminLayout>
   );
 }

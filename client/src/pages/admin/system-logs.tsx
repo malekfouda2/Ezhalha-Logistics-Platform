@@ -46,6 +46,7 @@ import {
 import type { SystemLog } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 
 interface PaginatedResponse {
   logs: SystemLog[];
@@ -63,6 +64,7 @@ interface LogStats {
 
 export default function AdminSystemLogs() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [levelFilter, setLevelFilter] = useState("all");
@@ -119,6 +121,8 @@ export default function AdminSystemLogs() {
       toast({ title: "Failed to resolve log", variant: "destructive" });
     },
   });
+
+  const canResolveLogs = adminAccess.hasPermission("system-logs", "resolve");
 
   const hasActiveFilters = levelFilter !== "all" || sourceFilter !== "all" || resolvedFilter !== "false" || debouncedSearch;
 
@@ -494,7 +498,7 @@ export default function AdminSystemLogs() {
                         {format(new Date(selectedLog.resolvedAt), "MMM d, yyyy 'at' HH:mm")}
                       </p>
                     </div>
-                  ) : (
+                  ) : canResolveLogs ? (
                     <div className="mt-2">
                       <Button
                         onClick={() => resolveMutation.mutate(selectedLog.id)}
@@ -505,6 +509,10 @@ export default function AdminSystemLogs() {
                         <CheckCircle className="h-4 w-4 mr-1" />
                         {resolveMutation.isPending ? "Resolving..." : "Mark as Resolved"}
                       </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      Read-only access. Resolving logs requires `system-logs:resolve`.
                     </div>
                   )}
                 </div>

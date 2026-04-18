@@ -1,0 +1,167 @@
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-08T22:53:04.911Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-08T22:53:05.199Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-08T22:53:05.362Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-08T22:53:05.364Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-08T23:53:04.925Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-08T23:53:05.311Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-08T23:53:05.325Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-08T23:53:05.328Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T00:57:33.994Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T00:57:34.648Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T00:57:34.652Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T00:57:34.652Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T02:13:59.958Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T02:14:00.164Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T02:14:00.175Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T02:14:00.176Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T03:25:08.333Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T03:25:08.584Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T03:25:08.588Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T03:25:08.588Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T04:55:50.187Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T04:55:51.747Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T04:55:51.748Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T04:55:51.749Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T05:56:58.477Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T05:57:00.731Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T05:57:00.735Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T05:57:00.735Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T06:58:07.737Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T06:58:10.445Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T06:58:10.446Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T06:58:10.447Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T07:59:16.787Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T07:59:18.945Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T07:59:18.946Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T07:59:18.963Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T09:00:24.783Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T09:00:26.759Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T09:00:26.767Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T09:00:26.789Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T10:01:33.792Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T10:01:36.184Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T10:01:36.215Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T10:01:36.218Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T11:02:42.811Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T11:02:45.031Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T11:02:45.033Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T11:02:45.039Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T12:03:51.092Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T12:03:53.055Z"}
+{"level":"info","message":"Marked credit invoice 9a434f98-b921-40ce-8c2c-3ce59fd3fe10 as OVERDUE","timestamp":"2026-04-09T12:03:53.656Z"}
+{"level":"info","message":"Marked credit invoice 9a2ae51a-478f-4c44-ac7b-e37b06b3d047 as OVERDUE","timestamp":"2026-04-09T12:03:53.662Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T12:03:53.665Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T12:03:53.666Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T13:05:00.005Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T13:05:02.648Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T13:05:02.652Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T13:05:02.652Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T14:06:09.316Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T14:06:11.240Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T14:06:11.242Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T14:06:11.243Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T15:07:18.131Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T15:07:19.680Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T15:07:19.703Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T15:07:19.704Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T16:07:17.325Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T16:07:17.436Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T16:07:17.450Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T16:07:17.450Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T17:07:17.203Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T17:07:17.239Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T17:07:17.268Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T17:07:17.269Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T18:40:20.420Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T18:40:20.546Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T18:40:20.550Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T18:40:20.551Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T19:51:17.769Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T19:51:17.960Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T19:51:17.967Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T19:51:17.967Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T20:51:17.723Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T20:51:17.778Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T20:51:17.778Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-09T20:51:17.781Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.807Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.807Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.807Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.807Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.807Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:41.815Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:28:44.780Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.932Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.946Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.933Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.959Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.953Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:28:51.981Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:28:53.843Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.111Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.108Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.115Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.141Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.123Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:29:09.180Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:29:10.900Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T21:29:41.004Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T21:29:41.016Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T21:29:41.017Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.074Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.074Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.092Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.086Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.077Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:30:43.075Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:30:46.196Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T21:31:16.203Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T21:31:16.343Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T21:31:16.344Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.026Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.026Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.026Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.025Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.026Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:16.025Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:37:19.085Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.512Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.509Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.524Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.546Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.549Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:42.599Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:37:44.398Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.369Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.378Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.379Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.404Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.446Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:37:53.567Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:37:55.815Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T21:38:25.838Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T21:38:25.850Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T21:38:25.850Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.526Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.529Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.584Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.571Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.601Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:15.717Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:39:18.022Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.158Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.158Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.157Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.207Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.166Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:31.496Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.028Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.043Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.256Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.313Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.298Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: false","timestamp":"2026-04-09T21:39:37.371Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-04-09T21:39:41.313Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-09T21:40:11.328Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-09T21:40:11.344Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-09T21:40:11.344Z"}

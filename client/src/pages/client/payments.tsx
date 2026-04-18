@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -17,20 +18,43 @@ import { SarAmount } from "@/components/sar-symbol";
 import type { Payment, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 
+interface ClientExtraFeeNotice {
+  shipmentId: string;
+  trackingNumber: string;
+  carrierTrackingNumber: string | null;
+  carrierName: string | null;
+  createdAt: string;
+  extraFeesAmountSar: number;
+  extraFeesType: "EXTRA_WEIGHT" | "EXTRA_COST" | null;
+  extraFeesWeightValue: number;
+  extraFeesCostAmountSar: number;
+  extraFeesAddedAt: string | null;
+  extraFeesEmailSentAt: string | null;
+  weightValue: number;
+  weightUnit: string | null;
+  grossTotalAmountSar: number;
+  extraFeesRateSarPerWeight: number;
+}
+
 export default function ClientPayments() {
   const { data: account } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
   });
 
-  const { data: payments, isLoading } = useQuery<Payment[]>({
+  const { data: payments, isLoading: paymentsLoading } = useQuery<Payment[]>({
     queryKey: ["/api/client/payments"],
+  });
+
+  const { data: extraFees, isLoading: extraFeesLoading } = useQuery<ClientExtraFeeNotice[]>({
+    queryKey: ["/api/client/extra-fees"],
   });
 
   const totalPaid = payments
     ?.filter((p) => p.status === "completed")
     .reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+  const totalExtraFees = extraFees?.reduce((sum, fee) => sum + Number(fee.extraFeesAmountSar || 0), 0) ?? 0;
 
-  if (isLoading) {
+  if (paymentsLoading || extraFeesLoading) {
     return (
       <ClientLayout clientProfile={account?.profile}>
         <LoadingScreen message="Loading payments..." />
@@ -58,6 +82,73 @@ export default function ClientPayments() {
             </div>
           )}
         </div>
+
+        {extraFees && extraFees.length > 0 && (
+          <Card>
+            <CardContent className="p-0">
+              <div className="flex items-center justify-between gap-4 px-6 py-4 border-b">
+                <div>
+                  <h2 className="text-lg font-semibold">Extra Fee Notices</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Shipment adjustments added by the admin team are listed here for your reference.
+                  </p>
+                </div>
+                <div className="text-sm font-medium">
+                  Total extra fees: <SarAmount amount={totalExtraFees} />
+                </div>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Shipment</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {extraFees.map((fee) => (
+                    <TableRow key={`${fee.shipmentId}-${fee.extraFeesAddedAt || fee.createdAt}`}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <p className="font-mono text-sm">{fee.trackingNumber}</p>
+                          {fee.carrierTrackingNumber && (
+                            <p className="text-xs text-muted-foreground">{fee.carrierTrackingNumber}</p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {fee.extraFeesType === "EXTRA_WEIGHT" ? "Extra Weight" : "Extra Cost"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {fee.extraFeesType === "EXTRA_WEIGHT"
+                          ? `${fee.extraFeesWeightValue.toFixed(2)} ${fee.weightUnit || "KG"} at ${fee.extraFeesRateSarPerWeight.toFixed(2)} SAR/${fee.weightUnit || "KG"}`
+                          : `Manual extra cost: SAR ${fee.extraFeesCostAmountSar.toFixed(2)}`}
+                      </TableCell>
+                      <TableCell>
+                        {fee.extraFeesEmailSentAt ? (
+                          <Badge variant="outline">Sent</Badge>
+                        ) : (
+                          <Badge variant="secondary">In Portal</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {format(new Date(fee.extraFeesAddedAt || fee.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        <SarAmount amount={fee.extraFeesAmountSar} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Payments Table */}
         <Card>

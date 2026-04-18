@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AdminLayout } from "@/components/admin-layout";
+import { SearchableSelect } from "@/components/searchable-select";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,25 +28,46 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAdminAccess } from "@/hooks/use-admin-access";
+import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
+import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { ArrowLeft, Save, Building, User, MapPin, Globe } from "lucide-react";
-import { insertClientAccountSchema, type ClientAccount, type PricingRule } from "@shared/schema";
+import { insertClientAccountSchema, type ClientAccount } from "@shared/schema";
 
 const editClientSchema = insertClientAccountSchema.partial().extend({
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Invalid email"),
   isActive: z.boolean(),
+  assignedAccountManagerUserId: z.string().optional().nullable(),
 });
 
 type EditClientFormData = z.infer<typeof editClientSchema>;
 
-const countries = [
-  "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman",
-  "Egypt", "Jordan", "Lebanon", "United States", "United Kingdom", "Germany", "France", "Other",
-];
+interface ProfileOption {
+  profile: string;
+  displayName: string;
+}
+
+interface AssignedAccountManagerSummary {
+  id: string;
+  username: string;
+  email: string;
+}
+
+interface ClientDetails extends ClientAccount {
+  assignedAccountManager?: AssignedAccountManagerSummary | null;
+}
+
+interface AccountManagerOption {
+  id: string;
+  username: string;
+  email: string;
+}
 
 export default function AdminEditClient() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
+  const isAccountManager = adminAccess.isAccountManager;
   const [, setLocation] = useLocation();
   const [, params] = useRoute("/admin/clients/:id/edit");
   const clientId = params?.id;
@@ -71,6 +93,7 @@ export default function AdminEditClient() {
       shippingShortAddress: "",
       profile: "",
       isActive: true,
+      assignedAccountManagerUserId: "unassigned",
       nameAr: "",
       companyNameAr: "",
       shippingContactNameAr: "",
@@ -85,14 +108,35 @@ export default function AdminEditClient() {
     },
   });
 
-  const { data: client, isLoading } = useQuery<ClientAccount>({
+  const { data: client, isLoading } = useQuery<ClientDetails>({
     queryKey: ["/api/admin/clients", clientId],
     enabled: !!clientId,
   });
 
-  const { data: pricingRules } = useQuery<PricingRule[]>({
-    queryKey: ["/api/admin/pricing"],
+  const { data: profileOptions } = useQuery<ProfileOption[]>({
+    queryKey: ["/api/admin/client-profile-options"],
+    enabled: adminAccess.hasPermission("clients", "read"),
   });
+
+  const canReadAccountManagers = adminAccess.hasPermission("account-managers", "read");
+  const canAssignAccountManagers = adminAccess.hasPermission("account-managers", "assign");
+
+  const { data: accountManagers } = useQuery<AccountManagerOption[]>({
+    queryKey: ["/api/admin/account-managers", "edit-client-options"],
+    enabled: canReadAccountManagers,
+    queryFn: async () => {
+      const res = await fetch("/api/admin/account-managers", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch account managers");
+      const data = await readJsonResponse<Array<{ id: string; username: string; email: string }>>(res);
+      return data.map((manager) => ({
+        id: manager.id,
+        username: manager.username,
+        email: manager.email,
+      }));
+    },
+  });
+
+  const canManageProfiles = (profileOptions?.length || 0) > 0;
 
   useEffect(() => {
     if (client) {
@@ -115,6 +159,7 @@ export default function AdminEditClient() {
         shippingShortAddress: client.shippingShortAddress || "",
         profile: client.profile || "",
         isActive: client.isActive,
+        assignedAccountManagerUserId: client.assignedAccountManager?.id || "unassigned",
         nameAr: client.nameAr || "",
         companyNameAr: client.companyNameAr || "",
         shippingContactNameAr: client.shippingContactNameAr || "",
@@ -132,11 +177,28 @@ export default function AdminEditClient() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: EditClientFormData) => {
-      await apiRequest("PATCH", `/api/admin/clients/${clientId}`, data);
+      const payload = isAccountManager
+        ? { ...data, isActive: undefined, assignedAccountManagerUserId: undefined }
+        : {
+            ...data,
+            assignedAccountManagerUserId:
+              canAssignAccountManagers && canReadAccountManagers
+                ? (data.assignedAccountManagerUserId === "unassigned" ? null : data.assignedAccountManagerUserId)
+                : undefined,
+          };
+      const res = await apiRequest("PATCH", `/api/admin/clients/${clientId}`, payload);
+      return readJsonResponse<{ requiresApproval?: boolean }>(res);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
-      toast({ title: "Client updated", description: "Client information has been updated successfully and synced to Zoho Books." });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/account-managers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/account-managers/change-requests"] });
+      toast({
+        title: data.requiresApproval ? "Approval requested" : "Client updated",
+        description: data.requiresApproval
+          ? "The client changes were sent to admin for approval."
+          : "Client information has been updated successfully and synced to Zoho Books.",
+      });
       setLocation("/admin/clients");
     },
     onError: (error) => {
@@ -147,10 +209,6 @@ export default function AdminEditClient() {
   const onSubmit = (data: EditClientFormData) => {
     updateMutation.mutate(data);
   };
-
-  const uniqueProfiles = pricingRules
-    ? Array.from(new Set(pricingRules.map((r) => r.profile)))
-    : [];
 
   if (isLoading) {
     return (
@@ -256,18 +314,16 @@ export default function AdminEditClient() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Country</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value || ""}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-country">
-                                <SelectValue placeholder="Select country" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {countries.map((c) => (
-                                <SelectItem key={c} value={c}>{c}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value || ""}
+                              onValueChange={field.onChange}
+                              options={COUNTRY_NAME_SELECT_OPTIONS}
+                              placeholder="Select country"
+                              searchPlaceholder="Search countries..."
+                              data-testid="select-country"
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -278,46 +334,86 @@ export default function AdminEditClient() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Profile</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value || ""}>
+                          {canManageProfiles ? (
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-profile">
+                                  <SelectValue placeholder="Select profile" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {profileOptions?.map((option) => (
+                                  <SelectItem key={option.profile} value={option.profile}>{option.displayName}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
                             <FormControl>
-                              <SelectTrigger data-testid="select-profile">
-                                <SelectValue placeholder="Select profile" />
-                              </SelectTrigger>
+                              <Input
+                                {...field}
+                                value={field.value || ""}
+                                placeholder="Client profile"
+                                data-testid="input-profile"
+                              />
                             </FormControl>
-                            <SelectContent>
-                              {uniqueProfiles.map((p) => (
-                                <SelectItem key={p} value={p}>{p}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={form.control}
-                      name="isActive"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Status</FormLabel>
-                          <Select
-                            onValueChange={(value) => field.onChange(value === "active")}
-                            value={field.value ? "active" : "inactive"}
-                          >
-                            <FormControl>
-                              <SelectTrigger data-testid="select-status">
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="inactive">Inactive</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {canReadAccountManagers && canAssignAccountManagers && !isAccountManager && (
+                      <FormField
+                        control={form.control}
+                        name="assignedAccountManagerUserId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Account Manager</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value || "unassigned"}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-edit-account-manager">
+                                  <SelectValue placeholder="Select account manager" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {(accountManagers || []).map((manager) => (
+                                  <SelectItem key={manager.id} value={manager.id}>
+                                    {manager.username}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                    {!isAccountManager && (
+                      <FormField
+                        control={form.control}
+                        name="isActive"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Status</FormLabel>
+                            <Select
+                              onValueChange={(value) => field.onChange(value === "active")}
+                              value={field.value ? "active" : "inactive"}
+                            >
+                              <FormControl>
+                                <SelectTrigger data-testid="select-status">
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="inactive">Inactive</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </CardContent>
                 </Card>
 
@@ -689,7 +785,7 @@ export default function AdminEditClient() {
                 data-testid="button-save"
               >
                 <Save className="w-4 h-4 mr-2" />
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                {updateMutation.isPending ? "Saving..." : isAccountManager ? "Submit For Approval" : "Save Changes"}
               </Button>
             </div>
           </form>

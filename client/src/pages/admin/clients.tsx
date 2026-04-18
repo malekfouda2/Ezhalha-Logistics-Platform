@@ -7,6 +7,7 @@ import { ProfileBadge } from "@/components/profile-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoClients } from "@/components/empty-state";
 import { PaginationControls } from "@/components/pagination-controls";
+import { SearchableSelect } from "@/components/searchable-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,7 +48,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAdminAccess } from "@/hooks/use-admin-access";
+import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
+import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2, Upload, X, RefreshCw, Users, Filter } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useUpload } from "@/hooks/use-upload";
@@ -61,37 +64,56 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { ClientAccount, PricingRule } from "@shared/schema";
+import type { ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-
-const countries = [
-  "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman",
-  "Egypt", "Jordan", "Lebanon", "United States", "United Kingdom", "Germany", "France", "Other",
-];
 
 interface UploadedDocument {
   name: string;
   path: string;
 }
 
+interface AssignedAccountManagerSummary {
+  id: string;
+  username: string;
+  email: string;
+}
+
+interface ClientListItem extends ClientAccount {
+  assignedAccountManager?: AssignedAccountManagerSummary | null;
+}
+
 interface PaginatedResponse {
-  clients: ClientAccount[];
+  clients: ClientListItem[];
   total: number;
   page: number;
   totalPages: number;
 }
 
+interface ProfileOption {
+  profile: string;
+  displayName: string;
+}
+
+interface AccountManagerOption {
+  id: string;
+  username: string;
+  email: string;
+}
+
 export default function AdminClients() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
+  const isAccountManager = adminAccess.isAccountManager;
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [profileFilter, setProfileFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [accountManagerFilter, setAccountManagerFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [selectedClient, setSelectedClient] = useState<ClientAccount | null>(null);
+  const [selectedClient, setSelectedClient] = useState<ClientListItem | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
@@ -99,7 +121,7 @@ export default function AdminClients() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editProfile, setEditProfile] = useState("");
   const [newClient, setNewClient] = useState({
-    name: "", email: "", phone: "", country: "", companyName: "",
+    name: "", email: "", phone: "", country: "", companyName: "", assignedAccountManagerUserId: "unassigned",
   });
   const [createUploadedDocs, setCreateUploadedDocs] = useState<UploadedDocument[]>([]);
 
@@ -141,11 +163,12 @@ export default function AdminClients() {
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (profileFilter !== "all") params.set("profile", profileFilter);
     if (statusFilter !== "all") params.set("status", statusFilter);
+    if (accountManagerFilter !== "all") params.set("accountManagerUserId", accountManagerFilter);
     return params.toString();
   };
 
   const { data, isLoading, isFetching, refetch } = useQuery<PaginatedResponse>({
-    queryKey: ["/api/admin/clients", page, pageSize, debouncedSearch, profileFilter, statusFilter],
+    queryKey: ["/api/admin/clients", page, pageSize, debouncedSearch, profileFilter, statusFilter, accountManagerFilter],
     queryFn: async () => {
       const res = await fetch(`/api/admin/clients?${buildQueryString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch clients");
@@ -153,18 +176,49 @@ export default function AdminClients() {
     },
   });
 
-  const { data: pricingRules } = useQuery<PricingRule[]>({
-    queryKey: ["/api/admin/pricing"],
+  const { data: profileOptions } = useQuery<ProfileOption[]>({
+    queryKey: ["/api/admin/client-profile-options"],
+    enabled: adminAccess.hasPermission("clients", "read"),
+  });
+
+  const canReadAccountManagers = adminAccess.hasPermission("account-managers", "read");
+  const canAssignAccountManagers = adminAccess.hasPermission("account-managers", "assign");
+  const canCreateClients = adminAccess.hasPermission("clients", "create");
+  const canUpdateClients = adminAccess.hasPermission("clients", "update");
+  const canDeleteClients = adminAccess.hasPermission("clients", "delete");
+  const canActivateClients = adminAccess.hasPermission("clients", "activate");
+  const canManageProfiles = canUpdateClients && (profileOptions?.length || 0) > 0;
+
+  const { data: accountManagers } = useQuery<AccountManagerOption[]>({
+    queryKey: ["/api/admin/account-managers", "client-page-options"],
+    enabled: canReadAccountManagers,
+    queryFn: async () => {
+      const res = await fetch("/api/admin/account-managers", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch account managers");
+      const data = await readJsonResponse<Array<{ id: string; username: string; email: string }>>(res);
+      return data.map((manager) => ({
+        id: manager.id,
+        username: manager.username,
+        email: manager.email,
+      }));
+    },
   });
 
   const updateProfileMutation = useMutation({
     mutationFn: async ({ id, profile }: { id: string; profile: string }) => {
-      await apiRequest("PATCH", `/api/admin/clients/${id}/profile`, { profile });
+      const res = await apiRequest("PATCH", `/api/admin/clients/${id}/profile`, { profile });
+      return readJsonResponse<{ requiresApproval?: boolean }>(res);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/account-managers/change-requests"] });
       setIsEditOpen(false);
-      toast({ title: "Profile updated", description: "Client profile has been updated successfully." });
+      toast({
+        title: data.requiresApproval ? "Approval requested" : "Profile updated",
+        description: data.requiresApproval
+          ? "The pricing profile change was sent to admin for approval."
+          : "Client profile has been updated successfully.",
+      });
     },
     onError: (error) => {
       toast({ title: "Update failed", description: error instanceof Error ? error.message : "Please try again", variant: "destructive" });
@@ -177,7 +231,12 @@ export default function AdminClients() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
-      toast({ title: "Status updated", description: "Client status has been updated successfully." });
+      toast({
+        title: "Status updated",
+        description: isAccountManager
+          ? "Client account has been deactivated successfully."
+          : "Client status has been updated successfully.",
+      });
     },
     onError: (error) => {
       toast({ title: "Update failed", description: error instanceof Error ? error.message : "Please try again", variant: "destructive" });
@@ -185,13 +244,19 @@ export default function AdminClients() {
   });
 
   const createClientMutation = useMutation({
-    mutationFn: async (data: typeof newClient & { documents?: string[] }) => {
+    mutationFn: async (
+      data: Omit<typeof newClient, "assignedAccountManagerUserId"> & {
+        documents?: string[];
+        assignedAccountManagerUserId?: string | null;
+      },
+    ) => {
       await apiRequest("POST", "/api/admin/clients", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/account-managers"] });
       setIsCreateOpen(false);
-      setNewClient({ name: "", email: "", phone: "", country: "", companyName: "" });
+      setNewClient({ name: "", email: "", phone: "", country: "", companyName: "", assignedAccountManagerUserId: "unassigned" });
       setCreateUploadedDocs([]);
       toast({ title: "Client created", description: "New client has been created successfully." });
     },
@@ -216,27 +281,29 @@ export default function AdminClients() {
     },
   });
 
-  const hasActiveFilters = profileFilter !== "all" || statusFilter !== "all" || debouncedSearch;
+  const hasActiveFilters =
+    profileFilter !== "all" || statusFilter !== "all" || accountManagerFilter !== "all" || debouncedSearch;
 
   const clearFilters = () => {
     setSearchQuery("");
     setDebouncedSearch("");
     setProfileFilter("all");
     setStatusFilter("all");
+    setAccountManagerFilter("all");
     setPage(1);
   };
 
-  const handleViewDetails = (client: ClientAccount) => {
+  const handleViewDetails = (client: ClientListItem) => {
     setSelectedClient(client);
     setIsDetailsOpen(true);
   };
 
-  const handleViewDocs = (client: ClientAccount) => {
+  const handleViewDocs = (client: ClientListItem) => {
     setSelectedClient(client);
     setIsDocsOpen(true);
   };
 
-  const handleEditProfile = (client: ClientAccount) => {
+  const handleEditProfile = (client: ClientListItem) => {
     setSelectedClient(client);
     setEditProfile(client.profile);
     setIsEditOpen(true);
@@ -248,11 +315,14 @@ export default function AdminClients() {
     }
   };
 
-  const handleToggleStatus = (client: ClientAccount) => {
+  const handleToggleStatus = (client: ClientListItem) => {
+    if (isAccountManager && !client.isActive) {
+      return;
+    }
     toggleStatusMutation.mutate({ id: client.id, isActive: !client.isActive });
   };
 
-  const handleDeleteClient = (client: ClientAccount) => {
+  const handleDeleteClient = (client: ClientListItem) => {
     setSelectedClient(client);
     setIsDeleteOpen(true);
   };
@@ -264,6 +334,10 @@ export default function AdminClients() {
     }
     createClientMutation.mutate({
       ...newClient,
+      assignedAccountManagerUserId:
+        canAssignAccountManagers && canReadAccountManagers && newClient.assignedAccountManagerUserId !== "unassigned"
+          ? newClient.assignedAccountManagerUserId
+          : null,
       documents: createUploadedDocs.length > 0 ? createUploadedDocs.map((doc) => doc.path) : undefined,
     });
   };
@@ -293,10 +367,12 @@ export default function AdminClients() {
               <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
               Refresh
             </Button>
-            <Button onClick={() => setIsCreateOpen(true)} data-testid="button-create-client">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Client
-            </Button>
+            {canCreateClients && (
+              <Button onClick={() => setIsCreateOpen(true)} data-testid="button-create-client">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Client
+              </Button>
+            )}
           </div>
         </div>
 
@@ -343,19 +419,37 @@ export default function AdminClients() {
                   data-testid="input-search"
                 />
               </div>
-              <Select value={profileFilter} onValueChange={(v) => { setProfileFilter(v); setPage(1); }}>
-                <SelectTrigger className="w-[180px]" data-testid="select-profile-filter">
-                  <SelectValue placeholder="Profile" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Profiles</SelectItem>
-                  {pricingRules?.map((rule) => (
-                    <SelectItem key={rule.id} value={rule.profile}>
-                      {rule.displayName || rule.profile}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {profileOptions && profileOptions.length > 0 && (
+                <Select value={profileFilter} onValueChange={(v) => { setProfileFilter(v); setPage(1); }}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-profile-filter">
+                    <SelectValue placeholder="Profile" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Profiles</SelectItem>
+                    {profileOptions.map((option) => (
+                      <SelectItem key={option.profile} value={option.profile}>
+                        {option.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {canReadAccountManagers && (
+                <Select value={accountManagerFilter} onValueChange={(v) => { setAccountManagerFilter(v); setPage(1); }}>
+                  <SelectTrigger className="w-[220px]" data-testid="select-account-manager-filter">
+                    <SelectValue placeholder="Account Manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Account Managers</SelectItem>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {(accountManagers || []).map((manager) => (
+                      <SelectItem key={manager.id} value={manager.id}>
+                        {manager.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
                 <SelectTrigger className="w-[140px]" data-testid="select-status-filter">
                   <SelectValue placeholder="Status" />
@@ -380,6 +474,7 @@ export default function AdminClients() {
                       <TableHead>Account ID</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Contact</TableHead>
+                      {canReadAccountManagers && <TableHead>Account Manager</TableHead>}
                       <TableHead>Profile</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Joined</TableHead>
@@ -404,6 +499,18 @@ export default function AdminClients() {
                             <p className="text-sm text-muted-foreground">{client.phone}</p>
                           </div>
                         </TableCell>
+                        {canReadAccountManagers && (
+                          <TableCell>
+                            {client.assignedAccountManager ? (
+                              <div>
+                                <p className="text-sm font-medium">{client.assignedAccountManager.username}</p>
+                                <p className="text-xs text-muted-foreground truncate">{client.assignedAccountManager.email}</p>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Unassigned</span>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell>
                           <ProfileBadge profile={client.profile} />
                         </TableCell>
@@ -425,27 +532,35 @@ export default function AdminClients() {
                                 <Eye className="mr-2 h-4 w-4" />
                                 View Details
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleEditProfile(client)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Edit Profile
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setLocation(`/admin/clients/${client.id}/edit`)} data-testid={`button-edit-client-${client.id}`}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Edit Full Details
-                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleViewDocs(client)}>
                                 <FileText className="mr-2 h-4 w-4" />
                                 View Documents {client.documents?.length ? `(${client.documents.length})` : ''}
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleToggleStatus(client)}>
-                                <Power className="mr-2 h-4 w-4" />
-                                {client.isActive ? "Deactivate" : "Activate"}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDeleteClient(client)} className="text-destructive focus:text-destructive">
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete Client
-                              </DropdownMenuItem>
+                              {(canUpdateClients || canActivateClients || canDeleteClients) && <DropdownMenuSeparator />}
+                              {canManageProfiles && (
+                                <DropdownMenuItem onClick={() => handleEditProfile(client)}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit Profile
+                                </DropdownMenuItem>
+                              )}
+                              {canUpdateClients && (
+                                <DropdownMenuItem onClick={() => setLocation(`/admin/clients/${client.id}/edit`)} data-testid={`button-edit-client-${client.id}`}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit Full Details
+                                </DropdownMenuItem>
+                              )}
+                              {canActivateClients && (!isAccountManager || client.isActive) && (
+                                <DropdownMenuItem onClick={() => handleToggleStatus(client)}>
+                                  <Power className="mr-2 h-4 w-4" />
+                                  {client.isActive ? "Deactivate" : "Activate"}
+                                </DropdownMenuItem>
+                              )}
+                              {canDeleteClients && (
+                                <DropdownMenuItem onClick={() => handleDeleteClient(client)} className="text-destructive focus:text-destructive">
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Client
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -483,9 +598,9 @@ export default function AdminClients() {
                 <SelectValue placeholder="Select profile" />
               </SelectTrigger>
               <SelectContent>
-                {pricingRules?.map((rule) => (
-                  <SelectItem key={rule.id} value={rule.profile}>
-                    {rule.displayName || rule.profile}
+                {profileOptions?.map((option) => (
+                  <SelectItem key={option.profile} value={option.profile}>
+                    {option.displayName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -596,18 +711,35 @@ export default function AdminClients() {
                       <span className="text-sm">{format(new Date(selectedClient.createdAt), "MMM d, yyyy")}</span>
                     </div>
                   </div>
+                  {canReadAccountManagers && (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">Account Manager</span>
+                      {selectedClient.assignedAccountManager ? (
+                        <div className="text-right">
+                          <p className="text-sm font-medium">{selectedClient.assignedAccountManager.username}</p>
+                          <p className="text-xs text-muted-foreground">{selectedClient.assignedAccountManager.email}</p>
+                        </div>
+                      ) : (
+                        <span className="text-sm">Unassigned</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <Separator />
               <div className="flex flex-col gap-2">
-                <Button variant="outline" onClick={() => { setIsDetailsOpen(false); handleEditProfile(selectedClient); }} data-testid="button-edit-from-details">
-                  <Edit className="mr-2 h-4 w-4" />
-                  Edit Profile
-                </Button>
-                <Button variant="outline" onClick={() => { handleToggleStatus(selectedClient); setIsDetailsOpen(false); }} data-testid="button-toggle-from-details">
-                  <Power className="mr-2 h-4 w-4" />
-                  {selectedClient.isActive ? "Deactivate Account" : "Activate Account"}
-                </Button>
+                {canManageProfiles && (
+                  <Button variant="outline" onClick={() => { setIsDetailsOpen(false); handleEditProfile(selectedClient); }} data-testid="button-edit-from-details">
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit Profile
+                  </Button>
+                )}
+                {canActivateClients && (!isAccountManager || selectedClient.isActive) && (
+                  <Button variant="outline" onClick={() => { handleToggleStatus(selectedClient); setIsDetailsOpen(false); }} data-testid="button-toggle-from-details">
+                    <Power className="mr-2 h-4 w-4" />
+                    {selectedClient.isActive ? "Deactivate Account" : "Activate Account"}
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -634,21 +766,40 @@ export default function AdminClients() {
             </div>
             <div className="space-y-2">
               <Label>Country *</Label>
-              <Select value={newClient.country} onValueChange={(v) => setNewClient({ ...newClient, country: v })}>
-                <SelectTrigger data-testid="select-client-country">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  {countries.map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={newClient.country}
+                onValueChange={(v) => setNewClient({ ...newClient, country: v })}
+                options={COUNTRY_NAME_SELECT_OPTIONS}
+                placeholder="Select country"
+                searchPlaceholder="Search countries..."
+                data-testid="select-client-country"
+              />
             </div>
             <div className="space-y-2">
               <Label>Company Name</Label>
               <Input value={newClient.companyName} onChange={(e) => setNewClient({ ...newClient, companyName: e.target.value })} placeholder="ACME Corp" data-testid="input-client-company" />
             </div>
+            {canReadAccountManagers && canAssignAccountManagers && (
+              <div className="space-y-2">
+                <Label>Account Manager</Label>
+                <Select
+                  value={newClient.assignedAccountManagerUserId}
+                  onValueChange={(value) => setNewClient({ ...newClient, assignedAccountManagerUserId: value })}
+                >
+                  <SelectTrigger data-testid="select-client-account-manager">
+                    <SelectValue placeholder="Select account manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {(accountManagers || []).map((manager) => (
+                      <SelectItem key={manager.id} value={manager.id}>
+                        {manager.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Documents</Label>
               <div className="flex flex-wrap gap-2">

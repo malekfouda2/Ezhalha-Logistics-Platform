@@ -7,6 +7,19 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+export async function readJsonResponse<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const body = await res.text();
+    const bodyPreview = body.replace(/\s+/g, " ").slice(0, 120);
+    throw new Error(
+      `Expected JSON response but received ${contentType || "unknown content"}. The local server may need to be restarted.${bodyPreview ? ` Response preview: ${bodyPreview}` : ""}`,
+    );
+  }
+
+  return res.json() as Promise<T>;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
@@ -24,21 +37,21 @@ export async function apiRequest(
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
-export const getQueryFn: <T>(options: {
+export const getQueryFn = <T>(options: {
   on401: UnauthorizedBehavior;
-}) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
+}): QueryFunction<T> =>
   async ({ queryKey }) => {
+    const unauthorizedBehavior = options.on401;
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+      return null as T;
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    return (await readJsonResponse<T>(res)) as T;
   };
 
 export const queryClient = new QueryClient({

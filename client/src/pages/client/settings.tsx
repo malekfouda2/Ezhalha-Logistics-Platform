@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { SearchableSelect } from "@/components/searchable-select";
 import {
   Form,
   FormControl,
@@ -20,15 +21,9 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound, Truck } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { ClientAccount } from "@shared/schema";
 import { useAuth } from "@/lib/auth-context";
 import { format } from "date-fns";
@@ -53,22 +48,6 @@ const passwordFormSchema = z.object({
 });
 
 type PasswordFormData = z.infer<typeof passwordFormSchema>;
-
-const shippingCountries = [
-  { code: "SA", name: "Saudi Arabia" },
-  { code: "AE", name: "United Arab Emirates" },
-  { code: "QA", name: "Qatar" },
-  { code: "KW", name: "Kuwait" },
-  { code: "BH", name: "Bahrain" },
-  { code: "OM", name: "Oman" },
-  { code: "EG", name: "Egypt" },
-  { code: "JO", name: "Jordan" },
-  { code: "LB", name: "Lebanon" },
-  { code: "US", name: "United States" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "DE", name: "Germany" },
-  { code: "FR", name: "France" },
-];
 
 const shippingAddressSchema = z.object({
   shippingContactName: z.string().min(2, "Contact name is required"),
@@ -606,20 +585,16 @@ export default function ClientSettings() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Country</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-shipping-country">
-                                <SelectValue placeholder="Select country" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {shippingCountries.map((country) => (
-                                <SelectItem key={country.code} value={country.code}>
-                                  {country.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              options={COUNTRY_CODE_SELECT_OPTIONS}
+                              placeholder="Select country"
+                              searchPlaceholder="Search countries..."
+                              data-testid="select-shipping-country"
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}

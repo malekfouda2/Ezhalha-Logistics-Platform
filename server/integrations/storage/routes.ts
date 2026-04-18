@@ -34,6 +34,23 @@ function verifyUploadToken(fileName: string, expiresAt: number, token: string): 
   return expected === token;
 }
 
+function resolveRequestBaseUrl(req: Request): string {
+  const origin = req.get("origin");
+  if (origin && origin !== "null") {
+    return origin.replace(/\/$/, "");
+  }
+
+  const referer = req.get("referer");
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+    }
+  }
+
+  return `${req.protocol}://${req.get("host")}`;
+}
+
 export function registerObjectStorageRoutes(app: Express): void {
   if (isObjectStorageAvailable()) {
     registerCloudRoutes(app);
@@ -42,18 +59,32 @@ export function registerObjectStorageRoutes(app: Express): void {
   }
 }
 
+function validateUploadRequest(
+  req: Request,
+  res: Response,
+): { name: string; size?: number; contentType?: string } | null {
+  const { name, size, contentType } = req.body;
+
+  if (!name) {
+    res.status(400).json({
+      error: "Missing required field: name",
+    });
+    return null;
+  }
+
+  return { name, size, contentType };
+}
+
 function registerCloudRoutes(app: Express): void {
   const objectStorageService = new ObjectStorageService();
 
-  app.post("/api/uploads/request-url", requireAuthenticated, async (req, res) => {
+  const handleCloudUploadUrlRequest = async (req: Request, res: Response) => {
     try {
-      const { name, size, contentType } = req.body;
-
-      if (!name) {
-        return res.status(400).json({
-          error: "Missing required field: name",
-        });
+      const uploadRequest = validateUploadRequest(req, res);
+      if (!uploadRequest) {
+        return;
       }
+      const { name, size, contentType } = uploadRequest;
 
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
       const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
@@ -67,7 +98,10 @@ function registerCloudRoutes(app: Express): void {
       console.error("Error generating upload URL:", error);
       res.status(500).json({ error: "Failed to generate upload URL" });
     }
-  });
+  };
+
+  app.post("/api/uploads/request-url", requireAuthenticated, handleCloudUploadUrlRequest);
+  app.post("/api/public/uploads/request-url", handleCloudUploadUrlRequest);
 
   app.get("/objects/:objectPath(*)", async (req, res) => {
     try {
@@ -111,15 +145,13 @@ function registerLocalRoutes(app: Express): void {
   localStorageService.initialize().catch(console.error);
   const maxFileSize = localStorageService.getMaxFileSize();
 
-  app.post("/api/uploads/request-url", requireAuthenticated, async (req, res) => {
+  const handleLocalUploadUrlRequest = async (req: Request, res: Response) => {
     try {
-      const { name, size, contentType } = req.body;
-
-      if (!name) {
-        return res.status(400).json({
-          error: "Missing required field: name",
-        });
+      const uploadRequest = validateUploadRequest(req, res);
+      if (!uploadRequest) {
+        return;
       }
+      const { name, size, contentType } = uploadRequest;
 
       const ext = path.extname(name).toLowerCase();
       if (!ALLOWED_EXTENSIONS.has(ext)) {
@@ -139,10 +171,7 @@ function registerLocalRoutes(app: Express): void {
       const expiresAt = Date.now() + 15 * 60 * 1000;
       const token = signUploadToken(result.fileName, expiresAt);
 
-      const appUrl = process.env.APP_URL;
-      const baseUrl = appUrl
-        ? appUrl.replace(/\/$/, "")
-        : `${req.protocol}://${req.get("host")}`;
+      const baseUrl = resolveRequestBaseUrl(req);
       const uploadURL = `${baseUrl}/api/uploads/direct/${result.fileName}?token=${token}&expires=${expiresAt}`;
 
       res.json({
@@ -154,7 +183,10 @@ function registerLocalRoutes(app: Express): void {
       console.error("Error generating upload URL:", error);
       res.status(500).json({ error: "Failed to generate upload URL" });
     }
-  });
+  };
+
+  app.post("/api/uploads/request-url", requireAuthenticated, handleLocalUploadUrlRequest);
+  app.post("/api/public/uploads/request-url", handleLocalUploadUrlRequest);
 
   app.put("/api/uploads/direct/:fileName", async (req, res) => {
     try {

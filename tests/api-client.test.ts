@@ -12,6 +12,90 @@ let clientAgent: supertest.SuperAgentTest;
 let testClientUsername: string;
 const TEST_CLIENT_PASSWORD = "TestClient123!";
 
+async function uploadTradeDocumentThroughApi(
+  agent: supertest.SuperAgentTest,
+  fileName: string,
+  contentType: string = "application/pdf",
+  fileBody: Buffer = Buffer.from("%PDF-1.4 test trade document"),
+) {
+  const uploadUrlRes = await agent
+    .post("/api/uploads/request-url")
+    .send({
+      name: fileName,
+      size: fileBody.length,
+      contentType,
+    });
+
+  expect(uploadUrlRes.status).toBe(200);
+  expect(uploadUrlRes.body).toHaveProperty("uploadURL");
+  expect(uploadUrlRes.body).toHaveProperty("objectPath");
+
+  const uploadUrl = new URL(uploadUrlRes.body.uploadURL);
+  const uploadRes = await agent
+    .put(`${uploadUrl.pathname}${uploadUrl.search}`)
+    .set("Content-Type", contentType)
+    .send(fileBody);
+
+  expect(uploadRes.status).toBe(200);
+
+  return {
+    fileName,
+    objectPath: uploadUrlRes.body.objectPath as string,
+    contentType,
+    size: fileBody.length,
+    documentType: "COMMERCIAL_INVOICE" as const,
+  };
+}
+
+function buildInternationalShipmentPayload(
+  tradeDocuments: Array<Record<string, unknown>> = [],
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    shipmentType: "outbound",
+    isDdp: false,
+    carrier: "FEDEX",
+    shipper: {
+      name: "Origin Sender",
+      phone: "5551112222",
+      email: "origin@example.com",
+      countryCode: "US",
+      city: "Houston",
+      postalCode: "77001",
+      addressLine1: "100 Export Way",
+      stateOrProvince: "Texas",
+    },
+    recipient: {
+      name: "Saudi Recipient",
+      phone: "5553334444",
+      email: "recipient@example.com",
+      countryCode: "SA",
+      city: "Riyadh",
+      postalCode: "11564",
+      addressLine1: "200 Riyadh Road",
+    },
+    packages: [
+      { weight: 2, length: 20, width: 15, height: 10 },
+    ],
+    weightUnit: "KG",
+    dimensionUnit: "CM",
+    packageType: "YOUR_PACKAGING",
+    currency: "SAR",
+    items: [
+      {
+        itemName: "Wireless Keyboard",
+        category: "electronics",
+        countryOfOrigin: "US",
+        hsCode: "847160",
+        price: 200,
+        quantity: 1,
+      },
+    ],
+    tradeDocuments,
+    ...overrides,
+  };
+}
+
 beforeAll(async () => {
   app = express();
   app.use(express.json());
@@ -87,6 +171,330 @@ describe("Client - Shipments", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
+
+  it("POST /api/client/shipments/rates should reject invalid DDP destinations", async () => {
+    const res = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send({
+        shipmentType: "inbound",
+        isDdp: true,
+        shipper: {
+          name: "Origin Sender",
+          phone: "5551112222",
+          email: "origin@example.com",
+          countryCode: "US",
+          city: "Houston",
+          postalCode: "77001",
+          addressLine1: "100 Export Way",
+          stateOrProvince: "Texas",
+        },
+        recipient: {
+          name: "Import Recipient",
+          phone: "5553334444",
+          email: "recipient@example.com",
+          countryCode: "EG",
+          city: "Cairo",
+          postalCode: "11511",
+          addressLine1: "200 Import Road",
+        },
+        packages: [
+          { weight: 2, length: 20, width: 15, height: 10 },
+        ],
+        weightUnit: "KG",
+        dimensionUnit: "CM",
+        packageType: "YOUR_PACKAGING",
+        currency: "SAR",
+        items: [],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("DDP is only available for import shipments to Saudi Arabia or the UAE");
+  });
+
+  it("POST /api/client/shipments/rates should reject unsupported trade document content types", async () => {
+    const res = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send({
+        shipmentType: "outbound",
+        isDdp: false,
+        shipper: {
+          name: "Origin Sender",
+          phone: "5551112222",
+          email: "origin@example.com",
+          countryCode: "US",
+          city: "Houston",
+          postalCode: "77001",
+          addressLine1: "100 Export Way",
+          stateOrProvince: "Texas",
+        },
+        recipient: {
+          name: "Saudi Recipient",
+          phone: "5553334444",
+          email: "recipient@example.com",
+          countryCode: "SA",
+          city: "Riyadh",
+          postalCode: "11564",
+          addressLine1: "200 Riyadh Road",
+          shortAddress: "RCTB4359",
+        },
+        packages: [
+          { weight: 2, length: 20, width: 15, height: 10 },
+        ],
+        weightUnit: "KG",
+        dimensionUnit: "CM",
+        packageType: "YOUR_PACKAGING",
+        currency: "SAR",
+        items: [
+          {
+            itemName: "Wireless Keyboard",
+            category: "electronics",
+            countryOfOrigin: "US",
+            price: 200,
+            quantity: 1,
+          },
+        ],
+        tradeDocuments: [
+          {
+            fileName: "invoice.exe",
+            objectPath: "/uploads/invoice.exe",
+            contentType: "application/octet-stream",
+            size: 1024,
+            documentType: "COMMERCIAL_INVOICE",
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Unsupported FedEx trade document content type");
+  });
+
+  it("POST /api/client/shipments/rates should return DHL quotes when DHL is selected", async () => {
+    const res = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send(buildInternationalShipmentPayload([], { carrier: "DHL" }));
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.quotes)).toBe(true);
+    expect(res.body.quotes.length).toBeGreaterThan(0);
+    expect(res.body.quotes[0].carrierName).toBe("DHL");
+  });
+
+  it("POST /api/client/shipments/extract-invoice-items should extract invoice items from an uploaded text invoice", async () => {
+    const invoiceBody = Buffer.from(
+      [
+        "Item Description\tQty\tUnit Price\tAmount\tOrigin",
+        "Wireless Keyboard\t2\t150.00\t300.00\tUS",
+        "Gaming Mouse\t1\t90.00\t90.00\tUS",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const invoiceDocument = await uploadTradeDocumentThroughApi(
+      clientAgent,
+      "invoice.txt",
+      "text/plain",
+      invoiceBody,
+    );
+
+    const res = await clientAgent
+      .post("/api/client/shipments/extract-invoice-items")
+      .send({
+        shipmentType: "outbound",
+        shipperCountryCode: "US",
+        fileName: invoiceDocument.fileName,
+        objectPath: invoiceDocument.objectPath,
+        contentType: invoiceDocument.contentType,
+      });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items[0].itemName).toBe("Wireless Keyboard");
+    expect(res.body.items[0].quantity).toBe(2);
+    expect(res.body.items[0].price).toBe(150);
+    expect(res.body.items[0].category).toBe("electronics");
+    expect(res.body.items[0].countryOfOrigin).toBe("US");
+  });
+
+  it("POST /api/client/shipments/extract-invoice-items should reject invoices with no extractable items", async () => {
+    const invoiceDocument = await uploadTradeDocumentThroughApi(
+      clientAgent,
+      "empty-invoice.txt",
+      "text/plain",
+      Buffer.from("Invoice Number 12345\nTotal 500.00", "utf8"),
+    );
+
+    const res = await clientAgent
+      .post("/api/client/shipments/extract-invoice-items")
+      .send({
+        shipmentType: "outbound",
+        shipperCountryCode: "US",
+        fileName: invoiceDocument.fileName,
+        objectPath: invoiceDocument.objectPath,
+        contentType: invoiceDocument.contentType,
+      });
+
+    expect(res.status).toBe(422);
+    expect(String(res.body.error).toLowerCase()).toContain("could not extract");
+  });
+
+  it("client shipment confirm flow should persist uploaded trade documents for international shipments", async () => {
+    const tradeDocument = await uploadTradeDocumentThroughApi(
+      clientAgent,
+      "commercial-invoice.pdf",
+    );
+
+    const ratesRes = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send(buildInternationalShipmentPayload([tradeDocument]));
+
+    expect(ratesRes.status).toBe(200);
+    expect(Array.isArray(ratesRes.body.quotes)).toBe(true);
+    expect(ratesRes.body.quotes.length).toBeGreaterThan(0);
+
+    const quoteId = ratesRes.body.quotes[0].quoteId;
+
+    const checkoutRes = await clientAgent
+      .post("/api/client/shipments/checkout")
+      .send({ quoteId });
+
+    expect(checkoutRes.status).toBe(200);
+    expect(checkoutRes.body).toHaveProperty("shipmentId");
+
+    const confirmRes = await clientAgent
+      .post("/api/client/shipments/confirm")
+      .send({
+        shipmentId: checkoutRes.body.shipmentId,
+        paymentIntentId: checkoutRes.body.paymentId,
+      });
+
+    expect(confirmRes.status).toBe(200);
+    expect(confirmRes.body).toHaveProperty("carrierTrackingNumber");
+
+    const confirmedShipment = await storage.getShipment(checkoutRes.body.shipmentId);
+    expect(confirmedShipment?.tradeDocumentsData).toBeTruthy();
+
+    const storedTradeDocuments = JSON.parse(confirmedShipment!.tradeDocumentsData!);
+    expect(Array.isArray(storedTradeDocuments)).toBe(true);
+    expect(storedTradeDocuments[0].fileName).toBe("commercial-invoice.pdf");
+    expect(storedTradeDocuments[0].documentType).toBe("COMMERCIAL_INVOICE");
+    expect(storedTradeDocuments[0].uploadedDocumentId).toBeTruthy();
+    expect(storedTradeDocuments[0].uploadedAt).toBeTruthy();
+  });
+
+  it("client DHL shipment confirm flow should create a DHL shipment with the selected carrier", async () => {
+    const ratesRes = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send(buildInternationalShipmentPayload([], { carrier: "DHL" }));
+
+    expect(ratesRes.status).toBe(200);
+    expect(ratesRes.body.quotes.length).toBeGreaterThan(0);
+
+    const checkoutRes = await clientAgent
+      .post("/api/client/shipments/checkout")
+      .send({ quoteId: ratesRes.body.quotes[0].quoteId });
+
+    expect(checkoutRes.status).toBe(200);
+
+    const confirmRes = await clientAgent
+      .post("/api/client/shipments/confirm")
+      .send({
+        shipmentId: checkoutRes.body.shipmentId,
+        paymentIntentId: checkoutRes.body.paymentId,
+      });
+
+    expect(confirmRes.status).toBe(200);
+    expect(confirmRes.body.carrierTrackingNumber).toContain("DHL");
+
+    const shipment = await storage.getShipment(checkoutRes.body.shipmentId);
+    expect(shipment?.carrierCode).toBe("DHL");
+    expect(shipment?.carrierName).toBe("DHL");
+    expect(shipment?.carrierTrackingNumber).toContain("DHL");
+  });
+
+  it("client pay-later flow should persist uploaded trade documents for international shipments", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+    await storage.updateClientAccount(clientUser!.clientAccountId!, {
+      creditEnabled: true,
+    } as any);
+
+    const tradeDocument = await uploadTradeDocumentThroughApi(
+      clientAgent,
+      "commercial-invoice-pay-later.pdf",
+    );
+
+    const ratesRes = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send(buildInternationalShipmentPayload([tradeDocument]));
+
+    expect(ratesRes.status).toBe(200);
+    expect(ratesRes.body.quotes.length).toBeGreaterThan(0);
+
+    const checkoutRes = await clientAgent
+      .post("/api/client/shipments/checkout")
+      .send({ quoteId: ratesRes.body.quotes[0].quoteId });
+
+    expect(checkoutRes.status).toBe(200);
+
+    const payLaterRes = await clientAgent
+      .post(`/api/client/shipments/${checkoutRes.body.shipmentId}/pay-later`)
+      .send({});
+
+    expect(payLaterRes.status).toBe(200);
+    expect(payLaterRes.body).toHaveProperty("creditInvoice");
+    expect(payLaterRes.body.creditInvoice.status).toBe("UNPAID");
+    expect(payLaterRes.body).toHaveProperty("carrierTrackingNumber");
+
+    const shipment = await storage.getShipment(checkoutRes.body.shipmentId);
+    expect(shipment?.tradeDocumentsData).toBeTruthy();
+    expect(shipment?.paymentMethod).toBe("CREDIT");
+    expect(shipment?.paymentStatus).toBe("unpaid");
+    expect(shipment?.status).toBe("created");
+
+    const storedTradeDocuments = JSON.parse(shipment!.tradeDocumentsData!);
+    expect(storedTradeDocuments[0].fileName).toBe("commercial-invoice-pay-later.pdf");
+    expect(storedTradeDocuments[0].uploadedDocumentId).toBeTruthy();
+    expect(storedTradeDocuments[0].uploadedAt).toBeTruthy();
+
+    const creditInvoice = await storage.getCreditInvoiceByShipmentId(checkoutRes.body.shipmentId);
+    expect(creditInvoice).toBeDefined();
+    expect(creditInvoice?.status).toBe("UNPAID");
+  });
+
+  it("client DHL pay-later flow should create a credit shipment with DHL", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+    await storage.updateClientAccount(clientUser!.clientAccountId!, {
+      creditEnabled: true,
+    } as any);
+
+    const ratesRes = await clientAgent
+      .post("/api/client/shipments/rates")
+      .send(buildInternationalShipmentPayload([], { carrier: "DHL" }));
+
+    expect(ratesRes.status).toBe(200);
+    expect(ratesRes.body.quotes.length).toBeGreaterThan(0);
+
+    const checkoutRes = await clientAgent
+      .post("/api/client/shipments/checkout")
+      .send({ quoteId: ratesRes.body.quotes[0].quoteId });
+
+    expect(checkoutRes.status).toBe(200);
+
+    const payLaterRes = await clientAgent
+      .post(`/api/client/shipments/${checkoutRes.body.shipmentId}/pay-later`)
+      .send({});
+
+    expect(payLaterRes.status).toBe(200);
+    expect(payLaterRes.body.creditInvoice.status).toBe("UNPAID");
+    expect(payLaterRes.body.carrierTrackingNumber).toContain("DHL");
+
+    const shipment = await storage.getShipment(checkoutRes.body.shipmentId);
+    expect(shipment?.carrierCode).toBe("DHL");
+    expect(shipment?.paymentMethod).toBe("CREDIT");
+    expect(shipment?.status).toBe("created");
+  });
 });
 
 describe("Client - Invoices", () => {
@@ -102,6 +510,60 @@ describe("Client - Payments", () => {
     const res = await clientAgent.get("/api/client/payments");
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it("GET /api/client/extra-fees should return extra fee notices for the client", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Warehouse Extra Fees",
+      senderAddress: "100 Sender Road",
+      senderCity: "Houston",
+      senderCountry: "US",
+      senderPhone: "5551000001",
+      recipientName: "Extra Fees Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5551000002",
+      weight: "5.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "inbound",
+      isDdp: false,
+      status: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "120.00",
+      accountingCurrency: "SAR",
+      taxScenario: "IMPORT",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "0.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "2.61",
+      clientTotalAmountSar: "120.00",
+      systemCostTotalAmountSar: "100.00",
+      taxPayableAmountSar: "2.61",
+      revenueExcludingTaxAmountSar: "117.39",
+      currency: "SAR",
+      paymentStatus: "paid",
+      extraFeesAmountSar: "12.00",
+      extraFeesType: "EXTRA_COST",
+      extraFeesCostAmountSar: "12.00",
+      extraFeesAddedAt: new Date(),
+    });
+
+    const res = await clientAgent.get("/api/client/extra-fees");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+
+    const matchingNotice = res.body.find((entry: any) => entry.shipmentId === shipment.id);
+    expect(matchingNotice).toBeDefined();
+    expect(Number(matchingNotice.extraFeesAmountSar)).toBe(12);
+    expect(matchingNotice.extraFeesType).toBe("EXTRA_COST");
   });
 });
 
@@ -131,6 +593,35 @@ describe("Client - Users (Team Members)", () => {
 });
 
 describe("Public - Application Submission", () => {
+  it("POST /api/public/uploads/request-url should prefer the browser origin for local upload URLs", async () => {
+    const res = await supertest(app)
+      .post("/api/public/uploads/request-url")
+      .set("Origin", "http://127.0.0.1:3001")
+      .send({
+        name: "origin-sensitive-doc.pdf",
+        size: 1024,
+        contentType: "application/pdf",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.uploadURL).toContain("http://127.0.0.1:3001/api/uploads/direct/");
+  });
+
+  it("POST /api/public/uploads/request-url should allow anonymous upload URL requests", async () => {
+    const res = await supertest(app)
+      .post("/api/public/uploads/request-url")
+      .send({
+        name: "application-doc.pdf",
+        size: 1024,
+        contentType: "application/pdf",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("uploadURL");
+    expect(res.body).toHaveProperty("objectPath");
+    expect(res.body.metadata.name).toBe("application-doc.pdf");
+  });
+
   it("POST /api/applications should accept valid application", async () => {
     const uniqueEmail = `test_${Date.now()}@example.com`;
     const res = await supertest(app)

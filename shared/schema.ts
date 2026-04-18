@@ -29,6 +29,41 @@ export const ShipmentType = {
 
 export type ShipmentTypeValue = typeof ShipmentType[keyof typeof ShipmentType];
 
+export const ShipmentTaxScenario = {
+  DCE: "DCE",
+  IMPORT: "IMPORT",
+  EXPORT: "EXPORT",
+  DDP: "DDP",
+} as const;
+
+export type ShipmentTaxScenarioValue =
+  typeof ShipmentTaxScenario[keyof typeof ShipmentTaxScenario];
+
+export const ShipmentExtraFeeType = {
+  EXTRA_WEIGHT: "EXTRA_WEIGHT",
+  EXTRA_COST: "EXTRA_COST",
+} as const;
+
+export type ShipmentExtraFeeTypeValue =
+  typeof ShipmentExtraFeeType[keyof typeof ShipmentExtraFeeType];
+
+export const CarrierPaymentStatus = {
+  UNPAID: "UNPAID",
+  BATCHED: "BATCHED",
+  PAID: "PAID",
+} as const;
+
+export type CarrierPaymentStatusValue =
+  typeof CarrierPaymentStatus[keyof typeof CarrierPaymentStatus];
+
+export const CarrierPayoutBatchStatus = {
+  OPEN: "OPEN",
+  PAID: "PAID",
+} as const;
+
+export type CarrierPayoutBatchStatusValue =
+  typeof CarrierPayoutBatchStatus[keyof typeof CarrierPayoutBatchStatus];
+
 // Shipment status
 export const ShipmentStatus = {
   PROCESSING: "processing",
@@ -89,6 +124,7 @@ export const users = pgTable("users", {
   userType: text("user_type").notNull().default("client"),
   clientAccountId: varchar("client_account_id"),
   isPrimaryContact: boolean("is_primary_contact").notNull().default(false),
+  isAccountManager: boolean("is_account_manager").notNull().default(false),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -281,6 +317,7 @@ export const shipments = pgTable("shipments", {
   numberOfPackages: integer("number_of_packages").default(1),
   packagesData: text("packages_data"),
   shipmentType: text("shipment_type").default("domestic"),
+  isDdp: boolean("is_ddp").notNull().default(false),
   serviceType: text("service_type"),
   currency: text("currency").default("SAR"),
   status: text("status").notNull().default("draft"),
@@ -288,11 +325,33 @@ export const shipments = pgTable("shipments", {
   marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }),
   margin: decimal("margin", { precision: 10, scale: 2 }).notNull(),
   finalPrice: decimal("final_price", { precision: 10, scale: 2 }).notNull(),
+  accountingCurrency: text("accounting_currency").default("SAR"),
+  taxScenario: text("tax_scenario"),
+  costAmountSar: decimal("cost_amount_sar", { precision: 10, scale: 2 }),
+  costTaxAmountSar: decimal("cost_tax_amount_sar", { precision: 10, scale: 2 }),
+  sellSubtotalAmountSar: decimal("sell_subtotal_amount_sar", { precision: 10, scale: 2 }),
+  sellTaxAmountSar: decimal("sell_tax_amount_sar", { precision: 10, scale: 2 }),
+  clientTotalAmountSar: decimal("client_total_amount_sar", { precision: 10, scale: 2 }),
+  systemCostTotalAmountSar: decimal("system_cost_total_amount_sar", { precision: 10, scale: 2 }),
+  taxPayableAmountSar: decimal("tax_payable_amount_sar", { precision: 10, scale: 2 }),
+  revenueExcludingTaxAmountSar: decimal("revenue_excluding_tax_amount_sar", { precision: 10, scale: 2 }),
+  extraFeesAmountSar: decimal("extra_fees_amount_sar", { precision: 10, scale: 2 }),
+  extraFeesType: text("extra_fees_type"),
+  extraFeesWeightValue: decimal("extra_fees_weight_value", { precision: 10, scale: 2 }),
+  extraFeesCostAmountSar: decimal("extra_fees_cost_amount_sar", { precision: 10, scale: 2 }),
+  extraFeesAddedAt: timestamp("extra_fees_added_at"),
+  extraFeesEmailSentAt: timestamp("extra_fees_email_sent_at"),
   carrierCode: text("carrier_code"),
   carrierName: text("carrier_name"),
   carrierServiceType: text("carrier_service_type"),
   carrierShipmentId: text("carrier_shipment_id"),
   carrierTrackingNumber: text("carrier_tracking_number"),
+  carrierPaymentStatus: text("carrier_payment_status").notNull().default("UNPAID"),
+  carrierPaidAt: timestamp("carrier_paid_at"),
+  carrierPaymentAmountSar: decimal("carrier_payment_amount_sar", { precision: 10, scale: 2 }),
+  carrierPaymentReference: text("carrier_payment_reference"),
+  carrierPaymentNote: text("carrier_payment_note"),
+  carrierPayoutBatchId: varchar("carrier_payout_batch_id"),
   carrierStatus: text("carrier_status").default("pending"),
   carrierErrorCode: text("carrier_error_code"),
   carrierErrorMessage: text("carrier_error_message"),
@@ -307,6 +366,7 @@ export const shipments = pgTable("shipments", {
   paymentMethod: text("payment_method").default("PAY_NOW"),
   paymentStatus: text("payment_status").default("pending"),
   itemsData: text("items_data"),
+  tradeDocumentsData: text("trade_documents_data"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -400,6 +460,36 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 
+export const carrierPayoutBatches = pgTable("carrier_payout_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  carrierCode: text("carrier_code"),
+  carrierName: text("carrier_name").notNull(),
+  month: integer("month").notNull(),
+  year: integer("year").notNull(),
+  status: text("status").notNull().default("OPEN"),
+  shipmentCount: integer("shipment_count").notNull().default(0),
+  totalCarrierCostSar: decimal("total_carrier_cost_sar", { precision: 10, scale: 2 }).notNull().default("0"),
+  totalCostTaxSar: decimal("total_cost_tax_sar", { precision: 10, scale: 2 }).notNull().default("0"),
+  totalCarrierCostWithTaxSar: decimal("total_carrier_cost_with_tax_sar", { precision: 10, scale: 2 }).notNull().default("0"),
+  paymentReference: text("payment_reference"),
+  notes: text("notes"),
+  createdByUserId: varchar("created_by_user_id"),
+  paidByUserId: varchar("paid_by_user_id"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCarrierPayoutBatchSchema = createInsertSchema(carrierPayoutBatches).omit({
+  id: true,
+  paidAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCarrierPayoutBatch = z.infer<typeof insertCarrierPayoutBatchSchema>;
+export type CarrierPayoutBatch = typeof carrierPayoutBatches.$inferSelect;
+
 // Client User Permissions table - stores permissions for each client user
 export const clientUserPermissions = pgTable("client_user_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -462,6 +552,11 @@ export const insertRoleSchema = createInsertSchema(roles).omit({
 export type InsertRole = z.infer<typeof insertRoleSchema>;
 export type Role = typeof roles.$inferSelect;
 
+export const ACCOUNT_MANAGER_SYSTEM_ROLE_ID = "system:account-manager";
+export const ACCOUNT_MANAGER_SYSTEM_ROLE_NAME = "Account Manager";
+export const ACCOUNT_MANAGER_SYSTEM_ROLE_DESCRIPTION =
+  "Fixed scoped access for assigned clients with approval-based client changes.";
+
 // Permissions table
 export const permissions = pgTable("permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -511,6 +606,64 @@ export const insertRolePermissionSchema = createInsertSchema(rolePermissions).om
 
 export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
 export type RolePermission = typeof rolePermissions.$inferSelect;
+
+export const accountManagerAssignments = pgTable("account_manager_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountManagerUserId: varchar("account_manager_user_id").notNull(),
+  clientAccountId: varchar("client_account_id").notNull(),
+  createdByUserId: varchar("created_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAccountManagerAssignmentSchema = createInsertSchema(accountManagerAssignments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAccountManagerAssignment = z.infer<typeof insertAccountManagerAssignmentSchema>;
+export type AccountManagerAssignment = typeof accountManagerAssignments.$inferSelect;
+
+export const AccountManagerChangeRequestType = {
+  PROFILE_UPDATE: "profile_update",
+  SETTINGS_UPDATE: "settings_update",
+} as const;
+
+export type AccountManagerChangeRequestTypeValue =
+  typeof AccountManagerChangeRequestType[keyof typeof AccountManagerChangeRequestType];
+
+export const AccountManagerChangeRequestStatus = {
+  PENDING: "pending",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+} as const;
+
+export type AccountManagerChangeRequestStatusValue =
+  typeof AccountManagerChangeRequestStatus[keyof typeof AccountManagerChangeRequestStatus];
+
+export const accountManagerClientChangeRequests = pgTable("account_manager_client_change_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountManagerUserId: varchar("account_manager_user_id").notNull(),
+  clientAccountId: varchar("client_account_id").notNull(),
+  requestType: text("request_type").notNull(),
+  requestedChanges: text("requested_changes").notNull(),
+  status: text("status").notNull().default("pending"),
+  adminNotes: text("admin_notes"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAccountManagerClientChangeRequestSchema = createInsertSchema(accountManagerClientChangeRequests).omit({
+  id: true,
+  reviewedByUserId: true,
+  reviewedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAccountManagerClientChangeRequest = z.infer<typeof insertAccountManagerClientChangeRequestSchema>;
+export type AccountManagerClientChangeRequest = typeof accountManagerClientChangeRequests.$inferSelect;
 
 // ============================================
 // INTEGRATION AND WEBHOOK TABLES
@@ -832,6 +985,61 @@ export const ItemCategory = {
 } as const;
 
 export type ItemCategoryValue = typeof ItemCategory[keyof typeof ItemCategory];
+
+export const FedExTradeDocumentType = {
+  COMMERCIAL_INVOICE: "COMMERCIAL_INVOICE",
+  PRO_FORMA_INVOICE: "PRO_FORMA_INVOICE",
+  CERTIFICATE_OF_ORIGIN: "CERTIFICATE_OF_ORIGIN",
+  USMCA_CERTIFICATION_OF_ORIGIN: "USMCA_CERTIFICATION_OF_ORIGIN",
+  USMCA_COMMERCIAL_INVOICE_CERTIFICATION_OF_ORIGIN: "USMCA_COMMERCIAL_INVOICE_CERTIFICATION_OF_ORIGIN",
+  OTHER: "OTHER",
+} as const;
+
+export type FedExTradeDocumentTypeValue =
+  typeof FedExTradeDocumentType[keyof typeof FedExTradeDocumentType];
+
+export const FEDEX_TRADE_DOCUMENT_MAX_FILES = 5;
+export const FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+
+export const FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES = [
+  "application/msword",
+  "application/pdf",
+  "application/rtf",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/tiff",
+  "text/plain",
+] as const;
+
+export const shipmentTradeDocumentSchema = z.object({
+  fileName: z.string().min(1),
+  objectPath: z.string().min(1),
+  contentType: z.string().min(1).refine(
+    (value) =>
+      FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES.includes(
+        value.split(";")[0].trim().toLowerCase() as typeof FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES[number],
+      ),
+    "Unsupported FedEx trade document content type",
+  ),
+  size: z.number().int().positive().max(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES),
+  documentType: z.enum([
+    FedExTradeDocumentType.COMMERCIAL_INVOICE,
+    FedExTradeDocumentType.PRO_FORMA_INVOICE,
+    FedExTradeDocumentType.CERTIFICATE_OF_ORIGIN,
+    FedExTradeDocumentType.USMCA_CERTIFICATION_OF_ORIGIN,
+    FedExTradeDocumentType.USMCA_COMMERCIAL_INVOICE_CERTIFICATION_OF_ORIGIN,
+    FedExTradeDocumentType.OTHER,
+  ]),
+  uploadedDocumentId: z.string().optional(),
+  uploadedAt: z.string().optional(),
+});
+
+export type ShipmentTradeDocument = z.infer<typeof shipmentTradeDocumentSchema>;
 
 // Shipment item interface (stored as JSON in itemsData)
 export interface ShipmentItem {

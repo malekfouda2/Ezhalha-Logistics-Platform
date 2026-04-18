@@ -1,0 +1,16 @@
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-15T22:09:29.719Z"}
+{"level":"info","message":"Using mock FedEx service availability (FedEx not configured)","timestamp":"2026-04-15T22:10:28.221Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-15T23:18:39.078Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-15T23:18:39.235Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-15T23:18:39.247Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-15T23:18:39.248Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-15T23:18:40.399Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-16T00:29:58.123Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-16T00:29:58.369Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-16T00:29:58.406Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-16T00:29:58.408Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-16T00:57:17.506Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-16T01:29:58.259Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-16T01:29:58.391Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-16T01:29:58.406Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-16T01:29:58.406Z"}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -19,90 +19,12 @@ import {
   FormMessage,
   FormDescription,
 } from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/searchable-select";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useUpload } from "@/hooks/use-upload";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
 import { ArrowLeft, Send, CheckCircle, Upload, FileText, X, Building2, User } from "lucide-react";
-
-const countries = [
-  "Saudi Arabia",
-  "United Arab Emirates",
-  "Qatar",
-  "Kuwait",
-  "Bahrain",
-  "Oman",
-  "Egypt",
-  "Jordan",
-  "Lebanon",
-  "United States",
-  "United Kingdom",
-  "Germany",
-  "France",
-  "Other",
-];
-
-const shippingCountries = [
-  { code: "SA", name: "Saudi Arabia" },
-  { code: "AE", name: "United Arab Emirates" },
-  { code: "QA", name: "Qatar" },
-  { code: "KW", name: "Kuwait" },
-  { code: "BH", name: "Bahrain" },
-  { code: "OM", name: "Oman" },
-  { code: "EG", name: "Egypt" },
-  { code: "JO", name: "Jordan" },
-  { code: "LB", name: "Lebanon" },
-  { code: "US", name: "United States" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "DE", name: "Germany" },
-  { code: "FR", name: "France" },
-  { code: "IT", name: "Italy" },
-  { code: "ES", name: "Spain" },
-  { code: "NL", name: "Netherlands" },
-  { code: "BE", name: "Belgium" },
-  { code: "CH", name: "Switzerland" },
-  { code: "SE", name: "Sweden" },
-  { code: "NO", name: "Norway" },
-  { code: "DK", name: "Denmark" },
-  { code: "AT", name: "Austria" },
-  { code: "PL", name: "Poland" },
-  { code: "IE", name: "Ireland" },
-  { code: "PT", name: "Portugal" },
-  { code: "FI", name: "Finland" },
-  { code: "GR", name: "Greece" },
-  { code: "CZ", name: "Czech Republic" },
-  { code: "HU", name: "Hungary" },
-  { code: "RO", name: "Romania" },
-  { code: "IN", name: "India" },
-  { code: "CN", name: "China" },
-  { code: "JP", name: "Japan" },
-  { code: "KR", name: "South Korea" },
-  { code: "SG", name: "Singapore" },
-  { code: "MY", name: "Malaysia" },
-  { code: "TH", name: "Thailand" },
-  { code: "ID", name: "Indonesia" },
-  { code: "PH", name: "Philippines" },
-  { code: "VN", name: "Vietnam" },
-  { code: "AU", name: "Australia" },
-  { code: "NZ", name: "New Zealand" },
-  { code: "CA", name: "Canada" },
-  { code: "MX", name: "Mexico" },
-  { code: "BR", name: "Brazil" },
-  { code: "AR", name: "Argentina" },
-  { code: "ZA", name: "South Africa" },
-  { code: "NG", name: "Nigeria" },
-  { code: "KE", name: "Kenya" },
-  { code: "TR", name: "Turkey" },
-  { code: "IL", name: "Israel" },
-  { code: "PK", name: "Pakistan" },
-  { code: "BD", name: "Bangladesh" },
-];
 
 interface UploadedDocument {
   name: string;
@@ -116,6 +38,7 @@ export default function ApplyPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
   const { uploadFile, isUploading } = useUpload({
+    requestUrlEndpoint: "/api/public/uploads/request-url",
     onSuccess: (response) => {
       setUploadedDocs((prev) => [
         ...prev,
@@ -171,6 +94,15 @@ export default function ApplyPage() {
   const shippingCountryCode = form.watch("shippingCountryCode");
 
   const accountType = form.watch("accountType");
+  const applicantName = form.watch("name");
+  const applicantPhone = form.watch("phone");
+
+  useEffect(() => {
+    if (accountType === "individual") {
+      form.setValue("shippingContactName", applicantName, { shouldValidate: false });
+      form.setValue("shippingContactPhone", applicantPhone, { shouldValidate: false });
+    }
+  }, [accountType, applicantName, applicantPhone, form]);
 
   const onSubmit = async (data: ApplicationFormData) => {
     if (accountType === "company" && uploadedDocs.length === 0) {
@@ -196,6 +128,8 @@ export default function ApplyPage() {
     try {
       const applicationData = {
         ...data,
+        shippingContactName: accountType === "individual" ? data.name : data.shippingContactName,
+        shippingContactPhone: accountType === "individual" ? data.phone : data.shippingContactPhone,
         documents: uploadedDocs.map((doc) => doc.path),
       };
       await apiRequest("POST", "/api/applications", applicationData);
@@ -414,42 +348,89 @@ export default function ApplyPage() {
                   </FormDescription>
                   
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className={`grid grid-cols-1 gap-4 ${shippingCountryCode === "SA" ? "sm:grid-cols-2" : ""}`}>
                       <FormField
                         control={form.control}
-                        name="shippingContactName"
+                        name="shippingCountryCode"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Contact Name</FormLabel>
+                            <FormLabel>Country</FormLabel>
                             <FormControl>
-                              <Input
-                                placeholder="Contact person name"
-                                data-testid="input-shipping-contact-name"
-                                {...field}
+                              <SearchableSelect
+                                value={field.value}
+                                onValueChange={field.onChange}
+                                options={COUNTRY_CODE_SELECT_OPTIONS}
+                                placeholder="Select country"
+                                searchPlaceholder="Search countries..."
+                                data-testid="select-shipping-country"
                               />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
-                      <FormField
-                        control={form.control}
-                        name="shippingContactPhone"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Contact Phone</FormLabel>
-                            <FormControl>
-                              <Input
-                                placeholder="+966 5XX XXX XXXX"
-                                data-testid="input-shipping-contact-phone"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                      {shippingCountryCode === "SA" && (
+                        <FormField
+                          control={form.control}
+                          name="shippingShortAddress"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Short Address</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="e.g. RCTB4359"
+                                  data-testid="input-shipping-short-address"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                Required for Saudi Arabia addresses (e.g. RCTB4359)
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
                     </div>
+
+                    {accountType === "company" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="shippingContactName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Contact Name</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="Contact person name"
+                                  data-testid="input-shipping-contact-name"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="shippingContactPhone"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Contact Phone</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder="+966 5XX XXX XXXX"
+                                  data-testid="input-shipping-contact-phone"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
 
                     <FormField
                       control={form.control}
@@ -490,33 +471,6 @@ export default function ApplyPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <FormField
                         control={form.control}
-                        name="shippingCountryCode"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Country</FormLabel>
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger data-testid="select-shipping-country">
-                                  <SelectValue placeholder="Select country" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {shippingCountries.map((c) => (
-                                  <SelectItem key={c.code} value={c.code}>
-                                    {c.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
                         name="shippingStateOrProvince"
                         render={({ field }) => (
                           <FormItem>
@@ -532,9 +486,6 @@ export default function ApplyPage() {
                           </FormItem>
                         )}
                       />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <FormField
                         control={form.control}
                         name="shippingCity"
@@ -552,47 +503,25 @@ export default function ApplyPage() {
                           </FormItem>
                         )}
                       />
-                      <FormField
-                        control={form.control}
-                        name="shippingPostalCode"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Postal Code</FormLabel>
-                            <FormControl>
-                              <Input
-                                placeholder="Postal/ZIP code"
-                                data-testid="input-shipping-postal"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                     </div>
 
-                    {shippingCountryCode === "SA" && (
-                      <FormField
-                        control={form.control}
-                        name="shippingShortAddress"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Short Address</FormLabel>
-                            <FormControl>
-                              <Input
-                                placeholder="e.g. RCTB4359"
-                                data-testid="input-shipping-short-address"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormDescription>
-                              Required for Saudi Arabia addresses (e.g. RCTB4359)
-                            </FormDescription>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    )}
+                    <FormField
+                      control={form.control}
+                      name="shippingPostalCode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Postal Code</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Postal/ZIP code"
+                              data-testid="input-shipping-postal"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </div>
                 </div>
 

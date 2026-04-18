@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { format } from "date-fns";
 import {
@@ -59,10 +60,15 @@ function statusBadge(status: string) {
 
 export default function AdminCreditRequests() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [actionType, setActionType] = useState<"approve" | "reject" | "revoke" | null>(null);
   const [adminNotes, setAdminNotes] = useState("");
+
+  const canApproveCreditRequests = adminAccess.hasPermission("credit-requests", "approve");
+  const canRejectCreditRequests = adminAccess.hasPermission("credit-requests", "reject");
+  const canRevokeCreditRequests = adminAccess.hasPermission("credit-requests", "revoke");
 
   const { data, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/credit-requests", statusFilter],
@@ -221,25 +227,32 @@ export default function AdminCreditRequests() {
                         <div className="flex gap-2">
                           {request.status === "pending" && (
                             <>
-                              <Button
-                                size="sm"
-                                variant="default"
-                                onClick={() => openAction(request, "approve")}
-                                data-testid={`button-approve-${request.id}`}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => openAction(request, "reject")}
-                                data-testid={`button-reject-${request.id}`}
-                              >
-                                Reject
-                              </Button>
+                              {canApproveCreditRequests && (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => openAction(request, "approve")}
+                                  data-testid={`button-approve-${request.id}`}
+                                >
+                                  Approve
+                                </Button>
+                              )}
+                              {canRejectCreditRequests && (
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => openAction(request, "reject")}
+                                  data-testid={`button-reject-${request.id}`}
+                                >
+                                  Reject
+                                </Button>
+                              )}
+                              {!canApproveCreditRequests && !canRejectCreditRequests && (
+                                <span className="text-sm text-muted-foreground">Read only</span>
+                              )}
                             </>
                           )}
-                          {request.status === "approved" && (
+                          {request.status === "approved" && canRevokeCreditRequests && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -249,7 +262,7 @@ export default function AdminCreditRequests() {
                               Revoke Access
                             </Button>
                           )}
-                          {(request.status === "rejected" || request.status === "revoked") && (
+                          {(request.status === "rejected" || request.status === "revoked") && canApproveCreditRequests && (
                             <Button
                               size="sm"
                               variant="default"

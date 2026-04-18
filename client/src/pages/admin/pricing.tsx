@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Percent, Edit, TrendingUp, Info, Plus, Trash2, Settings, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
 import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
@@ -38,6 +39,7 @@ interface TierFormData {
 
 export default function AdminPricing() {
   const { toast } = useToast();
+  const adminAccess = useAdminAccess();
   const [selectedRule, setSelectedRule] = useState<PricingRule | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -54,6 +56,10 @@ export default function AdminPricing() {
 
   const [newTiers, setNewTiers] = useState<TierFormData[]>([{ minAmount: "0", marginPercentage: "15" }]);
   const [editingTiers, setEditingTiers] = useState<(PricingTier & { isNew?: boolean; isDeleted?: boolean })[]>([]);
+
+  const canCreatePricing = adminAccess.hasPermission("pricing-rules", "create");
+  const canUpdatePricing = adminAccess.hasPermission("pricing-rules", "update");
+  const canDeletePricing = adminAccess.hasPermission("pricing-rules", "delete");
 
   const { data: pricingRules, isLoading } = useQuery<PricingRule[]>({
     queryKey: ["/api/admin/pricing"],
@@ -301,10 +307,12 @@ export default function AdminPricing() {
               Create and manage pricing profiles with tiered profit margins
             </p>
           </div>
-          <Button onClick={() => setIsCreateOpen(true)} data-testid="button-add-profile">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Profile
-          </Button>
+          {canCreatePricing && (
+            <Button onClick={() => setIsCreateOpen(true)} data-testid="button-add-profile">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Profile
+            </Button>
+          )}
         </div>
 
         <Card className="border-primary/20 bg-primary/5">
@@ -349,22 +357,26 @@ export default function AdminPricing() {
                         <ChevronDown className="h-4 w-4" />
                       )}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleEditProfile(rule)}
-                      data-testid={`button-edit-${rule.profile}`}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteClick(rule)}
-                      data-testid={`button-delete-${rule.profile}`}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {canUpdatePricing && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEditProfile(rule)}
+                        data-testid={`button-edit-${rule.profile}`}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {canDeletePricing && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteClick(rule)}
+                        data-testid={`button-delete-${rule.profile}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -377,15 +389,17 @@ export default function AdminPricing() {
                         <Settings className="h-4 w-4" />
                         Pricing Tiers
                       </h4>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={addNewTierToEdit}
-                        data-testid="button-add-tier"
-                      >
-                        <Plus className="h-4 w-4 mr-1" />
-                        Add Tier
-                      </Button>
+                      {canUpdatePricing && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={addNewTierToEdit}
+                          data-testid="button-add-tier"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Tier
+                        </Button>
+                      )}
                     </div>
 
                     {tiersLoading ? (
@@ -414,6 +428,7 @@ export default function AdminPricing() {
                                     value={tier.minAmount}
                                     onChange={(e) => updateEditingTier(actualIndex, "minAmount", e.target.value)}
                                     className="w-24"
+                                    disabled={!canUpdatePricing}
                                     data-testid={`input-tier-min-${index}`}
                                   />
                                   <span className="text-sm text-muted-foreground whitespace-nowrap">and above</span>
@@ -428,19 +443,22 @@ export default function AdminPricing() {
                                     value={tier.marginPercentage}
                                     onChange={(e) => updateEditingTier(actualIndex, "marginPercentage", e.target.value)}
                                     className="w-20"
+                                    disabled={!canUpdatePricing}
                                     data-testid={`input-tier-margin-${index}`}
                                   />
                                   <Percent className="h-4 w-4 text-muted-foreground" />
                                   <span className="text-sm text-muted-foreground">margin</span>
                                 </div>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => markTierForDeletion(actualIndex)}
-                                  data-testid={`button-delete-tier-${index}`}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
+                                {canUpdatePricing && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => markTierForDeletion(actualIndex)}
+                                    data-testid={`button-delete-tier-${index}`}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                )}
                               </div>
                             );
                           })
@@ -448,15 +466,17 @@ export default function AdminPricing() {
                       </div>
                     )}
 
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        onClick={handleSaveTiers}
-                        disabled={saveTiersMutation.isPending}
-                        data-testid="button-save-tiers"
-                      >
-                        {saveTiersMutation.isPending ? "Saving..." : "Save Tiers"}
-                      </Button>
-                    </div>
+                    {canUpdatePricing && (
+                      <div className="flex justify-end pt-2">
+                        <Button
+                          onClick={handleSaveTiers}
+                          disabled={saveTiersMutation.isPending}
+                          data-testid="button-save-tiers"
+                        >
+                          {saveTiersMutation.isPending ? "Saving..." : "Save Tiers"}
+                        </Button>
+                      </div>
+                    )}
 
                     <div className="mt-4 p-4 rounded-lg border bg-background">
                       <p className="text-sm font-medium mb-3">Example Calculations</p>
@@ -573,6 +593,7 @@ export default function AdminPricing() {
                 value={editDisplayName}
                 onChange={(e) => setEditDisplayName(e.target.value)}
                 placeholder="e.g., VIP, Enterprise"
+                disabled={!canUpdatePricing}
                 data-testid="input-edit-display-name"
               />
             </div>
@@ -588,6 +609,7 @@ export default function AdminPricing() {
                   value={editMargin}
                   onChange={(e) => setEditMargin(e.target.value)}
                   className="pr-10"
+                  disabled={!canUpdatePricing}
                   data-testid="input-edit-margin"
                 />
                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -603,7 +625,7 @@ export default function AdminPricing() {
             </Button>
             <Button
               onClick={handleSaveEdit}
-              disabled={updateProfileMutation.isPending || !editDisplayName || !editMargin}
+              disabled={!canUpdatePricing || updateProfileMutation.isPending || !editDisplayName || !editMargin}
               data-testid="button-save-edit"
             >
               {updateProfileMutation.isPending ? "Saving..." : "Save Changes"}
@@ -612,8 +634,9 @@ export default function AdminPricing() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-2xl">
+      {canCreatePricing && (
+        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+          <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Create Pricing Profile</DialogTitle>
             <DialogDescription>
@@ -736,8 +759,9 @@ export default function AdminPricing() {
               {createProfileMutation.isPending ? "Creating..." : "Create Profile"}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>

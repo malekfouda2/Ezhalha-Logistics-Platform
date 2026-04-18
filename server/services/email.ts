@@ -299,3 +299,50 @@ export async function sendApplicationRejected(
     html: rendered.html,
   });
 }
+
+export async function sendShipmentExtraFeesNotification(params: {
+  email: string;
+  clientName: string;
+  trackingNumber: string;
+  amountSar: string;
+  extraFeeType: "EXTRA_WEIGHT" | "EXTRA_COST";
+  extraWeightValue?: string | null;
+  weightUnit?: string | null;
+  extraCostAmountSar?: string | null;
+}): Promise<boolean> {
+  const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
+  const feeLabel =
+    params.extraFeeType === "EXTRA_WEIGHT" ? "Extra Weight" : "Extra Cost";
+  const detailLine =
+    params.extraFeeType === "EXTRA_WEIGHT"
+      ? `Additional weight recorded: ${params.extraWeightValue || "0"} ${params.weightUnit || "KG"}`
+      : `Additional cost recorded: SAR ${params.extraCostAmountSar || params.amountSar}`;
+
+  return sendEmail({
+    to: params.email,
+    subject: `Extra fees added for shipment ${params.trackingNumber}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2 style="margin-bottom: 12px;">Shipment Extra Fees Notice</h2>
+        <p>Dear ${params.clientName},</p>
+        <p>We added an extra fee to shipment <strong>${params.trackingNumber}</strong>.</p>
+        <p><strong>Fee Type:</strong> ${feeLabel}</p>
+        <p><strong>Amount:</strong> SAR ${params.amountSar}</p>
+        <p><strong>Details:</strong> ${detailLine}</p>
+        <p>You can review the full details in your payments page.</p>
+        <p><a href="${appUrl}/client/payments">Open Payments Page</a></p>
+        <p style="margin-top: 24px;">Best regards,<br />ezhalha Logistics</p>
+      </div>
+    `,
+    text: [
+      `Shipment Extra Fees Notice`,
+      ``,
+      `Dear ${params.clientName},`,
+      `We added an extra fee to shipment ${params.trackingNumber}.`,
+      `Fee Type: ${feeLabel}`,
+      `Amount: SAR ${params.amountSar}`,
+      `Details: ${detailLine}`,
+      `Review it here: ${appUrl}/client/payments`,
+    ].join("\n"),
+  });
+}

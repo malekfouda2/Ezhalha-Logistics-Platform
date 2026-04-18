@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Search, Eye, MapPin, Package, Calendar, Ban, Loader2, RefreshCw, Filter, X, Tag, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
@@ -45,7 +46,36 @@ interface PaginatedResponse {
   totalPages: number;
 }
 
+function hasAccountingSnapshot(shipment: Shipment) {
+  return Boolean(shipment.taxScenario && shipment.accountingCurrency === "SAR");
+}
+
+function formatTaxScenarioLabel(shipment: Shipment) {
+  if (shipment.taxScenario === "DDP") return "DDP Import";
+  if (shipment.taxScenario === "DCE") return "DCE Domestic";
+  if (shipment.taxScenario === "IMPORT") return "Import";
+  if (shipment.taxScenario === "EXPORT") return "Export";
+  return "Unclassified";
+}
+
+function getAccountingNote(shipment: Shipment) {
+  if (shipment.taxScenario === "DCE") {
+    return "Sell tax is added to the client total. Cost tax is system-only and is not billed to the client.";
+  }
+
+  if (shipment.taxScenario === "DDP") {
+    return "Sell tax is embedded inside the shipment sell amount and is shown here for accounting visibility.";
+  }
+
+  if (shipment.taxScenario === "IMPORT" || shipment.taxScenario === "EXPORT") {
+    return "Sell tax is embedded inside the shipment amount and is tracked separately for accounting.";
+  }
+
+  return "This shipment was created before the accounting snapshot was introduced.";
+}
+
 export default function AdminShipments() {
+  const adminAccess = useAdminAccess();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -53,6 +83,10 @@ export default function AdminShipments() {
   const [pageSize, setPageSize] = useState(25);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const { toast } = useToast();
+
+  const canUpdateShipments = adminAccess.hasPermission("shipments", "update");
+  const canCancelShipments = adminAccess.hasPermission("shipments", "cancel");
+  const canRetryCarrier = canUpdateShipments && !adminAccess.isAccountManager;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -298,7 +332,12 @@ export default function AdminShipments() {
                   <p className="text-sm text-muted-foreground">Shipment ID</p>
                   <p className="font-mono font-medium">{selectedShipment.trackingNumber}</p>
                 </div>
-                <StatusBadge status={selectedShipment.status} />
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selectedShipment.taxScenario && (
+                    <Badge variant="outline">{formatTaxScenarioLabel(selectedShipment)}</Badge>
+                  )}
+                  <StatusBadge status={selectedShipment.status} />
+                </div>
               </div>
               {selectedShipment.carrierTrackingNumber && (
                 <div>
@@ -434,11 +473,71 @@ export default function AdminShipments() {
                     <span className="text-muted-foreground">Margin</span>
                     <span className="text-green-600 dark:text-green-400">+<SarAmount amount={selectedShipment.margin} /></span>
                   </div>
+                  {hasAccountingSnapshot(selectedShipment) ? (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Sell Subtotal</span>
+                      <span><SarAmount amount={selectedShipment.sellSubtotalAmountSar || 0} /></span>
+                    </div>
+                  ) : null}
                   <div className="border-t pt-2 flex justify-between font-medium">
-                    <span>Final Price</span>
+                    <span>Client Total</span>
                     <span><SarAmount amount={selectedShipment.finalPrice} /></span>
                   </div>
                 </div>
+              </div>
+              <div className="p-4 rounded-lg border space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <SarSymbol size="xs" className="text-muted-foreground" />
+                    <span className="text-sm font-medium">Accounting Snapshot</span>
+                  </div>
+                  {selectedShipment.accountingCurrency && (
+                    <Badge variant="secondary">{selectedShipment.accountingCurrency}</Badge>
+                  )}
+                </div>
+                {hasAccountingSnapshot(selectedShipment) ? (
+                  <>
+                    <p className="text-xs text-muted-foreground">{getAccountingNote(selectedShipment)}</p>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Cost Amount</span>
+                        <span><SarAmount amount={selectedShipment.costAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Cost Tax (System Only)</span>
+                        <span><SarAmount amount={selectedShipment.costTaxAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">System Cost Total</span>
+                        <span><SarAmount amount={selectedShipment.systemCostTotalAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Sell Subtotal</span>
+                        <span><SarAmount amount={selectedShipment.sellSubtotalAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Sell Tax</span>
+                        <span><SarAmount amount={selectedShipment.sellTaxAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Revenue Excl. Tax</span>
+                        <span><SarAmount amount={selectedShipment.revenueExcludingTaxAmountSar || 0} /></span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Net Tax Payable</span>
+                        <span><SarAmount amount={selectedShipment.taxPayableAmountSar || 0} /></span>
+                      </div>
+                      <div className="border-t pt-2 flex justify-between font-medium">
+                        <span>Client Total</span>
+                        <span><SarAmount amount={selectedShipment.clientTotalAmountSar || selectedShipment.finalPrice} /></span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-md bg-muted/60 p-3 text-sm text-muted-foreground">
+                    This shipment does not have a frozen accounting snapshot yet.
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Calendar className="h-4 w-4" />
@@ -462,48 +561,56 @@ export default function AdminShipments() {
                   {(selectedShipment as any).carrierAttempts > 0 && (
                     <p className="text-xs text-muted-foreground">Attempts: {(selectedShipment as any).carrierAttempts}</p>
                   )}
-                  <Button
-                    className="w-full"
-                    onClick={() => retryCarrierMutation.mutate(selectedShipment.id)}
-                    disabled={retryCarrierMutation.isPending}
-                    data-testid="button-retry-carrier"
-                  >
-                    {retryCarrierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
-                    Retry Carrier Submission
-                  </Button>
+                  {canRetryCarrier && (
+                    <Button
+                      className="w-full"
+                      onClick={() => retryCarrierMutation.mutate(selectedShipment.id)}
+                      disabled={retryCarrierMutation.isPending}
+                      data-testid="button-retry-carrier"
+                    >
+                      {retryCarrierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                      Retry Carrier Submission
+                    </Button>
+                  )}
                 </div>
               )}
-              {selectedShipment.status !== "cancelled" && selectedShipment.status !== "delivered" && (
+              {selectedShipment.status !== "cancelled" &&
+                selectedShipment.status !== "delivered" &&
+                (canUpdateShipments || canCancelShipments) && (
                 <div className="p-4 rounded-lg border space-y-4">
                   <p className="text-sm font-medium">Update Status</p>
-                  <div className="flex items-center gap-3">
-                    <Select
-                      value={selectedShipment.status}
-                      onValueChange={(status) => updateStatusMutation.mutate({ id: selectedShipment.id, status })}
-                      disabled={updateStatusMutation.isPending}
+                  {canUpdateShipments && (
+                    <div className="flex items-center gap-3">
+                      <Select
+                        value={selectedShipment.status}
+                        onValueChange={(status) => updateStatusMutation.mutate({ id: selectedShipment.id, status })}
+                        disabled={updateStatusMutation.isPending}
+                      >
+                        <SelectTrigger className="flex-1" data-testid="select-status">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="created">Created</SelectItem>
+                          <SelectItem value="processing">Processing</SelectItem>
+                          <SelectItem value="in_transit">In Transit</SelectItem>
+                          <SelectItem value="delivered">Delivered</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {updateStatusMutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                    </div>
+                  )}
+                  {canCancelShipments && (
+                    <Button
+                      variant="destructive"
+                      className="w-full"
+                      onClick={() => cancelMutation.mutate(selectedShipment.id)}
+                      disabled={cancelMutation.isPending}
+                      data-testid="button-cancel-shipment"
                     >
-                      <SelectTrigger className="flex-1" data-testid="select-status">
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="created">Created</SelectItem>
-                        <SelectItem value="processing">Processing</SelectItem>
-                        <SelectItem value="in_transit">In Transit</SelectItem>
-                        <SelectItem value="delivered">Delivered</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {updateStatusMutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                  </div>
-                  <Button
-                    variant="destructive"
-                    className="w-full"
-                    onClick={() => cancelMutation.mutate(selectedShipment.id)}
-                    disabled={cancelMutation.isPending}
-                    data-testid="button-cancel-shipment"
-                  >
-                    {cancelMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
-                    Cancel Shipment
-                  </Button>
+                      {cancelMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
+                      Cancel Shipment
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

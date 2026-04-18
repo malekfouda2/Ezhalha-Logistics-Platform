@@ -11,6 +11,8 @@ import {
   type InsertInvoice,
   type Payment,
   type InsertPayment,
+  type CarrierPayoutBatch,
+  type InsertCarrierPayoutBatch,
   type PricingRule,
   type InsertPricingRule,
   type PricingTier,
@@ -25,6 +27,10 @@ import {
   type InsertUserRole,
   type RolePermission,
   type InsertRolePermission,
+  type AccountManagerAssignment,
+  type InsertAccountManagerAssignment,
+  type AccountManagerClientChangeRequest,
+  type InsertAccountManagerClientChangeRequest,
   type IntegrationLog,
   type InsertIntegrationLog,
   type WebhookEvent,
@@ -55,6 +61,7 @@ import {
   shipments,
   invoices,
   payments,
+  carrierPayoutBatches,
   pricingRules,
   pricingTiers,
   auditLogs,
@@ -62,6 +69,8 @@ import {
   permissions,
   userRoles,
   rolePermissions,
+  accountManagerAssignments,
+  accountManagerClientChangeRequests,
   integrationLogs,
   webhookEvents,
   shipmentRateQuotes,
@@ -76,16 +85,30 @@ import {
   systemLogs,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct } from "drizzle-orm";
+import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 const SALT_ROUNDS = 10;
+
+function isClientAccountNumberConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const dbError = error as { code?: string; constraint?: string };
+  return (
+    dbError.code === "23505" &&
+    dbError.constraint === "client_accounts_account_number_unique"
+  );
+}
 
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUsersByUserType(userType: string): Promise<User[]>;
+  getAccountManagers(): Promise<User[]>;
   getUsersByClientAccount(clientAccountId: string): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
@@ -98,6 +121,7 @@ export interface IStorage {
     search?: string;
     profile?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ clients: ClientAccount[]; total: number; page: number; totalPages: number }>;
   getClientAccount(id: string): Promise<ClientAccount | undefined>;
   createClientAccount(account: InsertClientAccount): Promise<ClientAccount>;
@@ -123,6 +147,7 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
@@ -137,9 +162,11 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ invoices: Invoice[]; total: number; page: number; totalPages: number }>;
   getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
+  getInvoiceByShipmentId(shipmentId: string): Promise<Invoice | undefined>;
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
   updateInvoice(id: string, updates: Partial<Invoice>): Promise<Invoice | undefined>;
 
@@ -150,10 +177,21 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ payments: Payment[]; total: number; page: number; totalPages: number }>;
   getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined>;
+
+  // Carrier Payout Batches
+  getCarrierPayoutBatches(params?: {
+    month?: number;
+    year?: number;
+    carrierCode?: string;
+  }): Promise<CarrierPayoutBatch[]>;
+  getCarrierPayoutBatch(id: string): Promise<CarrierPayoutBatch | undefined>;
+  createCarrierPayoutBatch(batch: InsertCarrierPayoutBatch): Promise<CarrierPayoutBatch>;
+  updateCarrierPayoutBatch(id: string, updates: Partial<CarrierPayoutBatch>): Promise<CarrierPayoutBatch | undefined>;
 
   // Pricing Rules
   getPricingRules(): Promise<PricingRule[]>;
@@ -217,6 +255,7 @@ export interface IStorage {
   // RBAC - Permissions
   getPermissions(): Promise<Permission[]>;
   getPermission(id: string): Promise<Permission | undefined>;
+  getAdminPermissions(userId: string): Promise<Permission[]>;
   createPermission(permission: InsertPermission): Promise<Permission>;
   deletePermission(id: string): Promise<void>;
 
@@ -229,6 +268,37 @@ export interface IStorage {
   getRolePermissions(roleId: string): Promise<RolePermission[]>;
   assignRolePermission(rolePermission: InsertRolePermission): Promise<RolePermission>;
   removeRolePermission(roleId: string, permissionId: string): Promise<void>;
+
+  // Account Managers
+  getAccountManagerAssignments(params?: {
+    accountManagerUserId?: string;
+    clientAccountId?: string;
+  }): Promise<AccountManagerAssignment[]>;
+  getPrimaryAccountManagerForClient(clientAccountId: string): Promise<User | undefined>;
+  setPrimaryAccountManagerForClient(
+    clientAccountId: string,
+    accountManagerUserId?: string | null,
+    createdByUserId?: string,
+  ): Promise<AccountManagerAssignment | undefined>;
+  replaceAccountManagerAssignments(
+    accountManagerUserId: string,
+    clientAccountIds: string[],
+    createdByUserId?: string,
+  ): Promise<AccountManagerAssignment[]>;
+  getClientIdsForAccountManager(accountManagerUserId: string): Promise<string[]>;
+  getAccountManagerClientChangeRequests(params?: {
+    status?: string;
+    accountManagerUserId?: string;
+    clientAccountId?: string;
+  }): Promise<AccountManagerClientChangeRequest[]>;
+  getAccountManagerClientChangeRequest(id: string): Promise<AccountManagerClientChangeRequest | undefined>;
+  createAccountManagerClientChangeRequest(
+    request: InsertAccountManagerClientChangeRequest,
+  ): Promise<AccountManagerClientChangeRequest>;
+  updateAccountManagerClientChangeRequest(
+    id: string,
+    updates: Partial<AccountManagerClientChangeRequest>,
+  ): Promise<AccountManagerClientChangeRequest | undefined>;
 
   // Shipment Rate Quotes
   getShipmentRateQuote(id: string): Promise<ShipmentRateQuote | undefined>;
@@ -276,6 +346,7 @@ export interface IStorage {
     limit?: number;
     status?: string;
     clientAccountId?: string;
+    clientAccountIds?: string[];
     overdueOnly?: boolean;
   }): Promise<{ invoices: CreditInvoice[]; total: number; page: number; totalPages: number }>;
   getCreditInvoicesByClientAccount(clientAccountId: string, status?: string): Promise<CreditInvoice[]>;
@@ -342,6 +413,16 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  async getUsersByUserType(userType: string): Promise<User[]> {
+    return db.select().from(users).where(eq(users.userType, userType));
+  }
+
+  async getAccountManagers(): Promise<User[]> {
+    return db.select().from(users).where(
+      and(eq(users.userType, "admin"), eq(users.isAccountManager, true)),
+    ).orderBy(desc(users.createdAt));
+  }
+
   async getUsersByClientAccount(clientAccountId: string): Promise<User[]> {
     return db.select().from(users).where(eq(users.clientAccountId, clientAccountId));
   }
@@ -369,10 +450,18 @@ export class DatabaseStorage implements IStorage {
     search?: string;
     profile?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ clients: ClientAccount[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, profile, status } = params;
+    const { page, limit, search, profile, status, clientAccountIds } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(clientAccounts.deletedAt)];
+
+    if (clientAccountIds) {
+      if (clientAccountIds.length === 0) {
+        return { clients: [], total: 0, page, totalPages: 0 };
+      }
+      conditions.push(inArray(clientAccounts.id, clientAccountIds));
+    }
 
     if (search) {
       conditions.push(
@@ -414,26 +503,42 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createClientAccount(account: InsertClientAccount): Promise<ClientAccount> {
-    // Generate next account number in format EZ0001, EZ0002, etc.
-    const [maxResult] = await db.select({ accountNumber: clientAccounts.accountNumber })
-      .from(clientAccounts)
-      .orderBy(desc(clientAccounts.accountNumber))
-      .limit(1);
-    
-    let nextNumber = 1;
-    if (maxResult?.accountNumber) {
-      const match = maxResult.accountNumber.match(/EZ(\d+)/);
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      // Generate the next account number in format EZ0001, EZ0002, etc.
+      const [maxResult] = await db
+        .select({ accountNumber: clientAccounts.accountNumber })
+        .from(clientAccounts)
+        .orderBy(desc(clientAccounts.accountNumber))
+        .limit(1);
+
+      let nextNumber = 1;
+      if (maxResult?.accountNumber) {
+        const match = maxResult.accountNumber.match(/EZ(\d+)/);
+        if (match) {
+          nextNumber = parseInt(match[1], 10) + 1;
+        }
+      }
+
+      const accountNumber = `EZ${String(nextNumber).padStart(4, "0")}`;
+
+      try {
+        const [newAccount] = await db
+          .insert(clientAccounts)
+          .values({
+            ...account,
+            accountNumber,
+          })
+          .returning();
+        return newAccount;
+      } catch (error) {
+        if (isClientAccountNumberConflict(error) && attempt < 4) {
+          continue;
+        }
+        throw error;
       }
     }
-    const accountNumber = `EZ${String(nextNumber).padStart(4, '0')}`;
-    
-    const [newAccount] = await db.insert(clientAccounts).values({
-      ...account,
-      accountNumber,
-    }).returning();
-    return newAccount;
+
+    throw new Error("Failed to generate a unique client account number");
   }
 
   async updateClientAccount(id: string, updates: Partial<ClientAccount>): Promise<ClientAccount | undefined> {
@@ -519,10 +624,18 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status } = params;
+    const { page, limit, search, status, clientAccountIds } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(shipments.deletedAt)];
+
+    if (clientAccountIds) {
+      if (clientAccountIds.length === 0) {
+        return { shipments: [], total: 0, page, totalPages: 0 };
+      }
+      conditions.push(inArray(shipments.clientAccountId, clientAccountIds));
+    }
 
     if (search) {
       conditions.push(
@@ -601,10 +714,18 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ invoices: Invoice[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status } = params;
+    const { page, limit, search, status, clientAccountIds } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(invoices.deletedAt)];
+
+    if (clientAccountIds) {
+      if (clientAccountIds.length === 0) {
+        return { invoices: [], total: 0, page, totalPages: 0 };
+      }
+      conditions.push(inArray(invoices.clientAccountId, clientAccountIds));
+    }
 
     if (search) {
       conditions.push(ilike(invoices.invoiceNumber, `%${search}%`));
@@ -642,6 +763,14 @@ export class DatabaseStorage implements IStorage {
     return invoice || undefined;
   }
 
+  async getInvoiceByShipmentId(shipmentId: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices)
+      .where(and(eq(invoices.shipmentId, shipmentId), isNull(invoices.deletedAt)))
+      .orderBy(desc(invoices.createdAt))
+      .limit(1);
+    return invoice || undefined;
+  }
+
   async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
     const [newInvoice] = await db.insert(invoices).values({
       ...invoice,
@@ -667,10 +796,18 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    clientAccountIds?: string[];
   }): Promise<{ payments: Payment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status } = params;
+    const { page, limit, search, status, clientAccountIds } = params;
     const offset = (page - 1) * limit;
     const conditions: any[] = [];
+
+    if (clientAccountIds) {
+      if (clientAccountIds.length === 0) {
+        return { payments: [], total: 0, page, totalPages: 0 };
+      }
+      conditions.push(inArray(payments.clientAccountId, clientAccountIds));
+    }
 
     if (search) {
       conditions.push(
@@ -714,6 +851,53 @@ export class DatabaseStorage implements IStorage {
   async updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined> {
     const [payment] = await db.update(payments).set(updates).where(eq(payments.id, id)).returning();
     return payment || undefined;
+  }
+
+  async getCarrierPayoutBatches(params?: {
+    month?: number;
+    year?: number;
+    carrierCode?: string;
+  }): Promise<CarrierPayoutBatch[]> {
+    const conditions = [];
+
+    if (params?.month !== undefined) {
+      conditions.push(eq(carrierPayoutBatches.month, params.month));
+    }
+
+    if (params?.year !== undefined) {
+      conditions.push(eq(carrierPayoutBatches.year, params.year));
+    }
+
+    if (params?.carrierCode) {
+      conditions.push(eq(carrierPayoutBatches.carrierCode, params.carrierCode));
+    }
+
+    if (conditions.length > 0) {
+      return db.select().from(carrierPayoutBatches)
+        .where(and(...conditions))
+        .orderBy(desc(carrierPayoutBatches.createdAt));
+    }
+
+    return db.select().from(carrierPayoutBatches)
+      .orderBy(desc(carrierPayoutBatches.createdAt));
+  }
+
+  async getCarrierPayoutBatch(id: string): Promise<CarrierPayoutBatch | undefined> {
+    const [batch] = await db.select().from(carrierPayoutBatches).where(eq(carrierPayoutBatches.id, id));
+    return batch || undefined;
+  }
+
+  async createCarrierPayoutBatch(batch: InsertCarrierPayoutBatch): Promise<CarrierPayoutBatch> {
+    const [newBatch] = await db.insert(carrierPayoutBatches).values(batch).returning();
+    return newBatch;
+  }
+
+  async updateCarrierPayoutBatch(id: string, updates: Partial<CarrierPayoutBatch>): Promise<CarrierPayoutBatch | undefined> {
+    const [batch] = await db.update(carrierPayoutBatches).set({
+      ...updates,
+      updatedAt: new Date(),
+    }).where(eq(carrierPayoutBatches.id, id)).returning();
+    return batch || undefined;
   }
 
   // Pricing Rules
@@ -1036,6 +1220,28 @@ export class DatabaseStorage implements IStorage {
     return permission || undefined;
   }
 
+  async getAdminPermissions(userId: string): Promise<Permission[]> {
+    const results = await db
+      .selectDistinct({
+        id: permissions.id,
+        name: permissions.name,
+        description: permissions.description,
+        resource: permissions.resource,
+        action: permissions.action,
+        createdAt: permissions.createdAt,
+      })
+      .from(userRoles)
+      .innerJoin(
+        roles,
+        and(eq(userRoles.roleId, roles.id), eq(roles.isActive, true)),
+      )
+      .innerJoin(rolePermissions, eq(rolePermissions.roleId, roles.id))
+      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+      .where(eq(userRoles.userId, userId));
+
+    return results;
+  }
+
   async createPermission(permission: InsertPermission): Promise<Permission> {
     const [newPermission] = await db.insert(permissions).values(permission).returning();
     return newPermission;
@@ -1056,7 +1262,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async removeUserRole(userId: string, roleId: string): Promise<void> {
-    await db.delete(userRoles).where(eq(userRoles.userId, userId));
+    await db.delete(userRoles).where(
+      and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId))
+    );
   }
 
   // RBAC - Role Permissions
@@ -1073,6 +1281,151 @@ export class DatabaseStorage implements IStorage {
     await db.delete(rolePermissions).where(
       and(eq(rolePermissions.roleId, roleId), eq(rolePermissions.permissionId, permissionId))
     );
+  }
+
+  // Account Managers
+  async getAccountManagerAssignments(params?: {
+    accountManagerUserId?: string;
+    clientAccountId?: string;
+  }): Promise<AccountManagerAssignment[]> {
+    const conditions = [];
+
+    if (params?.accountManagerUserId) {
+      conditions.push(eq(accountManagerAssignments.accountManagerUserId, params.accountManagerUserId));
+    }
+
+    if (params?.clientAccountId) {
+      conditions.push(eq(accountManagerAssignments.clientAccountId, params.clientAccountId));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(accountManagerAssignments).where(whereClause).orderBy(desc(accountManagerAssignments.createdAt));
+  }
+
+  async getPrimaryAccountManagerForClient(clientAccountId: string): Promise<User | undefined> {
+    const [assignment] = await db.select().from(accountManagerAssignments)
+      .where(eq(accountManagerAssignments.clientAccountId, clientAccountId))
+      .orderBy(desc(accountManagerAssignments.createdAt))
+      .limit(1);
+
+    if (!assignment) {
+      return undefined;
+    }
+
+    return this.getUser(assignment.accountManagerUserId);
+  }
+
+  async setPrimaryAccountManagerForClient(
+    clientAccountId: string,
+    accountManagerUserId?: string | null,
+    createdByUserId?: string,
+  ): Promise<AccountManagerAssignment | undefined> {
+    return db.transaction(async (tx) => {
+      await tx.delete(accountManagerAssignments).where(
+        eq(accountManagerAssignments.clientAccountId, clientAccountId),
+      );
+
+      if (!accountManagerUserId) {
+        return undefined;
+      }
+
+      const [createdAssignment] = await tx.insert(accountManagerAssignments).values({
+        accountManagerUserId,
+        clientAccountId,
+        createdByUserId: createdByUserId || null,
+      }).returning();
+
+      return createdAssignment;
+    });
+  }
+
+  async replaceAccountManagerAssignments(
+    accountManagerUserId: string,
+    clientAccountIds: string[],
+    createdByUserId?: string,
+  ): Promise<AccountManagerAssignment[]> {
+    const uniqueClientAccountIds = Array.from(new Set(clientAccountIds));
+
+    return db.transaction(async (tx) => {
+      await tx.delete(accountManagerAssignments).where(
+        eq(accountManagerAssignments.accountManagerUserId, accountManagerUserId),
+      );
+
+      if (uniqueClientAccountIds.length === 0) {
+        return [];
+      }
+
+      return tx.insert(accountManagerAssignments).values(
+        uniqueClientAccountIds.map((clientAccountId) => ({
+          accountManagerUserId,
+          clientAccountId,
+          createdByUserId: createdByUserId || null,
+        })),
+      ).returning();
+    });
+  }
+
+  async getClientIdsForAccountManager(accountManagerUserId: string): Promise<string[]> {
+    const assignments = await db.select({
+      clientAccountId: accountManagerAssignments.clientAccountId,
+    }).from(accountManagerAssignments).where(
+      eq(accountManagerAssignments.accountManagerUserId, accountManagerUserId),
+    );
+
+    return assignments.map((assignment) => assignment.clientAccountId);
+  }
+
+  async getAccountManagerClientChangeRequests(params?: {
+    status?: string;
+    accountManagerUserId?: string;
+    clientAccountId?: string;
+  }): Promise<AccountManagerClientChangeRequest[]> {
+    const conditions = [];
+
+    if (params?.status) {
+      conditions.push(eq(accountManagerClientChangeRequests.status, params.status));
+    }
+
+    if (params?.accountManagerUserId) {
+      conditions.push(eq(accountManagerClientChangeRequests.accountManagerUserId, params.accountManagerUserId));
+    }
+
+    if (params?.clientAccountId) {
+      conditions.push(eq(accountManagerClientChangeRequests.clientAccountId, params.clientAccountId));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    return db.select().from(accountManagerClientChangeRequests).where(whereClause).orderBy(
+      desc(accountManagerClientChangeRequests.createdAt),
+    );
+  }
+
+  async getAccountManagerClientChangeRequest(id: string): Promise<AccountManagerClientChangeRequest | undefined> {
+    const [request] = await db.select().from(accountManagerClientChangeRequests).where(
+      eq(accountManagerClientChangeRequests.id, id),
+    );
+
+    return request || undefined;
+  }
+
+  async createAccountManagerClientChangeRequest(
+    request: InsertAccountManagerClientChangeRequest,
+  ): Promise<AccountManagerClientChangeRequest> {
+    const [created] = await db.insert(accountManagerClientChangeRequests).values(request).returning();
+    return created;
+  }
+
+  async updateAccountManagerClientChangeRequest(
+    id: string,
+    updates: Partial<AccountManagerClientChangeRequest>,
+  ): Promise<AccountManagerClientChangeRequest | undefined> {
+    const [updated] = await db.update(accountManagerClientChangeRequests).set({
+      ...updates,
+      updatedAt: new Date(),
+    }).where(eq(accountManagerClientChangeRequests.id, id)).returning();
+
+    return updated || undefined;
   }
 
   // Shipment Rate Quotes
@@ -1195,6 +1548,51 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async promoteSingleClientUsersToPrimaryContacts(): Promise<number> {
+    const clientUsers = await this.getUsersByUserType("client");
+    const usersByClientAccount = new Map<string, User[]>();
+
+    for (const user of clientUsers) {
+      if (!user.clientAccountId) {
+        continue;
+      }
+
+      const accountUsers = usersByClientAccount.get(user.clientAccountId) || [];
+      accountUsers.push(user);
+      usersByClientAccount.set(user.clientAccountId, accountUsers);
+    }
+
+    let promotedCount = 0;
+
+    for (const [clientAccountId, accountUsers] of usersByClientAccount.entries()) {
+      const activeUsers = accountUsers.filter((accountUser) => accountUser.isActive);
+      if (activeUsers.length !== 1) {
+        continue;
+      }
+
+      const [soleUser] = activeUsers;
+      if (soleUser.isPrimaryContact) {
+        continue;
+      }
+
+      const existingPermissions = await this.getClientUserPermissions(soleUser.id, clientAccountId);
+      if (existingPermissions) {
+        continue;
+      }
+
+      const promotedUser = await this.updateUser(soleUser.id, {
+        isPrimaryContact: true,
+        updatedAt: new Date(),
+      });
+
+      if (promotedUser) {
+        promotedCount++;
+      }
+    }
+
+    return promotedCount;
+  }
+
   async initializeDefaults(): Promise<void> {
     // Check if admin user already exists
     const existingAdmin = await this.getUserByUsername("admin");
@@ -1203,6 +1601,11 @@ export class DatabaseStorage implements IStorage {
     if (existingPolicies.length === 0) {
       console.log("Seeding default policies...");
       await this.seedDefaultPolicies();
+    }
+
+    const promotedLegacyClientUsers = await this.promoteSingleClientUsersToPrimaryContacts();
+    if (promotedLegacyClientUsers > 0) {
+      console.log(`Promoted ${promotedLegacyClientUsers} legacy client account(s) to primary contact access`);
     }
 
     if (existingAdmin) {
@@ -1311,6 +1714,7 @@ export class DatabaseStorage implements IStorage {
       password: clientHashedPassword,
       userType: "client",
       clientAccountId: demoClientAccount.id,
+      isPrimaryContact: true,
       isActive: true,
     });
 
@@ -1573,6 +1977,7 @@ export class DatabaseStorage implements IStorage {
     limit?: number;
     status?: string;
     clientAccountId?: string;
+    clientAccountIds?: string[];
     overdueOnly?: boolean;
   }): Promise<{ invoices: CreditInvoice[]; total: number; page: number; totalPages: number }> {
     const page = params?.page || 1;
@@ -1585,6 +1990,12 @@ export class DatabaseStorage implements IStorage {
     }
     if (params?.clientAccountId) {
       conditions.push(eq(creditInvoices.clientAccountId, params.clientAccountId));
+    }
+    if (params?.clientAccountIds) {
+      if (params.clientAccountIds.length === 0) {
+        return { invoices: [], total: 0, page, totalPages: 0 };
+      }
+      conditions.push(inArray(creditInvoices.clientAccountId, params.clientAccountIds));
     }
     if (params?.overdueOnly) {
       conditions.push(eq(creditInvoices.status, "OVERDUE"));
