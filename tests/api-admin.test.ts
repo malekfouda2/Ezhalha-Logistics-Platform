@@ -5,7 +5,7 @@ import { createServer } from "http";
 import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
 import { storage } from "../server/storage";
-import { ACCOUNT_MANAGER_SYSTEM_ROLE_ID } from "../shared/schema";
+import { ACCOUNT_MANAGER_SYSTEM_ROLE_ID, InvoiceType } from "../shared/schema";
 
 let app: express.Express;
 let server: ReturnType<typeof createServer>;
@@ -208,6 +208,7 @@ describe("Admin - Financial Statements", () => {
     expect(res.body.summary.totalShipments).toBeGreaterThanOrEqual(1);
     expect(res.body.summary.clientTotalAmountSar).toBeGreaterThanOrEqual(138);
     expect(Array.isArray(res.body.monthlyStatements)).toBe(true);
+    expect(Array.isArray(res.body.carrierTransactions)).toBe(true);
     expect(Array.isArray(res.body.shipments)).toBe(true);
 
     const matchedShipment = res.body.shipments.find((entry: any) => entry.id === shipment.id);
@@ -672,7 +673,7 @@ describe("Admin - Financial Statements", () => {
     expect(completedPayment).toBeDefined();
   });
 
-  it("PATCH /api/admin/financial-statements/shipments/:id/extra-fees should save and reset stored extra fees", async () => {
+  it("PATCH /api/admin/financial-statements/shipments/:id/extra-fees should save combined extra fees and reset them", async () => {
     const unique = Date.now();
     const clientAccount = await storage.createClientAccount({
       name: `Extra Fees Client ${unique}`,
@@ -731,16 +732,31 @@ describe("Admin - Financial Statements", () => {
 
     const saveRes = await asAdmin
       .patch(`/api/admin/financial-statements/shipments/${shipment.id}/extra-fees`)
-      .send({ extraFeesType: "EXTRA_WEIGHT", extraWeightValue: "1.00" });
+      .send({ extraWeightValue: "1.00", extraCostAmountSar: "25.00" });
 
     expect(saveRes.status).toBe(200);
-    expect(Number(saveRes.body.extraFeesAmountSar)).toBe(50);
-    expect(saveRes.body.extraFeesType).toBe("EXTRA_WEIGHT");
+    expect(Number(saveRes.body.extraFeesAmountSar)).toBe(75);
+    expect(saveRes.body.extraFeesType).toBe("COMBINED");
     expect(Number(saveRes.body.extraFeesWeightValue)).toBe(1);
+    expect(Number(saveRes.body.extraFeesCostAmountSar)).toBe(25);
+    expect(Number(saveRes.body.costAmountSar)).toBe(125);
+    expect(Number(saveRes.body.systemCostTotalAmountSar)).toBe(140);
 
     const savedShipment = await storage.getShipment(shipment.id);
-    expect(savedShipment?.extraFeesAmountSar).toBe("50.00");
-    expect(savedShipment?.extraFeesType).toBe("EXTRA_WEIGHT");
+    expect(savedShipment?.extraFeesAmountSar).toBe("75.00");
+    expect(savedShipment?.extraFeesType).toBe("COMBINED");
+    expect(savedShipment?.extraFeesWeightValue).toBe("1.00");
+    expect(savedShipment?.extraFeesCostAmountSar).toBe("25.00");
+
+    const savedInvoices = await storage.getInvoicesByShipmentId(shipment.id);
+    const extraWeightInvoice = savedInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_WEIGHT);
+    const extraCostInvoice = savedInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_COST);
+
+    expect(extraWeightInvoice).toBeDefined();
+    expect(extraWeightInvoice?.status).toBe("pending");
+    expect(Number(extraWeightInvoice?.amount)).toBe(50);
+
+    expect(extraCostInvoice).toBeUndefined();
 
     const resetRes = await asAdmin
       .patch(`/api/admin/financial-statements/shipments/${shipment.id}/extra-fees`)
@@ -752,6 +768,12 @@ describe("Admin - Financial Statements", () => {
     const resetShipment = await storage.getShipment(shipment.id);
     expect(resetShipment?.extraFeesAmountSar).toBeNull();
     expect(resetShipment?.extraFeesType).toBeNull();
+    expect(resetShipment?.extraFeesWeightValue).toBeNull();
+    expect(resetShipment?.extraFeesCostAmountSar).toBeNull();
+
+    const resetInvoices = await storage.getInvoicesByShipmentId(shipment.id);
+    expect(resetInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_WEIGHT)).toBeUndefined();
+    expect(resetInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_COST)).toBeUndefined();
   });
 
   it("POST /api/admin/financial-statements/shipments/:id/mark-carrier-paid should mark the carrier settlement on a shipment", async () => {
@@ -832,6 +854,18 @@ describe("Admin - Financial Statements", () => {
     expect(updatedShipment?.carrierPaymentAmountSar).toBe("115.00");
     expect(updatedShipment?.carrierPaymentReference).toBe(`BANK-${unique}`);
     expect(updatedShipment?.carrierPaymentNote).toBe("Month-end FedEx settlement");
+
+    const statementRes = await asAdmin.get(
+      `/api/admin/financial-statements?search=${encodeURIComponent(shipment.trackingNumber)}`,
+    );
+    expect(statementRes.status).toBe(200);
+    const matchingTransaction = statementRes.body.carrierTransactions.find(
+      (entry: any) => entry.shipmentId === shipment.id,
+    );
+    expect(matchingTransaction).toBeDefined();
+    expect(Number(matchingTransaction.carrierTaxAmountSar)).toBe(15);
+    expect(Number(matchingTransaction.carrierPaymentAmountSar)).toBe(115);
+    expect(matchingTransaction.carrierPaymentReference).toBe(`BANK-${unique}`);
   });
 
   it("POST /api/admin/financial-statements/shipments/:id/cancel-carrier-payment should clear a stored carrier settlement so the shipment can be paid again", async () => {

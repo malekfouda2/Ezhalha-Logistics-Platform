@@ -23,12 +23,13 @@ const statusStyles: Record<string, string> = {
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   inactive: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
   paid: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  unpaid: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 };
 
 const statusLabels: Record<string, string> = {
   draft: "Draft",
-  payment_pending: "Payment Pending",
-  created: "Created",
+  payment_pending: "Awaiting Payment",
+  created: "Booked",
   processing: "Processing",
   in_transit: "In Transit",
   delivered: "Delivered",
@@ -42,6 +43,7 @@ const statusLabels: Record<string, string> = {
   active: "Active",
   inactive: "Inactive",
   paid: "Paid",
+  unpaid: "Unpaid",
 };
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {

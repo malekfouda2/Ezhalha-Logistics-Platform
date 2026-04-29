@@ -11,6 +11,8 @@ import {
   type InsertInvoice,
   type Payment,
   type InsertPayment,
+  type TapSavedCard,
+  type InsertTapSavedCard,
   type CarrierPayoutBatch,
   type InsertCarrierPayoutBatch,
   type PricingRule,
@@ -61,6 +63,7 @@ import {
   shipments,
   invoices,
   payments,
+  tapSavedCards,
   carrierPayoutBatches,
   pricingRules,
   pricingTiers,
@@ -83,6 +86,7 @@ import {
   creditNotificationEvents,
   hsCodeMappings,
   systemLogs,
+  InvoiceType,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
@@ -165,6 +169,7 @@ export interface IStorage {
     clientAccountIds?: string[];
   }): Promise<{ invoices: Invoice[]; total: number; page: number; totalPages: number }>;
   getInvoicesByClientAccount(clientAccountId: string): Promise<Invoice[]>;
+  getInvoicesByShipmentId(shipmentId: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   getInvoiceByShipmentId(shipmentId: string): Promise<Invoice | undefined>;
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -182,6 +187,13 @@ export interface IStorage {
   getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined>;
+
+  // Tap Saved Cards
+  getTapSavedCardsByClientAccount(clientAccountId: string): Promise<TapSavedCard[]>;
+  getTapSavedCard(id: string): Promise<TapSavedCard | undefined>;
+  getTapSavedCardByTapCardId(clientAccountId: string, tapCardId: string): Promise<TapSavedCard | undefined>;
+  createTapSavedCard(card: InsertTapSavedCard): Promise<TapSavedCard>;
+  updateTapSavedCard(id: string, updates: Partial<TapSavedCard>): Promise<TapSavedCard | undefined>;
 
   // Carrier Payout Batches
   getCarrierPayoutBatches(params?: {
@@ -757,6 +769,12 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(invoices.createdAt));
   }
 
+  async getInvoicesByShipmentId(shipmentId: string): Promise<Invoice[]> {
+    return db.select().from(invoices)
+      .where(and(eq(invoices.shipmentId, shipmentId), isNull(invoices.deletedAt)))
+      .orderBy(desc(invoices.createdAt));
+  }
+
   async getInvoice(id: string): Promise<Invoice | undefined> {
     const [invoice] = await db.select().from(invoices)
       .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)));
@@ -765,7 +783,11 @@ export class DatabaseStorage implements IStorage {
 
   async getInvoiceByShipmentId(shipmentId: string): Promise<Invoice | undefined> {
     const [invoice] = await db.select().from(invoices)
-      .where(and(eq(invoices.shipmentId, shipmentId), isNull(invoices.deletedAt)))
+      .where(and(
+        eq(invoices.shipmentId, shipmentId),
+        eq(invoices.invoiceType, InvoiceType.SHIPMENT),
+        isNull(invoices.deletedAt),
+      ))
       .orderBy(desc(invoices.createdAt))
       .limit(1);
     return invoice || undefined;
@@ -851,6 +873,42 @@ export class DatabaseStorage implements IStorage {
   async updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined> {
     const [payment] = await db.update(payments).set(updates).where(eq(payments.id, id)).returning();
     return payment || undefined;
+  }
+
+  async getTapSavedCardsByClientAccount(clientAccountId: string): Promise<TapSavedCard[]> {
+    return db.select().from(tapSavedCards)
+      .where(and(eq(tapSavedCards.clientAccountId, clientAccountId), isNull(tapSavedCards.deletedAt)))
+      .orderBy(desc(tapSavedCards.isDefault), desc(tapSavedCards.updatedAt));
+  }
+
+  async getTapSavedCard(id: string): Promise<TapSavedCard | undefined> {
+    const [card] = await db.select().from(tapSavedCards)
+      .where(and(eq(tapSavedCards.id, id), isNull(tapSavedCards.deletedAt)))
+      .limit(1);
+    return card || undefined;
+  }
+
+  async getTapSavedCardByTapCardId(clientAccountId: string, tapCardId: string): Promise<TapSavedCard | undefined> {
+    const [card] = await db.select().from(tapSavedCards)
+      .where(and(
+        eq(tapSavedCards.clientAccountId, clientAccountId),
+        eq(tapSavedCards.tapCardId, tapCardId),
+      ))
+      .limit(1);
+    return card || undefined;
+  }
+
+  async createTapSavedCard(card: InsertTapSavedCard): Promise<TapSavedCard> {
+    const [newCard] = await db.insert(tapSavedCards).values(card).returning();
+    return newCard;
+  }
+
+  async updateTapSavedCard(id: string, updates: Partial<TapSavedCard>): Promise<TapSavedCard | undefined> {
+    const [card] = await db.update(tapSavedCards)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tapSavedCards.id, id))
+      .returning();
+    return card || undefined;
   }
 
   async getCarrierPayoutBatches(params?: {
@@ -1756,7 +1814,7 @@ export class DatabaseStorage implements IStorage {
 <ul>
 <li><strong>Account Information:</strong> Name, email address, phone number, company name, and business registration details.</li>
 <li><strong>Shipping Information:</strong> Sender and recipient addresses, contact details, package dimensions, and weight.</li>
-<li><strong>Payment Information:</strong> Billing details processed securely through our third-party payment provider (Moyasar). We do not store full credit card numbers on our servers.</li>
+<li><strong>Payment Information:</strong> Billing details processed securely through our third-party payment provider (Tap Payments). We do not store full credit card numbers on our servers.</li>
 <li><strong>Usage Data:</strong> Login activity, IP addresses, browser type, pages visited, and actions taken within the platform.</li>
 <li><strong>Communication Data:</strong> Records of correspondence between you and our support team.</li>
 </ul>
@@ -1776,7 +1834,7 @@ export class DatabaseStorage implements IStorage {
 <p>We may share your information with:</p>
 <ul>
 <li><strong>Shipping Carriers:</strong> Such as FedEx, to fulfill shipment requests on your behalf.</li>
-<li><strong>Payment Processors:</strong> Including Moyasar, to process transactions securely.</li>
+<li><strong>Payment Processors:</strong> Including Tap Payments, to process transactions securely.</li>
 <li><strong>Accounting Systems:</strong> Such as Zoho Books, for invoice management and financial records.</li>
 <li><strong>Legal Authorities:</strong> When required by law or to protect our rights and the safety of our users.</li>
 </ul>
@@ -1844,7 +1902,7 @@ export class DatabaseStorage implements IStorage {
 <h3>4. Payment Terms</h3>
 <ul>
 <li>Payment is required at the time of shipment booking.</li>
-<li>Payments are processed securely through Moyasar payment gateway.</li>
+<li>Payments are processed securely through Tap Payments.</li>
 <li>Accepted payment methods include credit cards and debit cards with 3D Secure authentication.</li>
 <li>Invoices are generated automatically and can be accessed through your client portal.</li>
 </ul>

@@ -113,6 +113,7 @@ type FinancialShipment = Omit<
   | "extraFeesType"
   | "extraFeesWeightValue"
   | "extraFeesCostAmountSar"
+  | "extraWeightAmountSar"
   | "extraFeesAddedAt"
   | "extraFeesEmailSentAt"
 > & {
@@ -128,12 +129,15 @@ type FinancialShipment = Omit<
   revenueExcludingTaxAmountSar: number;
   netProfitAmountSar: number;
   extraFeesAmountSar: number;
-  extraFeesType: "EXTRA_WEIGHT" | "EXTRA_COST" | null;
+  extraFeesType: "EXTRA_WEIGHT" | "EXTRA_COST" | "COMBINED" | null;
   extraFeesWeightValue: number;
   extraFeesCostAmountSar: number;
+  extraWeightAmountSar: number;
   extraFeesRateSarPerWeight: number;
   extraFeesAddedAt: string | null;
   extraFeesEmailSentAt: string | null;
+  extraWeightInvoiceStatus: "paid" | "pending" | "failed" | null;
+  isExtraWeightPaid: boolean;
   weightValue: number;
   carrierTrackingId: string | null;
   carrierPaymentAmountSar: number;
@@ -147,6 +151,24 @@ type FinancialShipment = Omit<
   canViewCarrierPayment: boolean;
   canCancel: boolean;
 };
+
+interface CarrierTransaction {
+  shipmentId: string;
+  trackingNumber: string;
+  carrierTrackingId: string | null;
+  clientName: string;
+  clientAccountNumber: string | null;
+  carrierCode: string | null;
+  carrierName: string;
+  taxScenario: string | null;
+  carrierCostAmountSar: number;
+  carrierTaxAmountSar: number;
+  carrierPaymentAmountSar: number;
+  carrierPaymentReference: string | null;
+  carrierPaymentNote: string | null;
+  carrierPaidAt: string | null;
+  createdAt: string;
+}
 
 interface FinancialStatementsResponse {
   month: number;
@@ -162,11 +184,11 @@ interface FinancialStatementsResponse {
   excludedLegacyShipmentCount: number;
   summary: AccountingSummary;
   monthlyStatements: MonthlyStatement[];
+  carrierTransactions: CarrierTransaction[];
   shipments: FinancialShipment[];
 }
 
 type PaymentFilterValue = "all" | "paid" | "not_paid";
-type ExtraFeesTypeValue = "EXTRA_WEIGHT" | "EXTRA_COST";
 type CarrierPaymentDialogMode = "pay" | "view";
 
 function formatScenarioLabel(value: string | null | undefined) {
@@ -187,6 +209,13 @@ function getExtraFeesRate(shipment: FinancialShipment): number {
   }
 
   return roundMoney((shipment.clientTotalAmountSar || 0) / shipment.weightValue);
+}
+
+function formatExtraFeesTypeLabel(type: FinancialShipment["extraFeesType"]) {
+  if (type === "COMBINED") return "Weight + Cost";
+  if (type === "EXTRA_WEIGHT") return "Extra Weight";
+  if (type === "EXTRA_COST") return "Extra Cost";
+  return "Extra Fees";
 }
 
 async function postJson<T>(url: string, body?: unknown): Promise<T> {
@@ -231,6 +260,8 @@ async function refreshFinancialQueries() {
 export default function AdminPayments() {
   const { toast } = useToast();
   const { hasPermission } = useAdminAccess();
+  const [paymentTransactionsOpen, setPaymentTransactionsOpen] = useState(true);
+  const [carrierTransactionsOpen, setCarrierTransactionsOpen] = useState(true);
 
   const [financialSearchInput, setFinancialSearchInput] = useState("");
   const [financialSubmittedSearch, setFinancialSubmittedSearch] = useState("");
@@ -252,7 +283,6 @@ export default function AdminPayments() {
   const [paymentPageSize, setPaymentPageSize] = useState(25);
 
   const [extraFeesDialogShipment, setExtraFeesDialogShipment] = useState<FinancialShipment | null>(null);
-  const [extraFeesTypeInput, setExtraFeesTypeInput] = useState<ExtraFeesTypeValue>("EXTRA_WEIGHT");
   const [extraWeightInput, setExtraWeightInput] = useState("");
   const [extraCostInput, setExtraCostInput] = useState("");
   const [carrierPaymentDialogShipment, setCarrierPaymentDialogShipment] = useState<FinancialShipment | null>(null);
@@ -418,13 +448,11 @@ export default function AdminPayments() {
   const updateExtraFeesMutation = useMutation({
     mutationFn: async (params: {
       shipmentId: string;
-      extraFeesType?: ExtraFeesTypeValue;
       extraWeightValue?: string;
       extraCostAmountSar?: string;
       clear?: boolean;
     }) =>
       patchJson(`/api/admin/financial-statements/shipments/${params.shipmentId}/extra-fees`, {
-        extraFeesType: params.extraFeesType,
         extraWeightValue: params.extraWeightValue,
         extraCostAmountSar: params.extraCostAmountSar,
         clear: params.clear,
@@ -432,10 +460,12 @@ export default function AdminPayments() {
     onSuccess: async () => {
       await refreshFinancialQueries();
       setExtraFeesDialogShipment(null);
-      setExtraFeesTypeInput("EXTRA_WEIGHT");
       setExtraWeightInput("");
       setExtraCostInput("");
-      toast({ title: "Extra fees updated", description: "The shipment extra fees were saved and the client was notified." });
+      toast({
+        title: "Extra fees updated",
+        description: "The shipment extra fees were saved. Extra weight billing was synced for the client, and any internal-only extra cost stayed on the system side.",
+      });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update extra fees", description: error.message, variant: "destructive" });
@@ -495,6 +525,7 @@ export default function AdminPayments() {
     scenarioCounts: {},
   };
   const financialShipments = financialData?.shipments || [];
+  const carrierTransactions = financialData?.carrierTransactions || [];
   const financialTotal = financialData?.total || 0;
   const financialTotalPages = financialData?.totalPages || 1;
   const monthlyStatements = financialData?.monthlyStatements || [];
@@ -510,21 +541,8 @@ export default function AdminPayments() {
 
   const handleOpenExtraFeesDialog = (shipment: FinancialShipment) => {
     setExtraFeesDialogShipment(shipment);
-    setExtraFeesTypeInput(
-      shipment.extraFeesType || (shipment.extraFeesAmountSar > 0 ? "EXTRA_COST" : "EXTRA_WEIGHT"),
-    );
-    setExtraWeightInput(
-      shipment.extraFeesType === "EXTRA_WEIGHT" && shipment.extraFeesWeightValue > 0
-        ? shipment.extraFeesWeightValue.toFixed(2)
-        : "",
-    );
-    setExtraCostInput(
-      shipment.extraFeesType === "EXTRA_COST" && shipment.extraFeesCostAmountSar > 0
-        ? shipment.extraFeesCostAmountSar.toFixed(2)
-        : !shipment.extraFeesType && shipment.extraFeesAmountSar > 0
-          ? shipment.extraFeesAmountSar.toFixed(2)
-        : "",
-    );
+    setExtraWeightInput(shipment.extraFeesWeightValue > 0 ? shipment.extraFeesWeightValue.toFixed(2) : "");
+    setExtraCostInput(shipment.extraFeesCostAmountSar > 0 ? shipment.extraFeesCostAmountSar.toFixed(2) : "");
   };
 
   const resetCarrierPaymentDialog = () => {
@@ -957,7 +975,13 @@ export default function AdminPayments() {
                         >
                           <SarAmount amount={shipment.costAmountSar || 0} />
                         </TableCell>
-                        <TableCell><SarAmount amount={shipment.costTaxAmountSar || 0} /></TableCell>
+                        <TableCell
+                          className={cn(
+                            shipment.isCarrierPaid && shipment.costTaxAmountSar > 0 && "text-green-600 dark:text-green-400 font-semibold",
+                          )}
+                        >
+                          <SarAmount amount={shipment.costTaxAmountSar || 0} />
+                        </TableCell>
                         <TableCell><SarAmount amount={shipment.revenueExcludingTaxAmountSar || 0} /></TableCell>
                         <TableCell><SarAmount amount={shipment.sellTaxAmountSar || 0} /></TableCell>
                         <TableCell
@@ -971,11 +995,50 @@ export default function AdminPayments() {
                         <TableCell><SarAmount amount={shipment.netProfitAmountSar || 0} /></TableCell>
                         <TableCell>
                           <div className="space-y-1">
-                            <p><SarAmount amount={shipment.extraFeesAmountSar || 0} /></p>
-                            {shipment.extraFeesType && (
-                              <Badge variant="secondary" className="text-[10px]">
-                                {shipment.extraFeesType === "EXTRA_WEIGHT" ? "Extra Weight" : "Extra Cost"}
-                              </Badge>
+                            <p
+                              className={cn(
+                                shipment.extraWeightAmountSar > 0 &&
+                                  shipment.isExtraWeightPaid &&
+                                  shipment.extraFeesAmountSar > 0 &&
+                                  "text-green-600 dark:text-green-400 font-semibold",
+                              )}
+                            >
+                              <SarAmount amount={shipment.extraFeesAmountSar || 0} />
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {shipment.extraFeesType && (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {formatExtraFeesTypeLabel(shipment.extraFeesType)}
+                                </Badge>
+                              )}
+                              {shipment.extraFeesType === "EXTRA_WEIGHT" && shipment.isExtraWeightPaid && (
+                                <Badge className="text-[10px] bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                  Paid
+                                </Badge>
+                              )}
+                              {(shipment.extraFeesType === "EXTRA_COST" || shipment.extraFeesType === "COMBINED") &&
+                                shipment.extraFeesCostAmountSar > 0 && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Internal Cost
+                                  </Badge>
+                                )}
+                            </div>
+                            {shipment.extraFeesWeightValue > 0 && (
+                              <p
+                                className={cn(
+                                  "text-[10px] text-muted-foreground",
+                                  shipment.isExtraWeightPaid &&
+                                    "text-green-600 dark:text-green-400 font-medium",
+                                )}
+                              >
+                                Weight: {shipment.extraFeesWeightValue.toFixed(2)} {shipment.weightUnit || "KG"}
+                                {shipment.isExtraWeightPaid ? " · Paid" : ""}
+                              </p>
+                            )}
+                            {shipment.extraFeesCostAmountSar > 0 && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Internal cost: <SarAmount amount={shipment.extraFeesCostAmountSar} />
+                              </p>
                             )}
                             {canUpdateShipments && (
                               <Button
@@ -1182,63 +1245,175 @@ export default function AdminPayments() {
           <CardHeader>
             <CardTitle>Payment Transactions</CardTitle>
           </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            {payments.length > 0 ? (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Invoice ID</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Method</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Transaction ID</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {payments.map((payment) => {
-                      const StatusIcon = statusIcons[payment.status] || Clock;
-                      return (
-                        <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
+          <Collapsible open={paymentTransactionsOpen} onOpenChange={setPaymentTransactionsOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full justify-between rounded-none border-t px-6 py-4">
+                <span className="text-sm font-medium">
+                  {paymentTransactionsOpen ? "Hide schedule" : "Show schedule"}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 transition-transform", paymentTransactionsOpen && "rotate-180")} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="p-0 overflow-x-auto">
+                {payments.length > 0 ? (
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Invoice ID</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Method</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Transaction ID</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {payments.map((payment) => {
+                          const StatusIcon = statusIcons[payment.status] || Clock;
+                          return (
+                            <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {format(new Date(payment.createdAt), "MMM d, yyyy HH:mm")}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">{payment.invoiceId.slice(0, 8)}...</TableCell>
+                              <TableCell className="font-bold"><SarAmount amount={payment.amount} /></TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{payment.paymentMethod}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge className={statusColors[payment.status] || ""}>
+                                  <StatusIcon className="h-3 w-3 mr-1" />
+                                  {payment.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-mono text-sm text-muted-foreground">
+                                {payment.transactionId || "-"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                    <PaginationControls
+                      page={paymentPage}
+                      totalPages={paymentTotalPages}
+                      total={paymentTotal}
+                      pageSize={paymentPageSize}
+                      onPageChange={setPaymentPage}
+                      onPageSizeChange={(size) => {
+                        setPaymentPageSize(size);
+                        setPaymentPage(1);
+                      }}
+                    />
+                  </>
+                ) : (
+                  <div className="p-8 text-center text-muted-foreground">No payments found</div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Carrier Payment Transactions</CardTitle>
+          </CardHeader>
+          <Collapsible open={carrierTransactionsOpen} onOpenChange={setCarrierTransactionsOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full justify-between rounded-none border-t px-6 py-4">
+                <span className="text-sm font-medium">
+                  {carrierTransactionsOpen ? "Hide schedule" : "Show schedule"}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 transition-transform", carrierTransactionsOpen && "rotate-180")} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="p-0 overflow-x-auto">
+                {carrierTransactions.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Paid At</TableHead>
+                        <TableHead>Carrier</TableHead>
+                        <TableHead>Shipment</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead>Carrier Cost</TableHead>
+                        <TableHead>Carrier Tax</TableHead>
+                        <TableHead>Total Paid</TableHead>
+                        <TableHead>Reference</TableHead>
+                        <TableHead>Tracking</TableHead>
+                        <TableHead>Note</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {carrierTransactions.map((transaction) => (
+                        <TableRow
+                          key={`${transaction.shipmentId}-${transaction.carrierPaidAt || transaction.createdAt}`}
+                          data-testid={`row-carrier-transaction-${transaction.shipmentId}`}
+                        >
                           <TableCell className="text-sm text-muted-foreground">
-                            {format(new Date(payment.createdAt), "MMM d, yyyy HH:mm")}
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">{payment.invoiceId.slice(0, 8)}...</TableCell>
-                          <TableCell className="font-bold"><SarAmount amount={payment.amount} /></TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{payment.paymentMethod}</Badge>
+                            {transaction.carrierPaidAt
+                              ? format(new Date(transaction.carrierPaidAt), "MMM d, yyyy HH:mm")
+                              : "-"}
                           </TableCell>
                           <TableCell>
-                            <Badge className={statusColors[payment.status] || ""}>
-                              <StatusIcon className="h-3 w-3 mr-1" />
-                              {payment.status}
-                            </Badge>
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{transaction.carrierName}</p>
+                              {transaction.carrierCode && (
+                                <p className="text-xs text-muted-foreground">{transaction.carrierCode}</p>
+                              )}
+                            </div>
                           </TableCell>
-                          <TableCell className="font-mono text-sm text-muted-foreground">
-                            {payment.transactionId || payment.stripePaymentIntentId?.slice(0, 15) || "-"}
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-mono text-sm">{transaction.trackingNumber}</p>
+                              {transaction.taxScenario && (
+                                <Badge variant="outline">{formatScenarioLabel(transaction.taxScenario)}</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{transaction.clientName}</p>
+                              {transaction.clientAccountNumber && (
+                                <p className="text-xs text-muted-foreground">{transaction.clientAccountNumber}</p>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-green-600 dark:text-green-400 font-semibold">
+                            <SarAmount amount={transaction.carrierCostAmountSar} />
+                          </TableCell>
+                          <TableCell className="text-green-600 dark:text-green-400 font-semibold">
+                            <SarAmount amount={transaction.carrierTaxAmountSar} />
+                          </TableCell>
+                          <TableCell className="font-semibold">
+                            <SarAmount amount={transaction.carrierPaymentAmountSar} />
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {transaction.carrierPaymentReference || "-"}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {transaction.carrierTrackingId || "-"}
+                          </TableCell>
+                          <TableCell className="max-w-[280px] text-sm text-muted-foreground">
+                            <div className="line-clamp-2">
+                              {transaction.carrierPaymentNote || "No note added."}
+                            </div>
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-                <PaginationControls
-                  page={paymentPage}
-                  totalPages={paymentTotalPages}
-                  total={paymentTotal}
-                  pageSize={paymentPageSize}
-                  onPageChange={setPaymentPage}
-                  onPageSizeChange={(size) => {
-                    setPaymentPageSize(size);
-                    setPaymentPage(1);
-                  }}
-                />
-              </>
-            ) : (
-              <div className="p-8 text-center text-muted-foreground">No payments found</div>
-            )}
-          </CardContent>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No carrier payment transactions found for the current filters.
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
         </Card>
       </div>
 
@@ -1389,7 +1564,6 @@ export default function AdminPayments() {
         onOpenChange={(open) => {
           if (!open) {
             setExtraFeesDialogShipment(null);
-            setExtraFeesTypeInput("EXTRA_WEIGHT");
             setExtraWeightInput("");
             setExtraCostInput("");
           }
@@ -1399,7 +1573,7 @@ export default function AdminPayments() {
           <DialogHeader>
             <DialogTitle>Edit Extra Fees</DialogTitle>
             <DialogDescription>
-              Choose how this shipment should be adjusted. Extra weight uses the existing gross-total-per-weight formula, while extra cost stores a manual amount.
+              Add extra weight, manual extra cost, or both for this shipment. Extra weight is billed to the client, while extra cost stays as an internal system cost only.
             </DialogDescription>
           </DialogHeader>
           {extraFeesDialogShipment && (
@@ -1415,55 +1589,48 @@ export default function AdminPayments() {
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="select-extra-fees-type">Extra Fee Type</Label>
-                <Select
-                  value={extraFeesTypeInput}
-                  onValueChange={(value: ExtraFeesTypeValue) => setExtraFeesTypeInput(value)}
-                >
-                  <SelectTrigger id="select-extra-fees-type" data-testid="select-extra-fees-type">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="EXTRA_WEIGHT">Extra Weight</SelectItem>
-                    <SelectItem value="EXTRA_COST">Extra Cost</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="extra-weight-input">Extra Weight</Label>
+                <Input
+                  id="extra-weight-input"
+                  inputMode="decimal"
+                  value={extraWeightInput}
+                  onChange={(e) => setExtraWeightInput(e.target.value)}
+                  placeholder={`0.00 ${extraFeesDialogShipment.weightUnit || "KG"}`}
+                  data-testid="input-extra-fees-weight"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Calculated weight-based fees:
+                  {" "}
+                  <SarAmount
+                    amount={roundMoney((Number(extraWeightInput) || 0) * getExtraFeesRate(extraFeesDialogShipment))}
+                  />
+                </p>
               </div>
-              {extraFeesTypeInput === "EXTRA_WEIGHT" ? (
-                <div className="grid gap-2">
-                  <Label htmlFor="extra-weight-input">Extra Weight</Label>
-                  <Input
-                    id="extra-weight-input"
-                    inputMode="decimal"
-                    value={extraWeightInput}
-                    onChange={(e) => setExtraWeightInput(e.target.value)}
-                    placeholder={`0.00 ${extraFeesDialogShipment.weightUnit || "KG"}`}
-                    data-testid="input-extra-fees-weight"
+              <div className="grid gap-2">
+                <Label htmlFor="extra-cost-input">Extra Cost</Label>
+                <Input
+                  id="extra-cost-input"
+                  inputMode="decimal"
+                  value={extraCostInput}
+                  onChange={(e) => setExtraCostInput(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="input-extra-fees-cost"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Manual extra cost added on top of any weight-based adjustment.
+                </p>
+              </div>
+              <div className="rounded-lg border p-3 text-sm">
+                Total extra fees after save:{" "}
+                <span className="font-semibold">
+                  <SarAmount
+                    amount={roundMoney(
+                      ((Number(extraWeightInput) || 0) * getExtraFeesRate(extraFeesDialogShipment)) +
+                      (Number(extraCostInput) || 0),
+                    )}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Calculated extra fees:
-                    {" "}
-                    <SarAmount
-                      amount={roundMoney((Number(extraWeightInput) || 0) * getExtraFeesRate(extraFeesDialogShipment))}
-                    />
-                  </p>
-                </div>
-              ) : (
-                <div className="grid gap-2">
-                  <Label htmlFor="extra-cost-input">Extra Cost</Label>
-                  <Input
-                    id="extra-cost-input"
-                    inputMode="decimal"
-                    value={extraCostInput}
-                    onChange={(e) => setExtraCostInput(e.target.value)}
-                    placeholder="0.00"
-                    data-testid="input-extra-fees-cost"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    This stores the manual extra cost amount for the shipment.
-                  </p>
-                </div>
-              )}
+                </span>
+              </div>
               {extraFeesDialogShipment.extraFeesEmailSentAt && (
                 <p className="text-xs text-muted-foreground">
                   Last client email sent {format(new Date(extraFeesDialogShipment.extraFeesEmailSentAt), "MMM d, yyyy 'at' h:mm a")}
@@ -1480,7 +1647,7 @@ export default function AdminPayments() {
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                Saving this will notify the client by email and surface the charge in the client payments page.
+                Saving this will notify the client only when extra weight is billed, create or update the extra-weight invoice when needed, and keep manual extra cost as an internal system charge.
               </p>
             </div>
           )}
@@ -1504,7 +1671,6 @@ export default function AdminPayments() {
               variant="outline"
               onClick={() => {
                 setExtraFeesDialogShipment(null);
-                setExtraFeesTypeInput("EXTRA_WEIGHT");
                 setExtraWeightInput("");
                 setExtraCostInput("");
               }}
@@ -1516,9 +1682,8 @@ export default function AdminPayments() {
                 onClick={() =>
                   updateExtraFeesMutation.mutate({
                     shipmentId: extraFeesDialogShipment.id,
-                    extraFeesType: extraFeesTypeInput,
-                    extraWeightValue: extraFeesTypeInput === "EXTRA_WEIGHT" ? extraWeightInput : undefined,
-                    extraCostAmountSar: extraFeesTypeInput === "EXTRA_COST" ? extraCostInput : undefined,
+                    extraWeightValue: extraWeightInput,
+                    extraCostAmountSar: extraCostInput,
                   })
                 }
                 disabled={updateExtraFeesMutation.isPending}

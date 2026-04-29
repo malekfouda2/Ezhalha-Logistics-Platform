@@ -168,6 +168,7 @@ export default function AdminSystemLogs() {
     const colors: Record<string, string> = {
       fedex: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
       zoho: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+      tap: "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200",
       moyasar: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
       stripe: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
       email: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
@@ -315,6 +316,7 @@ export default function AdminSystemLogs() {
                   <SelectItem value="all">All Sources</SelectItem>
                   <SelectItem value="fedex">FedEx</SelectItem>
                   <SelectItem value="zoho">Zoho</SelectItem>
+                  <SelectItem value="tap">Tap</SelectItem>
                   <SelectItem value="moyasar">Moyasar</SelectItem>
                   <SelectItem value="stripe">Stripe</SelectItem>
                   <SelectItem value="email">Email</SelectItem>

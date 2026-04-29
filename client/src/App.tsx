@@ -260,6 +260,9 @@ function Router() {
       <Route path="/client/shipments/new">
         <ProtectedRoute component={CreateShipment} requiredUserType="client" />
       </Route>
+      <Route path="/client/create-shipment">
+        <ProtectedRoute component={CreateShipment} requiredUserType="client" />
+      </Route>
       <Route path="/client/invoices">
         <ProtectedRoute component={ClientInvoices} requiredUserType="client" />
       </Route>

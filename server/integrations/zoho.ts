@@ -9,6 +9,7 @@
  * - ZOHO_ORGANIZATION_ID
  */
 
+import "../load-env";
 import { storage } from "../storage";
 
 export interface ZohoInvoiceParams {

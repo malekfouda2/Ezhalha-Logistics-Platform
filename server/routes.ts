@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
-import type { ClientAccount, ClientUserPermission, Permission, Role, Shipment, User } from "@shared/schema";
+import type { ClientAccount, ClientUserPermission, Invoice, Permission, Role, Shipment, User } from "@shared/schema";
 import {
   ACCOUNT_MANAGER_SYSTEM_ROLE_DESCRIPTION,
   ACCOUNT_MANAGER_SYSTEM_ROLE_ID,
@@ -16,6 +16,7 @@ import {
   CarrierPayoutBatchStatus,
   ClientPermission,
   ALL_CLIENT_PERMISSIONS,
+  InvoiceType,
   shipmentTradeDocumentSchema,
   ShipmentExtraFeeType,
   type ClientPermissionValue,
@@ -24,28 +25,236 @@ import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricin
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification } from "./services/email";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
 import type { CarrierAdapter, CreateShipmentRequest } from "./integrations/fedex";
-import { getCarrierAdapter } from "./integrations/carriers";
+import { carrierService, getCarrierAdapter } from "./integrations/carriers";
 import { zohoService } from "./integrations/zoho";
-import { stripeService } from "./integrations/stripe";
-import { moyasarService } from "./integrations/moyasar";
-import Stripe from "stripe";
+import type { TapCharge } from "./integrations/tap";
+import { tapService } from "./integrations/tap";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
-import { lookupHsCode, confirmHsCode } from "./services/hsLookup";
+import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
   calculateShipmentAccounting,
   isDdpEligibleForShipment,
 } from "./services/shipment-accounting";
+import {
+  getCompanyApplicationDocumentLabel,
+  getMissingCompanyApplicationDocumentTypes,
+} from "@shared/application-documents";
 import { buildFedExShipmentRequestFromShipment } from "./services/fedex-shipment";
 import { buildDhlShipmentRequestFromShipment } from "./services/dhl-shipment";
 import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 
 const SALT_ROUNDS = 10;
 const FINANCIAL_MONTH_WINDOW = 12;
+const DEFAULT_TAP_SOURCE_ID = "src_card";
+
+const COUNTRY_DIAL_CODES: Record<string, string> = {
+  SA: "966",
+  "SAUDI ARABIA": "966",
+  AE: "971",
+  "UNITED ARAB EMIRATES": "971",
+  BH: "973",
+  BAHRAIN: "973",
+  EG: "20",
+  EGYPT: "20",
+  GB: "44",
+  "UNITED KINGDOM": "44",
+  JO: "962",
+  JORDAN: "962",
+  KW: "965",
+  KUWAIT: "965",
+  OM: "968",
+  OMAN: "968",
+  QA: "974",
+  QATAR: "974",
+  US: "1",
+  "UNITED STATES": "1",
+};
 
 function formatMoney(value: number): string {
   return value.toFixed(2);
+}
+
+function hsConfidenceFromScore(score?: number): "HIGH" | "MEDIUM" | "LOW" | "MISSING" {
+  if (typeof score !== "number" || !Number.isFinite(score) || score <= 0) {
+    return "MISSING";
+  }
+  if (score >= 0.7) return "HIGH";
+  if (score >= 0.4) return "MEDIUM";
+  return "LOW";
+}
+
+async function enrichInvoiceItemsWithHsCodes(
+  items: Awaited<ReturnType<typeof extractInvoiceItemsFromDocument>>["items"],
+  options: {
+    clientAccountId?: string;
+    destinationCountry: string;
+  },
+): Promise<{
+  items: Awaited<ReturnType<typeof extractInvoiceItemsFromDocument>>["items"];
+  autoMatchedHsCodeCount: number;
+  hsCodeReviewCount: number;
+}> {
+  let autoMatchedHsCodeCount = 0;
+  let hsCodeReviewCount = 0;
+
+  const enrichedItems = await Promise.all(
+    items.map(async (item) => {
+      if (!item.itemName || !item.category || !item.countryOfOrigin) {
+        return item;
+      }
+
+      try {
+        const hsLookup = await lookupHsCode(
+          {
+            itemName: item.itemName,
+            itemDescription: item.itemDescription || undefined,
+            category: item.category,
+            material: item.material || undefined,
+            countryOfOrigin: item.countryOfOrigin,
+            destinationCountry: options.destinationCountry,
+          },
+          options.clientAccountId,
+        );
+
+        const topCandidate = hsLookup.candidates[0];
+        const confidence = hsConfidenceFromScore(topCandidate?.confidence);
+        const shouldAutoAttach =
+          Boolean(topCandidate) &&
+          confidence === "HIGH" &&
+          !isGenericItemName(item.itemName);
+
+        if (shouldAutoAttach) {
+          autoMatchedHsCodeCount += 1;
+        } else if (topCandidate) {
+          hsCodeReviewCount += 1;
+        }
+
+        return {
+          ...item,
+          hsCode: shouldAutoAttach ? topCandidate!.code : item.hsCode,
+          hsCodeSource: hsLookup.source,
+          hsCodeConfidence: confidence,
+          hsCodeCandidates: hsLookup.candidates,
+        };
+      } catch (error) {
+        logError("Invoice HS code enrichment failed", error);
+        return item;
+      }
+    }),
+  );
+
+  return {
+    items: enrichedItems,
+    autoMatchedHsCodeCount,
+    hsCodeReviewCount,
+  };
+}
+
+function splitFullName(fullName: string | null | undefined): { firstName: string; lastName: string } {
+  const normalized = (fullName || "").trim();
+  if (!normalized) {
+    return {
+      firstName: "Customer",
+      lastName: "Account",
+    };
+  }
+
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0],
+      lastName: parts[0],
+    };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function normalizePhoneNumber(rawPhone: string | null | undefined, countryCodeHint?: string | null) {
+  const digits = String(rawPhone || "").replace(/\D/g, "");
+  const upperCountryCode = String(countryCodeHint || "").toUpperCase();
+  const fallbackDialCode = COUNTRY_DIAL_CODES[upperCountryCode] || "966";
+
+  if (!digits) {
+    return undefined;
+  }
+
+  if (rawPhone?.trim().startsWith("+")) {
+    const match = rawPhone.replace(/[^\d+]/g, "").match(/^\+(\d{1,4})(\d+)$/);
+    if (match) {
+      return {
+        countryCode: match[1],
+        number: match[2].replace(/^0+/, "") || match[2],
+      };
+    }
+  }
+
+  if (digits.startsWith(fallbackDialCode) && digits.length > fallbackDialCode.length) {
+    return {
+      countryCode: fallbackDialCode,
+      number: digits.slice(fallbackDialCode.length).replace(/^0+/, "") || digits.slice(fallbackDialCode.length),
+    };
+  }
+
+  return {
+    countryCode: fallbackDialCode,
+    number: digits.replace(/^0+/, "") || digits,
+  };
+}
+
+function buildTapCustomer(account: ClientAccount) {
+  const displayName =
+    account.shippingContactName ||
+    account.name ||
+    account.companyName ||
+    "Ezhalha Customer";
+  const { firstName, lastName } = splitFullName(displayName);
+  const phone = normalizePhoneNumber(
+    account.shippingContactPhone || account.phone,
+    account.shippingCountryCode || account.country,
+  );
+
+  return {
+    ...(account.tapCustomerId ? { id: account.tapCustomerId } : {}),
+    firstName,
+    lastName,
+    email: account.email,
+    ...(phone ? { phone } : {}),
+  };
+}
+
+function buildTapEmbedConfig(account: ClientAccount) {
+  const customer = buildTapCustomer(account);
+
+  return {
+    configured: tapService.isConfigured(),
+    embeddedCardEnabled: tapService.isEmbeddedCardConfigured(),
+    hostedRedirectEnabled: tapService.isConfigured(),
+    publicKey: tapService.getPublicKey() || null,
+    merchantId: tapService.getMerchantId() || null,
+    sdkScriptUrl: tapService.getSdkScriptUrl(),
+    saveCardEnabled: tapService.isSavedCardsEnabled(),
+    supportedBrands: ["VISA", "MASTERCARD", "AMERICAN_EXPRESS", "MADA"],
+    locale: "en",
+    customer: {
+      tapCustomerId: account.tapCustomerId || null,
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      email: customer.email,
+      phone: customer.phone || null,
+    },
+  };
+}
+
+function buildAppBaseUrl(req: Request): string {
+  const protocol = (req.headers["x-forwarded-proto"] as string | undefined) || req.protocol || "https";
+  const host = (req.headers["x-forwarded-host"] as string | undefined) || req.headers.host;
+  return `${protocol}://${host}`;
 }
 
 function resolveCarrierCode(carrier?: string | null): string {
@@ -73,6 +282,487 @@ async function buildCarrierShipmentRequestFromShipment(
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+const clientFinancialReconcileInFlight = new Map<string, Promise<void>>();
+
+async function ensureShipmentBillingArtifacts(params: {
+  shipment: Shipment;
+  transactionId?: string | null;
+  paymentMethod: string;
+  invoiceStatus?: "paid" | "pending";
+}) {
+  const invoiceAmount = formatMoney(
+    parseMoneyValue(params.shipment.clientTotalAmountSar ?? params.shipment.finalPrice),
+  );
+  const shouldMarkPaid = params.invoiceStatus !== "pending";
+
+  let invoice = await storage.getInvoiceByShipmentId(params.shipment.id);
+  if (!invoice) {
+    invoice = await storage.createInvoice({
+      clientAccountId: params.shipment.clientAccountId,
+      shipmentId: params.shipment.id,
+      invoiceType: InvoiceType.SHIPMENT,
+      description: buildShipmentInvoiceDescription(params.shipment),
+      amount: invoiceAmount,
+      status: shouldMarkPaid ? "paid" : "pending",
+      dueDate: shouldMarkPaid ? new Date() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+  }
+
+  if (shouldMarkPaid && (!invoice.paidAt || invoice.status !== "paid")) {
+    invoice =
+      (await storage.updateInvoice(invoice.id, {
+        status: "paid",
+        paidAt: new Date(),
+      })) || invoice;
+  }
+
+  if (!shouldMarkPaid || !params.transactionId) {
+    return invoice;
+  }
+
+  const payments = await storage.getPaymentsByClientAccount(params.shipment.clientAccountId);
+  const existingCompletedPayment = payments.find(
+    (payment) =>
+      payment.invoiceId === invoice.id &&
+      payment.transactionId === params.transactionId &&
+      payment.status === "completed",
+  );
+
+  if (existingCompletedPayment) {
+    return invoice;
+  }
+
+  const existingPendingPayment = payments.find(
+    (payment) =>
+      payment.invoiceId === invoice.id &&
+      payment.status === "pending" &&
+      (!payment.transactionId || payment.transactionId === params.transactionId),
+  );
+
+  if (existingPendingPayment) {
+    await storage.updatePayment(existingPendingPayment.id, {
+      status: "completed",
+      paymentMethod: params.paymentMethod,
+      transactionId: params.transactionId,
+    });
+    return invoice;
+  }
+
+  await storage.createPayment({
+    invoiceId: invoice.id,
+    clientAccountId: params.shipment.clientAccountId,
+    amount: invoiceAmount,
+    paymentMethod: params.paymentMethod,
+    status: "completed",
+    transactionId: params.transactionId,
+  });
+
+  return invoice;
+}
+
+async function finalizePaidShipmentAfterPayment(params: {
+  shipment: Shipment;
+  transactionId?: string | null;
+  paymentMethod: string;
+  userId?: string;
+  ipAddress?: string;
+}) {
+  const { shipment, transactionId, paymentMethod, userId, ipAddress } = params;
+
+  if (shipment.status === "cancelled") {
+    throw new Error("Cancelled shipments cannot be finalized");
+  }
+
+  if (shipment.status === "created" && shipment.carrierTrackingNumber) {
+    const updatedShipment =
+      shipment.paymentStatus !== "paid"
+        ? ((await storage.updateShipment(shipment.id, { paymentStatus: "paid" })) || shipment)
+        : shipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+    });
+
+    return updatedShipment;
+  }
+
+  const confirmAddrValidation = validateShippingAddresses(
+    {
+      countryCode: shipment.senderCountry,
+      city: shipment.senderCity,
+      addressLine1: shipment.senderAddress,
+      postalCode: shipment.senderPostalCode || "",
+      phone: shipment.senderPhone,
+      stateOrProvince: shipment.senderStateOrProvince || "",
+    },
+    {
+      countryCode: shipment.recipientCountry,
+      city: shipment.recipientCity,
+      addressLine1: shipment.recipientAddress,
+      postalCode: shipment.recipientPostalCode || "",
+      phone: shipment.recipientPhone,
+      stateOrProvince: shipment.recipientStateOrProvince || "",
+    },
+  );
+  if (!confirmAddrValidation.valid) {
+    throw new Error(confirmAddrValidation.errors.join("; "));
+  }
+
+  let latestShipment = shipment;
+  const carrierAdapter = getAdapterForShipment(latestShipment);
+
+  try {
+    const preparedShipment = await buildCarrierShipmentRequestFromShipment(latestShipment, carrierAdapter);
+    if (preparedShipment.tradeDocumentsData !== latestShipment.tradeDocumentsData) {
+      latestShipment =
+        (await storage.updateShipment(latestShipment.id, {
+          tradeDocumentsData: preparedShipment.tradeDocumentsData,
+        })) || latestShipment;
+    }
+
+    const carrierResponse = await carrierAdapter.createShipment(preparedShipment.carrierRequest);
+    const updatedShipment =
+      (await storage.updateShipment(latestShipment.id, {
+        status: "created",
+        paymentStatus: "paid",
+        carrierStatus: "created",
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
+        carrierShipmentId: carrierResponse.trackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        carrierLabelBase64: carrierResponse.labelData || null,
+        carrierLabelMimeType: "application/pdf",
+        carrierLabelFormat: "PDF",
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+        carrierLastAttemptAt: new Date(),
+        carrierAttempts: (latestShipment.carrierAttempts || 0) + 1,
+      })) || latestShipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+    });
+
+    await logAudit(
+      userId,
+      "confirm_shipment",
+      "shipment",
+      updatedShipment.id,
+      `Confirmed shipment ${updatedShipment.trackingNumber} with carrier tracking ${carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber}`,
+      ipAddress,
+    );
+
+    return updatedShipment;
+  } catch (carrierError) {
+    const isCarrierErr = carrierError instanceof CarrierError;
+    const errCode = isCarrierErr ? carrierError.code : "UNKNOWN";
+    const errMsg = isCarrierErr ? carrierError.carrierMessage : (carrierError as Error).message;
+
+    await storage.updateShipment(latestShipment.id, {
+      status: "carrier_error",
+      carrierStatus: "error",
+      carrierErrorCode: errCode,
+      carrierErrorMessage: errMsg,
+      carrierLastAttemptAt: new Date(),
+      carrierAttempts: (latestShipment.carrierAttempts || 0) + 1,
+      paymentStatus: "paid",
+    });
+
+    throw carrierError;
+  }
+}
+
+async function reconcilePaidShipmentsForClientAccount(clientAccountId: string, ipAddress?: string) {
+  const existingRun = clientFinancialReconcileInFlight.get(clientAccountId);
+  if (existingRun) {
+    return existingRun;
+  }
+
+  const runPromise = (async () => {
+    const [shipments, invoices, payments] = await Promise.all([
+      storage.getShipmentsByClientAccount(clientAccountId),
+      storage.getInvoicesByClientAccount(clientAccountId),
+      storage.getPaymentsByClientAccount(clientAccountId),
+    ]);
+
+    const invoiceByShipmentId = new Map(
+      invoices
+        .filter((invoice) => Boolean(invoice.shipmentId))
+        .map((invoice) => [invoice.shipmentId!, invoice] as const),
+    );
+    const completedPaymentInvoiceIds = new Set(
+      payments
+        .filter((payment) => payment.status === "completed")
+        .map((payment) => payment.invoiceId),
+    );
+
+    for (const shipment of shipments) {
+      if (shipment.status === "cancelled" || shipment.paymentStatus !== "paid" || shipment.paymentMethod === "CREDIT") {
+        continue;
+      }
+
+      const existingInvoice = invoiceByShipmentId.get(shipment.id);
+      const paymentMethod = shipment.paymentMethod === "CREDIT" ? "credit" : "tap";
+      const needsCarrierFinalization =
+        shipment.status === "payment_pending" ||
+        (shipment.status === "carrier_error" && !shipment.carrierTrackingNumber) ||
+        (shipment.status === "created" && !shipment.carrierTrackingNumber);
+      const needsBillingArtifacts =
+        !existingInvoice ||
+        existingInvoice.status !== "paid" ||
+        !existingInvoice.paidAt ||
+        (shipment.paymentIntentId ? !completedPaymentInvoiceIds.has(existingInvoice.id) : false);
+
+      if (!needsCarrierFinalization && !needsBillingArtifacts) {
+        continue;
+      }
+
+      try {
+        if (needsCarrierFinalization) {
+          const finalizedShipment = await finalizePaidShipmentAfterPayment({
+            shipment,
+            transactionId: shipment.paymentIntentId,
+            paymentMethod,
+            ipAddress,
+          });
+
+          const refreshedInvoice = await storage.getInvoiceByShipmentId(finalizedShipment.id);
+          if (refreshedInvoice) {
+            invoiceByShipmentId.set(finalizedShipment.id, refreshedInvoice);
+            if (shipment.paymentIntentId) {
+              completedPaymentInvoiceIds.add(refreshedInvoice.id);
+            }
+          }
+          continue;
+        }
+
+        const reconciledInvoice = await ensureShipmentBillingArtifacts({
+          shipment,
+          transactionId: shipment.paymentIntentId,
+          paymentMethod,
+          invoiceStatus: "paid",
+        });
+        invoiceByShipmentId.set(shipment.id, reconciledInvoice);
+        if (shipment.paymentIntentId) {
+          completedPaymentInvoiceIds.add(reconciledInvoice.id);
+        }
+      } catch (error) {
+        logError("Failed to reconcile paid client shipment", {
+          shipmentId: shipment.id,
+          trackingNumber: shipment.trackingNumber,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    for (const shipment of shipments) {
+      if (shipment.status === "cancelled") {
+        continue;
+      }
+
+      const derivedExtraFees = getShipmentExtraFeeComponents(shipment);
+      if (derivedExtraFees.length === 0) {
+        continue;
+      }
+
+      try {
+        await syncShipmentExtraFeeInvoices(shipment);
+      } catch (error) {
+        logError("Failed to reconcile shipment extra fee invoices", {
+          shipmentId: shipment.id,
+          trackingNumber: shipment.trackingNumber,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  })()
+    .finally(() => {
+      clientFinancialReconcileInFlight.delete(clientAccountId);
+    });
+
+  clientFinancialReconcileInFlight.set(clientAccountId, runPromise);
+  return runPromise;
+}
+
+async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
+  const shipmentId = charge.metadata?.shipmentId;
+  const shipment =
+    (shipmentId ? await storage.getShipment(shipmentId) : undefined) ||
+    (charge.id ? await storage.getShipmentByPaymentId(charge.id) : undefined);
+
+  if (!shipment) {
+    return;
+  }
+
+  const updates: Record<string, any> = {};
+  if (shipment.paymentIntentId !== charge.id) {
+    updates.paymentIntentId = charge.id;
+  }
+
+  if (tapService.isSuccessfulStatus(charge.status) && shipment.paymentStatus !== "paid") {
+    updates.paymentStatus = "paid";
+  } else if (tapService.isFailureStatus(charge.status) && shipment.paymentStatus !== "failed") {
+    updates.paymentStatus = "failed";
+  }
+
+  let latestShipment = shipment;
+  if (Object.keys(updates).length > 0) {
+    latestShipment = (await storage.updateShipment(shipment.id, updates)) || shipment;
+    await logAudit(
+      undefined,
+      "tap_charge_update",
+      "shipment",
+      shipment.id,
+      `Tap payment updated shipment ${shipment.trackingNumber} to ${charge.status}`,
+      ipAddress,
+    );
+  }
+
+  if (tapService.isSuccessfulStatus(charge.status)) {
+    await finalizePaidShipmentAfterPayment({
+      shipment: latestShipment,
+      transactionId: charge.id,
+      paymentMethod: "tap",
+      userId: undefined,
+      ipAddress,
+    });
+  }
+}
+
+async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
+  const invoiceId = charge.metadata?.invoiceId;
+  if (!invoiceId) {
+    return;
+  }
+
+  const invoice = await storage.getInvoice(invoiceId);
+  if (!invoice) {
+    return;
+  }
+
+  const payments = await storage.getPaymentsByClientAccount(invoice.clientAccountId);
+  const matchingPayment =
+    payments.find((payment) => payment.invoiceId === invoice.id && payment.transactionId === charge.id) ||
+    payments.find((payment) => payment.invoiceId === invoice.id && payment.status === "pending");
+
+  if (tapService.isSuccessfulStatus(charge.status)) {
+    if (invoice.status !== "paid") {
+      await storage.updateInvoice(invoice.id, { status: "paid", paidAt: new Date() });
+    }
+
+    if (matchingPayment) {
+      await storage.updatePayment(matchingPayment.id, {
+        status: "completed",
+        paymentMethod: "tap",
+        transactionId: charge.id,
+      });
+    } else {
+      await storage.createPayment({
+        invoiceId: invoice.id,
+        clientAccountId: invoice.clientAccountId,
+        amount: formatMoney(Number(charge.amount || invoice.amount)),
+        paymentMethod: "tap",
+        transactionId: charge.id,
+        status: "completed",
+      });
+    }
+
+    await logAudit(
+      undefined,
+      "tap_charge_update",
+      "invoice",
+      invoice.id,
+      `Tap payment completed for invoice ${invoice.invoiceNumber}`,
+      ipAddress,
+    );
+    return;
+  }
+
+  if (tapService.isFailureStatus(charge.status) && matchingPayment && matchingPayment.status !== "failed") {
+    await storage.updatePayment(matchingPayment.id, {
+      status: "failed",
+      paymentMethod: "tap",
+      transactionId: charge.id,
+    });
+  }
+}
+
+async function syncTapSavedCardFromCharge(charge: TapCharge) {
+  if (!tapService.isSuccessfulStatus(charge.status)) {
+    return;
+  }
+
+  const clientAccountId = charge.metadata?.clientAccountId;
+  if (!clientAccountId) {
+    return;
+  }
+
+  const tapCustomerId = charge.customer?.id;
+  const tapCardId = charge.card?.id;
+
+  if (!tapCustomerId && !tapCardId) {
+    return;
+  }
+
+  const clientAccount = await storage.getClientAccount(clientAccountId);
+  if (!clientAccount) {
+    return;
+  }
+
+  if (tapCustomerId && clientAccount.tapCustomerId !== tapCustomerId) {
+    await storage.updateClientAccount(clientAccountId, {
+      tapCustomerId,
+    });
+  }
+
+  if (!tapCustomerId || !tapCardId) {
+    return;
+  }
+
+  const existingCard = await storage.getTapSavedCardByTapCardId(clientAccountId, tapCardId);
+  const baseCardFields = {
+    clientAccountId,
+    tapCustomerId,
+    tapCardId,
+    paymentAgreementId: charge.payment_agreement?.id || null,
+    brand: charge.card?.brand || null,
+    scheme: charge.card?.scheme || null,
+    funding: charge.card?.funding || null,
+    lastFour: charge.card?.last_four || null,
+    firstSix: charge.card?.first_six || null,
+    firstEight: charge.card?.first_eight || null,
+    expMonth: charge.card?.exp_month ?? null,
+    expYear: charge.card?.exp_year ?? null,
+    cardholderName: charge.card?.name || null,
+    fingerprint: charge.card?.fingerprint || null,
+    status: "active",
+  };
+
+  if (existingCard) {
+    await storage.updateTapSavedCard(existingCard.id, {
+      ...baseCardFields,
+      deletedAt: null,
+    });
+    return;
+  }
+
+  const activeCards = await storage.getTapSavedCardsByClientAccount(clientAccountId);
+  await storage.createTapSavedCard({
+    ...baseCardFields,
+    isDefault: activeCards.length === 0,
+  });
+}
+
+async function processTapChargeUpdate(charge: TapCharge, ipAddress?: string) {
+  await syncTapSavedCardFromCharge(charge);
+  await processTapShipmentCharge(charge, ipAddress);
+  await processTapInvoiceCharge(charge, ipAddress);
 }
 
 function getShipmentAccountingInsert(snapshot: ReturnType<typeof calculateShipmentAccounting>) {
@@ -256,26 +946,80 @@ function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   return roundMoney(grossTotalAmountSar / weightValue);
 }
 
+function deriveShipmentExtraFees(shipment: Record<string, any>) {
+  const storedType = typeof shipment.extraFeesType === "string" ? shipment.extraFeesType : null;
+  const storedTotalAmountSar = parseMoneyValue(shipment.extraFeesAmountSar);
+  const extraFeesWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
+  const extraFeesRateSarPerWeight = getExtraFeesRateSarPerWeight(shipment);
+  const extraWeightAmountSar = extraFeesWeightValue > 0
+    ? roundMoney(extraFeesWeightValue * extraFeesRateSarPerWeight)
+    : 0;
+
+  const explicitExtraCostAmountSar = parseMoneyValue(shipment.extraFeesCostAmountSar);
+  const extraFeesCostAmountSar =
+    explicitExtraCostAmountSar > 0
+      ? explicitExtraCostAmountSar
+      : storedType === ShipmentExtraFeeType.EXTRA_COST && storedTotalAmountSar > 0
+        ? storedTotalAmountSar
+        : 0;
+
+  const extraFeesAmountSar =
+    extraWeightAmountSar > 0 || extraFeesCostAmountSar > 0
+      ? roundMoney(extraWeightAmountSar + extraFeesCostAmountSar)
+      : storedTotalAmountSar;
+
+  let extraFeesType: string | null = null;
+  if (extraWeightAmountSar > 0 && extraFeesCostAmountSar > 0) {
+    extraFeesType = ShipmentExtraFeeType.COMBINED;
+  } else if (extraWeightAmountSar > 0) {
+    extraFeesType = ShipmentExtraFeeType.EXTRA_WEIGHT;
+  } else if (extraFeesCostAmountSar > 0) {
+    extraFeesType = ShipmentExtraFeeType.EXTRA_COST;
+  } else if (storedType && storedTotalAmountSar > 0) {
+    extraFeesType = storedType;
+  }
+
+  return {
+    extraFeesType,
+    extraFeesAmountSar,
+    extraFeesWeightValue,
+    extraWeightAmountSar,
+    extraFeesCostAmountSar,
+    extraFeesRateSarPerWeight,
+  };
+}
+
 function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
   const isCancelled = shipment.status === "cancelled";
-  const costAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.costAmountSar);
+  const derivedExtraFees = isCancelled
+    ? {
+        extraFeesType: null,
+        extraFeesAmountSar: 0,
+        extraFeesWeightValue: 0,
+        extraWeightAmountSar: 0,
+        extraFeesCostAmountSar: 0,
+        extraFeesRateSarPerWeight: 0,
+      }
+    : deriveShipmentExtraFees(shipment);
+  const baseCostAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.costAmountSar);
   const costTaxAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.costTaxAmountSar);
   const sellSubtotalAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.sellSubtotalAmountSar);
   const sellTaxAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.sellTaxAmountSar);
   const clientTotalAmountSar = isCancelled
     ? 0
     : parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
-  const systemCostTotalAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.systemCostTotalAmountSar);
-  const taxPayableAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.taxPayableAmountSar);
   const revenueExcludingTaxAmountSar = isCancelled
     ? 0
     : parseMoneyValue(shipment.revenueExcludingTaxAmountSar);
   const marginAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.margin);
   const weightValue = parseMoneyValue(shipment.weight);
-  const extraFeesRateSarPerWeight = isCancelled ? 0 : getExtraFeesRateSarPerWeight(shipment);
-  const extraFeesAmountSar = isCancelled
+  const costAmountSar = isCancelled
     ? 0
-    : parseMoneyValue(shipment.extraFeesAmountSar);
+    : roundMoney(baseCostAmountSar + derivedExtraFees.extraFeesCostAmountSar);
+  const systemCostTotalAmountSar = isCancelled
+    ? 0
+    : roundMoney(costAmountSar + costTaxAmountSar);
+  const taxPayableAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.taxPayableAmountSar);
   const netProfitAmountSar = isCancelled
     ? 0
     : roundMoney(revenueExcludingTaxAmountSar - costAmountSar);
@@ -291,8 +1035,12 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
     taxPayableAmountSar,
     revenueExcludingTaxAmountSar,
     marginAmountSar,
-    extraFeesAmountSar,
-    extraFeesRateSarPerWeight,
+    extraFeesType: derivedExtraFees.extraFeesType,
+    extraFeesAmountSar: derivedExtraFees.extraFeesAmountSar,
+    extraFeesWeightValue: derivedExtraFees.extraFeesWeightValue,
+    extraWeightAmountSar: derivedExtraFees.extraWeightAmountSar,
+    extraFeesCostAmountSar: derivedExtraFees.extraFeesCostAmountSar,
+    extraFeesRateSarPerWeight: derivedExtraFees.extraFeesRateSarPerWeight,
     netProfitAmountSar,
     weightValue,
   };
@@ -301,12 +1049,40 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
 function serializeFinancialShipment(
   shipment: Record<string, any>,
   client?: { name?: string | null; accountNumber?: string | null } | null,
+  relatedInvoices: Invoice[] = [],
 ) {
   const effective = getEffectiveShipmentFinancials(shipment);
   const carrierPaymentAmountSar =
     shipment.carrierPaymentStatus === CarrierPaymentStatus.PAID
       ? parseMoneyValue(shipment.carrierPaymentAmountSar ?? shipment.systemCostTotalAmountSar)
       : parseMoneyValue(shipment.carrierPaymentAmountSar);
+  const extraWeightPaidAmountSar = roundMoney(
+    relatedInvoices
+      .filter(
+        (invoice) =>
+          invoice.invoiceType === InvoiceType.EXTRA_WEIGHT &&
+          invoice.status === "paid" &&
+          !invoice.deletedAt,
+      )
+      .reduce((sum, invoice) => sum + parseMoneyValue(invoice.amount), 0),
+  );
+  const extraWeightOutstandingAmountSar = roundMoney(
+    Math.max(effective.extraWeightAmountSar - extraWeightPaidAmountSar, 0),
+  );
+  const isExtraWeightPaid =
+    effective.extraWeightAmountSar > 0 && extraWeightOutstandingAmountSar <= 0;
+  const extraWeightPendingInvoice = relatedInvoices.find(
+    (invoice) =>
+      invoice.invoiceType === InvoiceType.EXTRA_WEIGHT &&
+      invoice.status !== "paid" &&
+      !invoice.deletedAt,
+  );
+  const extraWeightInvoiceStatus =
+    effective.extraWeightAmountSar <= 0
+      ? null
+      : isExtraWeightPaid
+        ? "paid"
+        : extraWeightPendingInvoice?.status || "pending";
 
   return {
     ...shipment,
@@ -321,12 +1097,15 @@ function serializeFinancialShipment(
     taxPayableAmountSar: effective.taxPayableAmountSar,
     revenueExcludingTaxAmountSar: effective.revenueExcludingTaxAmountSar,
     extraFeesAmountSar: effective.extraFeesAmountSar,
-    extraFeesType: shipment.extraFeesType || null,
-    extraFeesWeightValue: parseMoneyValue(shipment.extraFeesWeightValue),
-    extraFeesCostAmountSar: parseMoneyValue(shipment.extraFeesCostAmountSar),
+    extraFeesType: effective.extraFeesType,
+    extraFeesWeightValue: effective.extraFeesWeightValue,
+    extraFeesCostAmountSar: effective.extraFeesCostAmountSar,
+    extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
     extraFeesAddedAt: shipment.extraFeesAddedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt,
+    extraWeightInvoiceStatus,
+    isExtraWeightPaid,
     netProfitAmountSar: effective.netProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
@@ -343,6 +1122,33 @@ function serializeFinancialShipment(
       Boolean(shipment.carrierTrackingNumber),
     canViewCarrierPayment: shipment.carrierPaymentStatus === CarrierPaymentStatus.PAID,
     canCancel: shipment.status !== "cancelled" && shipment.status !== "delivered",
+  };
+}
+
+function serializeCarrierPaymentTransaction(
+  shipment: Record<string, any>,
+  client?: { name?: string | null; accountNumber?: string | null } | null,
+) {
+  const effective = getEffectiveShipmentFinancials(shipment);
+
+  return {
+    shipmentId: shipment.id,
+    trackingNumber: shipment.trackingNumber,
+    carrierTrackingId: shipment.carrierTrackingNumber || null,
+    clientName: client?.name || "Unknown Client",
+    clientAccountNumber: client?.accountNumber || null,
+    carrierCode: shipment.carrierCode || null,
+    carrierName: shipment.carrierName || shipment.carrierCode || "Unknown Carrier",
+    taxScenario: shipment.taxScenario || null,
+    carrierCostAmountSar: effective.costAmountSar,
+    carrierTaxAmountSar: effective.costTaxAmountSar,
+    carrierPaymentAmountSar: parseMoneyValue(
+      shipment.carrierPaymentAmountSar ?? effective.systemCostTotalAmountSar,
+    ),
+    carrierPaymentReference: shipment.carrierPaymentReference || null,
+    carrierPaymentNote: shipment.carrierPaymentNote || null,
+    carrierPaidAt: shipment.carrierPaidAt,
+    createdAt: shipment.createdAt,
   };
 }
 
@@ -1161,6 +1967,8 @@ async function markCreditInvoicePaid(
     shipmentInvoice = await storage.createInvoice({
       clientAccountId: invoice.clientAccountId,
       shipmentId: invoice.shipmentId,
+      invoiceType: InvoiceType.SHIPMENT,
+      description: shipment ? buildShipmentInvoiceDescription(shipment) : `Shipping service for shipment ${invoice.shipmentId}`,
       amount: invoiceAmount,
       status: "paid",
       dueDate: new Date(),
@@ -1244,6 +2052,8 @@ async function markShipmentClientPaymentPaid(shipment: Awaited<ReturnType<typeof
     invoice = await storage.createInvoice({
       clientAccountId: shipment.clientAccountId,
       shipmentId: shipment.id,
+      invoiceType: InvoiceType.SHIPMENT,
+      description: buildShipmentInvoiceDescription(shipment),
       amount: invoiceAmount,
       status: "paid",
       dueDate: new Date(),
@@ -1370,23 +2180,193 @@ async function cancelShipmentCarrierPayment(
 }
 
 function serializeClientExtraFeeNotice(shipment: Record<string, any>) {
+  const effective = getEffectiveShipmentFinancials(shipment);
   return {
     shipmentId: shipment.id,
     trackingNumber: shipment.trackingNumber,
     carrierTrackingNumber: shipment.carrierTrackingNumber || null,
     carrierName: shipment.carrierName || shipment.carrierCode || null,
     createdAt: shipment.createdAt,
-    extraFeesAmountSar: parseMoneyValue(shipment.extraFeesAmountSar),
-    extraFeesType: shipment.extraFeesType || null,
-    extraFeesWeightValue: parseMoneyValue(shipment.extraFeesWeightValue),
-    extraFeesCostAmountSar: parseMoneyValue(shipment.extraFeesCostAmountSar),
+    extraFeesAmountSar: effective.extraFeesAmountSar,
+    extraFeesType: effective.extraFeesType,
+    extraFeesWeightValue: effective.extraFeesWeightValue,
+    extraFeesCostAmountSar: effective.extraFeesCostAmountSar,
+    extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
     weightValue: parseMoneyValue(shipment.weight),
     weightUnit: shipment.weightUnit || "KG",
     grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
-    extraFeesRateSarPerWeight: getExtraFeesRateSarPerWeight(shipment),
+    extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
   };
+}
+
+function getInvoiceTypeLabel(invoiceType: string | null | undefined) {
+  if (invoiceType === InvoiceType.EXTRA_WEIGHT) {
+    return "Extra Weight";
+  }
+  if (invoiceType === InvoiceType.EXTRA_COST) {
+    return "Extra Cost";
+  }
+  return "Shipment";
+}
+
+function buildExtraFeeInvoiceDescription(shipment: Record<string, any>, invoiceType: string) {
+  const feeLabel = getInvoiceTypeLabel(invoiceType);
+  return `${feeLabel} adjustment for shipment ${shipment.trackingNumber}`;
+}
+
+function buildShipmentInvoiceDescription(shipment: Record<string, any>) {
+  return `Shipping service for shipment ${shipment.trackingNumber}`;
+}
+
+function getShipmentExtraFeeComponents(shipment: Record<string, any>) {
+  const effective = getEffectiveShipmentFinancials(shipment);
+  const components: Array<{
+    invoiceType: string;
+    amountSar: number;
+    weightValue?: number;
+    costAmountSar?: number;
+    rateSarPerWeight?: number;
+  }> = [];
+
+  if (effective.extraWeightAmountSar > 0) {
+    components.push({
+      invoiceType: InvoiceType.EXTRA_WEIGHT,
+      amountSar: effective.extraWeightAmountSar,
+      weightValue: effective.extraFeesWeightValue,
+      rateSarPerWeight: effective.extraFeesRateSarPerWeight,
+    });
+  }
+
+  if (effective.extraFeesCostAmountSar > 0) {
+    components.push({
+      invoiceType: InvoiceType.EXTRA_COST,
+      amountSar: effective.extraFeesCostAmountSar,
+      costAmountSar: effective.extraFeesCostAmountSar,
+    });
+  }
+
+  return components;
+}
+
+async function syncShipmentExtraFeeInvoiceForType(params: {
+  shipment: Shipment;
+  relatedInvoices: Invoice[];
+  invoiceType: typeof InvoiceType.EXTRA_WEIGHT | typeof InvoiceType.EXTRA_COST;
+  targetAmountSar: number;
+}) {
+  const extraFeeInvoices = params.relatedInvoices.filter(
+    (invoice) => invoice.invoiceType === params.invoiceType,
+  );
+  const paidAmountSar = roundMoney(
+    extraFeeInvoices
+      .filter((invoice) => invoice.status === "paid")
+      .reduce((sum, invoice) => sum + parseMoneyValue(invoice.amount), 0),
+  );
+  const pendingInvoices = extraFeeInvoices.filter((invoice) => invoice.status !== "paid");
+  const outstandingAmountSar = roundMoney(Math.max(params.targetAmountSar - paidAmountSar, 0));
+  const description = buildExtraFeeInvoiceDescription(params.shipment, params.invoiceType);
+
+  if (outstandingAmountSar <= 0) {
+    for (const pendingInvoice of pendingInvoices) {
+      await storage.updateInvoice(pendingInvoice.id, { deletedAt: new Date() });
+    }
+    return pendingInvoices[0] ?? extraFeeInvoices[0] ?? null;
+  }
+
+  const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  let invoice = pendingInvoices[0];
+
+  if (invoice) {
+    invoice =
+      (await storage.updateInvoice(invoice.id, {
+        amount: formatMoney(outstandingAmountSar),
+        description,
+        dueDate,
+        invoiceType: params.invoiceType,
+      })) || invoice;
+
+    for (const duplicateInvoice of pendingInvoices.slice(1)) {
+      await storage.updateInvoice(duplicateInvoice.id, { deletedAt: new Date() });
+    }
+
+    return invoice;
+  }
+
+  return storage.createInvoice({
+    clientAccountId: params.shipment.clientAccountId,
+    shipmentId: params.shipment.id,
+    invoiceType: params.invoiceType,
+    description,
+    amount: formatMoney(outstandingAmountSar),
+    status: "pending",
+    dueDate,
+  });
+}
+
+async function syncShipmentExtraFeeInvoices(shipment: Shipment) {
+  const relatedInvoices = await storage.getInvoicesByShipmentId(shipment.id);
+  const componentMap = new Map(
+    getShipmentExtraFeeComponents(shipment).map((component) => [component.invoiceType, component]),
+  );
+
+  const weightInvoice = await syncShipmentExtraFeeInvoiceForType({
+    shipment,
+    relatedInvoices,
+    invoiceType: InvoiceType.EXTRA_WEIGHT,
+    targetAmountSar: componentMap.get(InvoiceType.EXTRA_WEIGHT)?.amountSar ?? 0,
+  });
+
+  const costInvoice = await syncShipmentExtraFeeInvoiceForType({
+    shipment,
+    relatedInvoices,
+    invoiceType: InvoiceType.EXTRA_COST,
+    targetAmountSar: 0,
+  });
+
+  return {
+    [InvoiceType.EXTRA_WEIGHT]: weightInvoice,
+    [InvoiceType.EXTRA_COST]: costInvoice,
+  } as const;
+}
+
+function serializeClientExtraFeeNotices(
+  shipment: Record<string, any>,
+  invoicesByType: Partial<Record<typeof InvoiceType.EXTRA_WEIGHT | typeof InvoiceType.EXTRA_COST, Invoice | null>>,
+) {
+  const effective = getEffectiveShipmentFinancials(shipment);
+  const notices: Array<Record<string, any>> = [];
+
+  if (effective.extraWeightAmountSar > 0) {
+    const invoice = invoicesByType[InvoiceType.EXTRA_WEIGHT] || null;
+    notices.push({
+      shipmentId: shipment.id,
+      trackingNumber: shipment.trackingNumber,
+      carrierTrackingNumber: shipment.carrierTrackingNumber || null,
+      carrierName: shipment.carrierName || shipment.carrierCode || null,
+      createdAt: shipment.createdAt,
+      extraFeesAmountSar: invoice ? parseMoneyValue(invoice.amount) : effective.extraWeightAmountSar,
+      extraFeesType: ShipmentExtraFeeType.EXTRA_WEIGHT,
+      extraFeesWeightValue: effective.extraFeesWeightValue,
+      extraFeesCostAmountSar: 0,
+      extraWeightAmountSar: effective.extraWeightAmountSar,
+      extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
+      extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
+      weightValue: parseMoneyValue(shipment.weight),
+      weightUnit: shipment.weightUnit || "KG",
+      grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
+      extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
+      invoiceId: invoice?.id || null,
+      invoiceNumber: invoice?.invoiceNumber || null,
+      invoiceStatus: invoice?.status || null,
+      invoiceDescription: invoice?.description || buildExtraFeeInvoiceDescription(shipment, InvoiceType.EXTRA_WEIGHT),
+      invoiceAmountSar: invoice ? parseMoneyValue(invoice.amount) : effective.extraWeightAmountSar,
+      invoiceDueDate: invoice?.dueDate || null,
+    });
+  }
+
+  return notices;
 }
 
 // Default permissions for the platform
@@ -1603,8 +2583,9 @@ export async function registerRoutes(
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "data:", "blob:", "https:"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://tap-sdks.b-cdn.net"],
           connectSrc: ["'self'", "https:"],
+          frameSrc: ["'self'", "https://*.tap.company", "https://tap-sdks.b-cdn.net"],
         },
       },
       crossOriginEmbedderPolicy: false, // Allow embedding for development
@@ -1917,6 +2898,16 @@ export async function registerRoutes(
       }
       
       const data = applicationFormSchema.parse(req.body);
+      if (data.accountType === "company") {
+        const missingDocumentTypes = getMissingCompanyApplicationDocumentTypes(data.documents);
+        if (missingDocumentTypes.length > 0) {
+          return res.status(400).json({
+            error: `Missing required company documents: ${missingDocumentTypes
+              .map(getCompanyApplicationDocumentLabel)
+              .join(", ")}`,
+          });
+        }
+      }
       // Derive country from shipping country code for backwards compatibility
       const countryMap: Record<string, string> = {
         SA: "Saudi Arabia", AE: "United Arab Emirates", QA: "Qatar", KW: "Kuwait",
@@ -3268,8 +4259,24 @@ export async function registerRoutes(
       const sortedSelectedShipments = selectedPeriodShipments.sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
+      const carrierTransactions = selectedPeriodShipments
+        .filter((shipment) => shipment.carrierPaymentStatus === CarrierPaymentStatus.PAID && shipment.carrierPaidAt)
+        .sort(
+          (a, b) =>
+            new Date(b.carrierPaidAt || b.updatedAt).getTime() -
+            new Date(a.carrierPaidAt || a.updatedAt).getTime(),
+        )
+        .map((shipment) =>
+          serializeCarrierPaymentTransaction(shipment, clientMap.get(shipment.clientAccountId)),
+        );
       const offset = (page - 1) * limit;
       const paginatedShipments = sortedSelectedShipments.slice(offset, offset + limit);
+      const paginatedShipmentsWithInvoices = await Promise.all(
+        paginatedShipments.map(async (shipment) => ({
+          shipment,
+          relatedInvoices: await storage.getInvoicesByShipmentId(shipment.id),
+        })),
+      );
 
       res.json({
         month,
@@ -3285,8 +4292,13 @@ export async function registerRoutes(
         excludedLegacyShipmentCount,
         summary,
         monthlyStatements,
-        shipments: paginatedShipments.map((shipment) =>
-          serializeFinancialShipment(shipment, clientMap.get(shipment.clientAccountId)),
+        carrierTransactions,
+        shipments: paginatedShipmentsWithInvoices.map(({ shipment, relatedInvoices }) =>
+          serializeFinancialShipment(
+            shipment,
+            clientMap.get(shipment.clientAccountId),
+            relatedInvoices,
+          ),
         ),
       });
     } catch (error) {
@@ -3678,34 +4690,55 @@ export async function registerRoutes(
       let nextExtraFeesEmailSentAt: Date | null = null;
 
       if (!clear) {
-        if (!extraFeesType) {
-          return res.status(400).json({ error: "Extra fee type is required" });
+        const hasWeightInput = extraWeightValue !== undefined && extraWeightValue !== null && String(extraWeightValue).trim() !== "";
+        const hasCostInput = extraCostAmountSar !== undefined && extraCostAmountSar !== null && String(extraCostAmountSar).trim() !== "";
+
+        if (!hasWeightInput && !hasCostInput && !extraFeesType) {
+          return res.status(400).json({ error: "Provide an extra weight value, an extra cost amount, or both" });
         }
 
-        nextExtraFeesType = extraFeesType;
-        nextExtraFeesAddedAt = new Date();
+        let parsedWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
+        let parsedCostAmount = parseMoneyValue(shipment.extraFeesCostAmountSar);
 
-        if (extraFeesType === ShipmentExtraFeeType.EXTRA_WEIGHT) {
-          const parsedWeightValue =
+        if (hasWeightInput) {
+          parsedWeightValue =
             typeof extraWeightValue === "number" ? extraWeightValue : Number(extraWeightValue);
-          if (!Number.isFinite(parsedWeightValue) || parsedWeightValue <= 0) {
-            return res.status(400).json({ error: "Extra weight must be a valid positive value" });
+          if (!Number.isFinite(parsedWeightValue) || parsedWeightValue < 0) {
+            return res.status(400).json({ error: "Extra weight must be a valid non-negative value" });
           }
+        } else if (extraFeesType === ShipmentExtraFeeType.EXTRA_WEIGHT) {
+          parsedWeightValue = 0;
+        }
 
-          const ratePerWeight = getExtraFeesRateSarPerWeight(shipment);
-          const calculatedExtraFeesAmount = roundMoney(parsedWeightValue * ratePerWeight);
-
-          nextExtraFeesWeightValue = formatMoney(parsedWeightValue);
-          nextExtraFeesAmountSar = formatMoney(calculatedExtraFeesAmount);
-        } else {
-          const parsedCostAmount =
+        if (hasCostInput) {
+          parsedCostAmount =
             typeof extraCostAmountSar === "number" ? extraCostAmountSar : Number(extraCostAmountSar);
           if (!Number.isFinite(parsedCostAmount) || parsedCostAmount < 0) {
             return res.status(400).json({ error: "Extra cost must be a valid non-negative amount" });
           }
+        } else if (extraFeesType === ShipmentExtraFeeType.EXTRA_COST) {
+          parsedCostAmount = 0;
+        }
 
-          nextExtraFeesCostAmountSar = formatMoney(parsedCostAmount);
-          nextExtraFeesAmountSar = formatMoney(parsedCostAmount);
+        const ratePerWeight = getExtraFeesRateSarPerWeight(shipment);
+        const extraWeightAmountSar = parsedWeightValue > 0
+          ? roundMoney(parsedWeightValue * ratePerWeight)
+          : 0;
+        const totalExtraFeesAmountSar = roundMoney(extraWeightAmountSar + parsedCostAmount);
+
+        if (totalExtraFeesAmountSar > 0) {
+          nextExtraFeesAddedAt = new Date();
+          nextExtraFeesWeightValue = parsedWeightValue > 0 ? formatMoney(parsedWeightValue) : null;
+          nextExtraFeesCostAmountSar = parsedCostAmount > 0 ? formatMoney(parsedCostAmount) : null;
+          nextExtraFeesAmountSar = formatMoney(totalExtraFeesAmountSar);
+
+          if (parsedWeightValue > 0 && parsedCostAmount > 0) {
+            nextExtraFeesType = ShipmentExtraFeeType.COMBINED;
+          } else if (parsedWeightValue > 0) {
+            nextExtraFeesType = ShipmentExtraFeeType.EXTRA_WEIGHT;
+          } else if (parsedCostAmount > 0) {
+            nextExtraFeesType = ShipmentExtraFeeType.EXTRA_COST;
+          }
         }
       }
 
@@ -3717,28 +4750,57 @@ export async function registerRoutes(
         extraFeesAddedAt: nextExtraFeesAddedAt,
         extraFeesEmailSentAt: nextExtraFeesEmailSentAt,
       });
+      const refreshedShipment = (await storage.getShipment(shipment.id)) || updatedShipment || shipment;
+      const syncedExtraFeeInvoices = await syncShipmentExtraFeeInvoices(refreshedShipment);
       const client = await storage.getClientAccount(shipment.clientAccountId);
 
       if (
-        updatedShipment &&
+        refreshedShipment &&
         client &&
         client.email &&
-        nextExtraFeesType &&
-        nextExtraFeesAmountSar
+        !clear
       ) {
         try {
-          const emailSent = await sendShipmentExtraFeesNotification({
-            email: client.email,
-            clientName: client.name,
-            trackingNumber: shipment.trackingNumber,
-            amountSar: nextExtraFeesAmountSar,
-            extraFeeType: nextExtraFeesType as "EXTRA_WEIGHT" | "EXTRA_COST",
-            extraWeightValue: nextExtraFeesWeightValue,
-            weightUnit: shipment.weightUnit,
-            extraCostAmountSar: nextExtraFeesCostAmountSar,
-          });
+          const feeComponents = getShipmentExtraFeeComponents(refreshedShipment);
+          let sentAnyEmail = false;
 
-          if (emailSent) {
+          for (const component of feeComponents) {
+            if (
+              component.invoiceType !== InvoiceType.EXTRA_WEIGHT &&
+              component.invoiceType !== InvoiceType.EXTRA_COST
+            ) {
+              continue;
+            }
+
+            const relatedInvoice = syncedExtraFeeInvoices[component.invoiceType];
+            if (!relatedInvoice || relatedInvoice.status !== "pending") {
+              continue;
+            }
+
+            const emailSent = await sendShipmentExtraFeesNotification({
+              email: client.email,
+              clientName: client.name,
+              trackingNumber: shipment.trackingNumber,
+              amountSar: formatMoney(parseMoneyValue(relatedInvoice.amount)),
+              extraFeeType: component.invoiceType,
+              extraWeightValue:
+                component.invoiceType === InvoiceType.EXTRA_WEIGHT && component.weightValue !== undefined
+                  ? formatMoney(component.weightValue)
+                  : null,
+              weightUnit: shipment.weightUnit,
+              extraCostAmountSar:
+                component.invoiceType === InvoiceType.EXTRA_COST && component.costAmountSar !== undefined
+                  ? formatMoney(component.costAmountSar)
+                  : null,
+              invoiceNumber: relatedInvoice.invoiceNumber,
+            });
+
+            if (emailSent) {
+              sentAnyEmail = true;
+            }
+          }
+
+          if (sentAnyEmail) {
             nextExtraFeesEmailSentAt = new Date();
             await storage.updateShipment(shipment.id, {
               extraFeesEmailSentAt: nextExtraFeesEmailSentAt,
@@ -3751,8 +4813,6 @@ export async function registerRoutes(
           });
         }
       }
-
-      const refreshedShipment = (await storage.getShipment(shipment.id)) || updatedShipment || shipment;
 
       await logAudit(
         req.session.userId,
@@ -5849,6 +6909,8 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Client account not found" });
     }
 
+    await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
+
     const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
     const invoices = await storage.getInvoicesByClientAccount(user.clientAccountId);
 
@@ -5918,6 +6980,8 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Client account not found" });
     }
 
+    await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
+
     const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
     res.json(shipments.slice(0, 5));
   });
@@ -5928,6 +6992,8 @@ export async function registerRoutes(
     if (!user || !user.clientAccountId) {
       return res.status(404).json({ error: "Client account not found" });
     }
+
+    await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
 
     const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
     res.json(shipments);
@@ -6000,6 +7066,25 @@ export async function registerRoutes(
     }
   });
 
+  const shipmentItemInputSchema = z.object({
+    itemName: z.string().min(1),
+    itemDescription: z.string().optional(),
+    category: z.string().min(1),
+    material: z.string().optional(),
+    countryOfOrigin: z.string().length(2),
+    hsCode: z.string().optional(),
+    hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
+    hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
+    hsCodeCandidates: z.array(z.object({
+      code: z.string(),
+      description: z.string(),
+      confidence: z.number(),
+    })).optional(),
+    price: z.number().nonnegative(),
+    quantity: z.number().int().positive(),
+    currency: z.string().optional(),
+  });
+
   const shipmentInputSchema = z.object({
     shipmentType: z.enum(["domestic", "inbound", "outbound"]),
     isDdp: z.boolean().default(false),
@@ -6017,29 +7102,14 @@ export async function registerRoutes(
     dimensionUnit: z.enum(["IN", "CM"]).default("CM"),
     packageType: z.string().default("YOUR_PACKAGING"),
     currency: z.string().default("SAR"),
-    items: z.array(z.object({
-      itemName: z.string().min(1),
-      itemDescription: z.string().optional(),
-      category: z.string().min(1),
-      material: z.string().optional(),
-      countryOfOrigin: z.string().length(2),
-      hsCode: z.string().optional(),
-      hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
-      hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
-      hsCodeCandidates: z.array(z.object({
-        code: z.string(),
-        description: z.string(),
-        confidence: z.number(),
-      })).optional(),
-      price: z.number().nonnegative(),
-      quantity: z.number().int().positive(),
-    })).optional().default([]),
+    items: z.array(shipmentItemInputSchema).optional().default([]),
     tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional().default([]),
   });
 
   const invoiceExtractionSchema = z.object({
     shipmentType: z.enum(["domestic", "inbound", "outbound"]),
     shipperCountryCode: z.string().length(2),
+    recipientCountryCode: z.string().length(2).optional(),
     fileName: z.string().min(1),
     objectPath: z.string().min(1),
     contentType: z.string().min(1),
@@ -6052,6 +7122,11 @@ export async function registerRoutes(
     async (req, res) => {
       try {
         const data = invoiceExtractionSchema.parse(req.body);
+        const user = await storage.getUser(req.session.userId!);
+        const destinationCountry =
+          data.shipmentType === "inbound"
+            ? data.recipientCountryCode || "SA"
+            : data.recipientCountryCode || data.shipperCountryCode || "SA";
 
         const extraction = await extractInvoiceItemsFromDocument(
           {
@@ -6065,7 +7140,24 @@ export async function registerRoutes(
           },
         );
 
-        res.json(extraction);
+        const hsEnrichment = await enrichInvoiceItemsWithHsCodes(extraction.items, {
+          clientAccountId: user?.clientAccountId || undefined,
+          destinationCountry,
+        });
+
+        const { warnings, ...clientExtraction } = extraction;
+
+        res.json({
+          ...clientExtraction,
+          items: hsEnrichment.items,
+          summary: {
+            importedItemCount: hsEnrichment.items.length,
+            aiAssisted: extraction.extractionMethod === "gemini",
+            hasParsingWarnings: warnings.length > 0,
+            autoMatchedHsCodeCount: hsEnrichment.autoMatchedHsCodeCount,
+            hsCodeReviewCount: hsEnrichment.hsCodeReviewCount,
+          },
+        });
       } catch (error) {
         if (error instanceof z.ZodError) {
           return res.status(400).json({ error: error.errors[0].message });
@@ -6108,13 +7200,9 @@ export async function registerRoutes(
       const pricingRule = await storage.getPricingRuleByProfile(account.profile);
       const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
 
-      const selectedCarrierCode = resolveCarrierCode(data.carrier);
-      let carrierAdapter: CarrierAdapter;
-      try {
-        carrierAdapter = getCarrierAdapter(selectedCarrierCode);
-      } catch (error) {
-        return res.status(400).json({ error: (error as Error).message });
-      }
+      const carrierAdapters = data.carrier?.trim()
+        ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
+        : carrierService.getSupportedCarriers();
 
       // Map to carrier adapter format
       const rateRequest = {
@@ -6158,11 +7246,35 @@ export async function registerRoutes(
         currency: data.currency,
       };
 
-      const carrierRates = await carrierAdapter.getRates(rateRequest);
+      const carrierRateResults = await Promise.all(
+        carrierAdapters.map(async (carrierAdapter) => {
+          try {
+            const carrierRates = await carrierAdapter.getRates(rateRequest);
+            return {
+              carrierAdapter,
+              carrierRates,
+              error: null,
+            };
+          } catch (error) {
+            logError("Carrier rate lookup failed", {
+              carrierCode: carrierAdapter.carrierCode,
+              carrierName: carrierAdapter.name,
+              error: error instanceof Error ? error.message : String(error),
+            });
+
+            return {
+              carrierAdapter,
+              carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>>,
+              error,
+            };
+          }
+        }),
+      );
 
       // Store quotes with pricing and return to client
       const quotes: Array<{
         quoteId: string;
+        carrierCode: string;
         carrierName: string;
         serviceType: string;
         serviceName: string;
@@ -6175,49 +7287,60 @@ export async function registerRoutes(
       // Quote expiration: 30 minutes
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
-      for (const rate of carrierRates) {
-        // Get tiered margin based on the base rate amount
-        const marginPercentage = pricingRule 
-          ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
-          : defaultMarginPercentage;
-        
-        const marginAmount = rate.baseRate * (marginPercentage / 100);
-        const accountingSnapshot = calculateShipmentAccounting({
-          shipmentType: data.shipmentType,
-          isDdp: data.isDdp,
-          recipientCountryCode: data.recipient.countryCode,
-          baseRate: rate.baseRate,
-          marginAmount,
-        });
+      for (const { carrierAdapter, carrierRates } of carrierRateResults) {
+        for (const rate of carrierRates) {
+          const marginPercentage = pricingRule
+            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+            : defaultMarginPercentage;
 
-        const quoteShipmentData = { ...data, effectivePackagingType: rate.packagingType || data.packageType };
-        const quote = await storage.createShipmentRateQuote({
-          clientAccountId: user.clientAccountId,
-          shipmentData: JSON.stringify(quoteShipmentData),
-          carrierCode: carrierAdapter.carrierCode,
-          carrierName: carrierAdapter.name,
-          serviceType: rate.serviceType,
-          serviceName: rate.serviceName,
-          baseRate: rate.baseRate.toFixed(2),
-          marginPercentage: marginPercentage.toFixed(2),
-          marginAmount: marginAmount.toFixed(2),
-          finalPrice: accountingSnapshot.clientTotalAmountSar.toFixed(2),
-          currency: rate.currency,
-          transitDays: rate.transitDays,
-          estimatedDelivery: rate.deliveryDate,
-          expiresAt,
-        });
+          const marginAmount = rate.baseRate * (marginPercentage / 100);
+          const accountingSnapshot = calculateShipmentAccounting({
+            shipmentType: data.shipmentType,
+            isDdp: data.isDdp,
+            recipientCountryCode: data.recipient.countryCode,
+            baseRate: rate.baseRate,
+            marginAmount,
+          });
 
-        // Return only what client should see (no baseRate)
-        quotes.push({
-          quoteId: quote.id,
-          carrierName: carrierAdapter.name,
-          serviceType: rate.serviceType,
-          serviceName: rate.serviceName,
-          finalPrice: accountingSnapshot.clientTotalAmountSar,
-          currency: rate.currency,
-          transitDays: rate.transitDays,
-          estimatedDelivery: rate.deliveryDate,
+          const quoteShipmentData = {
+            ...data,
+            carrier: carrierAdapter.carrierCode,
+            effectivePackagingType: rate.packagingType || data.packageType,
+          };
+          const quote = await storage.createShipmentRateQuote({
+            clientAccountId: user.clientAccountId,
+            shipmentData: JSON.stringify(quoteShipmentData),
+            carrierCode: carrierAdapter.carrierCode,
+            carrierName: carrierAdapter.name,
+            serviceType: rate.serviceType,
+            serviceName: rate.serviceName,
+            baseRate: rate.baseRate.toFixed(2),
+            marginPercentage: marginPercentage.toFixed(2),
+            marginAmount: marginAmount.toFixed(2),
+            finalPrice: accountingSnapshot.clientTotalAmountSar.toFixed(2),
+            currency: rate.currency,
+            transitDays: rate.transitDays,
+            estimatedDelivery: rate.deliveryDate,
+            expiresAt,
+          });
+
+          quotes.push({
+            quoteId: quote.id,
+            carrierCode: carrierAdapter.carrierCode,
+            carrierName: carrierAdapter.name,
+            serviceType: rate.serviceType,
+            serviceName: rate.serviceName,
+            finalPrice: accountingSnapshot.clientTotalAmountSar,
+            currency: rate.currency,
+            transitDays: rate.transitDays,
+            estimatedDelivery: rate.deliveryDate,
+          });
+        }
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({
+          error: "No carrier rates were available for this shipment.",
         });
       }
 
@@ -6234,7 +7357,7 @@ export async function registerRoutes(
     }
   });
 
-  // STEP 2: Checkout - Create payment intent with selected rate
+  // STEP 2: Checkout - Create shipment draft with selected rate
   app.post("/api/client/shipments/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       // Check idempotency
@@ -6253,9 +7376,11 @@ export async function registerRoutes(
 
       const checkoutSchema = z.object({
         quoteId: z.string().uuid("Invalid quote ID"),
+        items: z.array(shipmentItemInputSchema).optional(),
+        tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional(),
       });
 
-      const { quoteId } = checkoutSchema.parse(req.body);
+      const { quoteId, items, tradeDocuments } = checkoutSchema.parse(req.body);
 
       // Verify quote exists and is valid
       const quote = await storage.getShipmentRateQuote(quoteId);
@@ -6269,14 +7394,43 @@ export async function registerRoutes(
       }
 
       // Recalculate price server-side to prevent tampering
-      const shipmentData = JSON.parse(quote.shipmentData);
+      const storedShipmentData = JSON.parse(quote.shipmentData);
+      const shipmentItems =
+        storedShipmentData.shipmentType === "domestic"
+          ? []
+          : Array.isArray(items)
+            ? items
+            : Array.isArray(storedShipmentData.items)
+              ? storedShipmentData.items
+              : [];
+      const shipmentTradeDocuments =
+        storedShipmentData.shipmentType === "domestic"
+          ? []
+          : Array.isArray(tradeDocuments)
+            ? tradeDocuments
+            : Array.isArray(storedShipmentData.tradeDocuments)
+              ? storedShipmentData.tradeDocuments
+              : [];
+      const shipmentData = {
+        ...storedShipmentData,
+        items: shipmentItems,
+        tradeDocuments: shipmentTradeDocuments,
+      };
+
+      if (shipmentData.shipmentType !== "domestic" && shipmentItems.length === 0) {
+        return res.status(400).json({ error: "Please add at least one shipment item before checkout." });
+      }
       if (shipmentData.isDdp && !isDdpEligibleForShipment(shipmentData.shipmentType, shipmentData.recipient.countryCode)) {
         return res.status(400).json({
           error: "DDP is only available for import shipments to Saudi Arabia or the UAE",
         });
       }
       const account = await storage.getClientAccount(user.clientAccountId);
-      const pricingRule = await storage.getPricingRuleByProfile(account?.profile || "regular");
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const pricingRule = await storage.getPricingRuleByProfile(account.profile || "regular");
       const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
       const baseRate = Number(quote.baseRate);
       
@@ -6362,51 +7516,18 @@ export async function registerRoutes(
         estimatedDelivery: quote.estimatedDelivery,
       });
 
-      // Create payment via Moyasar
-      let paymentResult: { paymentId: string; transactionUrl?: string } | null = null;
-      
-      // Construct callback URL for payment completion
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      const host = req.headers['x-forwarded-host'] || req.headers.host;
-      const callbackUrl = `${protocol}://${host}/api/payments/moyasar/callback`;
-      
-      if (moyasarService.isConfigured()) {
-        paymentResult = await moyasarService.createPayment({
-          amount: Math.round(Number(quote.finalPrice) * 100), // Convert to smallest currency unit
-          currency: quote.currency.toUpperCase(),
-          description: `Shipment ${shipment.trackingNumber}`,
-          callbackUrl: callbackUrl,
-          metadata: {
-            shipmentId: shipment.id,
-            clientAccountId: user.clientAccountId,
-          },
-        });
-
-        // Update shipment with payment ID
-        await storage.updateShipment(shipment.id, {
-          paymentIntentId: paymentResult.paymentId,
-        });
-      } else {
-        // Demo mode - create mock payment
-        paymentResult = {
-          paymentId: `mpy_mock_${Date.now()}`,
-          transactionUrl: undefined,
-        };
-        await storage.updateShipment(shipment.id, {
-          paymentIntentId: paymentResult.paymentId,
-        });
-      }
-
       await logAudit(req.session.userId, "checkout_shipment", "shipment", shipment.id,
         `Created checkout for shipment ${shipment.trackingNumber}`, req.ip);
 
       const response = {
         shipmentId: shipment.id,
         trackingNumber: shipment.trackingNumber,
-        paymentId: paymentResult?.paymentId,
-        transactionUrl: paymentResult?.transactionUrl,
         amount: Number(quote.finalPrice),
         currency: quote.currency,
+        carrierCode: quote.carrierCode,
+        carrierName: quote.carrierName,
+        serviceType: quote.serviceType,
+        serviceName: quote.serviceName,
       };
 
       // Store idempotency record
@@ -6421,6 +7542,90 @@ export async function registerRoutes(
       }
       logError("Failed to create checkout", error);
       res.status(500).json({ error: "Failed to create checkout" });
+    }
+  });
+
+  const shipmentPaymentSchema = z.object({
+    shipmentId: z.string().uuid("Invalid shipment ID"),
+    tapTokenId: z.string().min(1).optional(),
+    saveCardForFuture: z.boolean().optional(),
+  });
+
+  app.post("/api/client/shipments/pay", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const { shipmentId, tapTokenId, saveCardForFuture } = shipmentPaymentSchema.parse(req.body);
+      const shipment = await storage.getShipment(shipmentId);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (shipment.paymentStatus === "paid") {
+        return res.status(400).json({ error: "Shipment is already paid" });
+      }
+
+      if (shipment.status !== "payment_pending" && shipment.status !== "carrier_error") {
+        return res.status(400).json({ error: "Shipment is not ready for payment" });
+      }
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const appBaseUrl = buildAppBaseUrl(req);
+      const chargeResult = await tapService.createCharge({
+        amount: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
+        currency: (shipment.currency || "SAR").toUpperCase(),
+        description: `Shipment ${shipment.trackingNumber}`,
+        redirectUrl: `${appBaseUrl}/api/payments/tap/redirect`,
+        postUrl: `${appBaseUrl}/api/webhooks/tap`,
+        customer: buildTapCustomer(account),
+        reference: {
+          transaction: shipment.trackingNumber,
+          order: shipment.id,
+        },
+        metadata: {
+          kind: "shipment",
+          shipmentId: shipment.id,
+          clientAccountId: user.clientAccountId,
+          trackingNumber: shipment.trackingNumber,
+        },
+        sourceId: tapTokenId || DEFAULT_TAP_SOURCE_ID,
+        saveCard: Boolean(saveCardForFuture && tapService.isSavedCardsEnabled()),
+      });
+
+      await storage.updateShipment(shipment.id, {
+        paymentIntentId: chargeResult.chargeId,
+      });
+
+      if (tapService.isSuccessfulStatus(chargeResult.status)) {
+        await processTapChargeUpdate(chargeResult.charge, req.ip);
+      }
+
+      res.json({
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        paymentId: chargeResult.chargeId,
+        transactionUrl: chargeResult.transactionUrl,
+        amount: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
+        currency: shipment.currency || "SAR",
+        paymentStatus: chargeResult.status,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create shipment payment charge", error);
+      res.status(500).json({ error: "Failed to create shipment payment" });
     }
   });
 
@@ -6459,58 +7664,43 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      // Verify shipment is in correct state
-      if (shipment.status !== "payment_pending") {
-        return res.status(400).json({ error: "Shipment cannot be confirmed in current state" });
-      }
-
       // Use the stored payment ID from shipment if not provided
       const effectivePaymentId = paymentIntentId || shipment.paymentIntentId;
 
-      // Verify payment if Moyasar is configured
-      if (moyasarService.isConfigured() && effectivePaymentId) {
-        const paymentStatus = await moyasarService.verifyPayment(effectivePaymentId);
-        if (paymentStatus !== "paid") {
+      let verifiedTapCharge: TapCharge | null = null;
+      if (effectivePaymentId) {
+        verifiedTapCharge = await tapService.retrieveCharge(effectivePaymentId);
+        if (!verifiedTapCharge || !tapService.isSuccessfulStatus(verifiedTapCharge.status)) {
           return res.status(400).json({ error: "Payment not confirmed" });
         }
-      } else if (effectivePaymentId && effectivePaymentId.startsWith("mpy_mock_")) {
-        // Demo mode - accept mock payments
-      } else if (!effectivePaymentId) {
-        // No payment ID available - this shouldn't happen in normal flow
+        await processTapShipmentCharge(verifiedTapCharge, req.ip);
+      } else {
         logError("Confirm shipment: No payment ID available", { shipmentId });
       }
 
-      const confirmAddrValidation = validateShippingAddresses(
-        { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
-        { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
-      );
-      if (!confirmAddrValidation.valid) {
-        return res.status(400).json({ error: "Address validation failed", details: confirmAddrValidation.errors });
+      const currentShipment = (await storage.getShipment(shipmentId)) || shipment;
+
+      if (
+        currentShipment.status !== "payment_pending" &&
+        !(currentShipment.status === "created" && currentShipment.carrierTrackingNumber) &&
+        currentShipment.status !== "carrier_error"
+      ) {
+        return res.status(400).json({ error: "Shipment cannot be confirmed in current state" });
       }
 
-      const carrierAdapter = getAdapterForShipment(shipment);
-      let carrierResponse;
+      let updatedShipment;
       try {
-        const preparedShipment = await buildCarrierShipmentRequestFromShipment(shipment, carrierAdapter);
-        if (preparedShipment.tradeDocumentsData !== shipment.tradeDocumentsData) {
-          await storage.updateShipment(shipmentId, {
-            tradeDocumentsData: preparedShipment.tradeDocumentsData,
-          });
-        }
-        carrierResponse = await carrierAdapter.createShipment(preparedShipment.carrierRequest);
+        updatedShipment = await finalizePaidShipmentAfterPayment({
+          shipment: currentShipment,
+          transactionId: effectivePaymentId,
+          paymentMethod: "tap",
+          userId: req.session.userId,
+          ipAddress: req.ip,
+        });
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
-        const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
-        const errMsg = isCarrierErr ? (carrierError as CarrierError).carrierMessage : (carrierError as Error).message;
-
-        await storage.updateShipment(shipmentId, {
-          status: "carrier_error",
-          carrierStatus: "error",
-          carrierErrorCode: errCode,
-          carrierErrorMessage: errMsg,
-          carrierLastAttemptAt: new Date(),
-          carrierAttempts: (shipment.carrierAttempts || 0) + 1,
-        });
+        const errCode = isCarrierErr ? carrierError.code : "UNKNOWN";
+        const errMsg = isCarrierErr ? carrierError.carrierMessage : (carrierError as Error).message;
 
         logError("Carrier error during confirm", carrierError);
         return res.status(502).json({
@@ -6520,39 +7710,11 @@ export async function registerRoutes(
         });
       }
 
-      // Update shipment with carrier response
-      const updatedShipment = await storage.updateShipment(shipmentId, {
-        status: "created",
-        paymentStatus: "paid",
-        carrierStatus: "created",
-        carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
-        carrierShipmentId: carrierResponse.trackingNumber,
-        labelUrl: carrierResponse.labelUrl,
-        carrierLabelBase64: carrierResponse.labelData || null,
-        carrierLabelMimeType: "application/pdf",
-        carrierLabelFormat: "PDF",
-        estimatedDelivery: carrierResponse.estimatedDelivery,
-        carrierLastAttemptAt: new Date(),
-        carrierAttempts: (shipment.carrierAttempts || 0) + 1,
-      });
-
-      // Create invoice
-      await storage.createInvoice({
-        clientAccountId: user.clientAccountId,
-        shipmentId: shipment.id,
-        amount: shipment.finalPrice,
-        status: "paid",
-        dueDate: new Date(),
-      });
-
-      await logAudit(req.session.userId, "confirm_shipment", "shipment", shipmentId,
-        `Confirmed shipment ${shipment.trackingNumber} with carrier tracking ${carrierResponse.carrierTrackingNumber}`, req.ip);
-
       const response = {
         shipment: updatedShipment,
-        carrierTrackingNumber: carrierResponse.carrierTrackingNumber,
-        labelUrl: carrierResponse.labelUrl,
-        estimatedDelivery: carrierResponse.estimatedDelivery,
+        carrierTrackingNumber: updatedShipment?.carrierTrackingNumber || "",
+        labelUrl: updatedShipment?.labelUrl || undefined,
+        estimatedDelivery: updatedShipment?.estimatedDelivery || undefined,
       };
 
       // Store idempotency record
@@ -7065,6 +8227,8 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Client account not found" });
     }
 
+    await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
+
     const invoices = await storage.getInvoicesByClientAccount(user.clientAccountId);
     res.json(invoices);
   });
@@ -7098,6 +8262,30 @@ export async function registerRoutes(
           day: "numeric" 
         });
       };
+      const invoiceLineTitle =
+        invoice.invoiceType === InvoiceType.EXTRA_WEIGHT
+          ? "Extra Weight"
+          : invoice.invoiceType === InvoiceType.EXTRA_COST
+            ? "Extra Cost"
+            : "Shipping Service";
+      const invoiceLineDescription = invoice.description || invoiceLineTitle;
+      const invoiceLineDetails = shipment
+        ? invoice.invoiceType === InvoiceType.SHIPMENT
+          ? `
+          <span style="font-size: 13px;">
+            ${shipment.senderCity}, ${shipment.senderCountry} → ${shipment.recipientCity}, ${shipment.recipientCountry}<br>
+            Weight: ${Number(shipment.weight).toFixed(1)} kg | Type: ${shipment.packageType}
+          </span>
+          `
+          : `
+          <span style="font-size: 13px;">
+            Tracking: ${shipment.trackingNumber}<br>
+            ${shipment.senderCity}, ${shipment.senderCountry} → ${shipment.recipientCity}, ${shipment.recipientCountry}
+          </span>
+          `
+        : invoice.invoiceType === InvoiceType.SHIPMENT
+          ? "Logistics Services"
+          : "Shipment Adjustment";
 
       // Generate printable HTML invoice
       const html = `
@@ -7171,18 +8359,13 @@ export async function registerRoutes(
     <tbody>
       <tr>
         <td>
-          <strong>Shipping Service</strong><br>
+          <strong>${invoiceLineTitle}</strong><br>
           <span style="color: #666; font-size: 13px;">
-            ${shipment ? `Tracking: ${shipment.trackingNumber}` : 'Shipping Services'}
+            ${invoiceLineDescription}
           </span>
         </td>
         <td>
-          ${shipment ? `
-          <span style="font-size: 13px;">
-            ${shipment.senderCity}, ${shipment.senderCountry} → ${shipment.recipientCity}, ${shipment.recipientCountry}<br>
-            Weight: ${Number(shipment.weight).toFixed(1)} kg | Type: ${shipment.packageType}
-          </span>
-          ` : 'Logistics Services'}
+          ${invoiceLineDetails}
         </td>
         <td class="text-right">SAR ${Number(invoice.amount).toFixed(2)}</td>
       </tr>
@@ -7228,8 +8411,113 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Client account not found" });
     }
 
+    await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
+
     const payments = await storage.getPaymentsByClientAccount(user.clientAccountId);
     res.json(payments);
+  });
+
+  app.get("/api/client/payments/tap/config", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      res.json(buildTapEmbedConfig(account));
+    } catch (error) {
+      logError("Failed to fetch Tap payment config", error);
+      res.status(500).json({ error: "Failed to fetch payment config" });
+    }
+  });
+
+  app.get("/api/client/payments/tap/saved-cards", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const cards = await storage.getTapSavedCardsByClientAccount(user.clientAccountId);
+      res.json(cards);
+    } catch (error) {
+      logError("Failed to fetch Tap saved cards", error);
+      res.status(500).json({ error: "Failed to fetch saved cards" });
+    }
+  });
+
+  app.post("/api/client/payments/tap/saved-cards/:id/default", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const card = await storage.getTapSavedCard(req.params.id);
+      if (!card || card.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Saved card not found" });
+      }
+
+      const cards = await storage.getTapSavedCardsByClientAccount(user.clientAccountId);
+      await Promise.all(cards.map((savedCard) =>
+        storage.updateTapSavedCard(savedCard.id, {
+          isDefault: savedCard.id === card.id,
+        }),
+      ));
+
+      const refreshed = await storage.getTapSavedCard(card.id);
+      res.json(refreshed);
+    } catch (error) {
+      logError("Failed to set Tap saved card default", error);
+      res.status(500).json({ error: "Failed to update saved card" });
+    }
+  });
+
+  app.delete("/api/client/payments/tap/saved-cards/:id", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const card = await storage.getTapSavedCard(req.params.id);
+      if (!card || card.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Saved card not found" });
+      }
+
+      if (card.tapCustomerId && card.tapCardId) {
+        try {
+          await tapService.deleteSavedCard(card.tapCustomerId, card.tapCardId);
+        } catch (error) {
+          logError("Tap saved card delete failed remotely", {
+            cardId: card.id,
+            tapCardId: card.tapCardId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      await storage.updateTapSavedCard(card.id, {
+        deletedAt: new Date(),
+        isDefault: false,
+        status: "deleted",
+      });
+
+      const remainingCards = await storage.getTapSavedCardsByClientAccount(user.clientAccountId);
+      if (remainingCards.length > 0 && !remainingCards.some((savedCard) => savedCard.isDefault)) {
+        await storage.updateTapSavedCard(remainingCards[0].id, { isDefault: true });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Failed to delete Tap saved card", error);
+      res.status(500).json({ error: "Failed to delete saved card" });
+    }
   });
 
   app.get("/api/client/extra-fees", requireClient, requireClientPermission(ClientPermission.VIEW_PAYMENTS), async (req, res) => {
@@ -7239,35 +8527,66 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Client account not found" });
       }
 
-      const shipments = await storage.getShipmentsByClientAccount(user.clientAccountId);
-      const extraFeeShipments = shipments
+      await reconcilePaidShipmentsForClientAccount(user.clientAccountId, req.ip);
+
+      const [shipments, invoices] = await Promise.all([
+        storage.getShipmentsByClientAccount(user.clientAccountId),
+        storage.getInvoicesByClientAccount(user.clientAccountId),
+      ]);
+      const extraFeeInvoicesByShipmentAndType = new Map<string, Invoice>();
+
+      for (const invoice of invoices) {
+        if (
+          !invoice.shipmentId ||
+          (invoice.invoiceType !== InvoiceType.EXTRA_WEIGHT && invoice.invoiceType !== InvoiceType.EXTRA_COST)
+        ) {
+          continue;
+        }
+
+        const key = `${invoice.shipmentId}:${invoice.invoiceType}`;
+        const existingInvoice = extraFeeInvoicesByShipmentAndType.get(key);
+        if (!existingInvoice || (existingInvoice.status !== "pending" && invoice.status === "pending")) {
+          extraFeeInvoicesByShipmentAndType.set(key, invoice);
+        }
+      }
+
+      const extraFeeNotices = shipments
         .filter((shipment) =>
           shipment.status !== "cancelled" &&
           parseMoneyValue(shipment.extraFeesAmountSar) > 0,
         )
         .sort((a, b) => new Date(b.extraFeesAddedAt || b.updatedAt).getTime() - new Date(a.extraFeesAddedAt || a.updatedAt).getTime())
-        .map(serializeClientExtraFeeNotice);
+        .flatMap((shipment) =>
+          serializeClientExtraFeeNotices(shipment, {
+            [InvoiceType.EXTRA_WEIGHT]:
+              extraFeeInvoicesByShipmentAndType.get(`${shipment.id}:${InvoiceType.EXTRA_WEIGHT}`) || null,
+            [InvoiceType.EXTRA_COST]:
+              extraFeeInvoicesByShipmentAndType.get(`${shipment.id}:${InvoiceType.EXTRA_COST}`) || null,
+          }),
+        );
 
-      res.json(extraFeeShipments);
+      res.json(extraFeeNotices);
     } catch (error) {
       logError("Error fetching client extra fees", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
 
-  // Client - Create Payment Intent (Stripe checkout)
+  // Client - Create Tap charge for invoice payment
   const createPaymentSchema = z.object({
     invoiceId: z.string().min(1, "Invoice ID is required"),
+    tapTokenId: z.string().min(1).optional(),
+    saveCardForFuture: z.boolean().optional(),
   });
 
-  app.post("/api/client/payments/create-intent", requireClient, requireClientPermission(ClientPermission.MAKE_PAYMENTS), async (req, res) => {
+  const handleCreateClientPaymentCharge = async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
         return res.status(404).json({ error: "Client account not found" });
       }
 
-      const { invoiceId } = createPaymentSchema.parse(req.body);
+      const { invoiceId, tapTokenId, saveCardForFuture } = createPaymentSchema.parse(req.body);
       
       const invoice = await storage.getInvoice(invoiceId);
       if (!invoice) {
@@ -7282,81 +8601,71 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invoice already paid" });
       }
 
-      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-      if (!stripeSecretKey) {
-        return res.status(503).json({ 
-          error: "Payment processing is not configured. Please contact support.",
-          code: "STRIPE_NOT_CONFIGURED"
-        });
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
       }
 
-      // Check if there's already a pending payment for this invoice
       const existingPayments = await storage.getPaymentsByClientAccount(user.clientAccountId);
-      const existingPendingPayment = existingPayments.find(
-        p => p.invoiceId === invoice.id && p.status === "pending" && p.stripePaymentIntentId
-      );
-      
-      if (existingPendingPayment && existingPendingPayment.stripePaymentIntentId) {
-        // Return existing payment intent's client secret
-        const stripe = new Stripe(stripeSecretKey);
-        try {
-          const existingIntent = await stripe.paymentIntents.retrieve(existingPendingPayment.stripePaymentIntentId);
-          if (existingIntent.status === "requires_payment_method" || existingIntent.status === "requires_confirmation") {
-            return res.json({
-              clientSecret: existingIntent.client_secret,
-              paymentIntentId: existingIntent.id,
-              amount: invoice.amount,
-              invoiceNumber: invoice.invoiceNumber,
-            });
-          }
-        } catch (error) {
-          // If intent doesn't exist or is expired, create a new one
-          logError("Failed to retrieve existing payment intent, creating new one", error);
-        }
-      }
-
-      // Create Stripe payment intent
-      const stripe = new Stripe(stripeSecretKey);
-      const amountInCents = Math.round(Number(invoice.amount) * 100);
-      
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amountInCents,
-        currency: "usd",
+      const chargeResult = await tapService.createCharge({
+        amount: Number(invoice.amount),
+        currency: "SAR",
+        description: `Invoice ${invoice.invoiceNumber}`,
+        redirectUrl: `${buildAppBaseUrl(req)}/api/payments/tap/redirect`,
+        postUrl: `${buildAppBaseUrl(req)}/api/webhooks/tap`,
+        customer: buildTapCustomer(account),
+        reference: {
+          transaction: invoice.invoiceNumber,
+          order: invoice.id,
+        },
         metadata: {
+          kind: "invoice",
           invoiceId: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
           clientAccountId: user.clientAccountId,
         },
-        description: `Invoice ${invoice.invoiceNumber}`,
+        sourceId: tapTokenId || DEFAULT_TAP_SOURCE_ID,
+        saveCard: Boolean(saveCardForFuture && tapService.isSavedCardsEnabled()),
       });
 
-      // Create pending payment record
+      for (const payment of existingPayments.filter((payment) => payment.invoiceId === invoice.id && payment.status === "pending")) {
+        await storage.updatePayment(payment.id, { status: "failed" });
+      }
+
       await storage.createPayment({
         invoiceId: invoice.id,
         clientAccountId: user.clientAccountId,
         amount: invoice.amount,
-        paymentMethod: "stripe",
-        status: "pending",
-        stripePaymentIntentId: paymentIntent.id,
+        paymentMethod: "tap",
+        status: tapService.isSuccessfulStatus(chargeResult.status) ? "completed" : "pending",
+        transactionId: chargeResult.chargeId,
       });
 
-      await logAudit(req.session.userId, "create_payment_intent", "payment", paymentIntent.id,
-        `Created payment intent for invoice ${invoice.invoiceNumber}`, req.ip);
+      if (tapService.isSuccessfulStatus(chargeResult.status)) {
+        await processTapChargeUpdate(chargeResult.charge, req.ip);
+      }
+
+      await logAudit(req.session.userId, "create_payment_charge", "payment", chargeResult.chargeId,
+        `Created Tap charge for invoice ${invoice.invoiceNumber}`, req.ip);
 
       res.json({
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
+        paymentId: chargeResult.chargeId,
+        transactionUrl: chargeResult.transactionUrl,
         amount: invoice.amount,
         invoiceNumber: invoice.invoiceNumber,
+        paymentStatus: chargeResult.status,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
-      logError("Failed to create payment intent", error);
+      logError("Failed to create Tap payment charge", error);
       res.status(500).json({ error: "Failed to create payment" });
     }
-  });
+  };
+
+  app.post("/api/client/payments/create-charge", requireClient, requireClientPermission(ClientPermission.MAKE_PAYMENTS), handleCreateClientPaymentCharge);
+  app.post("/api/client/payments/create-intent", requireClient, requireClientPermission(ClientPermission.MAKE_PAYMENTS), handleCreateClientPaymentCharge);
 
   // Client - Track Shipment
   app.get("/api/client/shipments/:id/track", requireClient, async (req, res) => {
@@ -8022,54 +9331,83 @@ export async function registerRoutes(
     }
   });
 
-  // Stripe-specific signature validation
-  // Stripe uses format: t=timestamp,v1=signature,v0=signature
-  function validateStripeSignature(payload: string, signatureHeader: string | undefined, secret: string): boolean {
-    if (!signatureHeader) return false;
-    
+  app.get("/api/payments/tap/redirect", async (req, res) => {
     try {
-      const crypto = require("crypto");
-      
-      // Parse the signature header
-      const elements = signatureHeader.split(",");
-      const sigMap: Record<string, string> = {};
-      
-      for (const element of elements) {
-        const [key, value] = element.split("=");
-        sigMap[key] = value;
-      }
-      
-      const timestamp = sigMap["t"];
-      const v1Signature = sigMap["v1"];
-      
-      if (!timestamp || !v1Signature) return false;
-      
-      // Construct signed payload as per Stripe docs
-      const signedPayload = `${timestamp}.${payload}`;
-      const expectedSignature = crypto.createHmac("sha256", secret).update(signedPayload).digest("hex");
-      
-      // Safe comparison
-      if (v1Signature.length !== expectedSignature.length) return false;
-      
-      return crypto.timingSafeEqual(Buffer.from(v1Signature, "utf8"), Buffer.from(expectedSignature, "utf8"));
-    } catch {
-      return false;
-    }
-  }
+      const tapId = typeof req.query.tap_id === "string" ? req.query.tap_id : undefined;
 
-  // Stripe Webhook Handler
-  app.post("/api/webhooks/stripe", async (req, res) => {
+      if (!tapId) {
+        return res.redirect("/client/payments?paymentStatus=failed&message=missing_payment_id");
+      }
+
+      const charge = await tapService.retrieveCharge(tapId);
+      if (!charge) {
+        return res.redirect("/client/payments?paymentStatus=failed&message=charge_not_found");
+      }
+
+      const redirectEvent = await storage.createWebhookEvent({
+        source: "tap",
+        eventType: "payment_redirect",
+        payload: JSON.stringify(charge),
+        signature: null,
+        processed: false,
+        retryCount: 0,
+      });
+
+      await processTapChargeUpdate(charge, req.ip);
+      await storage.updateWebhookEvent(redirectEvent.id, {
+        processed: true,
+        processedAt: new Date(),
+      });
+
+      const target = charge.metadata?.kind;
+      const message = encodeURIComponent(charge.response?.message || "Payment was not completed");
+      const shipmentCreatePath = "/client/shipments/new";
+
+      if (target === "shipment" && charge.metadata?.shipmentId) {
+        if (tapService.isSuccessfulStatus(charge.status)) {
+          return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=success`);
+        }
+        if (tapService.isFailureStatus(charge.status)) {
+          return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=failed&message=${message}`);
+        }
+        return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=pending`);
+      }
+
+      if (target === "invoice" && charge.metadata?.invoiceId) {
+        if (tapService.isSuccessfulStatus(charge.status)) {
+          return res.redirect(`/client/invoices?invoiceId=${charge.metadata.invoiceId}&paymentStatus=success`);
+        }
+        if (tapService.isFailureStatus(charge.status)) {
+          return res.redirect(`/client/invoices?invoiceId=${charge.metadata.invoiceId}&paymentStatus=failed&message=${message}`);
+        }
+        return res.redirect(`/client/invoices?invoiceId=${charge.metadata.invoiceId}&paymentStatus=pending`);
+      }
+
+      if (tapService.isSuccessfulStatus(charge.status)) {
+        return res.redirect("/client/payments?paymentStatus=success");
+      }
+
+      if (tapService.isFailureStatus(charge.status)) {
+        return res.redirect(`/client/payments?paymentStatus=failed&message=${message}`);
+      }
+
+      return res.redirect("/client/payments?paymentStatus=pending");
+    } catch (error) {
+      logError("Tap redirect error", error);
+      return res.redirect("/client/payments?paymentStatus=failed&message=callback_error");
+    }
+  });
+
+  app.post("/api/webhooks/tap", async (req, res) => {
     try {
-      // Use raw body for signature validation if available
       const rawBody = (req as any).rawBody;
       const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
-      const signature = req.headers["stripe-signature"] as string | undefined;
-      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+      const signature = req.headers["hashstring"] as string | undefined;
+      const charge = req.body as TapCharge;
 
-      // Validate signature if secret is configured using Stripe's format
-      if (webhookSecret && !validateStripeSignature(payload, signature, webhookSecret)) {
+      if (tapService.isConfigured() && !tapService.validateWebhookSignature(req.body, signature)) {
         await storage.createWebhookEvent({
-          source: "stripe",
+          source: "tap",
           eventType: "signature_validation_failed",
           payload,
           signature: signature || null,
@@ -8080,171 +9418,27 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid signature" });
       }
 
-      const event = req.body;
-      const eventType = event.type || "unknown";
-
-      // Store webhook event
       const webhookEvent = await storage.createWebhookEvent({
-        source: "stripe",
-        eventType,
+        source: "tap",
+        eventType: `charge.${String(charge.status || "updated").toLowerCase()}`,
         payload,
         signature: signature || null,
         processed: false,
         retryCount: 0,
       });
 
-      // Process payment events
-      if (eventType === "payment_intent.succeeded" && event.data?.object) {
-        const paymentIntent = event.data.object;
-        const invoiceId = paymentIntent.metadata?.invoiceId;
-        
-        if (invoiceId) {
-          // Update invoice status to paid
-          await storage.updateInvoice(invoiceId, { status: "paid", paidAt: new Date() });
-          
-          // Find and update existing payment record (created when payment intent was created)
-          const invoice = await storage.getInvoice(invoiceId);
-          if (invoice) {
-            const payments = await storage.getPaymentsByClientAccount(invoice.clientAccountId);
-            const pendingPayment = payments.find(p => 
-              p.stripePaymentIntentId === paymentIntent.id && p.status === "pending"
-            );
-            
-            if (pendingPayment) {
-              // Update existing payment record
-              await storage.updatePayment(pendingPayment.id, { 
-                status: "completed",
-                transactionId: paymentIntent.id,
-              });
-            } else {
-              // Create new payment record if not found (fallback)
-              await storage.createPayment({
-                clientAccountId: invoice.clientAccountId,
-                invoiceId: invoice.id,
-                amount: String(paymentIntent.amount / 100),
-                paymentMethod: "stripe",
-                transactionId: paymentIntent.id,
-                status: "completed",
-              });
-            }
-          }
-          
-          await logAudit(undefined, "webhook_payment", "payment", paymentIntent.id,
-            `Stripe webhook processed payment for invoice ${invoiceId}`, req.ip);
-        }
-        
-        await storage.updateWebhookEvent(webhookEvent.id, { processed: true, processedAt: new Date() });
+      if (charge.id) {
+        await processTapChargeUpdate(charge, req.ip);
       }
+
+      await storage.updateWebhookEvent(webhookEvent.id, {
+        processed: true,
+        processedAt: new Date(),
+      });
 
       res.json({ received: true, eventId: webhookEvent.id });
     } catch (error) {
-      console.error("Stripe webhook error:", error);
-      res.status(500).json({ error: "Webhook processing failed" });
-    }
-  });
-
-  // Moyasar Payment Callback Handler
-  // This handles the redirect after user completes payment on Moyasar's page
-  app.get("/api/payments/moyasar/callback", async (req, res) => {
-    try {
-      const { id: paymentId, status, message } = req.query as { id?: string; status?: string; message?: string };
-
-      if (!paymentId) {
-        return res.redirect("/client/shipments?error=missing_payment_id");
-      }
-
-      // Log the callback event
-      await storage.createWebhookEvent({
-        source: "moyasar",
-        eventType: "payment_callback",
-        payload: JSON.stringify({ paymentId, status, message }),
-        processed: false,
-        retryCount: 0,
-      });
-
-      // Find shipment by payment ID (indexed lookup)
-      const shipment = await storage.getShipmentByPaymentId(paymentId);
-
-      if (!shipment) {
-        logError("Moyasar callback: Shipment not found for payment", { paymentId });
-        return res.redirect("/client/shipments?error=shipment_not_found");
-      }
-
-      // Verify payment status with Moyasar
-      const verifiedStatus = await moyasarService.verifyPayment(paymentId);
-
-      if (verifiedStatus === "paid") {
-        // Redirect to the create shipment page to complete the flow
-        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=success`);
-      } else if (verifiedStatus === "failed") {
-        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=failed&message=${encodeURIComponent(message || "Payment failed")}`);
-      } else {
-        // Payment still pending or in another state
-        return res.redirect(`/client/create-shipment?shipmentId=${shipment.id}&paymentStatus=pending`);
-      }
-    } catch (error) {
-      logError("Moyasar callback error:", error);
-      return res.redirect("/client/shipments?error=callback_error");
-    }
-  });
-
-  // Moyasar Webhook Handler (for server-to-server notifications)
-  app.post("/api/webhooks/moyasar", async (req, res) => {
-    try {
-      const rawBody = (req as any).rawBody;
-      const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
-      const signature = req.headers["x-moyasar-signature"] as string | undefined;
-      const event = req.body;
-
-      // Validate webhook signature
-      if (!moyasarService.validateWebhookSignature(payload, signature)) {
-        await storage.createWebhookEvent({
-          source: "moyasar",
-          eventType: "signature_validation_failed",
-          payload,
-          signature: signature || null,
-          processed: false,
-          retryCount: 0,
-          errorMessage: "Invalid webhook signature",
-        });
-        return res.status(401).json({ error: "Invalid signature" });
-      }
-
-      // Store webhook event
-      const webhookEvent = await storage.createWebhookEvent({
-        source: "moyasar",
-        eventType: event.type || "payment_update",
-        payload,
-        signature: signature || null,
-        processed: false,
-        retryCount: 0,
-      });
-
-      // Process payment events
-      const payment = event.data || event;
-      const paymentId = payment.id;
-      const paymentStatus = payment.status;
-
-      if (paymentId) {
-        // Find shipment by payment ID (indexed lookup)
-        const shipment = await storage.getShipmentByPaymentId(paymentId);
-
-        if (shipment && paymentStatus === "paid") {
-          // Update shipment payment status
-          await storage.updateShipment(shipment.id, {
-            paymentStatus: "paid",
-          });
-
-          await logAudit(undefined, "webhook_payment", "payment", paymentId,
-            `Moyasar webhook confirmed payment for shipment ${shipment.trackingNumber}`, req.ip);
-        }
-
-        await storage.updateWebhookEvent(webhookEvent.id, { processed: true, processedAt: new Date() });
-      }
-
-      res.json({ received: true, eventId: webhookEvent.id });
-    } catch (error) {
-      logError("Moyasar webhook error:", error);
+      logError("Tap webhook error", error);
       res.status(500).json({ error: "Webhook processing failed" });
     }
   });

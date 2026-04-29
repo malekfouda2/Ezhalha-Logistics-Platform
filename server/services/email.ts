@@ -309,14 +309,21 @@ export async function sendShipmentExtraFeesNotification(params: {
   extraWeightValue?: string | null;
   weightUnit?: string | null;
   extraCostAmountSar?: string | null;
+  invoiceNumber?: string | null;
 }): Promise<boolean> {
   const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
   const feeLabel =
-    params.extraFeeType === "EXTRA_WEIGHT" ? "Extra Weight" : "Extra Cost";
+    params.extraFeeType === "EXTRA_WEIGHT"
+      ? "Extra Weight"
+      : "Extra Cost";
   const detailLine =
     params.extraFeeType === "EXTRA_WEIGHT"
       ? `Additional weight recorded: ${params.extraWeightValue || "0"} ${params.weightUnit || "KG"}`
       : `Additional cost recorded: SAR ${params.extraCostAmountSar || params.amountSar}`;
+  const invoiceLine = params.invoiceNumber
+    ? `<p><strong>Invoice:</strong> ${params.invoiceNumber}</p>`
+    : "";
+  const invoiceTextLine = params.invoiceNumber ? `Invoice: ${params.invoiceNumber}` : null;
 
   return sendEmail({
     to: params.email,
@@ -329,8 +336,9 @@ export async function sendShipmentExtraFeesNotification(params: {
         <p><strong>Fee Type:</strong> ${feeLabel}</p>
         <p><strong>Amount:</strong> SAR ${params.amountSar}</p>
         <p><strong>Details:</strong> ${detailLine}</p>
-        <p>You can review the full details in your payments page.</p>
-        <p><a href="${appUrl}/client/payments">Open Payments Page</a></p>
+        ${invoiceLine}
+        <p>You can review and pay this invoice from your invoices page.</p>
+        <p><a href="${appUrl}/client/invoices">Open Invoices Page</a></p>
         <p style="margin-top: 24px;">Best regards,<br />ezhalha Logistics</p>
       </div>
     `,
@@ -342,7 +350,8 @@ export async function sendShipmentExtraFeesNotification(params: {
       `Fee Type: ${feeLabel}`,
       `Amount: SAR ${params.amountSar}`,
       `Details: ${detailLine}`,
-      `Review it here: ${appUrl}/client/payments`,
+      ...(invoiceTextLine ? [invoiceTextLine] : []),
+      `Review and pay it here: ${appUrl}/client/invoices`,
     ].join("\n"),
   });
 }

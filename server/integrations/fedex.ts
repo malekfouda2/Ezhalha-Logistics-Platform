@@ -1,3 +1,4 @@
+import "../load-env";
 import crypto from "crypto";
 import type { FedExTradeDocumentTypeValue } from "@shared/schema";
 import { logInfo, logError } from "../services/logger";

@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
 import { StatusBadge } from "@/components/status-badge";
+import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoInvoices } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -23,14 +25,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Download, Eye, FileText, CreditCard, Loader2 } from "lucide-react";
+import { Search, Download, Eye, FileText, CreditCard } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import type { Invoice, ClientAccount } from "@shared/schema";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation, useSearch } from "wouter";
+
+function formatInvoiceTypeLabel(invoiceType?: string | null) {
+  if (invoiceType === "EXTRA_WEIGHT") return "Extra Weight";
+  if (invoiceType === "EXTRA_COST") return "Extra Cost";
+  return "Shipment";
+}
 
 export default function ClientInvoices() {
+  const [, navigate] = useLocation();
+  const search = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -45,10 +56,48 @@ export default function ClientInvoices() {
     queryKey: ["/api/client/invoices"],
   });
 
-  const createPaymentIntent = useMutation({
-    mutationFn: async (invoiceId: string) => {
-      const response = await apiRequest("POST", "/api/client/payments/create-intent", {
-        invoiceId,
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const paymentStatus = params.get("paymentStatus");
+    const message = params.get("message");
+
+    if (!paymentStatus) {
+      return;
+    }
+
+    if (paymentStatus === "success") {
+      toast({
+        title: "Payment completed",
+        description: "Your invoice payment was completed successfully.",
+      });
+      refetch();
+    } else if (paymentStatus === "failed") {
+      toast({
+        title: "Payment failed",
+        description: message || "Your payment could not be completed.",
+        variant: "destructive",
+      });
+    } else if (paymentStatus === "pending") {
+      toast({
+        title: "Payment pending",
+        description: "Your payment is still being processed.",
+      });
+      refetch();
+    }
+
+    navigate("/client/invoices", { replace: true });
+  }, [navigate, refetch, search, toast]);
+
+  const createPaymentCharge = useMutation({
+    mutationFn: async (payload: {
+      invoiceId: string;
+      tapTokenId?: string;
+      saveCardForFuture?: boolean;
+    }) => {
+      const response = await apiRequest("POST", "/api/client/payments/create-charge", {
+        invoiceId: payload.invoiceId,
+        tapTokenId: payload.tapTokenId,
+        saveCardForFuture: payload.saveCardForFuture,
       });
       return response.json();
     },
@@ -62,15 +111,27 @@ export default function ClientInvoices() {
         setPaymentDialogOpen(false);
         return;
       }
-      
-      // In a full implementation, you would use Stripe.js to handle the payment
-      // For now, show the payment details
+
+      if (data.transactionUrl) {
+        window.location.href = data.transactionUrl;
+        return;
+      }
+
+      if (String(data.paymentStatus || "").toUpperCase() === "CAPTURED") {
+        toast({
+          title: "Payment completed",
+          description: `Invoice ${data.invoiceNumber} has been paid successfully.`,
+        });
+        setPaymentDialogOpen(false);
+        refetch();
+        return;
+      }
+
       toast({
-        title: "Payment Initiated",
-        description: `Payment intent created for invoice ${data.invoiceNumber}. Amount: ${data.amount} SAR`,
+        title: "Payment initiated",
+        description: `A payment request was created for invoice ${data.invoiceNumber}.`,
       });
       setPaymentDialogOpen(false);
-      refetch();
     },
     onError: (error: Error) => {
       toast({
@@ -84,12 +145,6 @@ export default function ClientInvoices() {
   const handlePayNow = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setPaymentDialogOpen(true);
-  };
-
-  const handleConfirmPayment = () => {
-    if (selectedInvoice) {
-      createPaymentIntent.mutate(selectedInvoice.id);
-    }
   };
 
   const filteredInvoices = invoices?.filter((invoice) => {
@@ -155,7 +210,7 @@ export default function ClientInvoices() {
                   <TabsTrigger value="pending" data-testid="tab-pending">
                     Pending
                   </TabsTrigger>
-                  <TabsTrigger value="completed" data-testid="tab-completed">
+                  <TabsTrigger value="paid" data-testid="tab-completed">
                     Paid
                   </TabsTrigger>
                 </TabsList>
@@ -172,6 +227,7 @@ export default function ClientInvoices() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Invoice #</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
@@ -182,7 +238,19 @@ export default function ClientInvoices() {
                   {filteredInvoices.map((invoice) => (
                     <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
                       <TableCell className="font-mono font-medium">
-                        {invoice.invoiceNumber}
+                        <div className="space-y-1">
+                          <p>{invoice.invoiceNumber}</p>
+                          {invoice.description && (
+                            <p className="font-normal text-xs text-muted-foreground">
+                              {invoice.description}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {formatInvoiceTypeLabel(invoice.invoiceType)}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={invoice.status} />
@@ -270,29 +338,28 @@ export default function ClientInvoices() {
               <Button
                 variant="outline"
                 onClick={() => setPaymentDialogOpen(false)}
-                disabled={createPaymentIntent.isPending}
+                disabled={createPaymentCharge.isPending}
                 data-testid="button-cancel-payment"
               >
                 Cancel
               </Button>
-              <Button
-                onClick={handleConfirmPayment}
-                disabled={createPaymentIntent.isPending}
-                data-testid="button-confirm-payment"
-              >
-                {createPaymentIntent.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Pay <SarAmount amount={selectedInvoice ? Number(selectedInvoice.amount) : 0} />
-                  </>
-                )}
-              </Button>
             </div>
+            {selectedInvoice && (
+              <TapCardForm
+                amount={Number(selectedInvoice.amount)}
+                currency="SAR"
+                submitLabel="Pay with Tap"
+                pending={createPaymentCharge.isPending}
+                onSubmit={(payload) =>
+                  createPaymentCharge.mutate({
+                    invoiceId: selectedInvoice.id,
+                    tapTokenId: payload.tapTokenId,
+                    saveCardForFuture: payload.saveCardForFuture,
+                  })
+                }
+                testId="button-confirm-payment"
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>

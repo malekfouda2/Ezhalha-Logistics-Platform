@@ -35,6 +35,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { parseApplicationDocumentReference } from "@shared/application-documents";
 import { Search, Check, X, Building2, User, Mail, Phone, MapPin, FileText, Hash, Download, RefreshCw, Filter, Inbox } from "lucide-react";
 import type { ClientApplication, PricingRule } from "@shared/schema";
 import { format } from "date-fns";
@@ -432,10 +433,12 @@ export default function AdminApplications() {
               </div>
               {selectedApp?.documents && selectedApp.documents.length > 0 ? (
                 <div className="space-y-2">
-                  {selectedApp.documents.map((docPath, index) => (
+                  {selectedApp.documents.map((docPath, index) => {
+                    const document = parseApplicationDocumentReference(docPath);
+                    return (
                     <a
-                      key={docPath}
-                      href={docPath}
+                      key={`${document.path}-${index}`}
+                      href={document.path}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
@@ -443,11 +446,15 @@ export default function AdminApplications() {
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                        <span className="text-sm truncate">Document {index + 1}</span>
+                        <div className="min-w-0">
+                          <p className="text-sm truncate">{document.label || `Document ${index + 1}`}</p>
+                          <p className="text-xs text-muted-foreground truncate">{document.name || `Document ${index + 1}`}</p>
+                        </div>
                       </div>
                       <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                     </a>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">No documents uploaded</p>

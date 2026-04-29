@@ -98,7 +98,7 @@ export default function AdminIntegrationLogs() {
           <div>
             <h1 className="text-2xl font-bold">Integration Logs</h1>
             <p className="text-muted-foreground">
-              Monitor API calls to external services (FedEx, Zoho, Moyasar)
+              Monitor API calls to external services (FedEx, DHL, Tap, Zoho)
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="button-refresh">
@@ -157,6 +157,7 @@ export default function AdminIntegrationLogs() {
                 <SelectContent>
                   <SelectItem value="all">All Services</SelectItem>
                   <SelectItem value="fedex">FedEx</SelectItem>
+                  <SelectItem value="tap">Tap</SelectItem>
                   <SelectItem value="moyasar">Moyasar</SelectItem>
                   <SelectItem value="zoho">Zoho</SelectItem>
                 </SelectContent>

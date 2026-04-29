@@ -12,9 +12,9 @@ import {
 import { ObjectStorageService } from "../integrations/storage";
 import { LocalStorageService } from "../integrations/storage/localStorage";
 import {
-  extractInvoiceItemsWithOpenAI,
-  isOpenAIInvoiceExtractionConfigured,
-} from "./openai-invoice-extraction";
+  extractInvoiceItemsWithGemini,
+  isGeminiInvoiceExtractionConfigured,
+} from "./gemini-invoice-extraction";
 
 const localStorageService = new LocalStorageService();
 const objectStorageService = new ObjectStorageService();
@@ -89,6 +89,8 @@ const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
   { category: ItemCategory.DOCUMENTS, keywords: ["document", "paper", "brochure", "catalog"] },
   { category: ItemCategory.SAMPLES, keywords: ["sample", "specimen", "prototype"] },
 ];
+const MAX_REASONABLE_EXTRACTED_QUANTITY = 1_000_000;
+const MAX_REASONABLE_EXTRACTED_UNIT_PRICE = 10_000_000;
 
 export interface InvoiceDocumentInput {
   fileName: string;
@@ -115,7 +117,7 @@ export interface InvoiceExtractionResult {
   items: ExtractedInvoiceItem[];
   warnings: string[];
   detectedCurrency: string;
-  extractionMethod: "deterministic" | "openai";
+  extractionMethod: "deterministic" | "gemini";
 }
 
 interface ParsedRow {
@@ -180,16 +182,12 @@ function parseNumber(value: unknown): number | null {
     return null;
   }
 
-  const cleaned = value
-    .replace(/[, ]+/g, "")
-    .replace(/[A-Za-z$€£]/g, "")
-    .trim();
-
-  if (!cleaned) {
+  const matches = value.match(/[-+]?\d[\d,]*(?:\.\d+)?/g);
+  if (!matches || matches.length !== 1) {
     return null;
   }
 
-  const parsed = Number(cleaned);
+  const parsed = Number(matches[0].replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -232,6 +230,8 @@ function isLikelySummaryLine(text: string): boolean {
     "grand total",
     "amount due",
     "balance due",
+    "payment",
+    "net payment",
     "bank",
     "iban",
     "ship to",
@@ -259,12 +259,35 @@ function normalizeTextValue(value: unknown): string {
   return String(value).replace(/\s+/g, " ").trim();
 }
 
+function containsAlphabeticCharacter(value: string): boolean {
+  return /[A-Za-z]/.test(value);
+}
+
+function isLikelyContactOrAddressLine(text: string): boolean {
+  if (/^\+?\d[\d\s()-]{6,}$/.test(text)) {
+    return true;
+  }
+
+  if (/\b[A-Z][A-Za-z.' -]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(text)) {
+    return true;
+  }
+
+  if (
+    text.includes(",") &&
+    /\b(street|road|drive|avenue|suite|district|city|state|postal|zip)\b/i.test(text)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function isImageContentType(contentType: string): boolean {
   return contentType.startsWith("image/");
 }
 
-function shouldUseOpenAIOnWarning(result: { warnings: string[] }): boolean {
-  return process.env.OPENAI_INVOICE_FALLBACK_ON_WARNING === "true" && result.warnings.length > 0;
+function shouldUseGeminiOnWarning(result: { warnings: string[] }): boolean {
+  return process.env.GEMINI_INVOICE_FALLBACK_ON_WARNING === "true" && result.warnings.length > 0;
 }
 
 function toExtractedItem(
@@ -278,6 +301,11 @@ function toExtractedItem(
     return null;
   }
 
+  if (!containsAlphabeticCharacter(itemName) || isLikelyContactOrAddressLine(itemName)) {
+    warnings.push(`Skipped a non-item line while parsing the invoice: "${itemName}".`);
+    return null;
+  }
+
   const quantity = row.quantity && row.quantity > 0 ? row.quantity : 1;
   let price = row.unitPrice && row.unitPrice >= 0 ? row.unitPrice : null;
 
@@ -287,6 +315,11 @@ function toExtractedItem(
 
   if (price === null || price <= 0) {
     warnings.push(`Could not determine a unit price for "${itemName}".`);
+    return null;
+  }
+
+  if (quantity > MAX_REASONABLE_EXTRACTED_QUANTITY || price > MAX_REASONABLE_EXTRACTED_UNIT_PRICE) {
+    warnings.push(`Skipped an unreasonable invoice line while parsing "${itemName}".`);
     return null;
   }
 
@@ -532,7 +565,7 @@ async function extractInvoiceItemsFromDocumentDeterministic(
   };
 }
 
-async function extractInvoiceTextForOpenAI(
+async function extractInvoiceTextForGemini(
   document: InvoiceDocumentInput,
   buffer: Buffer,
 ): Promise<string | undefined> {
@@ -594,14 +627,14 @@ export async function extractInvoiceItemsFromDocument(
   const normalizedContentType = normalizeContentType(document.contentType);
   const buffer = await readStoredFileBuffer(document.objectPath);
   const fallbackCurrency = options.fallbackCurrency || "SAR";
-  const openAIConfigured = isOpenAIInvoiceExtractionConfigured();
+  const geminiConfigured = isGeminiInvoiceExtractionConfigured();
 
   if (isImageContentType(normalizedContentType)) {
-    if (!openAIConfigured) {
-      throw new Error("Scanned invoice images require AI extraction. Configure OpenAI or upload a PDF, DOCX, XLSX, or TXT invoice.");
+    if (!geminiConfigured) {
+      throw new Error("Scanned invoice images require AI extraction. Configure Gemini or upload a PDF, DOCX, XLSX, or TXT invoice.");
     }
 
-    const aiResult = await extractInvoiceItemsWithOpenAI({
+    const aiResult = await extractInvoiceItemsWithGemini({
       document: {
         ...document,
         contentType: normalizedContentType,
@@ -617,7 +650,7 @@ export async function extractInvoiceItemsFromDocument(
         "AI extraction was used for this invoice. Review the extracted items carefully.",
         ...aiResult.warnings,
       ])),
-      extractionMethod: "openai",
+      extractionMethod: "gemini",
     };
   }
 
@@ -627,17 +660,17 @@ export async function extractInvoiceItemsFromDocument(
       options,
     );
 
-    if (!openAIConfigured || !shouldUseOpenAIOnWarning(deterministicResult)) {
+    if (!geminiConfigured || !shouldUseGeminiOnWarning(deterministicResult)) {
       return deterministicResult;
     }
 
-    const aiResult = await extractInvoiceItemsWithOpenAI({
+    const aiResult = await extractInvoiceItemsWithGemini({
       document: {
         ...document,
         contentType: normalizedContentType,
       },
       buffer,
-      extractedText: await extractInvoiceTextForOpenAI(document, buffer),
+      extractedText: await extractInvoiceTextForGemini(document, buffer),
       fallbackCountryOfOrigin: options.fallbackCountryOfOrigin,
       fallbackCurrency,
     });
@@ -649,20 +682,20 @@ export async function extractInvoiceItemsFromDocument(
         ...deterministicResult.warnings,
         ...aiResult.warnings,
       ])),
-      extractionMethod: "openai",
+      extractionMethod: "gemini",
     };
   } catch (error) {
-    if (!openAIConfigured) {
+    if (!geminiConfigured) {
       throw error;
     }
 
-    const aiResult = await extractInvoiceItemsWithOpenAI({
+    const aiResult = await extractInvoiceItemsWithGemini({
       document: {
         ...document,
         contentType: normalizedContentType,
       },
       buffer,
-      extractedText: await extractInvoiceTextForOpenAI(document, buffer),
+      extractedText: await extractInvoiceTextForGemini(document, buffer),
       fallbackCountryOfOrigin: options.fallbackCountryOfOrigin,
       fallbackCurrency,
     });
@@ -674,7 +707,7 @@ export async function extractInvoiceItemsFromDocument(
         error instanceof Error ? error.message : "Deterministic parsing failed.",
         ...aiResult.warnings,
       ])),
-      extractionMethod: "openai",
+      extractionMethod: "gemini",
     };
   }
 }

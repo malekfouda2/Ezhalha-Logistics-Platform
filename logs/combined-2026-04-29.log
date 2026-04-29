@@ -1,0 +1,34 @@
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-28T21:46:24.918Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-28T21:46:25.197Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-28T21:46:25.201Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-28T21:46:25.204Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T11:12:13.550Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T11:12:15.786Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T11:12:15.795Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T11:12:15.796Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T14:03:44.714Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T14:03:44.829Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T14:03:44.836Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T14:03:44.836Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T15:04:46.630Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T15:04:46.791Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T15:04:46.797Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T15:04:46.798Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T16:05:48.484Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T16:05:48.592Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T16:05:48.635Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T16:05:48.636Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T17:05:48.626Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T17:05:48.672Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T17:05:48.673Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T17:05:48.673Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T18:05:48.620Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T18:05:48.662Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T18:05:48.694Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T18:05:48.694Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-04-29T19:07:16.836Z"}
+{"level":"info","message":"Cleared expired idempotency records","timestamp":"2026-04-29T19:07:16.908Z"}
+{"level":"info","message":"Marked credit invoice 7b4ea5d3-d1cf-43c6-bead-8eacc1699d66 as OVERDUE","timestamp":"2026-04-29T19:07:17.007Z"}
+{"level":"info","message":"Marked credit invoice c72f0503-7e79-4fcc-930f-c51e0598595e as OVERDUE","timestamp":"2026-04-29T19:07:17.014Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-04-29T19:07:17.018Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-04-29T19:07:17.018Z"}

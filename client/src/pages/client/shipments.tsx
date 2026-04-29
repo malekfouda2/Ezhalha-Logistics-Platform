@@ -147,7 +147,8 @@ export default function ClientShipments() {
                     <TableHead>Shipment ID</TableHead>
                     <TableHead>Recipient</TableHead>
                     <TableHead>Destination</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Shipment</TableHead>
+                    <TableHead>Payment</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead className="w-12"></TableHead>
@@ -166,11 +167,14 @@ export default function ClientShipments() {
                       <TableCell>
                         <StatusBadge status={shipment.status} />
                       </TableCell>
+                      <TableCell>
+                        <StatusBadge status={shipment.paymentStatus || "pending"} />
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {format(new Date(shipment.createdAt), "MMM d, yyyy")}
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        <SarAmount amount={shipment.finalPrice} />
+                        <SarAmount amount={Number(shipment.clientTotalAmountSar ?? shipment.finalPrice ?? 0)} />
                       </TableCell>
                       <TableCell>
                         <Button
@@ -211,7 +215,10 @@ export default function ClientShipments() {
                   <p className="text-sm text-muted-foreground">Shipment ID</p>
                   <p className="font-mono font-medium">{selectedShipment.trackingNumber}</p>
                 </div>
-                <StatusBadge status={selectedShipment.status} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={selectedShipment.status} />
+                  <StatusBadge status={selectedShipment.paymentStatus || "pending"} />
+                </div>
               </div>
               {selectedShipment.carrierTrackingNumber && (
                 <div>
@@ -367,7 +374,7 @@ export default function ClientShipments() {
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Total Cost</span>
                   <span className="text-2xl font-bold">
-                    <SarAmount amount={selectedShipment.finalPrice} />
+                    <SarAmount amount={Number(selectedShipment.clientTotalAmountSar ?? selectedShipment.finalPrice ?? 0)} />
                   </span>
                 </div>
               </div>

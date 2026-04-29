@@ -55,4 +55,37 @@ describe("Invoice Extraction", () => {
     expect(result.items[0].countryOfOrigin).toBe("CN");
     expect(result.extractionMethod).toBe("deterministic");
   });
+
+  it("filters noisy non-item lines from a text invoice", async () => {
+    const buffer = Buffer.from(
+      [
+        "Description\tQty\tAmount",
+        "Bambu Lab H2S\t2\t2099.00",
+        "+16789206377\t16789206377",
+        "2401 Windy Hill Road Southeast,Marietta,Georgia,30067,United\t240130067",
+        "Net payment\t2368.17",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const uploaded = await createUploadedInvoice("invoice.txt", buffer);
+
+    const result = await extractInvoiceItemsFromDocument(
+      {
+        fileName: "invoice.txt",
+        objectPath: uploaded.objectPath,
+        contentType: "text/plain",
+      },
+      {
+        fallbackCountryOfOrigin: "EG",
+        fallbackCurrency: "SAR",
+      },
+    );
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].itemName).toBe("Bambu Lab H2S");
+    expect(result.items[0].quantity).toBe(2);
+    expect(result.items[0].price).toBe(1049.5);
+    expect(result.warnings.some((warning) => warning.includes("Skipped"))).toBe(true);
+  });
 });

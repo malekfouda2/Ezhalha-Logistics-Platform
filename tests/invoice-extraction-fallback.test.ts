@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalStorageService } from "../server/integrations/storage/localStorage";
 
-const mockExtractInvoiceItemsWithOpenAI = vi.fn();
-const mockIsOpenAIInvoiceExtractionConfigured = vi.fn();
+const mockExtractInvoiceItemsWithGemini = vi.fn();
+const mockIsGeminiInvoiceExtractionConfigured = vi.fn();
 
-vi.mock("../server/services/openai-invoice-extraction", () => ({
-  extractInvoiceItemsWithOpenAI: mockExtractInvoiceItemsWithOpenAI,
-  isOpenAIInvoiceExtractionConfigured: mockIsOpenAIInvoiceExtractionConfigured,
+vi.mock("../server/services/gemini-invoice-extraction", () => ({
+  extractInvoiceItemsWithGemini: mockExtractInvoiceItemsWithGemini,
+  isGeminiInvoiceExtractionConfigured: mockIsGeminiInvoiceExtractionConfigured,
 }));
 
 const { extractInvoiceItemsFromDocument } = await import("../server/services/invoice-extraction");
@@ -23,7 +23,7 @@ async function createUploadedInvoice(fileName: string, buffer: Buffer) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.OPENAI_INVOICE_FALLBACK_ON_WARNING;
+  delete process.env.GEMINI_INVOICE_FALLBACK_ON_WARNING;
 });
 
 afterEach(async () => {
@@ -36,9 +36,9 @@ afterEach(async () => {
 });
 
 describe("Invoice Extraction Fallback", () => {
-  it("falls back to OpenAI for image invoices when configured", async () => {
-    mockIsOpenAIInvoiceExtractionConfigured.mockReturnValue(true);
-    mockExtractInvoiceItemsWithOpenAI.mockResolvedValue({
+  it("falls back to Gemini for image invoices when configured", async () => {
+    mockIsGeminiInvoiceExtractionConfigured.mockReturnValue(true);
+    mockExtractInvoiceItemsWithGemini.mockResolvedValue({
       items: [
         {
           itemName: "Scanned Keyboard",
@@ -73,8 +73,8 @@ describe("Invoice Extraction Fallback", () => {
       },
     );
 
-    expect(mockExtractInvoiceItemsWithOpenAI).toHaveBeenCalledOnce();
-    expect(result.extractionMethod).toBe("openai");
+    expect(mockExtractInvoiceItemsWithGemini).toHaveBeenCalledOnce();
+    expect(result.extractionMethod).toBe("gemini");
     expect(result.items[0].itemName).toBe("Scanned Keyboard");
   });
 });

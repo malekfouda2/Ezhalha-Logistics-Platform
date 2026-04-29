@@ -1,3 +1,4 @@
+import "../load-env";
 import crypto from "crypto";
 import {
   CarrierError,
@@ -23,11 +24,25 @@ import { storage } from "../storage";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const DEFAULT_PLANNED_SHIPPING_HOUR_UTC = 9;
+const MAX_COMMODITY_DESCRIPTION_LENGTH = 70;
+const MAX_DECLARED_VALUE = 999_999_999_999_999;
+const MAX_REASONABLE_LINE_ITEM_QUANTITY = 1_000_000;
+const MAX_REASONABLE_LINE_ITEM_PRICE = 10_000_000;
 const COUNTRY_REGEX: Record<string, RegExp> = {
   SA: /^\d{5}$/,
   US: /^\d{5}(-\d{4})?$/,
   AE: /^\d{5,6}$/,
 };
+const FRIDAY_SATURDAY_WEEKEND_COUNTRIES = new Set([
+  "BH",
+  "EG",
+  "JO",
+  "KW",
+  "OM",
+  "QA",
+  "SA",
+]);
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
@@ -46,14 +61,91 @@ function normalizeCountryCode(countryCode: string): string {
   return countryCode.trim().toUpperCase();
 }
 
-function normalizePlannedShippingDate(shipDate?: string): string {
+function containsAlphabeticCharacter(value: string): boolean {
+  return /[A-Za-z]/.test(value);
+}
+
+function normalizeItemDescription(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isLikelyNonCommodityDescription(value: string): boolean {
+  const normalizedValue = normalizeItemDescription(value);
+
+  if (!normalizedValue || !containsAlphabeticCharacter(normalizedValue)) {
+    return true;
+  }
+
+  if (/^\+?\d[\d\s()-]{6,}$/.test(normalizedValue)) {
+    return true;
+  }
+
+  if (/\b[A-Z][A-Za-z.' -]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/.test(normalizedValue)) {
+    return true;
+  }
+
+  if (/\b(net payment|amount due|grand total|subtotal|sub total|balance due)\b/i.test(normalizedValue)) {
+    return true;
+  }
+
+  if (
+    normalizedValue.includes(",") &&
+    /\b(street|road|drive|avenue|suite|district|city|state|postal|zip)\b/i.test(normalizedValue)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function getWeekendDays(countryCode?: string): number[] {
+  const normalizedCountryCode = countryCode ? normalizeCountryCode(countryCode) : "";
+  return FRIDAY_SATURDAY_WEEKEND_COUNTRIES.has(normalizedCountryCode) ? [5, 6] : [0, 6];
+}
+
+function alignToBusinessShippingHour(date: Date): void {
+  date.setUTCHours(DEFAULT_PLANNED_SHIPPING_HOUR_UTC, 0, 0, 0);
+}
+
+function advanceToBusinessDay(date: Date, countryCode?: string): void {
+  const weekendDays = getWeekendDays(countryCode);
+  while (weekendDays.includes(date.getUTCDay())) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+}
+
+function buildDefaultPlannedShippingDate(countryCode?: string): string {
+  const plannedDate = new Date();
+  plannedDate.setUTCDate(plannedDate.getUTCDate() + 1);
+  alignToBusinessShippingHour(plannedDate);
+  advanceToBusinessDay(plannedDate, countryCode);
+  return plannedDate.toISOString();
+}
+
+function normalizePlannedShippingDate(shipDate?: string, shipperCountryCode?: string): string {
   if (shipDate) {
     const parsed = new Date(shipDate);
     if (!Number.isNaN(parsed.getTime())) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(shipDate.trim())) {
+        alignToBusinessShippingHour(parsed);
+        advanceToBusinessDay(parsed, shipperCountryCode);
+      }
       return parsed.toISOString();
     }
   }
-  return new Date().toISOString();
+  return buildDefaultPlannedShippingDate(shipperCountryCode);
+}
+
+function formatDhlShipmentDateTime(dateIsoString: string): string {
+  const date = new Date(dateIsoString);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds} GMT+00:00`;
 }
 
 function parseEstimatedDate(value: unknown): Date | undefined {
@@ -116,6 +208,9 @@ function buildPartyDetails(address: ShippingAddress, compact: boolean = false) {
       cityName: address.city,
       countryCode: normalizeCountryCode(address.countryCode),
       addressLine1: address.streetLine1,
+      ...(address.streetLine2 ? { addressLine2: address.streetLine2 } : {}),
+      ...(address.streetLine3 ? { addressLine3: address.streetLine3 } : {}),
+      ...(address.stateOrProvince ? { countyName: address.stateOrProvince } : {}),
     };
   }
 
@@ -150,22 +245,89 @@ function defaultProductCode(request: RateRequest | CreateShipmentRequest): strin
   return isInternational ? "P" : "N";
 }
 
-function buildDeclaredValue(items?: ShipmentItem[]): number | undefined {
+function sanitizeShipmentItems(items?: ShipmentItem[]): ShipmentItem[] {
   if (!items || items.length === 0) {
+    return [];
+  }
+
+  return items
+    .map<ShipmentItem | null>((item) => {
+      const description = normalizeItemDescription(item.description || "");
+      const quantity = Math.max(1, Math.round(Number(item.quantity || 0)));
+      const unitPrice = Number(item.unitPrice || 0);
+
+      if (
+        !description ||
+        !Number.isFinite(quantity) ||
+        !Number.isFinite(unitPrice) ||
+        quantity <= 0 ||
+        unitPrice <= 0 ||
+        quantity > MAX_REASONABLE_LINE_ITEM_QUANTITY ||
+        unitPrice > MAX_REASONABLE_LINE_ITEM_PRICE ||
+        isLikelyNonCommodityDescription(description)
+      ) {
+        return null;
+      }
+
+      const normalizedItem: ShipmentItem = {
+        ...item,
+        description,
+        quantity,
+        unitPrice: Number(unitPrice.toFixed(2)),
+        currency: item.currency?.trim() || "SAR",
+      };
+
+      if (item.hsCode?.trim()) {
+        normalizedItem.hsCode = item.hsCode.trim();
+      }
+
+      if (item.countryOfOrigin?.trim()) {
+        normalizedItem.countryOfOrigin = item.countryOfOrigin.trim();
+      }
+
+      return normalizedItem;
+    })
+    .filter((item): item is ShipmentItem => item !== null);
+}
+
+function buildDeclaredValue(items?: ShipmentItem[]): number | undefined {
+  const sanitizedItems = sanitizeShipmentItems(items);
+  if (sanitizedItems.length === 0) {
     return undefined;
   }
 
-  const total = items.reduce((sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 0), 0);
-  return total > 0 ? total : undefined;
-}
+  const total = sanitizedItems.reduce(
+    (sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 0),
+    0,
+  );
 
-function buildCommodityDescription(request: CreateShipmentRequest): string {
-  if (request.commodityDescription?.trim()) {
-    return request.commodityDescription.trim();
+  if (!Number.isFinite(total) || total <= 0) {
+    return undefined;
   }
 
-  if (request.items && request.items.length > 0) {
-    return request.items.map((item) => item.description).join(", ").slice(0, 150);
+  return Math.min(total, MAX_DECLARED_VALUE);
+}
+
+function formatDeclaredValue(value: number): string {
+  const normalizedValue = Math.min(MAX_DECLARED_VALUE, Math.max(0, value));
+  if (Number.isInteger(normalizedValue)) {
+    return String(normalizedValue);
+  }
+
+  return normalizedValue.toFixed(2);
+}
+
+function buildCommodityDescription(request: CreateShipmentRequest, items?: ShipmentItem[]): string {
+  const sanitizedItems = sanitizeShipmentItems(items ?? request.items);
+  if (sanitizedItems.length > 0) {
+    return sanitizedItems
+      .map((item) => item.description)
+      .join(", ")
+      .slice(0, MAX_COMMODITY_DESCRIPTION_LENGTH);
+  }
+
+  if (request.commodityDescription?.trim()) {
+    return request.commodityDescription.trim().slice(0, MAX_COMMODITY_DESCRIPTION_LENGTH);
   }
 
   return "General cargo";
@@ -179,19 +341,20 @@ function buildLineItemWeight(totalWeight: number, totalQuantity: number, itemQua
   return Math.max(0.1, Number(((totalWeight / totalQuantity) * itemQuantity).toFixed(3)));
 }
 
-function buildExportDeclaration(request: CreateShipmentRequest) {
-  if (!request.items || request.items.length === 0) {
+function buildExportDeclaration(request: CreateShipmentRequest, items?: ShipmentItem[]) {
+  const sanitizedItems = sanitizeShipmentItems(items ?? request.items);
+  if (sanitizedItems.length === 0) {
     return undefined;
   }
 
   const totalWeight = request.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
-  const totalQuantity = request.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const invoiceDate = normalizePlannedShippingDate(request.shipDate).split("T")[0];
-  const declaredValue = request.declaredValue ?? buildDeclaredValue(request.items) ?? 0;
+  const totalQuantity = sanitizedItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const invoiceDate = normalizePlannedShippingDate(request.shipDate, request.shipper.countryCode).split("T")[0];
+  const declaredValue = buildDeclaredValue(sanitizedItems) ?? 0;
   const currency = request.currency || "SAR";
 
   return {
-    lineItems: request.items.map((item, index) => {
+    lineItems: sanitizedItems.map((item, index) => {
       const grossWeight = buildLineItemWeight(totalWeight, totalQuantity, Number(item.quantity || 0));
       const commodityCodes = item.hsCode
         ? [
@@ -203,7 +366,7 @@ function buildExportDeclaration(request: CreateShipmentRequest) {
       return {
         number: index + 1,
         ...(commodityCodes ? { commodityCodes } : {}),
-        description: item.description.slice(0, 70),
+        description: item.description.slice(0, MAX_COMMODITY_DESCRIPTION_LENGTH),
         price: Number(item.unitPrice || 0),
         priceCurrency: item.currency || currency,
         quantity: {
@@ -223,7 +386,7 @@ function buildExportDeclaration(request: CreateShipmentRequest) {
       date: invoiceDate,
       totalNetWeight: totalWeight > 0 ? totalWeight : undefined,
       totalGrossWeight: totalWeight > 0 ? totalWeight : undefined,
-      customerReferences: [{ value: `EZH-${Date.now()}` }],
+      customerReferences: [{ value: `EZH-${Date.now()}`, typeCode: "CU" }],
     },
     ...(declaredValue > 0
       ? {
@@ -468,7 +631,7 @@ export class DhlAdapter implements CarrierAdapter {
             Accept: "application/json",
             "Message-Reference": crypto.randomUUID(),
             "Message-Reference-Date": new Date().toISOString(),
-            "Plugin-Name": "Ezhalha Logistics Platform",
+            "Plugin-Name": "Ezhalha Logistics",
           },
           body: body ? JSON.stringify(body) : undefined,
         });
@@ -628,7 +791,7 @@ export class DhlAdapter implements CarrierAdapter {
           receiverDetails: buildPartyDetails(request.recipient, true),
         },
         accounts: [{ typeCode: "shipper", number: this.accountNumber }],
-        plannedShippingDateAndTime: normalizePlannedShippingDate(),
+        plannedShippingDateAndTime: normalizePlannedShippingDate(undefined, request.shipper.countryCode),
         unitOfMeasurement: toMetricOrImperial(request.packages[0]?.weightUnit),
         isCustomsDeclarable:
           normalizeCountryCode(request.shipper.countryCode) !== normalizeCountryCode(request.recipient.countryCode),
@@ -721,10 +884,19 @@ export class DhlAdapter implements CarrierAdapter {
     try {
       const isInternational =
         normalizeCountryCode(request.shipper.countryCode) !== normalizeCountryCode(request.recipient.countryCode);
-      const declaredValue = request.declaredValue ?? buildDeclaredValue(request.items) ?? 1;
+      const sanitizedItems = sanitizeShipmentItems(request.items);
+      const requestedDeclaredValue = Number(request.declaredValue || 0);
+      const derivedDeclaredValue = buildDeclaredValue(sanitizedItems);
+      const declaredValue =
+        derivedDeclaredValue ??
+        (Number.isFinite(requestedDeclaredValue) && requestedDeclaredValue > 0
+          ? Math.min(requestedDeclaredValue, MAX_DECLARED_VALUE)
+          : 1);
       const payload: Record<string, any> = {
         productCode: request.serviceType || defaultProductCode(request),
-        plannedShippingDateAndTime: normalizePlannedShippingDate(request.shipDate),
+        plannedShippingDateAndTime: formatDhlShipmentDateTime(
+          normalizePlannedShippingDate(request.shipDate, request.shipper.countryCode),
+        ),
         pickup: { isRequested: false },
         accounts: [{ number: this.accountNumber, typeCode: "shipper" }],
         outputImageProperties: {
@@ -744,15 +916,15 @@ export class DhlAdapter implements CarrierAdapter {
           unitOfMeasurement: toMetricOrImperial(request.packages[0]?.weightUnit),
           incoterm: request.incoterm || "DAP",
           isCustomsDeclarable: isInternational,
-          description: buildCommodityDescription(request),
+          description: buildCommodityDescription(request, sanitizedItems),
           packages: buildPackages(request),
-          declaredValue,
+          declaredValue: formatDeclaredValue(declaredValue),
           declaredValueCurrency: request.currency || "SAR",
         },
       };
 
       if (isInternational) {
-        const exportDeclaration = buildExportDeclaration(request);
+        const exportDeclaration = buildExportDeclaration(request, sanitizedItems);
         if (exportDeclaration) {
           payload.content.exportDeclaration = exportDeclaration;
         }

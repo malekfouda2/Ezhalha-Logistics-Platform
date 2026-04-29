@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -24,9 +24,18 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useUpload } from "@/hooks/use-upload";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
+import {
+  COMPANY_APPLICATION_DOCUMENTS,
+  getCompanyApplicationDocumentLabel,
+  getMissingCompanyApplicationDocumentTypes,
+  serializeApplicationDocumentReference,
+  type CompanyApplicationDocumentType,
+} from "@shared/application-documents";
 import { ArrowLeft, Send, CheckCircle, Upload, FileText, X, Building2, User } from "lucide-react";
 
 interface UploadedDocument {
+  type: CompanyApplicationDocumentType;
+  label: string;
   name: string;
   path: string;
 }
@@ -37,13 +46,10 @@ export default function ApplyPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
+  const autofilledContactNameRef = useRef("");
   const { uploadFile, isUploading } = useUpload({
     requestUrlEndpoint: "/api/public/uploads/request-url",
     onSuccess: (response) => {
-      setUploadedDocs((prev) => [
-        ...prev,
-        { name: response.metadata.name, path: response.objectPath },
-      ]);
       toast({
         title: "Document uploaded",
         description: response.metadata.name,
@@ -58,17 +64,31 @@ export default function ApplyPage() {
     },
   });
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      await uploadFile(files[i]);
+  const handleFileSelect = async (
+    documentType: CompanyApplicationDocumentType,
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const uploadResponse = await uploadFile(file);
+    if (uploadResponse) {
+      setUploadedDocs((prev) => [
+        ...prev.filter((doc) => doc.type !== documentType),
+        {
+          type: documentType,
+          label: getCompanyApplicationDocumentLabel(documentType),
+          name: uploadResponse.metadata.name,
+          path: uploadResponse.objectPath,
+        },
+      ]);
     }
+
     e.target.value = "";
   };
 
-  const removeDocument = (path: string) => {
-    setUploadedDocs((prev) => prev.filter((doc) => doc.path !== path));
+  const removeDocument = (documentType: CompanyApplicationDocumentType) => {
+    setUploadedDocs((prev) => prev.filter((doc) => doc.type !== documentType));
   };
 
   const form = useForm<ApplicationFormData>({
@@ -96,19 +116,59 @@ export default function ApplyPage() {
   const accountType = form.watch("accountType");
   const applicantName = form.watch("name");
   const applicantPhone = form.watch("phone");
+  const shippingContactName = form.watch("shippingContactName");
 
   useEffect(() => {
     if (accountType === "individual") {
-      form.setValue("shippingContactName", applicantName, { shouldValidate: false });
+      if (shippingContactName !== applicantName) {
+        form.setValue("shippingContactName", applicantName, { shouldValidate: false });
+      }
       form.setValue("shippingContactPhone", applicantPhone, { shouldValidate: false });
+      autofilledContactNameRef.current = applicantName;
+      return;
     }
-  }, [accountType, applicantName, applicantPhone, form]);
+
+    const currentContactName = shippingContactName || "";
+    const previousAutofilledContactName = autofilledContactNameRef.current;
+    const shouldKeepAutoSyncing =
+      currentContactName === "" || currentContactName === previousAutofilledContactName;
+
+    if (shouldKeepAutoSyncing) {
+      if (currentContactName !== applicantName) {
+        form.setValue("shippingContactName", applicantName, { shouldValidate: false });
+      }
+      autofilledContactNameRef.current = applicantName;
+    }
+  }, [accountType, applicantName, applicantPhone, form, shippingContactName]);
 
   const onSubmit = async (data: ApplicationFormData) => {
+    if (accountType === "company") {
+      const missingDocumentTypes = getMissingCompanyApplicationDocumentTypes(
+        uploadedDocs.map((doc) =>
+          serializeApplicationDocumentReference({
+            type: doc.type,
+            label: doc.label,
+            name: doc.name,
+            path: doc.path,
+          }),
+        ),
+      );
+
+      if (missingDocumentTypes.length > 0) {
+        const missingLabels = missingDocumentTypes.map(getCompanyApplicationDocumentLabel).join(", ");
+        toast({
+          title: "Company documents required",
+          description: `Please upload the following before submitting: ${missingLabels}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     if (accountType === "company" && uploadedDocs.length === 0) {
       toast({
         title: "Documents required",
-        description: "Please upload at least one company document",
+        description: "Please upload all required company documents.",
         variant: "destructive",
       });
       return;
@@ -130,7 +190,14 @@ export default function ApplyPage() {
         ...data,
         shippingContactName: accountType === "individual" ? data.name : data.shippingContactName,
         shippingContactPhone: accountType === "individual" ? data.phone : data.shippingContactPhone,
-        documents: uploadedDocs.map((doc) => doc.path),
+        documents: uploadedDocs.map((doc) =>
+          serializeApplicationDocumentReference({
+            type: doc.type,
+            label: doc.label,
+            name: doc.name,
+            path: doc.path,
+          }),
+        ),
       };
       await apiRequest("POST", "/api/applications", applicationData);
       setIsSubmitted(true);
@@ -531,58 +598,74 @@ export default function ApplyPage() {
                       Upload Company Documents
                     </h3>
                     <FormDescription className="mb-3">
-                      Please upload your Commercial Registration, Tax Certificate, and any other required business documents.
+                      Upload all required company documents to complete your application.
                     </FormDescription>
                     
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <label htmlFor="document-upload" className="cursor-pointer">
-                          <div className="flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-muted/50 transition-colors">
-                            <Upload className="h-4 w-4" />
-                            <span className="text-sm">
-                              {isUploading ? "Uploading..." : "Choose Files"}
-                            </span>
-                          </div>
-                          <input
-                            id="document-upload"
-                            type="file"
-                            multiple
-                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                            className="hidden"
-                            onChange={handleFileSelect}
-                            disabled={isUploading}
-                            data-testid="input-documents"
-                          />
-                        </label>
-                        <span className="text-xs text-muted-foreground">
-                          PDF, DOC, DOCX, JPG, PNG (max 10MB each)
-                        </span>
-                      </div>
-                      
-                      {uploadedDocs.length > 0 && (
-                        <div className="space-y-2">
-                          {uploadedDocs.map((doc) => (
+                      <p className="text-xs text-muted-foreground">
+                        PDF, DOC, DOCX, JPG, PNG. One file is required for each document type below.
+                      </p>
+
+                      <div className="space-y-3">
+                        {COMPANY_APPLICATION_DOCUMENTS.map((document) => {
+                          const uploadedDocument = uploadedDocs.find((doc) => doc.type === document.type);
+
+                          return (
                             <div
-                              key={doc.path}
-                              className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50"
+                              key={document.type}
+                              className="rounded-lg border p-3 space-y-3"
                             >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                <span className="text-sm truncate">{doc.name}</span>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-medium">{document.label}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Required for company applications
+                                  </p>
+                                </div>
+                                <label htmlFor={`document-upload-${document.type}`} className="cursor-pointer">
+                                  <div className="flex items-center gap-2 px-3 py-2 border rounded-md hover:bg-muted/50 transition-colors">
+                                    <Upload className="h-4 w-4" />
+                                    <span className="text-sm">
+                                      {isUploading ? "Uploading..." : uploadedDocument ? "Replace" : "Upload"}
+                                    </span>
+                                  </div>
+                                  <input
+                                    id={`document-upload-${document.type}`}
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                    className="hidden"
+                                    onChange={(e) => handleFileSelect(document.type, e)}
+                                    disabled={isUploading}
+                                    data-testid={`input-document-${document.type.toLowerCase()}`}
+                                  />
+                                </label>
                               </div>
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => removeDocument(doc.path)}
-                                data-testid={`button-remove-doc-${doc.name}`}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
+
+                              {uploadedDocument ? (
+                                <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                    <span className="text-sm truncate">{uploadedDocument.name}</span>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => removeDocument(document.type)}
+                                    data-testid={`button-remove-doc-${document.type.toLowerCase()}`}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                                  No file uploaded yet.
+                                </div>
+                              )}
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}

@@ -51,6 +51,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
+import { parseApplicationDocumentReference } from "@shared/application-documents";
 import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2, Upload, X, RefreshCw, Users, Filter } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useUpload } from "@/hooks/use-upload";
@@ -626,10 +627,12 @@ export default function AdminClients() {
             </p>
             {selectedClient?.documents && selectedClient.documents.length > 0 ? (
               <div className="space-y-2">
-                {selectedClient.documents.map((docPath, index) => (
+                {selectedClient.documents.map((docPath, index) => {
+                  const document = parseApplicationDocumentReference(docPath);
+                  return (
                   <a
-                    key={docPath}
-                    href={docPath}
+                    key={`${document.path}-${index}`}
+                    href={document.path}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-between gap-2 p-3 rounded-md border hover:bg-muted/50 transition-colors"
@@ -637,11 +640,15 @@ export default function AdminClients() {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                      <span className="text-sm truncate">Document {index + 1}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm truncate">{document.label || `Document ${index + 1}`}</p>
+                        <p className="text-xs text-muted-foreground truncate">{document.name || `Document ${index + 1}`}</p>
+                      </div>
                     </div>
                     <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                   </a>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No documents available</p>

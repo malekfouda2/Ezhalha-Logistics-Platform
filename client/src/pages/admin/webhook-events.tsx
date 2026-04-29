@@ -98,7 +98,7 @@ export default function AdminWebhookEvents() {
           <div>
             <h1 className="text-2xl font-bold">Webhook Events</h1>
             <p className="text-muted-foreground">
-              Monitor incoming webhooks from FedEx, Moyasar, and other services
+              Monitor incoming webhooks from FedEx, Tap, and other services
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="button-refresh">
@@ -157,6 +157,7 @@ export default function AdminWebhookEvents() {
                 <SelectContent>
                   <SelectItem value="all">All Sources</SelectItem>
                   <SelectItem value="fedex">FedEx</SelectItem>
+                  <SelectItem value="tap">Tap</SelectItem>
                   <SelectItem value="moyasar">Moyasar</SelectItem>
                   <SelectItem value="stripe">Stripe</SelectItem>
                 </SelectContent>

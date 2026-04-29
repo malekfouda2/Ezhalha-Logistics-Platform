@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
+import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingSpinner, LoadingScreen } from "@/components/loading-spinner";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -227,6 +228,7 @@ interface ShipmentFormData {
 
 interface RateQuote {
   quoteId: string;
+  carrierCode: string;
   carrierName: string;
   serviceType: string;
   serviceName: string;
@@ -256,18 +258,36 @@ interface InvoiceExtractionResponse {
     currency: string;
     quantity: number;
   }>;
-  warnings: string[];
   detectedCurrency: string;
-  extractionMethod: "deterministic" | "openai";
+  extractionMethod: "deterministic" | "gemini";
+  summary: {
+    importedItemCount: number;
+    aiAssisted: boolean;
+    hasParsingWarnings: boolean;
+    autoMatchedHsCodeCount: number;
+    hsCodeReviewCount: number;
+  };
 }
 
 interface CheckoutResponse {
   shipmentId: string;
   trackingNumber: string;
-  paymentId?: string;
+  amount: number;
+  currency: string;
+  carrierCode?: string;
+  carrierName?: string;
+  serviceType?: string;
+  serviceName?: string;
+}
+
+interface ShipmentPaymentResponse {
+  shipmentId: string;
+  trackingNumber: string;
+  paymentId: string;
   transactionUrl?: string;
   amount: number;
   currency: string;
+  paymentStatus: string;
 }
 
 interface ConfirmResponse {
@@ -286,27 +306,6 @@ const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
 ]);
 
 const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
-
-interface ServiceOption {
-  serviceType: string;
-  packagingType: string;
-  displayName: string;
-  isInternational: boolean;
-  validPackagingTypes?: string[];
-}
-
-interface AddressValidationResult {
-  valid: boolean;
-  classification?: string;
-  suggestions?: Array<{
-    streetLine1?: string;
-    city?: string;
-    stateOrProvince?: string;
-    postalCode?: string;
-    countryCode?: string;
-  }>;
-  errors?: string[];
-}
 
 const packageTypes = [
   { value: "YOUR_PACKAGING", label: "Your Own Packaging" },
@@ -354,6 +353,36 @@ function CarrierMark({ carrierCode }: { carrierCode: string }) {
   );
 }
 
+function titleCaseLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatRateServiceMeta(serviceType: string, serviceName: string): string | null {
+  const trimmedServiceType = serviceType.trim();
+  if (!trimmedServiceType) {
+    return null;
+  }
+
+  if (/^[A-Z0-9]{1,4}$/.test(trimmedServiceType)) {
+    return `Service code ${trimmedServiceType}`;
+  }
+
+  const normalized = titleCaseLabel(trimmedServiceType.replace(/_/g, " "));
+  const normalizedName = serviceName.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normalizedMeta = normalized.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+  if (!normalizedMeta || normalizedName.includes(normalizedMeta)) {
+    return null;
+  }
+
+  return normalized;
+}
+
 const shipmentTypeOptions = [
   { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
   { value: "inbound", label: "Inbound", description: "International shipping into a country" },
@@ -381,7 +410,7 @@ export default function CreateShipment() {
   const [formData, setFormData] = useState<ShipmentFormData>({
     shipmentType: "" as "domestic" | "inbound" | "outbound",
     isDdp: false,
-    carrier: "FEDEX",
+    carrier: "",
     serviceType: "",
     shipper: {
       name: "",
@@ -422,14 +451,8 @@ export default function CreateShipment() {
   const [itemSheetOpen, setItemSheetOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<ItemFormData>({ ...defaultItem });
-  const [availableServices, setAvailableServices] = useState<ServiceOption[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
-  const [servicesError, setServicesError] = useState<string | null>(null);
-  const [addressValidation, setAddressValidation] = useState<{ shipper?: AddressValidationResult; recipient?: AddressValidationResult }>({});
-  const [addressValidating, setAddressValidating] = useState<{ shipper?: boolean; recipient?: boolean }>({});
   const [customsInputMode, setCustomsInputMode] = useState<"invoice" | "manual">("manual");
-  const [invoiceExtractionWarnings, setInvoiceExtractionWarnings] = useState<string[]>([]);
-  const [invoiceExtractionMethod, setInvoiceExtractionMethod] = useState<"deterministic" | "openai" | null>(null);
+  const [invoiceExtractionSummary, setInvoiceExtractionSummary] = useState<InvoiceExtractionResponse["summary"] | null>(null);
   const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
 
   const { uploadFile: uploadInvoiceFile, isUploading: isUploadingInvoice } = useUpload({
@@ -504,7 +527,7 @@ export default function CreateShipment() {
     });
   }, [account]);
 
-  // Handle Moyasar payment callback
+  // Handle payment return flow
   useEffect(() => {
     const params = new URLSearchParams(searchString);
     const shipmentId = params.get("shipmentId");
@@ -546,33 +569,24 @@ export default function CreateShipment() {
   const getRatesMutation = useMutation({
     mutationFn: async (data: ShipmentFormData) => {
       const payload = {
-        ...data,
-        items: data.shipmentType !== "domestic" ? data.items
-          .filter(item => item.itemName.trim() !== "")
-          .map(item => ({
-            itemName: item.itemName,
-            itemDescription: item.itemDescription || undefined,
-            category: item.category,
-            material: item.material || undefined,
-            countryOfOrigin: item.countryOfOrigin,
-            hsCode: item.hsCode || undefined,
-            hsCodeSource: item.hsCodeSource || undefined,
-            hsCodeConfidence: item.hsCodeConfidence || undefined,
-            hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
-            price: item.price,
-            currency: item.currency,
-            quantity: item.quantity,
-          })) : [],
-        tradeDocuments:
-          data.shipmentType !== "domestic" && customsInputMode === "invoice"
-            ? data.tradeDocuments
-            : [],
+        shipmentType: data.shipmentType,
+        isDdp: data.isDdp,
+        shipper: data.shipper,
+        recipient: data.recipient,
+        packages: data.packages,
+        weightUnit: data.weightUnit,
+        dimensionUnit: data.dimensionUnit,
+        packageType: data.packageType,
+        currency: data.currency,
       };
       const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
       return res.json() as Promise<RatesResponse>;
     },
     onSuccess: (data) => {
+      setSelectedQuoteId(null);
       setRates(data);
+      setCheckoutData(null);
+      setConfirmData(null);
       setStep(5);
     },
     onError: (error) => {
@@ -585,18 +599,76 @@ export default function CreateShipment() {
   });
 
   const checkoutMutation = useMutation({
-    mutationFn: async (quoteId: string) => {
-      const res = await apiRequest("POST", "/api/client/shipments/checkout", { quoteId });
+    mutationFn: async (payload: {
+      quoteId: string;
+      items?: Array<{
+        itemName: string;
+        itemDescription?: string;
+        category: string;
+        material?: string;
+        countryOfOrigin: string;
+        hsCode?: string;
+        hsCodeSource?: HsCodeSourceValue;
+        hsCodeConfidence?: HsCodeConfidenceValue;
+        hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
+        price: number;
+        currency?: string;
+        quantity: number;
+      }>;
+      tradeDocuments?: ShipmentTradeDocument[];
+    }) => {
+      const res = await apiRequest("POST", "/api/client/shipments/checkout", payload);
       return res.json() as Promise<CheckoutResponse>;
     },
     onSuccess: (data) => {
       setCheckoutData(data);
-      setStep(6);
+      setStep(paymentStep);
     },
     onError: (error) => {
       toast({
         title: "Failed to process checkout",
         description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createShipmentPaymentMutation = useMutation({
+    mutationFn: async (payload: {
+      shipmentId: string;
+      tapTokenId?: string;
+      saveCardForFuture?: boolean;
+    }) => {
+      const res = await apiRequest("POST", "/api/client/shipments/pay", payload);
+      return res.json() as Promise<ShipmentPaymentResponse>;
+    },
+    onSuccess: (data) => {
+      if (data.transactionUrl) {
+        window.location.href = data.transactionUrl;
+        return;
+      }
+
+      if (["CAPTURED", "AUTHORIZED"].includes(String(data.paymentStatus || "").toUpperCase())) {
+        toast({
+          title: "Payment Successful",
+          description: "Completing your shipment...",
+        });
+        confirmMutation.mutate({
+          shipmentId: data.shipmentId,
+          paymentIntentId: data.paymentId,
+        });
+        return;
+      }
+
+      toast({
+        title: "Payment initiated",
+        description: "Your payment is being processed.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Payment Failed",
+        description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
     },
@@ -609,11 +681,14 @@ export default function CreateShipment() {
     },
     onSuccess: (data) => {
       setConfirmData(data);
-      setStep(7);
+      setStep(confirmationStep);
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
       // Clear URL params after successful confirmation
-      navigate("/client/create-shipment", { replace: true });
+      navigate("/client/shipments/new", { replace: true });
     },
     onError: (error: any) => {
       const is502 = error?.status === 502 || (error instanceof Error && error.message?.includes("carrier"));
@@ -640,10 +715,13 @@ export default function CreateShipment() {
         labelUrl: data.labelUrl,
         estimatedDelivery: data.estimatedDelivery,
       });
-      setStep(7);
+      setStep(confirmationStep);
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
       toast({
         title: "Credit Invoice Created",
         description: "Your shipment has been created with Pay Later. Invoice due in 30 days.",
@@ -673,8 +751,32 @@ export default function CreateShipment() {
   const ddpEligibleDestination =
     formData.shipmentType === "inbound" &&
     DDP_DESTINATION_COUNTRIES.has((formData.recipient.countryCode || "").toUpperCase());
-  const isFedExSelected = formData.carrier === "FEDEX";
   const invoiceDocument = formData.tradeDocuments[0] ?? null;
+  const isInternationalShipment =
+    formData.shipmentType === "inbound" || formData.shipmentType === "outbound";
+  const customsStep = 6;
+  const paymentStep = isInternationalShipment ? 7 : 6;
+  const confirmationStep = paymentStep + 1;
+  const selectedQuote = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId) ?? null;
+  const selectedCarrierCode = selectedQuote?.carrierCode || formData.carrier || "";
+
+  useEffect(() => {
+    if (!ddpEligibleDestination && formData.isDdp) {
+      setFormData((prev) => ({ ...prev, isDdp: false }));
+    }
+  }, [ddpEligibleDestination, formData.isDdp]);
+
+  useEffect(() => {
+    if (!selectedQuote) {
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      carrier: selectedQuote.carrierCode,
+      serviceType: selectedQuote.serviceType,
+    }));
+  }, [selectedQuote]);
 
   // Permission check - show access denied if user lacks create_shipments permission
   if (permsLoading) {
@@ -702,14 +804,6 @@ export default function CreateShipment() {
     );
   }
 
-  const handlePayment = () => {
-    if (checkoutData?.transactionUrl) {
-      window.location.href = checkoutData.transactionUrl;
-    } else {
-      handleConfirmPayment();
-    }
-  };
-
   const updateShipper = (field: string, value: string) => {
     setFormData(prev => ({
       ...prev,
@@ -723,20 +817,6 @@ export default function CreateShipment() {
       recipient: { ...prev.recipient, [field]: value },
     }));
   };
-
-  useEffect(() => {
-    if (!ddpEligibleDestination && formData.isDdp) {
-      setFormData((prev) => ({ ...prev, isDdp: false }));
-    }
-  }, [ddpEligibleDestination, formData.isDdp]);
-
-  useEffect(() => {
-    setAvailableServices([]);
-    setServicesError(null);
-    setAddressValidation({});
-    setSelectedQuoteId(null);
-    setRates(null);
-  }, [formData.carrier]);
 
   const updatePackageItem = (index: number, field: string, value: number) => {
     setFormData(prev => ({
@@ -794,8 +874,7 @@ export default function CreateShipment() {
       tradeDocuments: [],
       items: [{ ...defaultItem }],
     }));
-    setInvoiceExtractionWarnings([]);
-    setInvoiceExtractionMethod(null);
+    setInvoiceExtractionSummary(null);
   };
 
   const handleInvoiceSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -847,6 +926,7 @@ export default function CreateShipment() {
         {
           shipmentType: formData.shipmentType,
           shipperCountryCode: formData.shipper.countryCode,
+          recipientCountryCode: formData.recipient.countryCode,
           fileName: uploadResponse.metadata.name,
           objectPath: uploadResponse.objectPath,
           contentType: normalizeTradeDocumentContentType(
@@ -890,8 +970,7 @@ export default function CreateShipment() {
           },
         ],
       }));
-      setInvoiceExtractionWarnings(extraction.warnings || []);
-      setInvoiceExtractionMethod(extraction.extractionMethod);
+      setInvoiceExtractionSummary(extraction.summary || null);
 
       toast({
         title: "Invoice processed",
@@ -899,8 +978,7 @@ export default function CreateShipment() {
       });
     } catch (error) {
       setFormData((prev) => ({ ...prev, tradeDocuments: [] }));
-      setInvoiceExtractionWarnings([]);
-      setInvoiceExtractionMethod(null);
+      setInvoiceExtractionSummary(null);
       toast({
         title: "Could not process invoice",
         description: error instanceof Error ? error.message : "Please upload another invoice or enter the items manually.",
@@ -1086,91 +1164,6 @@ export default function CreateShipment() {
     } catch {}
   };
 
-  const fetchServiceOptions = useCallback(async () => {
-    const { shipper, recipient, packages, packageType, weightUnit } = formData;
-    if (formData.carrier !== "FEDEX") {
-      setAvailableServices([]);
-      setServicesError(null);
-      return;
-    }
-    if (!shipper.countryCode || !shipper.city || !recipient.countryCode || !recipient.city) return;
-    if (packages.length === 0 || !packages[0].weight) return;
-
-    setServicesLoading(true);
-    setServicesError(null);
-    try {
-      const params = new URLSearchParams({
-        shipperCountry: shipper.countryCode,
-        shipperPostal: shipper.postalCode || "",
-        shipperCity: shipper.city,
-        recipientCountry: recipient.countryCode,
-        recipientPostal: recipient.postalCode || "",
-        recipientCity: recipient.city,
-        packagingType: packageType,
-        weight: String(packages[0].weight),
-      });
-      const res = await fetch(`/api/fedex/service-options?${params}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch service options");
-      const data = await res.json() as { services: ServiceOption[] };
-      setAvailableServices(data.services);
-      if (data.services.length === 0) {
-        setServicesError("No shipping services available for this lane. Please check addresses and try again.");
-      } else if (data.services.length > 0) {
-        const firstService = data.services[0];
-        const validPkgs = firstService.validPackagingTypes || [];
-        if (validPkgs.length > 0 && !validPkgs.includes(packageType)) {
-          setFormData(prev => ({ ...prev, packageType: validPkgs[0] }));
-        }
-      }
-    } catch {
-      setServicesError("Could not load available services. Rates will still be fetched.");
-      setAvailableServices([]);
-    } finally {
-      setServicesLoading(false);
-    }
-  }, [formData.carrier, formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
-      formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
-      formData.packageType, formData.packages]);
-
-  useEffect(() => {
-    if (formData.carrier !== "FEDEX") {
-      return;
-    }
-    if (formData.shipper.countryCode && formData.shipper.city &&
-        formData.recipient.countryCode && formData.recipient.city &&
-        formData.packages.length > 0 && formData.packages[0].weight > 0) {
-      fetchServiceOptions();
-    }
-  }, [formData.carrier, formData.shipper.countryCode, formData.shipper.city, formData.shipper.postalCode,
-      formData.recipient.countryCode, formData.recipient.city, formData.recipient.postalCode,
-      formData.packageType]);
-
-  const validateAddressViaApi = async (role: "shipper" | "recipient") => {
-    const addr = formData[role];
-    if (!addr.addressLine1 || !addr.countryCode) return;
-
-    setAddressValidating(prev => ({ ...prev, [role]: true }));
-    try {
-      const res = await apiRequest("POST", "/api/fedex/validate-address", {
-        streetLine1: addr.addressLine1,
-        streetLine2: addr.addressLine2 || undefined,
-        city: addr.city || undefined,
-        stateOrProvince: addr.stateOrProvince || undefined,
-        postalCode: addr.postalCode || undefined,
-        countryCode: addr.countryCode,
-      });
-      const result = await res.json() as AddressValidationResult;
-      setAddressValidation(prev => ({ ...prev, [role]: result }));
-    } catch (err: any) {
-      setAddressValidation(prev => ({
-        ...prev,
-        [role]: { valid: false, errors: [err?.message || "Address validation failed"] },
-      }));
-    } finally {
-      setAddressValidating(prev => ({ ...prev, [role]: false }));
-    }
-  };
-
   const isPostalRequired = (countryCode: string) => {
     return countryCode && !POSTAL_CODE_EXEMPT_COUNTRIES.has(countryCode.toUpperCase());
   };
@@ -1183,10 +1176,6 @@ export default function CreateShipment() {
     if (currentStep === 1) {
       if (!formData.shipmentType) {
         toast({ title: "Please select a shipment type", variant: "destructive" });
-        return false;
-      }
-      if (!formData.carrier) {
-        toast({ title: "Please select a carrier", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 2) {
@@ -1252,67 +1241,140 @@ export default function CreateShipment() {
           return false;
         }
       }
-      if (formData.shipmentType !== "domestic") {
-        if (customsInputMode === "invoice" && !invoiceDocument) {
-          toast({ title: "Please upload an invoice", variant: "destructive" });
-          return false;
-        }
+    } else if (currentStep === 5) {
+      if (!selectedQuoteId || !selectedQuote) {
+        toast({ title: "Please select a shipping rate", variant: "destructive" });
+        return false;
+      }
+    } else if (currentStep === customsStep && isInternationalShipment) {
+      if (customsInputMode === "invoice" && !invoiceDocument) {
+        toast({ title: "Please upload an invoice", variant: "destructive" });
+        return false;
+      }
 
-        const validItems = formData.items.filter(item => item.itemName.trim() !== "");
-        if (validItems.length === 0) {
-          toast({ title: "Please add at least one item for customs", variant: "destructive" });
+      const validItems = formData.items.filter(item => item.itemName.trim() !== "");
+      if (validItems.length === 0) {
+        toast({ title: "Please add at least one item for customs", variant: "destructive" });
+        return false;
+      }
+      for (let i = 0; i < validItems.length; i++) {
+        const item = validItems[i];
+        if (!item.category || !item.countryOfOrigin || item.price <= 0 || item.quantity < 1) {
+          toast({ title: `Please fill in all required fields for "${item.itemName}"`, variant: "destructive" });
           return false;
-        }
-        for (let i = 0; i < validItems.length; i++) {
-          const item = validItems[i];
-          if (!item.category || !item.countryOfOrigin || item.price <= 0 || item.quantity < 1) {
-            toast({ title: `Please fill in all required fields for "${item.itemName}"`, variant: "destructive" });
-            return false;
-          }
         }
       }
     }
     return true;
   };
 
-  const nextStep = () => {
-    if (validateStep(step)) {
-      if (step === 4) {
-        getRatesMutation.mutate(formData);
-      } else {
-        setStep(step + 1);
-      }
+  const buildCheckoutPayload = () => {
+    if (!selectedQuoteId) {
+      return null;
     }
+
+    const payload: {
+      quoteId: string;
+      items?: Array<{
+        itemName: string;
+        itemDescription?: string;
+        category: string;
+        material?: string;
+        countryOfOrigin: string;
+        hsCode?: string;
+        hsCodeSource?: HsCodeSourceValue;
+        hsCodeConfidence?: HsCodeConfidenceValue;
+        hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
+        price: number;
+        currency?: string;
+        quantity: number;
+      }>;
+      tradeDocuments?: ShipmentTradeDocument[];
+    } = {
+      quoteId: selectedQuoteId,
+    };
+
+    if (isInternationalShipment) {
+      payload.items = formData.items
+        .filter((item) => item.itemName.trim() !== "")
+        .map((item) => ({
+          itemName: item.itemName,
+          itemDescription: item.itemDescription || undefined,
+          category: item.category,
+          material: item.material || undefined,
+          countryOfOrigin: item.countryOfOrigin,
+          hsCode: item.hsCode || undefined,
+          hsCodeSource: item.hsCodeSource || undefined,
+          hsCodeConfidence: item.hsCodeConfidence || undefined,
+          hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
+          price: item.price,
+          currency: item.currency,
+          quantity: item.quantity,
+        }));
+      payload.tradeDocuments = customsInputMode === "invoice" ? formData.tradeDocuments : [];
+    }
+
+    return payload;
+  };
+
+  const nextStep = () => {
+    if (!validateStep(step)) {
+      return;
+    }
+
+    if (step === 4) {
+      getRatesMutation.mutate(formData);
+      return;
+    }
+
+    if (step === 5) {
+      if (isInternationalShipment) {
+        setStep(customsStep);
+        return;
+      }
+
+      const payload = buildCheckoutPayload();
+      if (payload) {
+        checkoutMutation.mutate(payload);
+      }
+      return;
+    }
+
+    if (step === customsStep && isInternationalShipment) {
+      const payload = buildCheckoutPayload();
+      if (payload) {
+        checkoutMutation.mutate(payload);
+      }
+      return;
+    }
+
+    setStep(step + 1);
   };
 
   const prevStep = () => {
     setStep(step - 1);
   };
 
-  const handleSelectRate = () => {
-    if (selectedQuoteId) {
-      checkoutMutation.mutate(selectedQuoteId);
-    }
-  };
-
-  const handleConfirmPayment = () => {
-    if (checkoutData) {
-      confirmMutation.mutate({
-        shipmentId: checkoutData.shipmentId,
-        paymentIntentId: checkoutData.paymentId,
-      });
-    }
-  };
-
-  const stepTitles = [
-    "Shipment Type",
-    "Sender Details",
-    "Recipient Details",
-    "Package & Items",
-    "Select Rate",
-    "Payment",
-    "Confirmation",
-  ];
+  const stepTitles = isInternationalShipment
+    ? [
+        "Shipment Type",
+        "Sender Details",
+        "Recipient Details",
+        "Package Details",
+        "Select Rate",
+        "Customs Details",
+        "Payment",
+        "Confirmation",
+      ]
+    : [
+        "Shipment Type",
+        "Sender Details",
+        "Recipient Details",
+        "Package Details",
+        "Select Rate",
+        "Payment",
+        "Confirmation",
+      ];
 
   const senderNeedsShortAddress = formData.shipper.countryCode === "SA";
   const recipientNeedsShortAddress = formData.recipient.countryCode === "SA";
@@ -1328,7 +1390,10 @@ export default function CreateShipment() {
         </Link>
 
         <div className="flex items-center justify-center mb-8">
-          {[1, 2, 3, 4, 5, 6, 7].map((s) => (
+          {stepTitles.map((_, index) => {
+            const s = index + 1;
+            const isLast = s === stepTitles.length;
+            return (
             <div key={s} className="flex items-center">
               <div
                 className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
@@ -1339,11 +1404,12 @@ export default function CreateShipment() {
               >
                 {step > s ? <Check className="h-4 w-4" /> : s}
               </div>
-              {s < 7 && (
+              {!isLast && (
                 <div className={`w-6 h-1 mx-0.5 ${step > s ? "bg-primary" : "bg-muted"}`} />
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <p className="text-center text-muted-foreground mb-6">{stepTitles[step - 1]}</p>
@@ -1355,7 +1421,7 @@ export default function CreateShipment() {
                 <Truck className="h-5 w-5" />
                 Shipment Type
               </CardTitle>
-              <CardDescription>Select the type of shipment and carrier</CardDescription>
+              <CardDescription>Select the shipment direction</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
@@ -1376,6 +1442,11 @@ export default function CreateShipment() {
                       stateOrProvince: "",
                       shortAddress: "",
                     };
+
+                    setSelectedQuoteId(null);
+                    setRates(null);
+                    setCheckoutData(null);
+                    setConfirmData(null);
                     
                     if (v === "domestic") {
                       const shipperAddress = accountAddress ? { ...accountAddress, countryCode: "SA" } : { ...emptyAddress, countryCode: "SA" };
@@ -1384,6 +1455,8 @@ export default function CreateShipment() {
                         ...prev,
                         shipmentType: v,
                         isDdp: false,
+                        carrier: "",
+                        serviceType: "",
                         shipper: shipperAddress,
                         recipient: recipientAddress,
                       }));
@@ -1392,6 +1465,8 @@ export default function CreateShipment() {
                         ...prev,
                         shipmentType: v,
                         isDdp: false,
+                        carrier: "",
+                        serviceType: "",
                         shipper: { ...emptyAddress },
                         recipient: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                       }));
@@ -1400,6 +1475,8 @@ export default function CreateShipment() {
                         ...prev,
                         shipmentType: v,
                         isDdp: false,
+                        carrier: "",
+                        serviceType: "",
                         shipper: accountAddress ? { ...accountAddress } : { ...emptyAddress },
                         recipient: { ...emptyAddress },
                       }));
@@ -1469,33 +1546,6 @@ export default function CreateShipment() {
                   ))}
                 </RadioGroup>
               </div>
-
-              <div>
-                <Label className="text-base font-medium">Carrier *</Label>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {carriers.map((carrier) => (
-                    <button
-                      key={carrier.code}
-                      type="button"
-                      className={`rounded-lg border p-4 transition-colors hover:bg-muted/40 ${
-                        formData.carrier === carrier.code ? "border-primary bg-primary/5" : "border-border"
-                      }`}
-                      onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          carrier: carrier.code,
-                        }))
-                      }
-                      data-testid={`select-carrier-${carrier.code.toLowerCase()}`}
-                    >
-                      <div className="flex min-h-14 items-center justify-center">
-                        <CarrierMark carrierCode={carrier.code} />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
             </CardContent>
             <CardFooter className="flex justify-end">
               <Button onClick={nextStep} data-testid="button-next">Next: Sender Details</Button>
@@ -1628,47 +1678,6 @@ export default function CreateShipment() {
                   />
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
-              )}
-              {isFedExSelected && (
-              <div className="pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => validateAddressViaApi("shipper")}
-                  disabled={addressValidating.shipper || !formData.shipper.addressLine1 || !formData.shipper.countryCode}
-                  data-testid="button-validate-shipper-address"
-                >
-                  {addressValidating.shipper ? (
-                    <><LoadingSpinner size="sm" className="mr-1" /> Validating...</>
-                  ) : (
-                    <><MapPin className="h-3 w-3 mr-1" /> Validate Address</>
-                  )}
-                </Button>
-                {addressValidation.shipper && (
-                  <div className={`mt-2 p-3 rounded-md text-sm ${
-                    addressValidation.shipper.valid
-                      ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
-                      : "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
-                  }`} data-testid="shipper-address-validation-result">
-                    {addressValidation.shipper.valid ? (
-                      <span className="flex items-center gap-1"><CheckCircle className="h-4 w-4" /> Address validated successfully</span>
-                    ) : (
-                      <div>
-                        <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> Address validation issues</span>
-                        {addressValidation.shipper.errors?.map((e, i) => <p key={i} className="mt-1">{e}</p>)}
-                        {addressValidation.shipper.suggestions && addressValidation.shipper.suggestions.length > 0 && (
-                          <div className="mt-2">
-                            <p className="font-medium">Suggestions:</p>
-                            {addressValidation.shipper.suggestions.map((s, i) => (
-                              <p key={i} className="text-xs mt-1">{[s.streetLine1, s.city, s.stateOrProvince, s.postalCode, s.countryCode].filter(Boolean).join(", ")}</p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
               )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
@@ -1838,47 +1847,6 @@ export default function CreateShipment() {
                   <p className="text-xs text-muted-foreground mt-1">Required for KSA addresses</p>
                 </div>
               )}
-              {isFedExSelected && (
-              <div className="pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => validateAddressViaApi("recipient")}
-                  disabled={addressValidating.recipient || !formData.recipient.addressLine1 || !formData.recipient.countryCode}
-                  data-testid="button-validate-recipient-address"
-                >
-                  {addressValidating.recipient ? (
-                    <><LoadingSpinner size="sm" className="mr-1" /> Validating...</>
-                  ) : (
-                    <><MapPin className="h-3 w-3 mr-1" /> Validate Address</>
-                  )}
-                </Button>
-                {addressValidation.recipient && (
-                  <div className={`mt-2 p-3 rounded-md text-sm ${
-                    addressValidation.recipient.valid
-                      ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
-                      : "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
-                  }`} data-testid="recipient-address-validation-result">
-                    {addressValidation.recipient.valid ? (
-                      <span className="flex items-center gap-1"><CheckCircle className="h-4 w-4" /> Address validated successfully</span>
-                    ) : (
-                      <div>
-                        <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> Address validation issues</span>
-                        {addressValidation.recipient.errors?.map((e, i) => <p key={i} className="mt-1">{e}</p>)}
-                        {addressValidation.recipient.suggestions && addressValidation.recipient.suggestions.length > 0 && (
-                          <div className="mt-2">
-                            <p className="font-medium">Suggestions:</p>
-                            {addressValidation.recipient.suggestions.map((s, i) => (
-                              <p key={i} className="text-xs mt-1">{[s.streetLine1, s.city, s.stateOrProvince, s.postalCode, s.countryCode].filter(Boolean).join(", ")}</p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
@@ -1910,18 +1878,9 @@ export default function CreateShipment() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(() => {
-                        const allValidPkgs = new Set<string>();
-                        availableServices.forEach(svc => {
-                          (svc.validPackagingTypes || []).forEach(p => allValidPkgs.add(p));
-                        });
-                        const filtered = allValidPkgs.size > 0 
-                          ? packageTypes.filter(p => allValidPkgs.has(p.value))
-                          : packageTypes;
-                        return (filtered.length > 0 ? filtered : packageTypes).map((p) => (
-                          <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                        ));
-                      })()}
+                      {packageTypes.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2035,291 +1994,10 @@ export default function CreateShipment() {
                   Add Package
                 </Button>
               </div>
-
-              {formData.shipmentType !== "domestic" && (
-                <>
-                  <div className="border-t pt-6 mt-2 space-y-6">
-                    <div className="space-y-4">
-                      <div>
-                        <h3 className="text-base font-medium flex items-center gap-2">
-                          <FileText className="h-4 w-4" />
-                          Customs Details
-                        </h3>
-                      </div>
-
-                      <RadioGroup
-                        value={customsInputMode}
-                        onValueChange={(value) => setCustomsInputMode(value as "invoice" | "manual")}
-                        className="grid gap-3 md:grid-cols-2"
-                        data-testid="customs-input-mode"
-                      >
-                        <Label
-                          htmlFor="customs-mode-invoice"
-                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
-                            customsInputMode === "invoice"
-                              ? "border-primary bg-primary/5"
-                              : "hover:bg-muted/40"
-                          }`}
-                        >
-                          <RadioGroupItem value="invoice" id="customs-mode-invoice" className="mt-0.5" />
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium">Upload Invoice</span>
-                            <p className="text-xs text-muted-foreground">Extract shipment items from the invoice.</p>
-                          </div>
-                        </Label>
-                        <Label
-                          htmlFor="customs-mode-manual"
-                          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
-                            customsInputMode === "manual"
-                              ? "border-primary bg-primary/5"
-                              : "hover:bg-muted/40"
-                          }`}
-                        >
-                          <RadioGroupItem value="manual" id="customs-mode-manual" className="mt-0.5" />
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium">Enter Items Manually</span>
-                            <p className="text-xs text-muted-foreground">Add and manage the customs items yourself.</p>
-                          </div>
-                        </Label>
-                      </RadioGroup>
-                    </div>
-
-                    {customsInputMode === "invoice" && (
-                      <div className="rounded-lg border p-4 space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h4 className="text-sm font-medium flex items-center gap-2">
-                              <FileText className="h-4 w-4" />
-                              Invoice
-                            </h4>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF invoice.
-                            </p>
-                          </div>
-                          <label htmlFor="invoice-upload" className="cursor-pointer">
-                            <div className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
-                              <Upload className="h-4 w-4" />
-                              <span>{isUploadingInvoice || isExtractingInvoice ? "Processing..." : invoiceDocument ? "Replace Invoice" : "Upload Invoice"}</span>
-                            </div>
-                            <input
-                              id="invoice-upload"
-                              type="file"
-                              accept={INVOICE_ACCEPT}
-                              className="hidden"
-                              onChange={handleInvoiceSelect}
-                              disabled={isUploadingInvoice || isExtractingInvoice}
-                              data-testid="input-invoice-upload"
-                            />
-                          </label>
-                        </div>
-
-                        {invoiceDocument ? (
-                          <div
-                            className="rounded-lg border p-3"
-                            data-testid={`invoice-document-${invoiceDocument.objectPath}`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                                  <span className="text-sm font-medium truncate">{invoiceDocument.fileName}</span>
-                                </div>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  {invoiceDocument.contentType} · {formatFileSize(invoiceDocument.size)}
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0"
-                                onClick={clearInvoiceDocument}
-                                data-testid={`button-remove-invoice-${invoiceDocument.fileName}`}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="rounded-lg border border-dashed px-4 py-6 text-center">
-                            <FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                            <p className="text-sm text-muted-foreground">No invoice uploaded.</p>
-                          </div>
-                        )}
-
-                        {(isUploadingInvoice || isExtractingInvoice) && (
-                          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-                            <LoadingSpinner size="sm" />
-                            <span>Processing invoice...</span>
-                          </div>
-                        )}
-
-                        {invoiceExtractionWarnings.length > 0 && (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                            <div className="flex items-start gap-2">
-                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                              <div className="space-y-1">
-                                {invoiceExtractionMethod === "openai" && (
-                                  <p className="font-medium">AI extraction was used. Review the imported items carefully.</p>
-                                )}
-                                {invoiceExtractionWarnings.map((warning) => (
-                                  <p key={warning}>{warning}</p>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <h3 className="text-base font-medium flex items-center gap-2">
-                            <Search className="h-4 w-4" />
-                            {customsInputMode === "invoice" ? "Invoice Items" : "Shipment Items"}
-                          </h3>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {customsInputMode === "invoice"
-                              ? "Review the extracted items before continuing."
-                              : "Add items for customs clearance."}
-                          </p>
-                        </div>
-                        {(customsInputMode === "manual" || invoiceDocument) && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={openAddItemSheet}
-                            data-testid="button-add-item"
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add Item
-                          </Button>
-                        )}
-                      </div>
-
-                      {formData.items.length > 0 && formData.items[0].itemName ? (
-                        <div className="space-y-2">
-                          {formData.items.map((item, index) => {
-                            const confidence = getConfidenceBadge(item.hsCodeConfidence);
-                            return (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between p-3 border rounded-lg"
-                                data-testid={`item-row-${index}`}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium text-sm truncate">{item.itemName}</span>
-                                    {item.hsCode && (
-                                      <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-hs-${index}`}>
-                                        HS: {item.hsCode}
-                                      </Badge>
-                                    )}
-                                    {item.hsCode && (
-                                      <Badge className={`text-xs shrink-0 ${confidence.className}`} data-testid={`badge-hs-confidence-${index}`}>
-                                        {confidence.label}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
-                                    {item.category && (
-                                      <span className="ml-2">
-                                        · {itemCategories.find(c => c.value === item.category)?.label || item.category}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0 ml-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    onClick={() => openEditItemSheet(index)}
-                                    data-testid={`button-edit-item-${index}`}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </Button>
-                                  {formData.items.length > 1 && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-8 w-8"
-                                      onClick={() => removeItem(index)}
-                                      data-testid={`button-remove-item-${index}`}
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="text-center py-6 border rounded-lg border-dashed">
-                          <Package className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                          <p className="text-sm text-muted-foreground">
-                            {customsInputMode === "invoice" ? "No invoice items available yet." : "No items added yet."}
-                          </p>
-                          {customsInputMode === "manual" && (
-                            <Button
-                              variant="link"
-                              size="sm"
-                              onClick={openAddItemSheet}
-                              className="mt-1"
-                              data-testid="button-add-first-item"
-                            >
-                              Add your first item
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-              <div className="border-t pt-4 mt-2">
-                <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-                  <Truck className="h-4 w-4" />
-                  Available Services
-                </h3>
-                {!isFedExSelected ? (
-                  <p className="text-sm text-muted-foreground" data-testid="services-dhl-note">
-                    Live services appear after rate lookup.
-                  </p>
-                ) : servicesLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="services-loading">
-                    <LoadingSpinner size="sm" /> Loading available services...
-                  </div>
-                ) : servicesError && availableServices.length === 0 ? (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="services-error">
-                    <span className="flex items-center gap-1"><AlertTriangle className="h-4 w-4" /> {servicesError}</span>
-                  </div>
-                ) : availableServices.length > 0 ? (
-                  <div className="flex flex-wrap gap-2" data-testid="services-list">
-                    {availableServices.map((svc) => (
-                      <Badge key={svc.serviceType} variant="secondary" data-testid={`badge-service-${svc.serviceType}`}>
-                        {svc.displayName}
-                        {svc.isInternational && <span className="ml-1 text-xs opacity-70">(Intl)</span>}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground" data-testid="services-empty">
-                    Fill in sender and recipient addresses above to see available services.
-                  </p>
-                )}
-              </div>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
-              <Button
-                onClick={nextStep}
-                disabled={getRatesMutation.isPending || (servicesError !== null && availableServices.length === 0 && !servicesLoading && formData.shipper.countryCode !== "" && formData.recipient.countryCode !== "")}
-                data-testid="button-get-rates"
-              >
+              <Button onClick={nextStep} disabled={getRatesMutation.isPending} data-testid="button-get-rates">
                 {getRatesMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Getting Rates...</>
                 ) : (
@@ -2342,49 +2020,386 @@ export default function CreateShipment() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <RadioGroup value={selectedQuoteId || ""} onValueChange={setSelectedQuoteId}>
-                <div className="space-y-3">
-                  {rates.quotes.map((quote) => (
-                    <div
-                      key={quote.quoteId}
-                      className={`flex items-center space-x-4 p-4 rounded-lg border cursor-pointer hover-elevate ${
-                        selectedQuoteId === quote.quoteId ? "border-primary bg-primary/5" : "border-border"
-                      }`}
-                      onClick={() => setSelectedQuoteId(quote.quoteId)}
-                      data-testid={`rate-option-${quote.serviceType}`}
-                    >
-                      <RadioGroupItem value={quote.quoteId} id={quote.quoteId} />
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-medium">{quote.serviceName}</p>
-                            <p className="text-sm text-muted-foreground">{quote.carrierName}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-lg font-bold"><SarAmount amount={quote.finalPrice} /></p>
-                            <p className="text-sm text-muted-foreground">{quote.currency}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            {quote.transitDays} day{quote.transitDays !== 1 ? "s" : ""}
-                          </span>
-                          {quote.estimatedDelivery && (
-                            <span>Est. delivery: {format(new Date(quote.estimatedDelivery), "MMM d")}</span>
-                          )}
-                        </div>
+              <RadioGroup
+                value={selectedQuoteId || ""}
+                onValueChange={setSelectedQuoteId}
+                className="grid gap-6 md:grid-cols-2"
+              >
+                {carriers.map((carrier) => {
+                  const carrierQuotes = rates.quotes.filter((quote) => quote.carrierCode === carrier.code);
+
+                  return (
+                    <div key={carrier.code} className="rounded-2xl border bg-card/60 p-4 md:p-5 space-y-4">
+                      <div className="flex items-center justify-between gap-3 border-b pb-4">
+                        <CarrierMark carrierCode={carrier.code} />
+                        <Badge variant="secondary" className="shrink-0">
+                          {carrierQuotes.length} option{carrierQuotes.length === 1 ? "" : "s"}
+                        </Badge>
                       </div>
+
+                      {carrierQuotes.length > 0 ? (
+                        <div className="space-y-3">
+                          {carrierQuotes.map((quote) => {
+                            const serviceMeta = formatRateServiceMeta(quote.serviceType, quote.serviceName);
+
+                            return (
+                              <label
+                                key={quote.quoteId}
+                                htmlFor={quote.quoteId}
+                                className={`block cursor-pointer rounded-xl border p-4 transition-all hover:border-primary/40 hover:bg-muted/30 ${
+                                  selectedQuoteId === quote.quoteId
+                                    ? "border-primary bg-primary/5 shadow-sm"
+                                    : "border-border"
+                                }`}
+                                data-testid={`rate-option-${carrier.code.toLowerCase()}-${quote.serviceType}`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <RadioGroupItem value={quote.quoteId} id={quote.quoteId} className="mt-1 shrink-0" />
+                                  <div className="min-w-0 flex-1 space-y-3">
+                                    <div className="flex items-start justify-between gap-4">
+                                      <div className="min-w-0 space-y-1">
+                                        <p className="text-base font-semibold leading-snug text-foreground break-words">
+                                          {quote.serviceName}
+                                        </p>
+                                        {serviceMeta && (
+                                          <p className="text-xs text-muted-foreground">
+                                            {serviceMeta}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <div className="shrink-0 text-right">
+                                        <p className="text-xl font-bold leading-none whitespace-nowrap">
+                                          <SarAmount amount={quote.finalPrice} />
+                                        </p>
+                                        <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                          {quote.currency}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                                      <span className="flex items-center gap-1 whitespace-nowrap">
+                                        <Clock className="h-4 w-4" />
+                                        {quote.transitDays} day{quote.transitDays !== 1 ? "s" : ""}
+                                      </span>
+                                      {quote.estimatedDelivery && (
+                                        <span className="whitespace-nowrap">
+                                          Est. delivery: {format(new Date(quote.estimatedDelivery), "MMM d")}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                          No rates available for {carrier.name} on this shipment.
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </RadioGroup>
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
               <Button
-                onClick={handleSelectRate}
-                disabled={!selectedQuoteId || checkoutMutation.isPending}
+                onClick={nextStep}
+                disabled={!selectedQuoteId || (!isInternationalShipment && checkoutMutation.isPending)}
+                data-testid="button-continue-from-rates"
+              >
+                {!isInternationalShipment && checkoutMutation.isPending
+                  ? "Processing..."
+                  : isInternationalShipment
+                    ? "Continue to Customs Details"
+                    : "Proceed to Payment"}
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === customsStep && isInternationalShipment && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Customs Details
+              </CardTitle>
+              <CardDescription>
+                Add the invoice or the shipment items for the selected service.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium">Selected Service</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedQuote?.carrierName} · {selectedQuote?.serviceName}
+                    </p>
+                  </div>
+                  {selectedCarrierCode ? <CarrierMark carrierCode={selectedCarrierCode} /> : null}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Label className="text-base font-medium">How would you like to provide the invoice details?</Label>
+                <RadioGroup
+                  value={customsInputMode}
+                  onValueChange={(value) => setCustomsInputMode(value as "invoice" | "manual")}
+                  className="grid gap-3 md:grid-cols-2"
+                  data-testid="customs-input-mode"
+                >
+                  <Label
+                    htmlFor="customs-mode-invoice"
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
+                      customsInputMode === "invoice"
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <RadioGroupItem value="invoice" id="customs-mode-invoice" className="mt-0.5" />
+                    <div className="space-y-1">
+                      <span className="text-sm font-medium">I have an invoice</span>
+                      <p className="text-xs text-muted-foreground">Upload the invoice and import the shipment items.</p>
+                    </div>
+                  </Label>
+                  <Label
+                    htmlFor="customs-mode-manual"
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
+                      customsInputMode === "manual"
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <RadioGroupItem value="manual" id="customs-mode-manual" className="mt-0.5" />
+                    <div className="space-y-1">
+                      <span className="text-sm font-medium">I do not have an invoice</span>
+                      <p className="text-xs text-muted-foreground">Enter the shipment items manually.</p>
+                    </div>
+                  </Label>
+                </RadioGroup>
+              </div>
+
+              {customsInputMode === "invoice" && (
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-medium flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Invoice
+                      </h4>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF invoice.
+                      </p>
+                    </div>
+                    <label htmlFor="invoice-upload" className="cursor-pointer">
+                      <div className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                        <Upload className="h-4 w-4" />
+                        <span>{isUploadingInvoice || isExtractingInvoice ? "Processing..." : invoiceDocument ? "Replace Invoice" : "Upload Invoice"}</span>
+                      </div>
+                      <input
+                        id="invoice-upload"
+                        type="file"
+                        accept={INVOICE_ACCEPT}
+                        className="hidden"
+                        onChange={handleInvoiceSelect}
+                        disabled={isUploadingInvoice || isExtractingInvoice}
+                        data-testid="input-invoice-upload"
+                      />
+                    </label>
+                  </div>
+
+                  {invoiceDocument ? (
+                    <div
+                      className="rounded-lg border p-3"
+                      data-testid={`invoice-document-${invoiceDocument.objectPath}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm font-medium truncate">{invoiceDocument.fileName}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {invoiceDocument.contentType} · {formatFileSize(invoiceDocument.size)}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={clearInvoiceDocument}
+                          data-testid={`button-remove-invoice-${invoiceDocument.fileName}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed px-4 py-6 text-center">
+                      <FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">No invoice uploaded.</p>
+                    </div>
+                  )}
+
+                  {(isUploadingInvoice || isExtractingInvoice) && (
+                    <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                      <LoadingSpinner size="sm" />
+                      <span>Processing invoice...</span>
+                    </div>
+                  )}
+
+                  {invoiceExtractionSummary && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="space-y-1">
+                          <p className="font-medium">
+                            {invoiceExtractionSummary.importedItemCount} item{invoiceExtractionSummary.importedItemCount === 1 ? "" : "s"} imported from your invoice.
+                          </p>
+                          <p>Please review the imported items before continuing.</p>
+                          {invoiceExtractionSummary.autoMatchedHsCodeCount > 0 && (
+                            <p>
+                              HS codes were matched automatically for {invoiceExtractionSummary.autoMatchedHsCodeCount} item{invoiceExtractionSummary.autoMatchedHsCodeCount === 1 ? "" : "s"}.
+                            </p>
+                          )}
+                          {invoiceExtractionSummary.hsCodeReviewCount > 0 && (
+                            <p>
+                              {invoiceExtractionSummary.hsCodeReviewCount} item{invoiceExtractionSummary.hsCodeReviewCount === 1 ? "" : "s"} need HS code review before you continue.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-medium flex items-center gap-2">
+                      <Search className="h-4 w-4" />
+                      {customsInputMode === "invoice" ? "Invoice Items" : "Shipment Items"}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {customsInputMode === "invoice"
+                        ? "Review the extracted items before continuing."
+                        : "Add the shipment items manually."}
+                    </p>
+                  </div>
+                  {(customsInputMode === "manual" || invoiceDocument) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={openAddItemSheet}
+                      data-testid="button-add-item"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Item
+                    </Button>
+                  )}
+                </div>
+
+                {formData.items.length > 0 && formData.items[0].itemName ? (
+                  <div className="space-y-2">
+                    {formData.items.map((item, index) => {
+                      const confidence = getConfidenceBadge(item.hsCodeConfidence);
+                      const needsHsReview =
+                        ((!item.hsCode && item.hsCodeCandidates.length > 0) ||
+                          item.hsCodeConfidence === "LOW" ||
+                          item.hsCodeConfidence === "MEDIUM") &&
+                        item.category !== "";
+                      return (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-3 border rounded-lg"
+                          data-testid={`item-row-${index}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm truncate">{item.itemName}</span>
+                              {item.hsCode && (
+                                <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-hs-${index}`}>
+                                  HS: {item.hsCode}
+                                </Badge>
+                              )}
+                              {item.hsCode && (
+                                <Badge className={`text-xs shrink-0 ${confidence.className}`} data-testid={`badge-hs-confidence-${index}`}>
+                                  {confidence.label}
+                                </Badge>
+                              )}
+                              {needsHsReview && (
+                                <Badge variant="outline" className="text-xs shrink-0 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300">
+                                  HS review needed
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
+                              {item.category && (
+                                <span className="ml-2">
+                                  · {itemCategories.find(c => c.value === item.category)?.label || item.category}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => openEditItemSheet(index)}
+                              data-testid={`button-edit-item-${index}`}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            {formData.items.length > 1 && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => removeItem(index)}
+                                data-testid={`button-remove-item-${index}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 border rounded-lg border-dashed">
+                    <Package className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      {customsInputMode === "invoice" ? "No invoice items available yet." : "No items added yet."}
+                    </p>
+                    {customsInputMode === "manual" && (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={openAddItemSheet}
+                        className="mt-1"
+                        data-testid="button-add-first-item"
+                      >
+                        Add your first item
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
+              <Button
+                onClick={nextStep}
+                disabled={checkoutMutation.isPending}
                 data-testid="button-checkout"
               >
                 {checkoutMutation.isPending ? (
@@ -2397,7 +2412,7 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === 6 && checkoutData && (
+        {step === paymentStep && checkoutData && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2424,55 +2439,20 @@ export default function CreateShipment() {
               </div>
 
               <div className="space-y-3">
-                {checkoutData.transactionUrl ? (
-                  <div className="p-4 border rounded-lg space-y-4">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <CreditCard className="h-4 w-4" />
-                      Pay Now
-                    </div>
-                    <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
-                      <p className="text-sm text-green-700 dark:text-green-300">
-                        Complete your payment securely via Moyasar. You will be redirected to enter your card details.
-                      </p>
-                    </div>
-                    <Button
-                      onClick={handlePayment}
-                      disabled={confirmMutation.isPending}
-                      className="w-full"
-                      data-testid="button-pay-now"
-                    >
-                      {confirmMutation.isPending ? (
-                        <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
-                      ) : (
-                        <>Proceed to Payment</>
-                      )}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-4 border rounded-lg space-y-4">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <CreditCard className="h-4 w-4" />
-                      Pay Now (Demo)
-                    </div>
-                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <p className="text-sm text-blue-600 dark:text-blue-400">
-                        Moyasar is not configured. Payment will be simulated for demonstration.
-                      </p>
-                    </div>
-                    <Button
-                      onClick={handlePayment}
-                      disabled={confirmMutation.isPending}
-                      className="w-full"
-                      data-testid="button-pay-now"
-                    >
-                      {confirmMutation.isPending ? (
-                        <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
-                      ) : (
-                        <>Confirm & Create Shipment</>
-                      )}
-                    </Button>
-                  </div>
-                )}
+                <TapCardForm
+                  amount={checkoutData.amount}
+                  currency={checkoutData.currency}
+                  submitLabel="Pay Now"
+                  pending={createShipmentPaymentMutation.isPending || confirmMutation.isPending}
+                  onSubmit={(payload) =>
+                    createShipmentPaymentMutation.mutate({
+                      shipmentId: checkoutData.shipmentId,
+                      tapTokenId: payload.tapTokenId,
+                      saveCardForFuture: payload.saveCardForFuture,
+                    })
+                  }
+                  testId="button-pay-now"
+                />
 
                 <div className="relative flex items-center py-2">
                   <div className="flex-grow border-t" />
@@ -2496,7 +2476,7 @@ export default function CreateShipment() {
                           payLaterMutation.mutate(checkoutData.shipmentId);
                         }
                       }}
-                      disabled={payLaterMutation.isPending}
+                      disabled={payLaterMutation.isPending || createShipmentPaymentMutation.isPending}
                       className="w-full border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
                       data-testid="button-pay-later"
                     >
@@ -2531,12 +2511,18 @@ export default function CreateShipment() {
               </div>
             </CardContent>
             <CardFooter>
-              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
+              <Button
+                variant="outline"
+                onClick={() => setStep(isInternationalShipment ? customsStep : 5)}
+                data-testid="button-prev"
+              >
+                Back
+              </Button>
             </CardFooter>
           </Card>
         )}
 
-        {step === 7 && confirmData && (
+        {step === confirmationStep && confirmData && (
           <Card>
             <CardHeader className="text-center">
               <div className="mx-auto w-12 h-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">

@@ -42,6 +42,7 @@ export type ShipmentTaxScenarioValue =
 export const ShipmentExtraFeeType = {
   EXTRA_WEIGHT: "EXTRA_WEIGHT",
   EXTRA_COST: "EXTRA_COST",
+  COMBINED: "COMBINED",
 } as const;
 
 export type ShipmentExtraFeeTypeValue =
@@ -91,6 +92,14 @@ export const PaymentStatus = {
 } as const;
 
 export type PaymentStatusValue = typeof PaymentStatus[keyof typeof PaymentStatus];
+
+export const InvoiceType = {
+  SHIPMENT: "SHIPMENT",
+  EXTRA_WEIGHT: "EXTRA_WEIGHT",
+  EXTRA_COST: "EXTRA_COST",
+} as const;
+
+export type InvoiceTypeValue = typeof InvoiceType[keyof typeof InvoiceType];
 
 // Account type (company vs individual)
 export const AccountType = {
@@ -187,6 +196,7 @@ export const clientAccounts = pgTable("client_accounts", {
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
   creditEnabled: boolean("credit_enabled").notNull().default(false),
+  tapCustomerId: text("tap_customer_id"),
   zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"), // Soft delete
@@ -418,6 +428,8 @@ export const invoices = pgTable("invoices", {
   invoiceNumber: text("invoice_number").notNull().unique(),
   clientAccountId: varchar("client_account_id").notNull(),
   shipmentId: varchar("shipment_id"),
+  invoiceType: text("invoice_type").notNull().default("SHIPMENT"),
+  description: text("description"),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   status: text("status").notNull().default("pending"),
   dueDate: timestamp("due_date").notNull(),
@@ -459,6 +471,39 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
 
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
+
+export const tapSavedCards = pgTable("tap_saved_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  tapCustomerId: text("tap_customer_id").notNull(),
+  tapCardId: text("tap_card_id").notNull().unique(),
+  paymentAgreementId: text("payment_agreement_id"),
+  brand: text("brand"),
+  scheme: text("scheme"),
+  funding: text("funding"),
+  lastFour: text("last_four"),
+  firstSix: text("first_six"),
+  firstEight: text("first_eight"),
+  expMonth: integer("exp_month"),
+  expYear: integer("exp_year"),
+  cardholderName: text("cardholder_name"),
+  fingerprint: text("fingerprint"),
+  isDefault: boolean("is_default").notNull().default(false),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+export const insertTapSavedCardSchema = createInsertSchema(tapSavedCards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+});
+
+export type InsertTapSavedCard = z.infer<typeof insertTapSavedCardSchema>;
+export type TapSavedCard = typeof tapSavedCards.$inferSelect;
 
 export const carrierPayoutBatches = pgTable("carrier_payout_batches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
