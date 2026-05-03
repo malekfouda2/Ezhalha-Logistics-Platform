@@ -6,6 +6,12 @@ vi.mock("../server/storage", () => ({
   },
 }));
 
+vi.mock("../server/services/logger", () => ({
+  logInfo: vi.fn(),
+  logError: vi.fn(),
+  logWarn: vi.fn(),
+}));
+
 import { validateFedExEnvOnStartup } from "../server/integrations/fedex";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -27,16 +33,14 @@ describe("validateFedExEnvOnStartup", () => {
     expect(() => validateFedExEnvOnStartup()).not.toThrow();
   });
 
-  it("throws in production when FedEx config is partial", () => {
+  it("does not throw in production when FedEx config is partial", () => {
     process.env.NODE_ENV = "production";
     process.env.FEDEX_CLIENT_ID = "client-id";
     process.env.FEDEX_CLIENT_SECRET = "client-secret";
     delete process.env.FEDEX_ACCOUNT_NUMBER;
     delete process.env.FEDEX_BASE_URL;
 
-    expect(() => validateFedExEnvOnStartup()).toThrow(
-      "FATAL: Missing required FedEx env vars in production: FEDEX_ACCOUNT_NUMBER, FEDEX_BASE_URL",
-    );
+    expect(() => validateFedExEnvOnStartup()).not.toThrow();
   });
 
   it("accepts alias env keys when FedEx is fully configured", () => {

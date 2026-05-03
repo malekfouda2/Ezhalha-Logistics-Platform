@@ -1,7 +1,7 @@
 import "../load-env";
 import crypto from "crypto";
 import type { FedExTradeDocumentTypeValue } from "@shared/schema";
-import { logInfo, logError } from "../services/logger";
+import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 
 const COUNTRIES_REQUIRING_STATE = new Set(["US", "CA", "AU", "IN", "BR", "MX", "CN", "JP"]);
@@ -288,16 +288,19 @@ export function validateFedExEnvOnStartup(): void {
     .map(([key]) => key);
 
   if (missing.length > 0) {
-    const msg = `FATAL: Missing required FedEx env vars in production: ${missing.join(", ")}`;
-    logError(msg, {});
-    throw new Error(msg);
+    logWarn(
+      `FedEx is partially configured in production and will be disabled until completed. Missing: ${missing.join(", ")}`,
+      { source: "fedex" },
+    );
+    return;
   }
 
   const baseUrl = configuredValues.FEDEX_BASE_URL || "";
   if (baseUrl.toLowerCase().includes("sandbox")) {
-    const msg = "FATAL: FEDEX_BASE_URL contains 'sandbox' in production environment. This is not allowed.";
-    logError(msg, {});
-    throw new Error(msg);
+    logWarn(
+      "FedEx production configuration is using a sandbox base URL and will be disabled until corrected.",
+      { source: "fedex", baseUrl },
+    );
   }
 }
 
