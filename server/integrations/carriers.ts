@@ -28,7 +28,8 @@ export class CarrierService {
   }
 
   getDefaultAdapter(): CarrierAdapter {
-    return fedexAdapter;
+    const configuredAdapter = this.getSupportedCarriers().find((adapter) => adapter.isConfigured());
+    return configuredAdapter || fedexAdapter;
   }
 
   getSupportedCarriers(): CarrierAdapter[] {

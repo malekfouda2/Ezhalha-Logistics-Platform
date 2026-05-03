@@ -7202,7 +7202,9 @@ export async function registerRoutes(
 
       const carrierAdapters = data.carrier?.trim()
         ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
-        : carrierService.getSupportedCarriers();
+        : carrierService.getSupportedCarriers().filter((adapter) =>
+            process.env.NODE_ENV !== "production" || adapter.isConfigured(),
+          );
 
       // Map to carrier adapter format
       const rateRequest = {

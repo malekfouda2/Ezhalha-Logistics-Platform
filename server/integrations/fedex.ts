@@ -270,15 +270,30 @@ function maskSensitiveData(data: any): any {
 export function validateFedExEnvOnStartup(): void {
   if (!isProduction()) return;
 
-  const required = ["FEDEX_CLIENT_ID", "FEDEX_CLIENT_SECRET", "FEDEX_ACCOUNT_NUMBER", "FEDEX_BASE_URL"];
-  const missing = required.filter(k => !process.env[k]);
+  const configuredValues = {
+    FEDEX_CLIENT_ID: process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY,
+    FEDEX_CLIENT_SECRET: process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY,
+    FEDEX_ACCOUNT_NUMBER: process.env.FEDEX_ACCOUNT_NUMBER,
+    FEDEX_BASE_URL: process.env.FEDEX_BASE_URL,
+  };
+
+  const hasAnyFedExConfig = Object.values(configuredValues).some((value) => !!value);
+  if (!hasAnyFedExConfig) {
+    logInfo("FedEx is not configured in production; continuing with other configured carriers only");
+    return;
+  }
+
+  const missing = Object.entries(configuredValues)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+
   if (missing.length > 0) {
     const msg = `FATAL: Missing required FedEx env vars in production: ${missing.join(", ")}`;
     logError(msg, {});
     throw new Error(msg);
   }
 
-  const baseUrl = process.env.FEDEX_BASE_URL || "";
+  const baseUrl = configuredValues.FEDEX_BASE_URL || "";
   if (baseUrl.toLowerCase().includes("sandbox")) {
     const msg = "FATAL: FEDEX_BASE_URL contains 'sandbox' in production environment. This is not allowed.";
     logError(msg, {});
