@@ -109,6 +109,9 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
       startCreditReminderScheduler();
+      if (typeof process.send === "function") {
+        process.send("ready");
+      }
     },
   );
 })();
