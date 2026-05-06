@@ -145,21 +145,49 @@ function buildFallbackCandidates(category: string, itemName: string): HsCandidat
   }));
 }
 
+function isFedExHsLookupConfigured(): boolean {
+  const clientId = process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
+  const clientSecret = process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
+  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
+  const configuredBaseUrl = process.env.FEDEX_BASE_URL;
+
+  if (!clientId || !clientSecret || !accountNumber) {
+    return false;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    if (!configuredBaseUrl) {
+      return false;
+    }
+
+    if (configuredBaseUrl.toLowerCase().includes("sandbox")) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function lookupViaFedEx(request: HsLookupRequest): Promise<HsCandidate[]> {
   const clientId = process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
   const clientSecret = process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
+  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
   const baseUrl = process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
 
-  if (!clientId || !clientSecret) {
-    logInfo("FedEx HS lookup: credentials not configured, using fallback");
+  if (!isFedExHsLookupConfigured()) {
+    logInfo("FedEx HS lookup: integration not fully configured for this environment, using fallback");
     return [];
   }
+
+  const safeClientId = clientId as string;
+  const safeClientSecret = clientSecret as string;
+  const safeAccountNumber = accountNumber as string;
 
   try {
     const tokenRes = await fetch(`${baseUrl}/oauth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`,
+      body: `grant_type=client_credentials&client_id=${encodeURIComponent(safeClientId)}&client_secret=${encodeURIComponent(safeClientSecret)}`,
     });
 
     if (!tokenRes.ok) {
@@ -177,7 +205,7 @@ async function lookupViaFedEx(request: HsLookupRequest): Promise<HsCandidate[]> 
     const combinedDescription = descriptionParts.join(". ");
 
     const lookupBody = {
-      accountNumber: { value: process.env.FEDEX_ACCOUNT_NUMBER || "" },
+      accountNumber: { value: safeAccountNumber },
       commodityDescription: combinedDescription,
       countryCode: request.countryOfOrigin,
       destinationCountryCode: request.destinationCountry,

@@ -131,6 +131,22 @@ function getTapErrorMessage(error: unknown): string {
   return "The payment form could not be initialized.";
 }
 
+function getTapDisplayErrorMessage(error: unknown): string {
+  const rawMessage = getTapErrorMessage(error);
+  const normalized = rawMessage.trim().toLowerCase();
+
+  if (
+    normalized.includes("bundle_id mismatch") ||
+    normalized.includes("bundle id mismatch") ||
+    normalized.includes("merchant") ||
+    normalized.includes("public key")
+  ) {
+    return "Embedded card payment is unavailable for the current Tap setup. We will continue with Tap's hosted card checkout.";
+  }
+
+  return rawMessage;
+}
+
 export function TapCardForm({
   amount,
   currency,
@@ -259,7 +275,7 @@ export function TapCardForm({
           },
           onInvalidInput: () => undefined,
           onError: (error: unknown) => {
-            const message = getTapErrorMessage(error);
+            const message = getTapDisplayErrorMessage(error);
             if (!cancelled) {
               setSdkError(message);
             }
@@ -287,7 +303,7 @@ export function TapCardForm({
         });
       } catch (error) {
         if (!cancelled) {
-          setSdkError(getTapErrorMessage(error));
+          setSdkError(getTapDisplayErrorMessage(error));
         }
       }
     }
@@ -332,7 +348,7 @@ export function TapCardForm({
         saveCardForFuture,
       });
     } catch (error) {
-      setSdkError(getTapErrorMessage(error));
+      setSdkError(getTapDisplayErrorMessage(error));
       setTokenizing(false);
     }
   };

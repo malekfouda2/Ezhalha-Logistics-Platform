@@ -144,7 +144,7 @@ export class TapService {
   }
 
   isEmbeddedCardConfigured(): boolean {
-    return Boolean(this.publicKey);
+    return Boolean(this.publicKey && this.merchantId);
   }
 
   getPublicKey(): string | undefined {
