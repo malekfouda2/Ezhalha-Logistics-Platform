@@ -118,7 +118,27 @@ export async function processCreditReminders(): Promise<void> {
 
 let reminderInterval: NodeJS.Timeout | null = null;
 
+function shouldRunCreditReminderScheduler(): boolean {
+  if (process.env.DISABLE_CREDIT_REMINDER_SCHEDULER === "true") {
+    return false;
+  }
+
+  const pm2Instance = process.env.NODE_APP_INSTANCE;
+  if (typeof pm2Instance === "string" && pm2Instance !== "0") {
+    return false;
+  }
+
+  return true;
+}
+
 export function startCreditReminderScheduler(): void {
+  if (!shouldRunCreditReminderScheduler()) {
+    logInfo(
+      `Skipping credit reminder scheduler on worker ${process.env.NODE_APP_INSTANCE ?? "standalone"}`,
+    );
+    return;
+  }
+
   if (reminderInterval) {
     clearInterval(reminderInterval);
   }

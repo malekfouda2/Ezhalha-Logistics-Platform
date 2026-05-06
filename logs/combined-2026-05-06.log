@@ -89,3 +89,10 @@
 {"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-05-06T20:08:54.888Z"}
 {"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-05-06T20:08:54.899Z"}
 {"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-05-06T20:08:54.900Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: true","timestamp":"2026-05-06T20:35:50.832Z"}
+{"level":"info","message":"Registered carrier adapter: FedEx (FEDEX) - configured: true","timestamp":"2026-05-06T20:35:50.834Z"}
+{"level":"info","message":"Registered carrier adapter: DHL (DHL) - configured: true","timestamp":"2026-05-06T20:35:50.834Z"}
+{"level":"info","message":"Starting credit reminder scheduler (hourly)","timestamp":"2026-05-06T20:35:52.631Z"}
+{"level":"info","message":"Starting credit invoice reminder processing...","timestamp":"2026-05-06T20:36:22.631Z"}
+{"level":"info","message":"Found 0 credit invoices due for reminder","timestamp":"2026-05-06T20:36:22.639Z"}
+{"level":"info","message":"Credit invoice reminder processing completed","timestamp":"2026-05-06T20:36:22.639Z"}
