@@ -356,6 +356,17 @@ export default function AdminShipments() {
                   Download Label (PDF)
                 </Button>
               )}
+              {selectedShipment.itemsData && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="button-download-commercial-invoice"
+                  onClick={() => window.open(`/api/admin/shipments/${selectedShipment.id}/commercial-invoice.pdf`, "_blank")}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Commercial Invoice (PDF)
+                </Button>
+              )}
               <div className="p-4 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 mb-3">
                   <MapPin className="h-4 w-4 text-muted-foreground" />

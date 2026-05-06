@@ -1,6 +1,7 @@
 import path from "path";
 import { z } from "zod";
 import {
+  FedExTradeDocumentType,
   FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES,
   FEDEX_TRADE_DOCUMENT_MAX_FILES,
   shipmentTradeDocumentSchema,
@@ -16,6 +17,12 @@ import {
 } from "../integrations/fedex";
 import { ObjectStorageService } from "../integrations/storage";
 import { LocalStorageService } from "../integrations/storage/localStorage";
+import {
+  buildCommercialInvoiceDocument,
+  buildCommercialInvoiceFileName,
+  INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
+  renderCommercialInvoicePdfBuffer,
+} from "./commercial-invoice";
 
 const storedTradeDocumentsSchema = z
   .array(shipmentTradeDocumentSchema)
@@ -82,15 +89,21 @@ function buildItems(shipment: Shipment): ShipmentItem[] {
   try {
     const items = JSON.parse(shipment.itemsData) as Array<{
       itemName: string;
+      itemDescription?: string;
+      category?: string;
+      material?: string;
       price: number;
       quantity: number;
       hsCode?: string;
+      hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
       countryOfOrigin?: string;
     }>;
 
     return items.map((item) => ({
-      description: item.itemName,
-      hsCode: item.hsCode,
+      description: item.itemDescription || item.itemName,
+      category: item.category,
+      material: item.material,
+      hsCode: item.hsCode || item.hsCodeCandidates?.[0]?.code,
       countryOfOrigin: item.countryOfOrigin || shipment.senderCountry,
       quantity: item.quantity,
       unitPrice: item.price,
@@ -174,6 +187,20 @@ async function readTradeDocumentBuffer(objectPath: string): Promise<Buffer> {
   );
 }
 
+function hasCustomerUploadedInvoice(documents: ShipmentTradeDocument[]): boolean {
+  const invoiceDocumentTypes = new Set([
+    FedExTradeDocumentType.COMMERCIAL_INVOICE,
+    FedExTradeDocumentType.PRO_FORMA_INVOICE,
+  ] as const);
+
+  return documents.some((document) =>
+    document.objectPath !== INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH &&
+    invoiceDocumentTypes.has(
+      document.documentType as typeof FedExTradeDocumentType.COMMERCIAL_INVOICE | typeof FedExTradeDocumentType.PRO_FORMA_INVOICE,
+    ),
+  );
+}
+
 function validateTradeDocument(document: ShipmentTradeDocument): void {
   const normalizedContentType = normalizeContentType(document.contentType);
 
@@ -195,9 +222,51 @@ export async function buildFedExShipmentRequestFromShipment(
   const items = buildItems(shipment);
   const { commodityDescription, declaredValue } = buildCommoditySummary(items);
   const isInternational = shipment.senderCountry !== shipment.recipientCountry;
-  const storedTradeDocuments = isInternational
+  let storedTradeDocuments = isInternational
     ? parseShipmentTradeDocuments(shipment.tradeDocumentsData)
     : [];
+  const internalCommercialInvoiceBuffer =
+    isInternational && items.length > 0
+      ? renderCommercialInvoicePdfBuffer(shipment)
+      : null;
+  const existingInternalCommercialInvoice = storedTradeDocuments.find(
+    (document) => document.objectPath === INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
+  );
+
+  if (internalCommercialInvoiceBuffer) {
+    const invoiceDocumentType = hasCustomerUploadedInvoice(storedTradeDocuments)
+      ? FedExTradeDocumentType.OTHER
+      : FedExTradeDocumentType.COMMERCIAL_INVOICE;
+    const nextInternalDocument: ShipmentTradeDocument = {
+      fileName: buildCommercialInvoiceFileName(shipment),
+      objectPath: INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
+      contentType: "application/pdf",
+      size: internalCommercialInvoiceBuffer.length,
+      documentType: invoiceDocumentType,
+      ...(existingInternalCommercialInvoice?.uploadedDocumentId &&
+      existingInternalCommercialInvoice.documentType === invoiceDocumentType
+        ? {
+            uploadedDocumentId: existingInternalCommercialInvoice.uploadedDocumentId,
+            uploadedAt: existingInternalCommercialInvoice.uploadedAt,
+          }
+        : {}),
+    };
+
+    if (existingInternalCommercialInvoice || storedTradeDocuments.length < FEDEX_TRADE_DOCUMENT_MAX_FILES) {
+      storedTradeDocuments = [
+        ...storedTradeDocuments.filter(
+          (document) => document.objectPath !== INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
+        ),
+        nextInternalDocument,
+      ];
+    }
+  } else if (existingInternalCommercialInvoice) {
+    storedTradeDocuments = storedTradeDocuments.filter(
+      (document) => document.objectPath !== INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
+    );
+  }
+
+  const internalCommercialInvoice = buildCommercialInvoiceDocument(shipment);
 
   const carrierRequest: CreateShipmentRequest = {
     shipper: {
@@ -229,6 +298,8 @@ export async function buildFedExShipmentRequestFromShipment(
     commodityDescription,
     declaredValue,
     currency: shipment.currency || "SAR",
+    commercialInvoiceNumber: internalCommercialInvoice.invoiceNumber,
+    commercialInvoiceDate: internalCommercialInvoice.issueDate,
     items: isInternational && items.length > 0 ? items : undefined,
   };
 
@@ -248,7 +319,9 @@ export async function buildFedExShipmentRequestFromShipment(
     let uploadedAt = document.uploadedAt;
 
     if (!uploadedDocumentId) {
-      const fileBuffer = await readTradeDocumentBuffer(document.objectPath);
+      const fileBuffer = document.objectPath === INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH
+        ? internalCommercialInvoiceBuffer!
+        : await readTradeDocumentBuffer(document.objectPath);
       const uploadResponse = await tradeDocumentUploader.uploadTradeDocument({
         fileName: document.fileName,
         contentType: normalizeContentType(document.contentType),

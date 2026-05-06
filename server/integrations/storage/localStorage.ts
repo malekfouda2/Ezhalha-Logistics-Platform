@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 const UPLOAD_DIR = process.env.LOCAL_UPLOAD_DIR || "./uploads";
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });

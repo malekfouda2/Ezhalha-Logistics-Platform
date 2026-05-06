@@ -44,6 +44,12 @@ import {
 import { buildFedExShipmentRequestFromShipment } from "./services/fedex-shipment";
 import { buildDhlShipmentRequestFromShipment } from "./services/dhl-shipment";
 import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
+import { extractPackageDetailsFromDocument } from "./services/package-extraction";
+import {
+  hasCommercialInvoiceData,
+  renderCommercialInvoiceHtml,
+  renderCommercialInvoicePdfBuffer,
+} from "./services/commercial-invoice";
 
 const SALT_ROUNDS = 10;
 const FINANCIAL_MONTH_WINDOW = 12;
@@ -96,6 +102,32 @@ async function enrichInvoiceItemsWithHsCodes(
   autoMatchedHsCodeCount: number;
   hsCodeReviewCount: number;
 }> {
+  return enrichItemsWithHsCodes(items, options);
+}
+
+type HsEnrichableItem = {
+  itemName: string;
+  itemDescription?: string;
+  category: string;
+  material?: string;
+  countryOfOrigin: string;
+  hsCode?: string;
+  hsCodeSource?: "USER" | "FEDEX" | "HISTORY" | "UNKNOWN";
+  hsCodeConfidence?: "HIGH" | "MEDIUM" | "LOW" | "MISSING";
+  hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
+};
+
+async function enrichItemsWithHsCodes<T extends HsEnrichableItem>(
+  items: T[],
+  options: {
+    clientAccountId?: string;
+    destinationCountry: string;
+  },
+): Promise<{
+  items: T[];
+  autoMatchedHsCodeCount: number;
+  hsCodeReviewCount: number;
+}> {
   let autoMatchedHsCodeCount = 0;
   let hsCodeReviewCount = 0;
 
@@ -106,38 +138,52 @@ async function enrichInvoiceItemsWithHsCodes(
       }
 
       try {
-        const hsLookup = await lookupHsCode(
-          {
-            itemName: item.itemName,
-            itemDescription: item.itemDescription || undefined,
-            category: item.category,
-            material: item.material || undefined,
-            countryOfOrigin: item.countryOfOrigin,
-            destinationCountry: options.destinationCountry,
-          },
-          options.clientAccountId,
-        );
+        const existingCandidates = Array.isArray(item.hsCodeCandidates) ? item.hsCodeCandidates : [];
+        let candidates = existingCandidates;
+        let source = item.hsCodeSource;
 
-        const topCandidate = hsLookup.candidates[0];
+        if (candidates.length === 0) {
+          const hsLookup = await lookupHsCode(
+            {
+              itemName: item.itemName,
+              itemDescription: item.itemDescription || undefined,
+              category: item.category,
+              material: item.material || undefined,
+              countryOfOrigin: item.countryOfOrigin,
+              destinationCountry: options.destinationCountry,
+            },
+            options.clientAccountId,
+          );
+
+          candidates = hsLookup.candidates;
+          source = hsLookup.source;
+        }
+
+        const topCandidate = candidates[0];
         const confidence = hsConfidenceFromScore(topCandidate?.confidence);
-        const shouldAutoAttach =
-          Boolean(topCandidate) &&
-          confidence === "HIGH" &&
-          !isGenericItemName(item.itemName);
+        const hadHsCode = Boolean(item.hsCode?.trim());
+        const attachedHsCode = item.hsCode?.trim() || topCandidate?.code?.trim() || "";
 
-        if (shouldAutoAttach) {
+        if (!hadHsCode && attachedHsCode) {
           autoMatchedHsCodeCount += 1;
-        } else if (topCandidate) {
+        }
+
+        if (
+          (!attachedHsCode && candidates.length > 0) ||
+          confidence === "LOW" ||
+          confidence === "MEDIUM" ||
+          (!hadHsCode && isGenericItemName(item.itemName))
+        ) {
           hsCodeReviewCount += 1;
         }
 
         return {
           ...item,
-          hsCode: shouldAutoAttach ? topCandidate!.code : item.hsCode,
-          hsCodeSource: hsLookup.source,
-          hsCodeConfidence: confidence,
-          hsCodeCandidates: hsLookup.candidates,
-        };
+          hsCode: attachedHsCode || item.hsCode,
+          hsCodeSource: (source || item.hsCodeSource) as T["hsCodeSource"],
+          hsCodeConfidence: (topCandidate ? confidence : item.hsCodeConfidence) as T["hsCodeConfidence"],
+          hsCodeCandidates: candidates as T["hsCodeCandidates"],
+        } as T;
       } catch (error) {
         logError("Invoice HS code enrichment failed", error);
         return item;
@@ -3117,7 +3163,17 @@ export async function registerRoutes(
       if (shipment.carrierTrackingNumber) {
         try {
           const carrierAdapter = getAdapterForShipment(shipment);
-          await carrierAdapter.cancelShipment(shipment.carrierTrackingNumber, shipment.senderCountry);
+          const cancelledWithCarrier = await carrierAdapter.cancelShipment(
+            shipment.carrierTrackingNumber,
+            shipment.senderCountry,
+          );
+
+          if (!cancelledWithCarrier) {
+            throw new CarrierError(
+              "CANCEL_FAILED",
+              "Carrier cancellation could not be confirmed",
+            );
+          }
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
@@ -3257,6 +3313,53 @@ export async function registerRoutes(
       res.send(pdfBuffer);
     } catch (error) {
       logError("Failed to download admin label", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/shipments/:id/commercial-invoice.pdf", requireAdminPermission("shipments", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
+        return;
+      }
+      if (!hasCommercialInvoiceData(shipment)) {
+        return res.status(400).json({ error: "Commercial invoice data is not available for this shipment" });
+      }
+
+      const pdfBuffer = renderCommercialInvoicePdfBuffer(shipment);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${shipment.trackingNumber.toLowerCase()}-commercial-invoice.pdf"`);
+      res.setHeader("Content-Length", pdfBuffer.length.toString());
+      res.send(pdfBuffer);
+    } catch (error) {
+      logError("Failed to generate admin commercial invoice PDF", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/shipments/:id/commercial-invoice.html", requireAdminPermission("shipments", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
+        return;
+      }
+      if (!hasCommercialInvoiceData(shipment)) {
+        return res.status(400).json({ error: "Commercial invoice data is not available for this shipment" });
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(renderCommercialInvoiceHtml(shipment));
+    } catch (error) {
+      logError("Failed to generate admin commercial invoice HTML", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -7115,6 +7218,12 @@ export async function registerRoutes(
     contentType: z.string().min(1),
   });
 
+  const packageExtractionSchema = z.object({
+    fileName: z.string().min(1),
+    objectPath: z.string().min(1),
+    contentType: z.string().min(1),
+  });
+
   app.post(
     "/api/client/shipments/extract-invoice-items",
     requireClient,
@@ -7169,6 +7278,42 @@ export async function registerRoutes(
     },
   );
 
+  app.post(
+    "/api/client/shipments/extract-package-details",
+    requireClient,
+    requireClientPermission(ClientPermission.CREATE_SHIPMENTS),
+    async (req, res) => {
+      try {
+        const data = packageExtractionSchema.parse(req.body);
+        const extraction = await extractPackageDetailsFromDocument({
+          fileName: data.fileName,
+          objectPath: data.objectPath,
+          contentType: data.contentType,
+        });
+
+        const { warnings, ...clientExtraction } = extraction;
+        const totalWeight = clientExtraction.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
+
+        res.json({
+          ...clientExtraction,
+          summary: {
+            importedPackageCount: clientExtraction.packages.length,
+            totalWeight: Number(totalWeight.toFixed(3)),
+            aiAssisted: clientExtraction.extractionMethod === "gemini",
+            hasParsingWarnings: warnings.length > 0,
+          },
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors[0].message });
+        }
+
+        const message = error instanceof Error ? error.message : "Failed to extract package details";
+        res.status(422).json({ error: message });
+      }
+    },
+  );
+
   // STEP 1: Rate Discovery - Get rates from all carriers
   app.post("/api/client/shipments/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
@@ -7205,6 +7350,19 @@ export async function registerRoutes(
         : carrierService.getSupportedCarriers().filter((adapter) =>
             process.env.NODE_ENV !== "production" || adapter.isConfigured(),
           );
+
+      const availableCarriers = carrierAdapters
+        .filter((adapter) => process.env.NODE_ENV !== "production" || adapter.isConfigured())
+        .map((adapter) => ({
+          code: adapter.carrierCode,
+          name: adapter.name,
+        }));
+
+      if (availableCarriers.length === 0) {
+        return res.status(503).json({
+          error: "No carriers are currently available for live rating.",
+        });
+      }
 
       // Map to carrier adapter format
       const rateRequest = {
@@ -7349,7 +7507,7 @@ export async function registerRoutes(
       await logAudit(req.session.userId, "get_shipping_rates", "shipment", undefined,
         `Requested ${quotes.length} shipping rates`, req.ip);
 
-      res.json({ quotes, expiresAt });
+      res.json({ quotes, expiresAt, availableCarriers });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
@@ -7464,6 +7622,25 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Price mismatch detected" });
       }
 
+      const hsPreparedItems = await enrichItemsWithHsCodes(shipmentData.items || [], {
+        clientAccountId: user.clientAccountId,
+        destinationCountry:
+          shipmentData.shipmentType === "inbound"
+            ? shipmentData.recipient.countryCode
+            : shipmentData.recipient.countryCode || shipmentData.shipper.countryCode || "SA",
+      });
+      const normalizedShipmentItems = hsPreparedItems.items;
+
+      if (
+        quote.carrierCode === "DHL" &&
+        shipmentData.shipmentType !== "domestic" &&
+        normalizedShipmentItems.some((item) => !item.hsCode?.trim())
+      ) {
+        return res.status(400).json({
+          error: "DHL requires an HS code for every shipment item. Please review the item classification and try again.",
+        });
+      }
+
       const totalShipmentWeight = shipmentData.packages.reduce((sum: number, p: { weight: number }) => sum + p.weight, 0);
 
       // Create draft shipment with payment pending status
@@ -7498,7 +7675,7 @@ export async function registerRoutes(
         packageType: shipmentData.effectivePackagingType || shipmentData.packageType,
         numberOfPackages: shipmentData.packages.length,
         packagesData: JSON.stringify(shipmentData.packages),
-        itemsData: shipmentData.items ? JSON.stringify(shipmentData.items) : undefined,
+        itemsData: normalizedShipmentItems.length > 0 ? JSON.stringify(normalizedShipmentItems) : undefined,
         tradeDocumentsData: shipmentData.tradeDocuments?.length
           ? JSON.stringify(shipmentData.tradeDocuments)
           : undefined,
@@ -7870,7 +8047,17 @@ export async function registerRoutes(
       if (shipment.carrierTrackingNumber) {
         try {
           const carrierAdapter = getAdapterForShipment(shipment);
-          await carrierAdapter.cancelShipment(shipment.carrierTrackingNumber, shipment.senderCountry);
+          const cancelledWithCarrier = await carrierAdapter.cancelShipment(
+            shipment.carrierTrackingNumber,
+            shipment.senderCountry,
+          );
+
+          if (!cancelledWithCarrier) {
+            throw new CarrierError(
+              "CANCEL_FAILED",
+              "Carrier cancellation could not be confirmed",
+            );
+          }
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
@@ -7929,6 +8116,59 @@ export async function registerRoutes(
       res.send(pdfBuffer);
     } catch (error) {
       logError("Failed to download client label", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/client/shipments/:id/commercial-invoice.pdf", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (!hasCommercialInvoiceData(shipment)) {
+        return res.status(400).json({ error: "Commercial invoice data is not available for this shipment" });
+      }
+
+      const pdfBuffer = renderCommercialInvoicePdfBuffer(shipment);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${shipment.trackingNumber.toLowerCase()}-commercial-invoice.pdf"`);
+      res.setHeader("Content-Length", pdfBuffer.length.toString());
+      res.send(pdfBuffer);
+    } catch (error) {
+      logError("Failed to download client commercial invoice", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/client/shipments/:id/commercial-invoice.html", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (!hasCommercialInvoiceData(shipment)) {
+        return res.status(400).json({ error: "Commercial invoice data is not available for this shipment" });
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(renderCommercialInvoiceHtml(shipment));
+    } catch (error) {
+      logError("Failed to render client commercial invoice HTML", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -8671,6 +8911,7 @@ export async function registerRoutes(
 
   // Client - Track Shipment
   app.get("/api/client/shipments/:id/track", requireClient, async (req, res) => {
+    let shipmentForError: Awaited<ReturnType<typeof storage.getShipment>> | null = null;
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user || !user.clientAccountId) {
@@ -8678,6 +8919,7 @@ export async function registerRoutes(
       }
 
       const shipment = await storage.getShipment(req.params.id);
+      shipmentForError = shipment;
       if (!shipment) {
         return res.status(404).json({ error: "Shipment not found" });
       }
@@ -8703,6 +8945,19 @@ export async function registerRoutes(
       });
     } catch (error) {
       logError("Failed to get shipment tracking", error);
+      if (error instanceof CarrierError && shipmentForError) {
+        await storage.updateShipment(shipmentForError.id, {
+          carrierErrorCode: error.code,
+          carrierErrorMessage: `Tracking failed: ${error.carrierMessage}`,
+          carrierLastAttemptAt: new Date(),
+        });
+
+        return res.status(502).json({
+          error: "Failed to get tracking information from carrier",
+          carrierErrorCode: error.code,
+          carrierErrorMessage: error.carrierMessage,
+        });
+      }
       res.status(500).json({ error: "Failed to get tracking information" });
     }
   });
@@ -8971,8 +9226,10 @@ export async function registerRoutes(
 
   // Track Shipment
   app.get("/api/shipments/:id/track", requireAuth, async (req, res) => {
+    let shipmentForError: Awaited<ReturnType<typeof storage.getShipment>> | null = null;
     try {
       const shipment = await storage.getShipment(req.params.id);
+      shipmentForError = shipment;
       if (!shipment) {
         return res.status(404).json({ error: "Shipment not found" });
       }
@@ -8987,6 +9244,19 @@ export async function registerRoutes(
       res.json({ ...tracking, shipment });
     } catch (error) {
       logError("Failed to track shipment", error);
+      if (error instanceof CarrierError && shipmentForError) {
+        await storage.updateShipment(shipmentForError.id, {
+          carrierErrorCode: error.code,
+          carrierErrorMessage: `Tracking failed: ${error.carrierMessage}`,
+          carrierLastAttemptAt: new Date(),
+        });
+
+        return res.status(502).json({
+          error: "Failed to track shipment with carrier",
+          carrierErrorCode: error.code,
+          carrierErrorMessage: error.carrierMessage,
+        });
+      }
       res.status(500).json({ error: "Failed to track shipment" });
     }
   });

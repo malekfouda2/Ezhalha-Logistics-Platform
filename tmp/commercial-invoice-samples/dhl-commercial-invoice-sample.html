@@ -1,0 +1,134 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>EZI-CI-EZH-DHL-SAMPLE</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color: #1f2937; margin: 32px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; border-bottom: 2px solid #fe5200; padding-bottom: 18px; margin-bottom: 24px; }
+    .brand { font-size: 28px; font-weight: 700; color: #fe5200; }
+    .muted { color: #6b7280; }
+    .micro { color: #6b7280; font-size: 12px; }
+    .meta { text-align: right; }
+    .meta strong { display: block; font-size: 22px; margin-bottom: 6px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+    .panel { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+    .panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; }
+    .panel p { margin: 4px 0; line-height: 1.5; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .summary-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
+    .summary-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin-bottom: 8px; }
+    .summary-card .value { font-size: 18px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    th, td { padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; text-align: left; }
+    .text-right { text-align: right; }
+    .totals { margin-left: auto; width: 320px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 8px 0; }
+    .totals-row.total { font-weight: 700; font-size: 18px; border-top: 2px solid #111827; margin-top: 4px; padding-top: 12px; }
+    .declaration { margin-top: 30px; border-top: 1px solid #e5e7eb; padding-top: 18px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">ezhalha</div>
+      <div class="muted">Internal Commercial Invoice</div>
+    </div>
+    <div class="meta">
+      <strong>EZI-CI-EZH-DHL-SAMPLE</strong>
+      <div>Issue Date: 2026-05-04</div>
+      <div>Shipment Ref: EZH-DHL-SAMPLE</div>
+      <div>Carrier: DHL (DHL)</div>
+      <div>Service: P</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>Shipper</h3>
+      <p><strong>Austin Warehouse</strong></p>
+      <p>100 Export Way</p><p>Suite 10</p><p>Houston, Texas, 77001, US</p><p>Phone: 5551112222</p><p>Email: sender@example.com</p>
+    </div>
+    <div class="panel">
+      <h3>Consignee</h3>
+      <p><strong>Riyadh Store</strong></p>
+      <p>200 Import Road</p><p>Al Falah | RRRD2929</p><p>Riyadh, Riyadh, 11564, SA</p><p>Phone: 5553334444</p><p>Email: recipient@example.com</p>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card">
+      <div class="label">Packages</div>
+      <div class="value">2</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Gross Weight</div>
+      <div class="value">4.50 KG</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Incoterm</div>
+      <div class="value">DDP</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Commodity</div>
+      <div class="value">Wireless Keyboard, Mouse Pad</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Description</th>
+        <th class="text-right">Qty</th>
+        <th class="text-right">Unit Value</th>
+        <th class="text-right">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+        <tr>
+          <td>1</td>
+          <td>
+            <strong>Wireless Keyboard</strong><br>
+            <span class="muted">Wireless Keyboard</span><br>
+            <span class="micro">Category: electronics | Material: plastic | Origin: US | HS: 847160</span>
+          </td>
+          <td class="text-right">1</td>
+          <td class="text-right">200.00 USD</td>
+          <td class="text-right">200.00 USD</td>
+        </tr>
+      
+        <tr>
+          <td>2</td>
+          <td>
+            <strong>Mouse Pad</strong><br>
+            <span class="muted">Gaming Mouse Pad</span><br>
+            <span class="micro">Category: other | Origin: US</span>
+          </td>
+          <td class="text-right">2</td>
+          <td class="text-right">15.50 USD</td>
+          <td class="text-right">31.00 USD</td>
+        </tr>
+      
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="totals-row"><span>Declared Value</span><span>231.00 USD</span></div>
+    <div class="totals-row"><span>Freight On Invoice</span><span>0.00</span></div>
+    <div class="totals-row"><span>Insurance</span><span>0.00</span></div>
+    <div class="totals-row total"><span>Total For Customs</span><span>231.00 USD</span></div>
+  </div>
+
+  <div class="declaration">
+    We hereby certify that the information contained in this invoice is true and correct and
+    that the contents of this shipment are as stated above. This commercial invoice was generated
+    internally by ezhalha from the shipment item data supplied in the booking flow.
+  </div>
+</body>
+</html>
+  

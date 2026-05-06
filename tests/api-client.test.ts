@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import supertest from "supertest";
 import express from "express";
 import { createServer } from "http";
 import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
+import { fedexAdapter } from "../server/integrations/fedex";
+import { dhlAdapter } from "../server/integrations/dhl";
 import { storage } from "../server/storage";
 import { InvoiceType } from "../shared/schema";
 import {
@@ -308,10 +310,61 @@ describe("Client - Shipments", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.quotes)).toBe(true);
     expect(res.body.quotes.length).toBeGreaterThan(0);
+    expect(Array.isArray(res.body.availableCarriers)).toBe(true);
 
     const returnedCarriers = new Set(res.body.quotes.map((quote: { carrierCode: string }) => quote.carrierCode));
     expect(returnedCarriers.has("FEDEX")).toBe(true);
     expect(returnedCarriers.has("DHL")).toBe(true);
+    const availableCarriers = new Set(
+      res.body.availableCarriers.map((carrier: { code: string }) => carrier.code),
+    );
+    expect(availableCarriers.has("FEDEX")).toBe(true);
+    expect(availableCarriers.has("DHL")).toBe(true);
+  });
+
+  it("POST /api/client/shipments/rates should hide FedEx in production when FedEx is not configured", async () => {
+    const payload = buildInternationalShipmentPayload();
+    delete (payload as { carrier?: string }).carrier;
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    const fedexConfiguredSpy = vi.spyOn(fedexAdapter, "isConfigured").mockReturnValue(false);
+    const dhlConfiguredSpy = vi.spyOn(dhlAdapter, "isConfigured").mockReturnValue(true);
+    const fedexRatesSpy = vi.spyOn(fedexAdapter, "getRates");
+    const dhlRatesSpy = vi.spyOn(dhlAdapter, "getRates").mockResolvedValue([
+      {
+        serviceType: "P",
+        serviceName: "EXPRESS WORLDWIDE",
+        baseRate: 194.11,
+        currency: "SAR",
+        transitDays: 3,
+        deliveryDate: new Date("2026-05-09T00:00:00.000Z"),
+      },
+    ]);
+
+    process.env.NODE_ENV = "production";
+
+    try {
+      const res = await clientAgent
+        .post("/api/client/shipments/rates")
+        .send(payload);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.availableCarriers)).toBe(true);
+      expect(res.body.availableCarriers).toEqual([
+        { code: "DHL", name: "DHL" },
+      ]);
+      const returnedCarriers = new Set(res.body.quotes.map((quote: { carrierCode: string }) => quote.carrierCode));
+      expect(returnedCarriers.has("DHL")).toBe(true);
+      expect(returnedCarriers.has("FEDEX")).toBe(false);
+      expect(fedexRatesSpy).not.toHaveBeenCalled();
+      expect(dhlRatesSpy).toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+      fedexConfiguredSpy.mockRestore();
+      dhlConfiguredSpy.mockRestore();
+      fedexRatesSpy.mockRestore();
+      dhlRatesSpy.mockRestore();
+    }
   });
 
   it("POST /api/client/shipments/extract-invoice-items should extract invoice items from an uploaded text invoice", async () => {
@@ -566,6 +619,56 @@ describe("Client - Shipments", () => {
     expect(shipment?.carrierCode).toBe("DHL");
     expect(shipment?.paymentMethod).toBe("CREDIT");
     expect(shipment?.status).toBe("created");
+  });
+
+  it("POST /api/client/shipments/:id/cancel should not cancel locally when carrier cancellation is not confirmed", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Client Cancel Sender",
+      senderAddress: "100 Sender Road",
+      senderStateOrProvince: "Texas",
+      senderPostalCode: "77001",
+      senderCity: "Houston",
+      senderCountry: "US",
+      senderPhone: "5553100201",
+      recipientName: "Client Cancel Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientPostalCode: "11564",
+      recipientCountry: "SA",
+      recipientPhone: "5553100202",
+      weight: "3.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound",
+      status: "processing",
+      paymentStatus: "paid",
+      carrierCode: "FEDEX",
+      carrierTrackingNumber: "794800000020",
+      carrierStatus: "processing",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+    });
+
+    const cancelSpy = vi.spyOn(fedexAdapter, "cancelShipment").mockResolvedValue(false);
+
+    try {
+      const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/cancel`).send({});
+
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe("Failed to cancel with carrier");
+
+      const updatedShipment = await storage.getShipment(shipment.id);
+      expect(updatedShipment?.status).toBe("processing");
+      expect(updatedShipment?.carrierStatus).toBe("processing");
+      expect(updatedShipment?.carrierErrorCode).toBe("CANCEL_FAILED");
+    } finally {
+      cancelSpy.mockRestore();
+    }
   });
 });
 

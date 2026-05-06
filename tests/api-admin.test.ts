@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import supertest from "supertest";
 import express from "express";
 import { createServer } from "http";
 import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
+import { fedexAdapter } from "../server/integrations/fedex";
 import { storage } from "../server/storage";
 import { ACCOUNT_MANAGER_SYSTEM_ROLE_ID, InvoiceType } from "../shared/schema";
 
@@ -1599,6 +1600,72 @@ describe("Admin - Shipments", () => {
     expect(storedTradeDocuments[0].fileName).toBe("retry-commercial-invoice.pdf");
     expect(storedTradeDocuments[0].uploadedDocumentId).toBeTruthy();
     expect(storedTradeDocuments[0].uploadedAt).toBeTruthy();
+  });
+
+  it("POST /api/admin/shipments/:id/cancel should not cancel locally when carrier cancellation is not confirmed", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `Admin Cancel Carrier Client ${unique}`,
+      email: `admin_cancel_carrier_client_${unique}@test.com`,
+      phone: "5553100101",
+      country: "United States",
+      profile: "regular",
+      accountType: "company",
+      companyName: "Admin Cancel Carrier Co",
+      isActive: true,
+      shippingContactName: "Cancel Contact",
+      shippingContactPhone: "5553100101",
+      shippingCountryCode: "US",
+      shippingStateOrProvince: "Texas",
+      shippingCity: "Houston",
+      shippingPostalCode: "77001",
+      shippingAddressLine1: "101 Cancel Way",
+    });
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Cancel Sender",
+      senderAddress: "101 Cancel Way",
+      senderCity: "Houston",
+      senderStateOrProvince: "Texas",
+      senderPostalCode: "77001",
+      senderCountry: "US",
+      senderPhone: "5553100102",
+      recipientName: "Cancel Recipient",
+      recipientAddress: "202 Import Road",
+      recipientCity: "Riyadh",
+      recipientPostalCode: "11564",
+      recipientCountry: "SA",
+      recipientPhone: "5553100103",
+      weight: "2.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound",
+      status: "created",
+      paymentStatus: "paid",
+      carrierCode: "FEDEX",
+      carrierTrackingNumber: "794800000010",
+      carrierStatus: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+    });
+
+    const cancelSpy = vi.spyOn(fedexAdapter, "cancelShipment").mockResolvedValue(false);
+
+    try {
+      const res = await asAdmin.post(`/api/admin/shipments/${shipment.id}/cancel`).send({});
+
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe("Failed to cancel with carrier");
+
+      const updatedShipment = await storage.getShipment(shipment.id);
+      expect(updatedShipment?.status).toBe("created");
+      expect(updatedShipment?.carrierStatus).toBe("created");
+      expect(updatedShipment?.carrierErrorCode).toBe("CANCEL_FAILED");
+    } finally {
+      cancelSpy.mockRestore();
+    }
   });
 });
 

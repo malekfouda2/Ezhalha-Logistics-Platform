@@ -175,6 +175,7 @@ describe("DhlAdapter", () => {
           description: "Bambu Lab H2S",
           quantity: 2,
           unitPrice: 2099,
+          hsCode: "847759",
           countryOfOrigin: "EG",
           currency: "SAR",
         },
@@ -208,5 +209,15 @@ describe("DhlAdapter", () => {
     expect(payload.content.exportDeclaration.invoice.customerReferences[0].typeCode).toBe("CU");
     expect(payload.content.exportDeclaration.lineItems).toHaveLength(1);
     expect(payload.content.exportDeclaration.lineItems[0].description).toBe("Bambu Lab H2S");
+    expect(payload.content.exportDeclaration.lineItems[0].commodityCodes).toEqual([
+      { value: "847759", typeCode: "outbound" },
+      { value: "847759", typeCode: "inbound" },
+    ]);
+    expect(payload.content.exportDeclaration.lineItems[0].weight.grossValue).toBeGreaterThan(
+      payload.content.exportDeclaration.lineItems[0].weight.netValue,
+    );
+    expect(payload.content.exportDeclaration.invoice.totalGrossWeight).toBeGreaterThan(
+      payload.content.exportDeclaration.invoice.totalNetWeight,
+    );
   });
 });

@@ -116,6 +116,7 @@ describe("DHL Shipment Builder", () => {
     expect(result.carrierRequest.recipient.countryCode).toBe("AE");
     expect(result.carrierRequest.items?.[0].hsCode).toBe("847160");
     expect(result.carrierRequest.declaredValue).toBe(200);
+    expect(result.carrierRequest.commercialInvoiceNumber).toBe("EZI-CI-EZH123456789");
   });
 
   it("should default to domestic DHL product code for same-country shipments", async () => {
@@ -132,5 +133,28 @@ describe("DHL Shipment Builder", () => {
     expect(result.carrierRequest.serviceType).toBe("N");
     expect(result.carrierRequest.incoterm).toBe("DAP");
     expect(result.carrierRequest.items).toBeUndefined();
+  });
+
+  it("should reuse the top HS candidate when the stored item hsCode is blank", async () => {
+    const shipment = buildShipment({
+      itemsData: JSON.stringify([
+        {
+          itemName: "Wireless Keyboard",
+          itemDescription: "Wireless Keyboard",
+          category: "electronics",
+          countryOfOrigin: "SA",
+          price: 200,
+          quantity: 1,
+          hsCode: "",
+          hsCodeCandidates: [
+            { code: "847160", description: "Computer keyboards", confidence: 0.42 },
+          ],
+        },
+      ]),
+    });
+
+    const result = await buildDhlShipmentRequestFromShipment(shipment);
+
+    expect(result.carrierRequest.items?.[0].hsCode).toBe("847160");
   });
 });

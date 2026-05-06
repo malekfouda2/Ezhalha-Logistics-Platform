@@ -1044,7 +1044,7 @@ export type FedExTradeDocumentTypeValue =
   typeof FedExTradeDocumentType[keyof typeof FedExTradeDocumentType];
 
 export const FEDEX_TRADE_DOCUMENT_MAX_FILES = 5;
-export const FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+export const FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES = 20 * 1024 * 1024;
 
 export const FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES = [
   "application/msword",

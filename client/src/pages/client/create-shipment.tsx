@@ -120,8 +120,20 @@ const itemCurrencies = [
 ];
 
 const INVOICE_ACCEPT = ".pdf,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.gif";
+const PACKAGE_LIST_ACCEPT = ".pdf,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.gif";
 
 const SUPPORTED_INVOICE_CONTENT_TYPES = new Set<string>([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+]);
+
+const SUPPORTED_PACKAGE_LIST_CONTENT_TYPES = new Set<string>([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.ms-excel",
@@ -213,6 +225,7 @@ interface ShipmentFormData {
     shortAddress?: string;
   };
   packages: Array<{
+    reference?: string;
     weight: number;
     length: number;
     width: number;
@@ -241,6 +254,10 @@ interface RateQuote {
 interface RatesResponse {
   quotes: RateQuote[];
   expiresAt: string;
+  availableCarriers?: Array<{
+    code: string;
+    name: string;
+  }>;
 }
 
 interface InvoiceExtractionResponse {
@@ -266,6 +283,25 @@ interface InvoiceExtractionResponse {
     hasParsingWarnings: boolean;
     autoMatchedHsCodeCount: number;
     hsCodeReviewCount: number;
+  };
+}
+
+interface PackageExtractionResponse {
+  packages: Array<{
+    packageNumber: string;
+    weight: number;
+    length: number;
+    width: number;
+    height: number;
+  }>;
+  detectedWeightUnit: "LB" | "KG";
+  detectedDimensionUnit: "IN" | "CM";
+  extractionMethod: "deterministic" | "gemini";
+  summary: {
+    importedPackageCount: number;
+    totalWeight: number;
+    aiAssisted: boolean;
+    hasParsingWarnings: boolean;
   };
 }
 
@@ -454,11 +490,29 @@ export default function CreateShipment() {
   const [customsInputMode, setCustomsInputMode] = useState<"invoice" | "manual">("manual");
   const [invoiceExtractionSummary, setInvoiceExtractionSummary] = useState<InvoiceExtractionResponse["summary"] | null>(null);
   const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
+  const [packageListDocument, setPackageListDocument] = useState<{
+    fileName: string;
+    objectPath: string;
+    contentType: string;
+    size: number;
+  } | null>(null);
+  const [packageExtractionSummary, setPackageExtractionSummary] = useState<PackageExtractionResponse["summary"] | null>(null);
+  const [isExtractingPackageList, setIsExtractingPackageList] = useState(false);
 
   const { uploadFile: uploadInvoiceFile, isUploading: isUploadingInvoice } = useUpload({
     onError: (error) => {
       toast({
         title: "Invoice upload failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const { uploadFile: uploadPackageListFile, isUploading: isUploadingPackageList } = useUpload({
+    onError: (error) => {
+      toast({
+        title: "Packing list upload failed",
         description: error.message,
         variant: "destructive",
       });
@@ -752,6 +806,7 @@ export default function CreateShipment() {
     formData.shipmentType === "inbound" &&
     DDP_DESTINATION_COUNTRIES.has((formData.recipient.countryCode || "").toUpperCase());
   const invoiceDocument = formData.tradeDocuments[0] ?? null;
+  const totalPackageWeight = formData.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
   const isInternationalShipment =
     formData.shipmentType === "inbound" || formData.shipmentType === "outbound";
   const customsStep = 6;
@@ -759,6 +814,11 @@ export default function CreateShipment() {
   const confirmationStep = paymentStep + 1;
   const selectedQuote = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId) ?? null;
   const selectedCarrierCode = selectedQuote?.carrierCode || formData.carrier || "";
+  const displayedCarriers = rates?.availableCarriers?.length
+    ? rates.availableCarriers
+    : carriers.filter((carrier) =>
+        rates ? rates.quotes.some((quote) => quote.carrierCode === carrier.code) : true,
+      );
 
   useEffect(() => {
     if (!ddpEligibleDestination && formData.isDdp) {
@@ -842,6 +902,112 @@ export default function CreateShipment() {
 
   const updateSharedPackageSetting = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const clearPackageListDocument = () => {
+    setPackageListDocument(null);
+    setPackageExtractionSummary(null);
+  };
+
+  const handlePackageListSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const normalizedContentType = normalizeTradeDocumentContentType(file.type, file.name);
+    if (!SUPPORTED_PACKAGE_LIST_CONTENT_TYPES.has(normalizedContentType)) {
+      toast({
+        title: "Unsupported packing list format",
+        description: "Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF packing list.",
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES) {
+      toast({
+        title: "Packing list is too large",
+        description: `The packing list exceeds the ${Math.round(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024))}MB limit.`,
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    const fileForUpload = file.type === normalizedContentType
+      ? file
+      : new File([file], file.name, {
+          type: normalizedContentType,
+          lastModified: file.lastModified,
+        });
+
+    const uploadResponse = await uploadPackageListFile(fileForUpload);
+    if (!uploadResponse) {
+      e.target.value = "";
+      return;
+    }
+
+    setIsExtractingPackageList(true);
+
+    try {
+      const extractionRes = await apiRequest(
+        "POST",
+        "/api/client/shipments/extract-package-details",
+        {
+          fileName: uploadResponse.metadata.name,
+          objectPath: uploadResponse.objectPath,
+          contentType: normalizeTradeDocumentContentType(
+            uploadResponse.metadata.contentType,
+            uploadResponse.metadata.name,
+          ),
+        },
+      );
+
+      const extraction = await extractionRes.json() as PackageExtractionResponse;
+      const extractedPackages = extraction.packages.map((pkg, index) => ({
+        reference: pkg.packageNumber || String(index + 1),
+        weight: pkg.weight,
+        length: pkg.length,
+        width: pkg.width,
+        height: pkg.height,
+      }));
+
+      setFormData((prev) => ({
+        ...prev,
+        packages: extractedPackages.length > 0 ? extractedPackages : prev.packages,
+        weightUnit: extraction.detectedWeightUnit,
+        dimensionUnit: extraction.detectedDimensionUnit,
+        packageType: "YOUR_PACKAGING",
+      }));
+      setPackageListDocument({
+        fileName: uploadResponse.metadata.name,
+        objectPath: uploadResponse.objectPath,
+        contentType: normalizeTradeDocumentContentType(
+          uploadResponse.metadata.contentType,
+          uploadResponse.metadata.name,
+        ),
+        size: uploadResponse.metadata.size,
+      });
+      setPackageExtractionSummary(extraction.summary);
+
+      toast({
+        title: "Packing list processed",
+        description: `${extractedPackages.length} package${extractedPackages.length === 1 ? "" : "s"} imported.`,
+      });
+    } catch (error) {
+      setPackageListDocument(null);
+      setPackageExtractionSummary(null);
+      toast({
+        title: "Could not process packing list",
+        description: error instanceof Error ? error.message : "Please upload another file or enter the packages manually.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtractingPackageList(false);
+      e.target.value = "";
+    }
   };
 
   const updateItem = (index: number, field: string, value: any) => {
@@ -1867,6 +2033,97 @@ export default function CreateShipment() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="rounded-lg border p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Packing List
+                    </h4>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Upload a packing list or spreadsheet and we will prepare the cartons, total weight, and package count for you.
+                    </p>
+                  </div>
+                  <label htmlFor="packing-list-upload" className="cursor-pointer">
+                    <div className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                      <Upload className="h-4 w-4" />
+                      <span>
+                        {isUploadingPackageList || isExtractingPackageList
+                          ? "Processing..."
+                          : packageListDocument
+                            ? "Replace Packing List"
+                            : "Upload Packing List"}
+                      </span>
+                    </div>
+                    <input
+                      id="packing-list-upload"
+                      type="file"
+                      accept={PACKAGE_LIST_ACCEPT}
+                      className="hidden"
+                      onChange={handlePackageListSelect}
+                      disabled={isUploadingPackageList || isExtractingPackageList}
+                      data-testid="input-packing-list-upload"
+                    />
+                  </label>
+                </div>
+
+                {packageListDocument ? (
+                  <div
+                    className="rounded-lg border p-3"
+                    data-testid={`packing-list-document-${packageListDocument.objectPath}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm font-medium truncate">{packageListDocument.fileName}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {packageListDocument.contentType} · {formatFileSize(packageListDocument.size)}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={clearPackageListDocument}
+                        data-testid={`button-remove-packing-list-${packageListDocument.fileName}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed px-4 py-6 text-center">
+                    <FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">No packing list uploaded.</p>
+                  </div>
+                )}
+
+                {(isUploadingPackageList || isExtractingPackageList) && (
+                  <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                    <LoadingSpinner size="sm" />
+                    <span>Processing packing list...</span>
+                  </div>
+                )}
+
+                {packageExtractionSummary && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="space-y-1">
+                        <p className="font-medium">
+                          {packageExtractionSummary.importedPackageCount} carton{packageExtractionSummary.importedPackageCount === 1 ? "" : "s"} imported.
+                        </p>
+                        <p>Total gross weight: {packageExtractionSummary.totalWeight.toFixed(3)} {formData.weightUnit}.</p>
+                        <p>Please review the imported packages before getting rates.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <Label>Package Type</Label>
@@ -1916,12 +2173,29 @@ export default function CreateShipment() {
                 </div>
               </div>
 
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border bg-muted/20 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Packages</p>
+                  <p className="mt-2 text-2xl font-semibold">{formData.packages.length}</p>
+                </div>
+                <div className="rounded-lg border bg-muted/20 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Total Weight</p>
+                  <p className="mt-2 text-2xl font-semibold">
+                    {totalPackageWeight.toFixed(3)} <span className="text-sm font-medium text-muted-foreground">{formData.weightUnit}</span>
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/20 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Package Type</p>
+                  <p className="mt-2 text-lg font-semibold">{packageTypeLabels[formData.packageType] || "Your Own Packaging"}</p>
+                </div>
+              </div>
+
               <div className="space-y-4">
                 {formData.packages.map((pkg, index) => (
                   <Card key={index} className="relative">
                     <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4">
                       <CardTitle className="text-sm font-medium">
-                        Package {index + 1}
+                        {pkg.reference ? `Carton ${pkg.reference}` : `Package ${index + 1}`}
                       </CardTitle>
                       {formData.packages.length > 1 && (
                         <Button
@@ -2025,7 +2299,7 @@ export default function CreateShipment() {
                 onValueChange={setSelectedQuoteId}
                 className="grid gap-6 md:grid-cols-2"
               >
-                {carriers.map((carrier) => {
+                {displayedCarriers.map((carrier) => {
                   const carrierQuotes = rates.quotes.filter((quote) => quote.carrierCode === carrier.code);
 
                   return (

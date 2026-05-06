@@ -1,5 +1,6 @@
 import { type Shipment } from "@shared/schema";
 import { type CreateShipmentRequest, type ShipmentItem } from "../integrations/fedex";
+import { buildCommercialInvoiceDocument } from "./commercial-invoice";
 
 function buildPackages(shipment: Shipment): CreateShipmentRequest["packages"] {
   if (shipment.packagesData) {
@@ -53,15 +54,21 @@ function buildItems(shipment: Shipment): ShipmentItem[] | undefined {
   try {
     const items = JSON.parse(shipment.itemsData) as Array<{
       itemName: string;
+      itemDescription?: string;
+      category?: string;
+      material?: string;
       price: number;
       quantity: number;
       hsCode?: string;
+      hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
       countryOfOrigin?: string;
     }>;
 
     return items.map((item) => ({
-      description: item.itemName,
-      hsCode: item.hsCode,
+      description: item.itemDescription || item.itemName,
+      hsCode: item.hsCode || item.hsCodeCandidates?.[0]?.code,
+      category: item.category,
+      material: item.material,
       countryOfOrigin: item.countryOfOrigin || shipment.senderCountry,
       quantity: item.quantity,
       unitPrice: item.price,
@@ -94,6 +101,11 @@ export async function buildDhlShipmentRequestFromShipment(
   const { commodityDescription, declaredValue } = buildCommoditySummary(items);
   const isInternational = shipment.senderCountry !== shipment.recipientCountry;
   const defaultServiceType = isInternational ? "P" : "N";
+  const internalCommercialInvoice = buildCommercialInvoiceDocument(shipment);
+
+  if (isInternational && items?.some((item) => !item.hsCode?.trim())) {
+    throw new Error("DHL requires an HS code for every shipment item before shipment creation.");
+  }
 
   const carrierRequest: CreateShipmentRequest = {
     shipper: {
@@ -128,6 +140,8 @@ export async function buildDhlShipmentRequestFromShipment(
     declaredValue,
     currency: shipment.currency || "SAR",
     shipDate: shipment.shipDate || undefined,
+    commercialInvoiceNumber: internalCommercialInvoice.invoiceNumber,
+    commercialInvoiceDate: internalCommercialInvoice.issueDate,
     incoterm: shipment.isDdp ? "DDP" : "DAP",
     items,
   };

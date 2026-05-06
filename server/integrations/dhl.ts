@@ -341,6 +341,24 @@ function buildLineItemWeight(totalWeight: number, totalQuantity: number, itemQua
   return Math.max(0.1, Number(((totalWeight / totalQuantity) * itemQuantity).toFixed(3)));
 }
 
+function buildLineItemWeightValues(totalWeight: number, totalQuantity: number, itemQuantity: number): {
+  netValue: number;
+  grossValue: number;
+} {
+  const grossValue = buildLineItemWeight(totalWeight, totalQuantity, itemQuantity);
+  const reduction = Math.min(0.01, Math.max(0.001, Number((grossValue * 0.05).toFixed(3))));
+  const netValue = Number(Math.max(0.001, grossValue - reduction).toFixed(3));
+
+  if (grossValue > netValue) {
+    return { netValue, grossValue };
+  }
+
+  return {
+    netValue: Number(Math.max(0.001, grossValue - 0.001).toFixed(3)),
+    grossValue,
+  };
+}
+
 function buildExportDeclaration(request: CreateShipmentRequest, items?: ShipmentItem[]) {
   const sanitizedItems = sanitizeShipmentItems(items ?? request.items);
   if (sanitizedItems.length === 0) {
@@ -349,13 +367,25 @@ function buildExportDeclaration(request: CreateShipmentRequest, items?: Shipment
 
   const totalWeight = request.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
   const totalQuantity = sanitizedItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const invoiceDate = normalizePlannedShippingDate(request.shipDate, request.shipper.countryCode).split("T")[0];
+  const invoiceDate =
+    request.commercialInvoiceDate ||
+    normalizePlannedShippingDate(request.shipDate, request.shipper.countryCode).split("T")[0];
+  const invoiceNumber = request.commercialInvoiceNumber || `EZH-${Date.now()}`;
   const declaredValue = buildDeclaredValue(sanitizedItems) ?? 0;
   const currency = request.currency || "SAR";
+  const lineItemWeights = sanitizedItems.map((item) =>
+    buildLineItemWeightValues(totalWeight, totalQuantity, Number(item.quantity || 0)),
+  );
+  const totalNetWeight = Number(
+    lineItemWeights.reduce((sum, item) => sum + item.netValue, 0).toFixed(3),
+  );
+  const totalGrossWeight = Number(
+    lineItemWeights.reduce((sum, item) => sum + item.grossValue, 0).toFixed(3),
+  );
 
   return {
     lineItems: sanitizedItems.map((item, index) => {
-      const grossWeight = buildLineItemWeight(totalWeight, totalQuantity, Number(item.quantity || 0));
+      const lineItemWeight = lineItemWeights[index] || { netValue: 0.099, grossValue: 0.1 };
       const commodityCodes = item.hsCode
         ? [
             { value: item.hsCode, typeCode: "outbound" },
@@ -374,19 +404,19 @@ function buildExportDeclaration(request: CreateShipmentRequest, items?: Shipment
           value: Number(item.quantity || 1),
         },
         weight: {
-          netValue: grossWeight,
-          grossValue: grossWeight,
+          netValue: lineItemWeight.netValue,
+          grossValue: lineItemWeight.grossValue,
         },
         manufacturerCountry: item.countryOfOrigin || request.shipper.countryCode,
         exportReasonType: "permanent",
       };
     }),
     invoice: {
-      number: `EZH-${Date.now()}`,
+      number: invoiceNumber,
       date: invoiceDate,
-      totalNetWeight: totalWeight > 0 ? totalWeight : undefined,
-      totalGrossWeight: totalWeight > 0 ? totalWeight : undefined,
-      customerReferences: [{ value: `EZH-${Date.now()}`, typeCode: "CU" }],
+      totalNetWeight: totalNetWeight > 0 ? totalNetWeight : undefined,
+      totalGrossWeight: totalGrossWeight > 0 ? totalGrossWeight : undefined,
+      customerReferences: [{ value: invoiceNumber, typeCode: "CU" }],
     },
     ...(declaredValue > 0
       ? {

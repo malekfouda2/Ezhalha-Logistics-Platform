@@ -6,11 +6,98 @@ import { storage } from "../storage";
 
 const COUNTRIES_REQUIRING_STATE = new Set(["US", "CA", "AU", "IN", "BR", "MX", "CN", "JP"]);
 
+const STATE_CODE_ALIASES: Record<string, Record<string, string>> = {
+  US: {
+    alabama: "AL",
+    alaska: "AK",
+    arizona: "AZ",
+    arkansas: "AR",
+    california: "CA",
+    colorado: "CO",
+    connecticut: "CT",
+    delaware: "DE",
+    florida: "FL",
+    georgia: "GA",
+    hawaii: "HI",
+    idaho: "ID",
+    illinois: "IL",
+    indiana: "IN",
+    iowa: "IA",
+    kansas: "KS",
+    kentucky: "KY",
+    louisiana: "LA",
+    maine: "ME",
+    maryland: "MD",
+    massachusetts: "MA",
+    michigan: "MI",
+    minnesota: "MN",
+    mississippi: "MS",
+    missouri: "MO",
+    montana: "MT",
+    nebraska: "NE",
+    nevada: "NV",
+    "new hampshire": "NH",
+    "new jersey": "NJ",
+    "new mexico": "NM",
+    "new york": "NY",
+    "north carolina": "NC",
+    "north dakota": "ND",
+    ohio: "OH",
+    oklahoma: "OK",
+    oregon: "OR",
+    pennsylvania: "PA",
+    "rhode island": "RI",
+    "south carolina": "SC",
+    "south dakota": "SD",
+    tennessee: "TN",
+    texas: "TX",
+    utah: "UT",
+    vermont: "VT",
+    virginia: "VA",
+    washington: "WA",
+    "west virginia": "WV",
+    wisconsin: "WI",
+    wyoming: "WY",
+    "district of columbia": "DC",
+  },
+  CA: {
+    alberta: "AB",
+    "british columbia": "BC",
+    manitoba: "MB",
+    "new brunswick": "NB",
+    "newfoundland and labrador": "NL",
+    "northwest territories": "NT",
+    "nova scotia": "NS",
+    nunavut: "NU",
+    ontario: "ON",
+    "prince edward island": "PE",
+    quebec: "QC",
+    saskatchewan: "SK",
+    yukon: "YT",
+  },
+  AU: {
+    "new south wales": "NSW",
+    victoria: "VIC",
+    queensland: "QLD",
+    "south australia": "SA",
+    "western australia": "WA",
+    tasmania: "TAS",
+    "northern territory": "NT",
+    "australian capital territory": "ACT",
+  },
+};
+
 function sanitizeStateCode(countryCode: string, stateOrProvince?: string): string | undefined {
   if (!stateOrProvince || stateOrProvince.trim() === "") return undefined;
   const trimmed = stateOrProvince.trim();
-  if (trimmed.length <= 2) return trimmed.toUpperCase();
-  if (COUNTRIES_REQUIRING_STATE.has(countryCode)) {
+  const normalizedCountryCode = countryCode.trim().toUpperCase();
+  if (trimmed.length <= 3) return trimmed.toUpperCase();
+  if (COUNTRIES_REQUIRING_STATE.has(normalizedCountryCode)) {
+    const normalizedState = trimmed.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+    const aliasMap = STATE_CODE_ALIASES[normalizedCountryCode];
+    if (aliasMap?.[normalizedState]) {
+      return aliasMap[normalizedState];
+    }
     return trimmed.substring(0, 2).toUpperCase();
   }
   return undefined;
@@ -55,6 +142,8 @@ export interface PackageDetails {
 
 export interface ShipmentItem {
   description: string;
+  category?: string;
+  material?: string;
   hsCode?: string;
   countryOfOrigin?: string;
   quantity: number;
@@ -177,6 +266,8 @@ export interface CreateShipmentRequest {
   declaredValue?: number;
   currency?: string;
   shipDate?: string;
+  commercialInvoiceNumber?: string;
+  commercialInvoiceDate?: string;
   items?: ShipmentItem[];
   tradeDocuments?: TradeDocumentReference[];
 }
@@ -1499,10 +1590,7 @@ export class FedExAdapter implements CarrierAdapter {
       };
     } catch (error) {
       logError("FedEx tracking error", error);
-      if (!isMockAllowed()) {
-        throw new CarrierError("TRACKING_FAILED", (error as Error).message);
-      }
-      return this.getMockTracking(trackingNumber);
+      throw new CarrierError("TRACKING_FAILED", (error as Error).message);
     }
   }
 
@@ -1563,10 +1651,7 @@ export class FedExAdapter implements CarrierAdapter {
       return true;
     } catch (error) {
       logError("FedEx cancel shipment error", error);
-      if (!isMockAllowed()) {
-        throw new CarrierError("CANCEL_FAILED", (error as Error).message);
-      }
-      return false;
+      throw new CarrierError("CANCEL_FAILED", (error as Error).message);
     }
   }
 

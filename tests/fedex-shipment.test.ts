@@ -159,7 +159,11 @@ describe("FedEx Shipment Builder", () => {
 
   it("reuses existing uploaded document ids without re-uploading", async () => {
     const uploader = {
-      uploadTradeDocument: vi.fn(),
+      uploadTradeDocument: vi.fn().mockResolvedValue({
+        documentId: "doc-internal-789",
+        fileName: "ezi-ci-ezh123456789.pdf",
+        documentType: "OTHER",
+      }),
     };
 
     const shipment = makeShipment({
@@ -176,14 +180,21 @@ describe("FedEx Shipment Builder", () => {
 
     const result = await buildFedExShipmentRequestFromShipment(shipment, uploader);
 
-    expect(uploader.uploadTradeDocument).not.toHaveBeenCalled();
-    expect(result.carrierRequest.tradeDocuments).toEqual([
-      {
-        documentType: "COMMERCIAL_INVOICE",
-        uploadedDocumentId: "doc-existing-123",
-      },
-    ]);
+    expect(uploader.uploadTradeDocument).toHaveBeenCalledTimes(1);
+    expect(result.carrierRequest.tradeDocuments).toEqual(
+      expect.arrayContaining([
+        {
+          documentType: "COMMERCIAL_INVOICE",
+          uploadedDocumentId: "doc-existing-123",
+        },
+        {
+          documentType: "OTHER",
+          uploadedDocumentId: "doc-internal-789",
+        },
+      ]),
+    );
     expect(result.tradeDocumentsData).toContain("doc-existing-123");
+    expect(result.tradeDocumentsData).toContain("doc-internal-789");
   });
 
   it("uploads missing local trade documents and stores returned doc ids", async () => {
@@ -192,11 +203,17 @@ describe("FedEx Shipment Builder", () => {
       "%PDF-1.4 unit test trade document",
     );
     const uploader = {
-      uploadTradeDocument: vi.fn().mockResolvedValue({
-        documentId: "doc-new-456",
-        fileName: "trade-upload.pdf",
-        documentType: "COMMERCIAL_INVOICE",
-      }),
+      uploadTradeDocument: vi.fn()
+        .mockResolvedValueOnce({
+          documentId: "doc-new-456",
+          fileName: "trade-upload.pdf",
+          documentType: "COMMERCIAL_INVOICE",
+        })
+        .mockResolvedValueOnce({
+          documentId: "doc-internal-456",
+          fileName: "ezi-ci-ezh123456789.pdf",
+          documentType: "OTHER",
+        }),
     };
 
     const shipment = makeShipment({
@@ -211,7 +228,7 @@ describe("FedEx Shipment Builder", () => {
 
     const result = await buildFedExShipmentRequestFromShipment(shipment, uploader);
 
-    expect(uploader.uploadTradeDocument).toHaveBeenCalledTimes(1);
+    expect(uploader.uploadTradeDocument).toHaveBeenCalledTimes(2);
     expect(uploader.uploadTradeDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         fileName: "trade-upload.pdf",
@@ -222,13 +239,60 @@ describe("FedEx Shipment Builder", () => {
         fileBuffer: expect.any(Buffer),
       }),
     );
+    expect(uploader.uploadTradeDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: "ezi-ci-ezh123456789.pdf",
+        contentType: "application/pdf",
+        documentType: "OTHER",
+        originCountryCode: "US",
+        destinationCountryCode: "SA",
+        fileBuffer: expect.any(Buffer),
+      }),
+    );
+    expect(result.carrierRequest.tradeDocuments).toEqual(
+      expect.arrayContaining([
+        {
+          documentType: "COMMERCIAL_INVOICE",
+          uploadedDocumentId: "doc-new-456",
+        },
+        {
+          documentType: "OTHER",
+          uploadedDocumentId: "doc-internal-456",
+        },
+      ]),
+    );
+    expect(result.tradeDocumentsData).toContain("doc-new-456");
+    expect(result.tradeDocumentsData).toContain("doc-internal-456");
+  });
+
+  it("generates and uploads an internal commercial invoice when no invoice was uploaded", async () => {
+    const uploader = {
+      uploadTradeDocument: vi.fn().mockResolvedValue({
+        documentId: "doc-internal-001",
+        fileName: "ezi-ci-ezh123456789.pdf",
+        documentType: "COMMERCIAL_INVOICE",
+      }),
+    };
+
+    const result = await buildFedExShipmentRequestFromShipment(makeShipment(), uploader);
+
+    expect(uploader.uploadTradeDocument).toHaveBeenCalledTimes(1);
+    expect(uploader.uploadTradeDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: "ezi-ci-ezh123456789.pdf",
+        contentType: "application/pdf",
+        documentType: "COMMERCIAL_INVOICE",
+        fileBuffer: expect.any(Buffer),
+      }),
+    );
+    expect(result.carrierRequest.commercialInvoiceNumber).toBe("EZI-CI-EZH123456789");
     expect(result.carrierRequest.tradeDocuments).toEqual([
       {
         documentType: "COMMERCIAL_INVOICE",
-        uploadedDocumentId: "doc-new-456",
+        uploadedDocumentId: "doc-internal-001",
       },
     ]);
-    expect(result.tradeDocumentsData).toContain("doc-new-456");
+    expect(result.tradeDocumentsData).toContain("internal://commercial-invoice");
   });
 
   it("rejects stored trade documents with unsupported content types", async () => {
