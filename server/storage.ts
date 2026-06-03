@@ -11,6 +11,10 @@ import {
   type InsertInvoice,
   type Payment,
   type InsertPayment,
+  type ShipmentRefundRequest,
+  type InsertShipmentRefundRequest,
+  type AbandonedShipmentRecovery,
+  type InsertAbandonedShipmentRecovery,
   type TapSavedCard,
   type InsertTapSavedCard,
   type CarrierPayoutBatch,
@@ -19,6 +23,10 @@ import {
   type InsertPricingRule,
   type PricingTier,
   type InsertPricingTier,
+  type DdpPricingTier,
+  type InsertDdpPricingTier,
+  type DdpPricingLane,
+  type InsertDdpPricingLane,
   type AuditLog,
   type InsertAuditLog,
   type Role,
@@ -35,6 +43,10 @@ import {
   type InsertAccountManagerClientChangeRequest,
   type IntegrationLog,
   type InsertIntegrationLog,
+  type IntegrationAccount,
+  type InsertIntegrationAccount,
+  type PlatformSetting,
+  type InsertPlatformSetting,
   type WebhookEvent,
   type InsertWebhookEvent,
   type ShipmentRateQuote,
@@ -63,10 +75,14 @@ import {
   shipments,
   invoices,
   payments,
+  shipmentRefundRequests,
+  abandonedShipmentRecoveries,
   tapSavedCards,
   carrierPayoutBatches,
   pricingRules,
   pricingTiers,
+  ddpPricingTiers,
+  ddpPricingLanes,
   auditLogs,
   roles,
   permissions,
@@ -75,6 +91,8 @@ import {
   accountManagerAssignments,
   accountManagerClientChangeRequests,
   integrationLogs,
+  integrationAccounts,
+  platformSettings,
   webhookEvents,
   shipmentRateQuotes,
   clientUserPermissions,
@@ -152,6 +170,7 @@ export interface IStorage {
     search?: string;
     status?: string;
     clientAccountIds?: string[];
+    abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
@@ -185,11 +204,39 @@ export interface IStorage {
     clientAccountIds?: string[];
   }): Promise<{ payments: Payment[]; total: number; page: number; totalPages: number }>;
   getPaymentsByClientAccount(clientAccountId: string): Promise<Payment[]>;
+  getPaymentByTransactionId(transactionId: string): Promise<Payment | undefined>;
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePayment(id: string, updates: Partial<Payment>): Promise<Payment | undefined>;
 
+  // Shipment Refund Requests
+  getShipmentRefundRequests(params?: {
+    status?: string;
+    shipmentId?: string;
+    clientAccountIds?: string[];
+    accountManagerUserId?: string;
+  }): Promise<ShipmentRefundRequest[]>;
+  getShipmentRefundRequest(id: string): Promise<ShipmentRefundRequest | undefined>;
+  getShipmentRefundRequestByShipmentId(shipmentId: string): Promise<ShipmentRefundRequest | undefined>;
+  createShipmentRefundRequest(request: InsertShipmentRefundRequest): Promise<ShipmentRefundRequest>;
+  updateShipmentRefundRequest(id: string, updates: Partial<ShipmentRefundRequest>): Promise<ShipmentRefundRequest | undefined>;
+
+  // Abandoned Shipment Recovery
+  getAbandonedShipmentRecoveries(params?: {
+    shipmentIds?: string[];
+    clientAccountIds?: string[];
+    includeDismissed?: boolean;
+  }): Promise<AbandonedShipmentRecovery[]>;
+  getAbandonedShipmentRecoveryByShipmentId(shipmentId: string): Promise<AbandonedShipmentRecovery | undefined>;
+  createAbandonedShipmentRecovery(recovery: InsertAbandonedShipmentRecovery): Promise<AbandonedShipmentRecovery>;
+  upsertAbandonedShipmentRecoveryByShipmentId(
+    shipmentId: string,
+    recovery: InsertAbandonedShipmentRecovery,
+    updates: Partial<AbandonedShipmentRecovery>,
+  ): Promise<AbandonedShipmentRecovery>;
+  updateAbandonedShipmentRecovery(id: string, updates: Partial<AbandonedShipmentRecovery>): Promise<AbandonedShipmentRecovery | undefined>;
+
   // Tap Saved Cards
-  getTapSavedCardsByClientAccount(clientAccountId: string): Promise<TapSavedCard[]>;
+  getTapSavedCardsByClientAccount(clientAccountId: string, tapIntegrationAccountId?: string | null): Promise<TapSavedCard[]>;
   getTapSavedCard(id: string): Promise<TapSavedCard | undefined>;
   getTapSavedCardByTapCardId(clientAccountId: string, tapCardId: string): Promise<TapSavedCard | undefined>;
   createTapSavedCard(card: InsertTapSavedCard): Promise<TapSavedCard>;
@@ -220,6 +267,26 @@ export interface IStorage {
   deletePricingTier(id: string): Promise<void>;
   getMarginForAmount(profileId: string, amount: number): Promise<number>;
 
+  // DDP Pricing Tiers
+  getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]>;
+  createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier>;
+  updateDdpPricingTier(id: string, updates: Partial<DdpPricingTier>): Promise<DdpPricingTier | undefined>;
+  deleteDdpPricingTier(id: string): Promise<void>;
+  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number>;
+
+  // DDP Pricing Lanes
+  getDdpPricingLanes(): Promise<DdpPricingLane[]>;
+  getDdpPricingLane(id: string): Promise<DdpPricingLane | undefined>;
+  findDdpPricingLane(params: {
+    originCountryCode: string;
+    originCity?: string;
+    destinationCountryCode: string;
+    destinationCity?: string;
+  }): Promise<DdpPricingLane | undefined>;
+  createDdpPricingLane(lane: InsertDdpPricingLane): Promise<DdpPricingLane>;
+  updateDdpPricingLane(id: string, updates: Partial<DdpPricingLane>): Promise<DdpPricingLane | undefined>;
+  deleteDdpPricingLane(id: string): Promise<void>;
+
   // Audit Logs
   getAuditLogs(): Promise<AuditLog[]>;
   getAuditLogsPaginated(params: {
@@ -244,6 +311,14 @@ export interface IStorage {
     success?: string;
   }): Promise<{ logs: IntegrationLog[]; total: number; page: number; totalPages: number }>;
   createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog>;
+  getIntegrationAccounts(): Promise<IntegrationAccount[]>;
+  getIntegrationAccount(id: string): Promise<IntegrationAccount | undefined>;
+  createIntegrationAccount(account: InsertIntegrationAccount): Promise<IntegrationAccount>;
+  updateIntegrationAccount(id: string, updates: Partial<IntegrationAccount>): Promise<IntegrationAccount | undefined>;
+  deleteIntegrationAccount(id: string): Promise<void>;
+  unsetDefaultIntegrationAccounts(appKey: string, environment: string, countryCode?: string | null): Promise<void>;
+  getPlatformSetting(key: string): Promise<PlatformSetting | undefined>;
+  upsertPlatformSetting(setting: InsertPlatformSetting): Promise<PlatformSetting>;
 
   // Webhook Events
   getWebhookEvents(): Promise<WebhookEvent[]>;
@@ -637,8 +712,9 @@ export class DatabaseStorage implements IStorage {
     search?: string;
     status?: string;
     clientAccountIds?: string[];
+    abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status, clientAccountIds } = params;
+    const { page, limit, search, status, clientAccountIds, abandonedOnly } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(shipments.deletedAt)];
 
@@ -661,6 +737,11 @@ export class DatabaseStorage implements IStorage {
     }
     if (status && status !== "all") {
       conditions.push(eq(shipments.status, status as any));
+    }
+    if (abandonedOnly) {
+      conditions.push(sql`coalesce(${shipments.paymentStatus}, 'pending') <> 'paid'`);
+      conditions.push(sql`coalesce(${shipments.paymentMethod}, 'PAY_NOW') <> 'CREDIT'`);
+      conditions.push(sql`${shipments.status} not in ('cancelled', 'credit_pending')`);
     }
 
     let totalResult;
@@ -865,6 +946,14 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(payments).where(eq(payments.clientAccountId, clientAccountId)).orderBy(desc(payments.createdAt));
   }
 
+  async getPaymentByTransactionId(transactionId: string): Promise<Payment | undefined> {
+    const [payment] = await db.select().from(payments)
+      .where(eq(payments.transactionId, transactionId))
+      .orderBy(desc(payments.createdAt))
+      .limit(1);
+    return payment || undefined;
+  }
+
   async createPayment(payment: InsertPayment): Promise<Payment> {
     const [newPayment] = await db.insert(payments).values(payment).returning();
     return newPayment;
@@ -875,9 +964,149 @@ export class DatabaseStorage implements IStorage {
     return payment || undefined;
   }
 
-  async getTapSavedCardsByClientAccount(clientAccountId: string): Promise<TapSavedCard[]> {
+  async getShipmentRefundRequests(params?: {
+    status?: string;
+    shipmentId?: string;
+    clientAccountIds?: string[];
+    accountManagerUserId?: string;
+  }): Promise<ShipmentRefundRequest[]> {
+    const conditions: any[] = [];
+
+    if (params?.status && params.status !== "all") {
+      conditions.push(eq(shipmentRefundRequests.status, params.status));
+    }
+
+    if (params?.shipmentId) {
+      conditions.push(eq(shipmentRefundRequests.shipmentId, params.shipmentId));
+    }
+
+    if (params?.accountManagerUserId) {
+      conditions.push(eq(shipmentRefundRequests.accountManagerUserId, params.accountManagerUserId));
+    }
+
+    if (params?.clientAccountIds) {
+      if (params.clientAccountIds.length === 0) {
+        return [];
+      }
+      conditions.push(inArray(shipmentRefundRequests.clientAccountId, params.clientAccountIds));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(shipmentRefundRequests).where(whereClause).orderBy(desc(shipmentRefundRequests.createdAt));
+  }
+
+  async getShipmentRefundRequest(id: string): Promise<ShipmentRefundRequest | undefined> {
+    const [request] = await db.select().from(shipmentRefundRequests).where(eq(shipmentRefundRequests.id, id)).limit(1);
+    return request || undefined;
+  }
+
+  async getShipmentRefundRequestByShipmentId(shipmentId: string): Promise<ShipmentRefundRequest | undefined> {
+    const [request] = await db.select().from(shipmentRefundRequests).where(eq(shipmentRefundRequests.shipmentId, shipmentId)).limit(1);
+    return request || undefined;
+  }
+
+  async createShipmentRefundRequest(request: InsertShipmentRefundRequest): Promise<ShipmentRefundRequest> {
+    const [created] = await db.insert(shipmentRefundRequests).values(request).returning();
+    return created;
+  }
+
+  async updateShipmentRefundRequest(
+    id: string,
+    updates: Partial<ShipmentRefundRequest>,
+  ): Promise<ShipmentRefundRequest | undefined> {
+    const [updated] = await db.update(shipmentRefundRequests)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(shipmentRefundRequests.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getAbandonedShipmentRecoveries(params?: {
+    shipmentIds?: string[];
+    clientAccountIds?: string[];
+    includeDismissed?: boolean;
+  }): Promise<AbandonedShipmentRecovery[]> {
+    const conditions: any[] = [];
+
+    if (params?.shipmentIds) {
+      if (params.shipmentIds.length === 0) {
+        return [];
+      }
+      conditions.push(inArray(abandonedShipmentRecoveries.shipmentId, params.shipmentIds));
+    }
+
+    if (params?.clientAccountIds) {
+      if (params.clientAccountIds.length === 0) {
+        return [];
+      }
+      conditions.push(inArray(abandonedShipmentRecoveries.clientAccountId, params.clientAccountIds));
+    }
+
+    if (!params?.includeDismissed) {
+      conditions.push(sql`${abandonedShipmentRecoveries.status} <> 'dismissed'`);
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return db.select().from(abandonedShipmentRecoveries).where(whereClause).orderBy(desc(abandonedShipmentRecoveries.updatedAt));
+  }
+
+  async getAbandonedShipmentRecoveryByShipmentId(shipmentId: string): Promise<AbandonedShipmentRecovery | undefined> {
+    const [recovery] = await db.select()
+      .from(abandonedShipmentRecoveries)
+      .where(eq(abandonedShipmentRecoveries.shipmentId, shipmentId))
+      .limit(1);
+    return recovery || undefined;
+  }
+
+  async createAbandonedShipmentRecovery(recovery: InsertAbandonedShipmentRecovery): Promise<AbandonedShipmentRecovery> {
+    const [created] = await db.insert(abandonedShipmentRecoveries).values(recovery).returning();
+    return created;
+  }
+
+  async upsertAbandonedShipmentRecoveryByShipmentId(
+    shipmentId: string,
+    recovery: InsertAbandonedShipmentRecovery,
+    updates: Partial<AbandonedShipmentRecovery>,
+  ): Promise<AbandonedShipmentRecovery> {
+    const [record] = await db.insert(abandonedShipmentRecoveries)
+      .values(recovery)
+      .onConflictDoUpdate({
+        target: abandonedShipmentRecoveries.shipmentId,
+        set: {
+          ...updates,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return record;
+  }
+
+  async updateAbandonedShipmentRecovery(
+    id: string,
+    updates: Partial<AbandonedShipmentRecovery>,
+  ): Promise<AbandonedShipmentRecovery | undefined> {
+    const [updated] = await db.update(abandonedShipmentRecoveries)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(abandonedShipmentRecoveries.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getTapSavedCardsByClientAccount(clientAccountId: string, tapIntegrationAccountId?: string | null): Promise<TapSavedCard[]> {
+    const conditions = [
+      eq(tapSavedCards.clientAccountId, clientAccountId),
+      isNull(tapSavedCards.deletedAt),
+    ];
+    if (tapIntegrationAccountId !== undefined) {
+      conditions.push(
+        tapIntegrationAccountId === null
+          ? isNull(tapSavedCards.tapIntegrationAccountId)
+          : eq(tapSavedCards.tapIntegrationAccountId, tapIntegrationAccountId),
+      );
+    }
+
     return db.select().from(tapSavedCards)
-      .where(and(eq(tapSavedCards.clientAccountId, clientAccountId), isNull(tapSavedCards.deletedAt)))
+      .where(and(...conditions))
       .orderBy(desc(tapSavedCards.isDefault), desc(tapSavedCards.updatedAt));
   }
 
@@ -989,6 +1218,7 @@ export class DatabaseStorage implements IStorage {
   async deletePricingRule(id: string): Promise<void> {
     // Also delete associated pricing tiers
     await db.delete(pricingTiers).where(eq(pricingTiers.profileId, id));
+    await db.delete(ddpPricingTiers).where(eq(ddpPricingTiers.profileId, id));
     await db.delete(pricingRules).where(eq(pricingRules.id, id));
   }
 
@@ -1029,6 +1259,104 @@ export class DatabaseStorage implements IStorage {
     // If no tiers found, fall back to the profile's default marginPercentage
     const profile = await this.getPricingRuleById(profileId);
     return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
+  }
+
+  // DDP Pricing Tiers
+  async getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]> {
+    return db.select().from(ddpPricingTiers)
+      .where(eq(ddpPricingTiers.profileId, profileId))
+      .orderBy(ddpPricingTiers.minAmount);
+  }
+
+  async createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier> {
+    const [newTier] = await db.insert(ddpPricingTiers).values(tier).returning();
+    return newTier;
+  }
+
+  async updateDdpPricingTier(id: string, updates: Partial<DdpPricingTier>): Promise<DdpPricingTier | undefined> {
+    const [tier] = await db.update(ddpPricingTiers).set(updates).where(eq(ddpPricingTiers.id, id)).returning();
+    return tier || undefined;
+  }
+
+  async deleteDdpPricingTier(id: string): Promise<void> {
+    await db.delete(ddpPricingTiers).where(eq(ddpPricingTiers.id, id));
+  }
+
+  async getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number> {
+    const tiers = await db.select().from(ddpPricingTiers)
+      .where(and(
+        eq(ddpPricingTiers.profileId, profileId),
+        eq(ddpPricingTiers.billingUnit, billingUnit),
+      ))
+      .orderBy(desc(ddpPricingTiers.minAmount));
+
+    for (const tier of tiers) {
+      if (quantity >= Number(tier.minAmount)) {
+        return Number(tier.marginPercentage);
+      }
+    }
+
+    const profile = await this.getPricingRuleById(profileId);
+    return profile ? Number(profile.ddpMarginPercentage) : 15;
+  }
+
+  // DDP Pricing Lanes
+  async getDdpPricingLanes(): Promise<DdpPricingLane[]> {
+    return db.select().from(ddpPricingLanes).orderBy(
+      ddpPricingLanes.originCountryCode,
+      ddpPricingLanes.destinationCountryCode,
+    );
+  }
+
+  async getDdpPricingLane(id: string): Promise<DdpPricingLane | undefined> {
+    const [lane] = await db.select().from(ddpPricingLanes).where(eq(ddpPricingLanes.id, id));
+    return lane || undefined;
+  }
+
+  async findDdpPricingLane(params: {
+    originCountryCode: string;
+    originCity?: string;
+    destinationCountryCode: string;
+    destinationCity?: string;
+  }): Promise<DdpPricingLane | undefined> {
+    const originCountryCode = params.originCountryCode.trim().toUpperCase();
+    const destinationCountryCode = params.destinationCountryCode.trim().toUpperCase();
+    const originCity = params.originCity?.trim().toLowerCase();
+    const destinationCity = params.destinationCity?.trim().toLowerCase();
+    const lanes = await db.select().from(ddpPricingLanes).where(
+      and(
+        eq(ddpPricingLanes.originCountryCode, originCountryCode),
+        eq(ddpPricingLanes.destinationCountryCode, destinationCountryCode),
+        eq(ddpPricingLanes.isActive, true),
+      ),
+    );
+
+    return lanes
+      .filter((lane) => {
+        const laneOriginCity = lane.originCity?.trim().toLowerCase();
+        const laneDestinationCity = lane.destinationCity?.trim().toLowerCase();
+        return (!laneOriginCity || laneOriginCity === originCity) &&
+          (!laneDestinationCity || laneDestinationCity === destinationCity);
+      })
+      .sort((a, b) => Number(Boolean(b.originCity)) + Number(Boolean(b.destinationCity)) -
+        Number(Boolean(a.originCity)) - Number(Boolean(a.destinationCity)))[0];
+  }
+
+  async createDdpPricingLane(lane: InsertDdpPricingLane): Promise<DdpPricingLane> {
+    const [created] = await db.insert(ddpPricingLanes).values(lane).returning();
+    return created;
+  }
+
+  async updateDdpPricingLane(id: string, updates: Partial<DdpPricingLane>): Promise<DdpPricingLane | undefined> {
+    const [lane] = await db.update(ddpPricingLanes).set({
+      ...updates,
+      updatedAt: new Date(),
+    }).where(eq(ddpPricingLanes.id, id)).returning();
+    return lane || undefined;
+  }
+
+  async deleteDdpPricingLane(id: string): Promise<void> {
+    await db.delete(ddpPricingLanes).where(eq(ddpPricingLanes.id, id));
   }
 
   // Audit Logs
@@ -1184,6 +1512,73 @@ export class DatabaseStorage implements IStorage {
   async createIntegrationLog(log: InsertIntegrationLog): Promise<IntegrationLog> {
     const [integrationLog] = await db.insert(integrationLogs).values(log).returning();
     return integrationLog;
+  }
+
+  async getIntegrationAccounts(): Promise<IntegrationAccount[]> {
+    return db.select().from(integrationAccounts).orderBy(desc(integrationAccounts.updatedAt));
+  }
+
+  async getIntegrationAccount(id: string): Promise<IntegrationAccount | undefined> {
+    const [account] = await db.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
+    return account;
+  }
+
+  async createIntegrationAccount(account: InsertIntegrationAccount): Promise<IntegrationAccount> {
+    const [created] = await db.insert(integrationAccounts).values(account).returning();
+    return created;
+  }
+
+  async updateIntegrationAccount(id: string, updates: Partial<IntegrationAccount>): Promise<IntegrationAccount | undefined> {
+    const [updated] = await db
+      .update(integrationAccounts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteIntegrationAccount(id: string): Promise<void> {
+    await db.delete(integrationAccounts).where(eq(integrationAccounts.id, id));
+  }
+
+  async unsetDefaultIntegrationAccounts(appKey: string, environment: string, countryCode?: string | null): Promise<void> {
+    const conditions = [
+      eq(integrationAccounts.appKey, appKey),
+      eq(integrationAccounts.environment, environment),
+      eq(integrationAccounts.isDefault, true),
+    ];
+
+    if (countryCode) {
+      conditions.push(eq(integrationAccounts.countryCode, countryCode));
+    } else {
+      conditions.push(isNull(integrationAccounts.countryCode));
+    }
+
+    await db
+      .update(integrationAccounts)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(and(...conditions));
+  }
+
+  async getPlatformSetting(key: string): Promise<PlatformSetting | undefined> {
+    const [setting] = await db.select().from(platformSettings).where(eq(platformSettings.key, key));
+    return setting;
+  }
+
+  async upsertPlatformSetting(setting: InsertPlatformSetting): Promise<PlatformSetting> {
+    const [saved] = await db
+      .insert(platformSettings)
+      .values(setting)
+      .onConflictDoUpdate({
+        target: platformSettings.key,
+        set: {
+          value: setting.value,
+          updatedByUserId: setting.updatedByUserId,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return saved;
   }
 
   // Webhook Events
@@ -1660,6 +2055,10 @@ export class DatabaseStorage implements IStorage {
       console.log("Seeding default policies...");
       await this.seedDefaultPolicies();
     }
+    if (!(await this.getPolicyBySlug("terms-and-conditions"))) {
+      console.log("Seeding default terms and conditions...");
+      await this.seedDefaultTermsAndConditionsPolicy();
+    }
 
     const promotedLegacyClientUsers = await this.promoteSingleClientUsersToPrimaryContacts();
     if (promotedLegacyClientUsers > 0) {
@@ -1687,9 +2086,42 @@ export class DatabaseStorage implements IStorage {
     const existingRules = await this.getPricingRules();
     if (existingRules.length === 0) {
       const pricingData = [
-        { profile: "regular", displayName: "Regular", marginPercentage: "20.00", isActive: true },
-        { profile: "mid_level", displayName: "Mid-Level", marginPercentage: "15.00", isActive: true },
-        { profile: "vip", displayName: "VIP", marginPercentage: "10.00", isActive: true },
+        {
+          profile: "regular",
+          displayName: "Regular",
+          marginPercentage: "20.00",
+          ddpMarginPercentage: "20.00",
+          badgeColor: "#6B7280",
+          badgeStyle: "solid",
+          badgeIcon: "user",
+          isActive: true,
+        },
+        {
+          profile: "mid_level",
+          displayName: "Mid-Level",
+          marginPercentage: "15.00",
+          ddpMarginPercentage: "15.00",
+          badgeColor: "#3B82F6",
+          badgeStyle: "gradient",
+          badgeGradientFrom: "#2563EB",
+          badgeGradientTo: "#7C3AED",
+          badgeGradientAngle: 135,
+          badgeIcon: "star",
+          isActive: true,
+        },
+        {
+          profile: "vip",
+          displayName: "VIP",
+          marginPercentage: "10.00",
+          ddpMarginPercentage: "10.00",
+          badgeColor: "#F59E0B",
+          badgeStyle: "gradient",
+          badgeGradientFrom: "#F97316",
+          badgeGradientTo: "#FACC15",
+          badgeGradientAngle: 135,
+          badgeIcon: "crown",
+          isActive: true,
+        },
       ];
 
       for (const rule of pricingData) {
@@ -1969,6 +2401,34 @@ export class DatabaseStorage implements IStorage {
 
 <h3>13. Contact Us</h3>
 <p>For questions, concerns, or claims regarding shipping and returns, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
+        isPublished: true,
+      });
+  }
+
+  private async seedDefaultTermsAndConditionsPolicy(): Promise<void> {
+      await this.createPolicy({
+        slug: "terms-and-conditions",
+        title: "Terms & Conditions",
+        content: `<h2>Terms & Conditions</h2>
+<p><strong>Last Updated:</strong> ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</p>
+
+<h3>1. Acceptance of Terms</h3>
+<p>By creating an account, requesting a quote, or submitting a shipment through ezhalha, you agree to these Terms & Conditions and the published Shipping & Return Policy.</p>
+
+<h3>2. Shipment Information</h3>
+<p>You are responsible for providing accurate sender, recipient, package, invoice, and customs information. Additional charges may apply when actual shipment measurements or customs information differ from the submitted details.</p>
+
+<h3>3. DDP Services</h3>
+<p>Door-to-door DDP shipments are manually managed by ezhalha. Rates are based on the configured lane, transport method, billable weight or volume, minimum charges, and your pricing profile.</p>
+
+<h3>4. Payments and Adjustments</h3>
+<p>Shipment payment is required before processing unless approved credit terms apply. Billable adjustments, including additional weight or volume identified after booking, may generate a separate invoice.</p>
+
+<h3>5. Customs and Prohibited Items</h3>
+<p>You must comply with applicable customs, import, export, and restricted-item rules. ezhalha may reject or pause shipments that require clarification or additional documentation.</p>
+
+<h3>6. Contact Us</h3>
+<p>For questions about these terms, please contact our support team through the platform or email us at support@ezhalha.com.</p>`,
         isPublished: true,
       });
   }

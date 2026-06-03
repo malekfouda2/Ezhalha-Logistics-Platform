@@ -1,0 +1,21 @@
+{
+  "shipmentReference": "EZHFEDEXETD58451395",
+  "fedexTrackingNumber": "794813219660",
+  "carrierTrackingNumber": "794813219660",
+  "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
+  "labelPath": "/Users/mac/Desktop/Ezhalha/Ezhalha-Logistics-Platform/tmp/live-fedex-etd/fedex-awb-794813219660.pdf",
+  "commercialInvoicePath": "/Users/mac/Desktop/Ezhalha/Ezhalha-Logistics-Platform/tmp/live-fedex-etd/fedex-etd-commercial-invoice-EZHFEDEXETD58451395.pdf",
+  "requestPath": "/Users/mac/Desktop/Ezhalha/Ezhalha-Logistics-Platform/tmp/live-fedex-etd/fedex-etd-request-794813219660.json",
+  "tradeDocumentsData": [
+    {
+      "fileName": "ezi-ci-ezhfedexetd58451395.pdf",
+      "objectPath": "internal://commercial-invoice",
+      "contentType": "application/pdf",
+      "size": 2994,
+      "documentType": "COMMERCIAL_INVOICE",
+      "uploadedDocumentId": "IApMD4ufxNZxn8yx",
+      "uploadedAt": "2026-05-07T12:54:16.359Z"
+    }
+  ],
+  "createdAt": "2026-05-07T12:54:19.205Z"
+}

@@ -22,7 +22,7 @@ describe("admin navigation permission helpers", () => {
 
   it("returns the first accessible admin path from the configured nav order", () => {
     expect(getFirstAccessibleAdminPath(["pricing-rules:read"])).toBe("/admin/pricing");
-    expect(getFirstAccessibleAdminPath(["users:read"])).toBe("/admin/rbac");
+    expect(getFirstAccessibleAdminPath(["users:read"])).toBe("/admin/users");
   });
 
   it("falls back to admin settings when no nav permissions are assigned", () => {

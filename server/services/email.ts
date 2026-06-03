@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { logInfo, logError } from "./logger";
 import { getRenderedTemplate } from "./email-templates";
+import { getIntegrationEnv, withShipmentIntegrationAccount } from "./integration-runtime";
 
 interface EmailConfig {
   host: string;
@@ -14,12 +15,12 @@ interface EmailConfig {
 
 function getTransporter() {
   const config: EmailConfig = {
-    host: process.env.SMTP_HOST || "smtp.example.com",
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: process.env.SMTP_SECURE === "true",
+    host: getIntegrationEnv("SMTP_HOST") || "smtp.example.com",
+    port: parseInt(getIntegrationEnv("SMTP_PORT") || "587"),
+    secure: getIntegrationEnv("SMTP_SECURE") === "true",
     auth: {
-      user: process.env.SMTP_USER || "",
-      pass: process.env.SMTP_PASS || "",
+      user: getIntegrationEnv("SMTP_USER") || "",
+      pass: getIntegrationEnv("SMTP_PASS") || "",
     },
   };
 
@@ -39,30 +40,32 @@ interface SendEmailOptions {
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
-  const transporter = getTransporter();
-  
-  if (!transporter) {
-    logInfo("Email not sent - service not configured", { to: options.to, subject: options.subject });
-    return false;
-  }
-
-  try {
-    const fromAddress = process.env.SMTP_FROM || "noreply@ezhalha.com";
+  return withShipmentIntegrationAccount("smtp", {}, async () => {
+    const transporter = getTransporter();
     
-    await transporter.sendMail({
-      from: `"ezhalha" <${fromAddress}>`,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-      text: options.text || options.html.replace(/<[^>]*>/g, ""),
-    });
+    if (!transporter) {
+      logInfo("Email not sent - service not configured", { to: options.to, subject: options.subject });
+      return false;
+    }
 
-    logInfo("Email sent successfully", { to: options.to, subject: options.subject });
-    return true;
-  } catch (error) {
-    logError("Failed to send email", error, { to: options.to, subject: options.subject });
-    return false;
-  }
+    try {
+      const fromAddress = getIntegrationEnv("SMTP_FROM") || "noreply@ezhalha.com";
+
+      await transporter.sendMail({
+        from: `"ezhalha" <${fromAddress}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text || options.html.replace(/<[^>]*>/g, ""),
+      });
+
+      logInfo("Email sent successfully", { to: options.to, subject: options.subject });
+      return true;
+    } catch (error) {
+      logError("Failed to send email", error, { to: options.to, subject: options.subject });
+      return false;
+    }
+  });
 }
 
 export async function sendAccountCredentials(
@@ -314,11 +317,11 @@ export async function sendShipmentExtraFeesNotification(params: {
   const appUrl = process.env.APP_URL || "https://app.ezhalha.co";
   const feeLabel =
     params.extraFeeType === "EXTRA_WEIGHT"
-      ? "Extra Weight"
+      ? params.weightUnit === "CBM" ? "Extra Volume" : "Extra Weight"
       : "Extra Cost";
   const detailLine =
     params.extraFeeType === "EXTRA_WEIGHT"
-      ? `Additional weight recorded: ${params.extraWeightValue || "0"} ${params.weightUnit || "KG"}`
+      ? `Additional ${params.weightUnit === "CBM" ? "billable volume" : "weight"} recorded: ${params.extraWeightValue || "0"} ${params.weightUnit || "KG"}`
       : `Additional cost recorded: SAR ${params.extraCostAmountSar || params.amountSar}`;
   const invoiceLine = params.invoiceNumber
     ? `<p><strong>Invoice:</strong> ${params.invoiceNumber}</p>`

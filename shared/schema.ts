@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -10,6 +10,16 @@ export const UserType = {
 } as const;
 
 export type UserTypeValue = typeof UserType[keyof typeof UserType];
+
+export const IntegrationAccountCountryBasis = {
+  SHIPPING_ACCOUNT_COUNTRY: "shipping_account_country",
+  CLIENT_BASE_ACCOUNT_COUNTRY: "client_base_account_country",
+} as const;
+
+export type IntegrationAccountCountryBasisValue =
+  typeof IntegrationAccountCountryBasis[keyof typeof IntegrationAccountCountryBasis];
+
+export const INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY = "integration_account_country_basis";
 
 // Client profile tiers
 export const ClientProfile = {
@@ -38,6 +48,25 @@ export const ShipmentTaxScenario = {
 
 export type ShipmentTaxScenarioValue =
   typeof ShipmentTaxScenario[keyof typeof ShipmentTaxScenario];
+
+export const DdpTransportMethod = {
+  AIR: "air",
+  SEA: "sea",
+} as const;
+
+export type DdpTransportMethodValue =
+  typeof DdpTransportMethod[keyof typeof DdpTransportMethod];
+
+export const DdpShipmentStatus = {
+  AWAITING_REVIEW: "awaiting_review",
+  BOOKED: "booked",
+  SUPPLIER_PICKUP: "supplier_pickup",
+  IN_TRANSIT: "in_transit",
+  CUSTOMS_CLEARANCE: "customs_clearance",
+  OUT_FOR_DELIVERY: "out_for_delivery",
+  DELIVERED: "delivered",
+  CANCELLED: "cancelled",
+} as const;
 
 export const ShipmentExtraFeeType = {
   EXTRA_WEIGHT: "EXTRA_WEIGHT",
@@ -97,9 +126,59 @@ export const InvoiceType = {
   SHIPMENT: "SHIPMENT",
   EXTRA_WEIGHT: "EXTRA_WEIGHT",
   EXTRA_COST: "EXTRA_COST",
+  DDP_ADJUSTMENT: "DDP_ADJUSTMENT",
 } as const;
 
 export type InvoiceTypeValue = typeof InvoiceType[keyof typeof InvoiceType];
+
+export const ShipmentRefundRequestStatus = {
+  PENDING: "PENDING",
+  COMPLETED: "COMPLETED",
+  REJECTED: "REJECTED",
+} as const;
+
+export type ShipmentRefundRequestStatusValue =
+  typeof ShipmentRefundRequestStatus[keyof typeof ShipmentRefundRequestStatus];
+
+export const ShipmentRefundApprovalStatus = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  NOT_REQUIRED: "NOT_REQUIRED",
+  REJECTED: "REJECTED",
+} as const;
+
+export type ShipmentRefundApprovalStatusValue =
+  typeof ShipmentRefundApprovalStatus[keyof typeof ShipmentRefundApprovalStatus];
+
+export const ShipmentRefundRequestActorType = {
+  CLIENT: "CLIENT",
+  ACCOUNT_MANAGER: "ACCOUNT_MANAGER",
+  ADMIN: "ADMIN",
+} as const;
+
+export type ShipmentRefundRequestActorTypeValue =
+  typeof ShipmentRefundRequestActorType[keyof typeof ShipmentRefundRequestActorType];
+
+export const AbandonedShipmentRecoveryStatus = {
+  NOT_CONTACTED: "not_contacted",
+  DISCOUNT_SENT: "discount_sent",
+  EXPIRED: "expired",
+  REMINDER_SENT: "reminder_sent",
+  DISMISSED: "dismissed",
+  RECOVERED: "recovered",
+} as const;
+
+export type AbandonedShipmentRecoveryStatusValue =
+  typeof AbandonedShipmentRecoveryStatus[keyof typeof AbandonedShipmentRecoveryStatus];
+
+export const AbandonedShipmentRecoveryChannel = {
+  WHATSAPP: "WhatsApp",
+  SMS: "SMS",
+  EMAIL: "Email",
+} as const;
+
+export type AbandonedShipmentRecoveryChannelValue =
+  typeof AbandonedShipmentRecoveryChannel[keyof typeof AbandonedShipmentRecoveryChannel];
 
 // Account type (company vs individual)
 export const AccountType = {
@@ -197,7 +276,9 @@ export const clientAccounts = pgTable("client_accounts", {
   isActive: boolean("is_active").notNull().default(true),
   creditEnabled: boolean("credit_enabled").notNull().default(false),
   tapCustomerId: text("tap_customer_id"),
+  tapIntegrationAccountId: varchar("tap_integration_account_id"),
   zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
+  zohoIntegrationAccountId: varchar("zoho_integration_account_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"), // Soft delete
 });
@@ -260,6 +341,13 @@ export const pricingRules = pgTable("pricing_rules", {
   profile: text("profile").notNull().unique(),
   displayName: text("display_name").notNull(),
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  ddpMarginPercentage: decimal("ddp_margin_percentage", { precision: 5, scale: 2 }).notNull().default("0"),
+  badgeColor: text("badge_color"),
+  badgeStyle: text("badge_style").notNull().default("solid"),
+  badgeGradientFrom: text("badge_gradient_from"),
+  badgeGradientTo: text("badge_gradient_to"),
+  badgeGradientAngle: integer("badge_gradient_angle").notNull().default(135),
+  badgeIcon: text("badge_icon").notNull().default("star"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -273,6 +361,47 @@ export const insertPricingRuleSchema = createInsertSchema(pricingRules).omit({
 
 export type InsertPricingRule = z.infer<typeof insertPricingRuleSchema>;
 export type PricingRule = typeof pricingRules.$inferSelect;
+
+// DDP is a manually fulfilled door-to-door product with admin-managed lane pricing.
+export const ddpPricingLanes = pgTable("ddp_pricing_lanes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  originCountryCode: text("origin_country_code").notNull(),
+  originCity: text("origin_city"),
+  destinationCountryCode: text("destination_country_code").notNull(),
+  destinationCity: text("destination_city"),
+  currency: text("currency").notNull().default("SAR"),
+  airBaseRatePerKg: decimal("air_base_rate_per_kg", { precision: 12, scale: 2 }),
+  seaBaseRatePerCbm: decimal("sea_base_rate_per_cbm", { precision: 12, scale: 2 }),
+  minimumBillableKg: decimal("minimum_billable_kg", { precision: 12, scale: 3 }).notNull().default("0"),
+  kgRoundingIncrement: decimal("kg_rounding_increment", { precision: 12, scale: 3 }).notNull().default("0.5"),
+  minimumBillableCbm: decimal("minimum_billable_cbm", { precision: 12, scale: 4 }).notNull().default("0"),
+  cbmRoundingIncrement: decimal("cbm_rounding_increment", { precision: 12, scale: 4 }).notNull().default("0.1"),
+  minimumShipmentCharge: decimal("minimum_shipment_charge", { precision: 12, scale: 2 }).notNull().default("0"),
+  airTransitDaysMin: integer("air_transit_days_min"),
+  airTransitDaysMax: integer("air_transit_days_max"),
+  seaTransitDaysMin: integer("sea_transit_days_min"),
+  seaTransitDaysMax: integer("sea_transit_days_max"),
+  volumetricDivisor: integer("volumetric_divisor").notNull().default(6000),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  laneLookup: uniqueIndex("ddp_pricing_lanes_lookup_unique").on(
+    table.originCountryCode,
+    table.originCity,
+    table.destinationCountryCode,
+    table.destinationCity,
+  ),
+}));
+
+export const insertDdpPricingLaneSchema = createInsertSchema(ddpPricingLanes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDdpPricingLane = z.infer<typeof insertDdpPricingLaneSchema>;
+export type DdpPricingLane = typeof ddpPricingLanes.$inferSelect;
 
 // Pricing Tiers table (tiered margins per profile based on shipment value)
 export const pricingTiers = pgTable("pricing_tiers", {
@@ -290,6 +419,26 @@ export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
 
 export type InsertPricingTier = z.infer<typeof insertPricingTierSchema>;
 export type PricingTier = typeof pricingTiers.$inferSelect;
+
+// DDP Pricing Tiers table (tiered DDP markups per profile based on billable KG or CBM)
+export const ddpPricingTiers = pgTable("ddp_pricing_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  profileId: varchar("profile_id").notNull(),
+  billingUnit: text("billing_unit").notNull().default("KG"),
+  // Keep the existing column name for a safe production migration. For DDP,
+  // this threshold represents billable quantity rather than a SAR amount.
+  minAmount: decimal("min_amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertDdpPricingTierSchema = createInsertSchema(ddpPricingTiers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDdpPricingTier = z.infer<typeof insertDdpPricingTierSchema>;
+export type DdpPricingTier = typeof ddpPricingTiers.$inferSelect;
 
 // Shipments table
 export const shipments = pgTable("shipments", {
@@ -318,6 +467,10 @@ export const shipments = pgTable("shipments", {
   recipientShortAddress: text("recipient_short_address"),
   weight: decimal("weight", { precision: 10, scale: 2 }).notNull(),
   weightUnit: text("weight_unit").default("LB"),
+  dimensionalWeight: decimal("dimensional_weight", { precision: 10, scale: 3 }),
+  chargeableWeight: decimal("chargeable_weight", { precision: 10, scale: 3 }),
+  chargeableWeightUnit: text("chargeable_weight_unit").default("KG"),
+  chargeableWeightDetails: text("chargeable_weight_details"),
   length: decimal("length", { precision: 10, scale: 2 }),
   width: decimal("width", { precision: 10, scale: 2 }),
   height: decimal("height", { precision: 10, scale: 2 }),
@@ -328,6 +481,18 @@ export const shipments = pgTable("shipments", {
   packagesData: text("packages_data"),
   shipmentType: text("shipment_type").default("domestic"),
   isDdp: boolean("is_ddp").notNull().default(false),
+  fulfillmentType: text("fulfillment_type").notNull().default("carrier"),
+  ddpPricingLaneId: varchar("ddp_pricing_lane_id"),
+  ddpTransportMethod: text("ddp_transport_method"),
+  ddpSupplierName: text("ddp_supplier_name"),
+  ddpSupplierPhone: text("ddp_supplier_phone"),
+  ddpTotalCbm: decimal("ddp_total_cbm", { precision: 12, scale: 4 }),
+  ddpBillableQuantity: decimal("ddp_billable_quantity", { precision: 12, scale: 4 }),
+  ddpBillingUnit: text("ddp_billing_unit"),
+  ddpRatePerUnitSar: decimal("ddp_rate_per_unit_sar", { precision: 12, scale: 2 }),
+  ddpSpecialInstructions: text("ddp_special_instructions"),
+  ddpTermsAcceptedAt: timestamp("ddp_terms_accepted_at"),
+  ddpBrokerAuthorizationAcceptedAt: timestamp("ddp_broker_authorization_accepted_at"),
   serviceType: text("service_type"),
   currency: text("currency").default("SAR"),
   status: text("status").notNull().default("draft"),
@@ -353,6 +518,7 @@ export const shipments = pgTable("shipments", {
   extraFeesEmailSentAt: timestamp("extra_fees_email_sent_at"),
   carrierCode: text("carrier_code"),
   carrierName: text("carrier_name"),
+  carrierIntegrationAccountId: varchar("carrier_integration_account_id"),
   carrierServiceType: text("carrier_service_type"),
   carrierShipmentId: text("carrier_shipment_id"),
   carrierTrackingNumber: text("carrier_tracking_number"),
@@ -373,6 +539,7 @@ export const shipments = pgTable("shipments", {
   labelUrl: text("label_url"),
   shipDate: text("ship_date"),
   paymentIntentId: text("payment_intent_id"),
+  tapIntegrationAccountId: varchar("tap_integration_account_id"),
   paymentMethod: text("payment_method").default("PAY_NOW"),
   paymentStatus: text("payment_status").default("pending"),
   itemsData: text("items_data"),
@@ -401,8 +568,14 @@ export const shipmentRateQuotes = pgTable("shipment_rate_quotes", {
   shipmentData: text("shipment_data").notNull(),
   carrierCode: text("carrier_code").notNull(),
   carrierName: text("carrier_name").notNull(),
+  carrierIntegrationAccountId: varchar("carrier_integration_account_id"),
   serviceType: text("service_type").notNull(),
   serviceName: text("service_name").notNull(),
+  actualWeight: decimal("actual_weight", { precision: 10, scale: 3 }),
+  dimensionalWeight: decimal("dimensional_weight", { precision: 10, scale: 3 }),
+  chargeableWeight: decimal("chargeable_weight", { precision: 10, scale: 3 }),
+  chargeableWeightUnit: text("chargeable_weight_unit").default("KG"),
+  chargeableWeightDetails: text("chargeable_weight_details"),
   baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
   marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }).notNull(),
@@ -434,6 +607,8 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull().default("pending"),
   dueDate: timestamp("due_date").notNull(),
   paidAt: timestamp("paid_at"),
+  tapIntegrationAccountId: varchar("tap_integration_account_id"),
+  zohoIntegrationAccountId: varchar("zoho_integration_account_id"),
   zohoInvoiceId: text("zoho_invoice_id"), // Zoho Books invoice ID
   zohoInvoiceUrl: text("zoho_invoice_url"), // Link to Zoho invoice
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -459,6 +634,7 @@ export const payments = pgTable("payments", {
   paymentMethod: text("payment_method").notNull(),
   status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
+  integrationAccountId: varchar("integration_account_id"),
   stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID (legacy)
   moyasarPaymentId: text("moyasar_payment_id"), // Moyasar payment ID
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -472,9 +648,76 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 
+export const shipmentRefundRequests = pgTable("shipment_refund_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull().unique(),
+  clientAccountId: varchar("client_account_id").notNull(),
+  invoiceId: varchar("invoice_id"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  currency: text("currency").notNull().default("SAR"),
+  status: text("status").notNull().default("PENDING"),
+  requestedByUserId: varchar("requested_by_user_id").notNull(),
+  requestedByActorType: text("requested_by_actor_type").notNull(),
+  accountManagerUserId: varchar("account_manager_user_id"),
+  accountManagerApprovalStatus: text("account_manager_approval_status").notNull().default("PENDING"),
+  accountManagerApprovedByUserId: varchar("account_manager_approved_by_user_id"),
+  accountManagerApprovedAt: timestamp("account_manager_approved_at"),
+  financeApprovalStatus: text("finance_approval_status").notNull().default("PENDING"),
+  financeApprovedByUserId: varchar("finance_approved_by_user_id"),
+  financeApprovedAt: timestamp("finance_approved_at"),
+  completedAt: timestamp("completed_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertShipmentRefundRequestSchema = createInsertSchema(shipmentRefundRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertShipmentRefundRequest = z.infer<typeof insertShipmentRefundRequestSchema>;
+export type ShipmentRefundRequest = typeof shipmentRefundRequests.$inferSelect;
+
+export const abandonedShipmentRecoveries = pgTable("abandoned_shipment_recoveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull().unique(),
+  clientAccountId: varchar("client_account_id").notNull(),
+  status: text("status").notNull().default(AbandonedShipmentRecoveryStatus.NOT_CONTACTED),
+  lastAction: text("last_action"),
+  discountType: text("discount_type"),
+  discountValue: decimal("discount_value", { precision: 10, scale: 2 }),
+  discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }),
+  discountFinalPrice: decimal("discount_final_price", { precision: 10, scale: 2 }),
+  discountChannel: text("discount_channel"),
+  discountExpiresAt: timestamp("discount_expires_at"),
+  discountMessage: text("discount_message"),
+  discountSentAt: timestamp("discount_sent_at"),
+  reminderChannel: text("reminder_channel"),
+  reminderCount: integer("reminder_count").notNull().default(0),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  dismissedAt: timestamp("dismissed_at"),
+  recoveredAt: timestamp("recovered_at"),
+  createdByUserId: varchar("created_by_user_id"),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAbandonedShipmentRecoverySchema = createInsertSchema(abandonedShipmentRecoveries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAbandonedShipmentRecovery = z.infer<typeof insertAbandonedShipmentRecoverySchema>;
+export type AbandonedShipmentRecovery = typeof abandonedShipmentRecoveries.$inferSelect;
+
 export const tapSavedCards = pgTable("tap_saved_cards", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clientAccountId: varchar("client_account_id").notNull(),
+  tapIntegrationAccountId: varchar("tap_integration_account_id"),
   tapCustomerId: text("tap_customer_id").notNull(),
   tapCardId: text("tap_card_id").notNull().unique(),
   paymentAgreementId: text("payment_agreement_id"),
@@ -735,6 +978,62 @@ export const insertIntegrationLogSchema = createInsertSchema(integrationLogs).om
 
 export type InsertIntegrationLog = z.infer<typeof insertIntegrationLogSchema>;
 export type IntegrationLog = typeof integrationLogs.$inferSelect;
+
+export const integrationAccounts = pgTable("integration_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appKey: text("app_key").notNull(),
+  appName: text("app_name").notNull(),
+  category: text("category").notNull(),
+  accountName: text("account_name").notNull(),
+  environment: text("environment").notNull().default("sandbox"),
+  countryCode: text("country_code"),
+  region: text("region"),
+  priority: integer("priority").notNull().default(100),
+  isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  credentialsEncrypted: text("credentials_encrypted").notNull(),
+  settings: text("settings"),
+  capabilities: text("capabilities"),
+  lastTestedAt: timestamp("last_tested_at"),
+  lastTestSuccess: boolean("last_test_success"),
+  lastTestMessage: text("last_test_message"),
+  createdByUserId: varchar("created_by_user_id"),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  defaultPerScope: uniqueIndex("integration_accounts_default_scope_unique")
+    .on(table.appKey, table.environment, sql`coalesce(${table.countryCode}, '')`)
+    .where(sql`${table.isDefault} = true`),
+}));
+
+export const insertIntegrationAccountSchema = createInsertSchema(integrationAccounts).omit({
+  id: true,
+  lastTestedAt: true,
+  lastTestSuccess: true,
+  lastTestMessage: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertIntegrationAccount = z.infer<typeof insertIntegrationAccountSchema>;
+export type IntegrationAccount = typeof integrationAccounts.$inferSelect;
+
+export const platformSettings = pgTable("platform_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertPlatformSettingSchema = createInsertSchema(platformSettings).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPlatformSetting = z.infer<typeof insertPlatformSettingSchema>;
+export type PlatformSetting = typeof platformSettings.$inferSelect;
 
 // Webhook Events table
 export const webhookEvents = pgTable("webhook_events", {

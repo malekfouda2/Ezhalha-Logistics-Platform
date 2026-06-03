@@ -1,4 +1,5 @@
 import { storage } from "../storage";
+import { getIntegrationEnv } from "./integration-runtime";
 import { logInfo, logError } from "./logger";
 
 export interface HsLookupRequest {
@@ -146,10 +147,10 @@ function buildFallbackCandidates(category: string, itemName: string): HsCandidat
 }
 
 function isFedExHsLookupConfigured(): boolean {
-  const clientId = process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
-  const clientSecret = process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
-  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
-  const configuredBaseUrl = process.env.FEDEX_BASE_URL;
+  const clientId = getIntegrationEnv("FEDEX_CLIENT_ID") || getIntegrationEnv("FEDEX_API_KEY");
+  const clientSecret = getIntegrationEnv("FEDEX_CLIENT_SECRET") || getIntegrationEnv("FEDEX_SECRET_KEY");
+  const accountNumber = getIntegrationEnv("FEDEX_ACCOUNT_NUMBER");
+  const configuredBaseUrl = getIntegrationEnv("FEDEX_BASE_URL");
 
   if (!clientId || !clientSecret || !accountNumber) {
     return false;
@@ -169,10 +170,10 @@ function isFedExHsLookupConfigured(): boolean {
 }
 
 async function lookupViaFedEx(request: HsLookupRequest): Promise<HsCandidate[]> {
-  const clientId = process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
-  const clientSecret = process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
-  const accountNumber = process.env.FEDEX_ACCOUNT_NUMBER;
-  const baseUrl = process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
+  const clientId = getIntegrationEnv("FEDEX_CLIENT_ID") || getIntegrationEnv("FEDEX_API_KEY");
+  const clientSecret = getIntegrationEnv("FEDEX_CLIENT_SECRET") || getIntegrationEnv("FEDEX_SECRET_KEY");
+  const accountNumber = getIntegrationEnv("FEDEX_ACCOUNT_NUMBER");
+  const baseUrl = getIntegrationEnv("FEDEX_BASE_URL") || "https://apis-sandbox.fedex.com";
 
   if (!isFedExHsLookupConfigured()) {
     logInfo("FedEx HS lookup: integration not fully configured for this environment, using fallback");

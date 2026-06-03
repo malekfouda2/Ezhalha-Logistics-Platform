@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingSpinner, LoadingScreen } from "@/components/loading-spinner";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -36,6 +37,7 @@ import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Tras
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
+import dhlLogo from "@/assets/carriers/dhl-logo.png";
 import type {
   ClientAccount,
   HsCodeSourceValue,
@@ -46,6 +48,7 @@ import {
   FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES,
   ItemCategory,
 } from "@shared/schema";
+import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { format } from "date-fns";
 
 interface ItemFormData {
@@ -92,6 +95,41 @@ function confidenceFromNumber(c: number): HsCodeConfidenceValue {
   if (c >= 0.4) return "MEDIUM";
   if (c > 0) return "LOW";
   return "MISSING";
+}
+
+function formatWeight(value: number | undefined, unit: string | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return `0.000 ${unit || "KG"}`;
+  }
+
+  return `${value.toFixed(3)} ${unit || "KG"}`;
+}
+
+function getChargeableWeightExplanation(summary: ChargeableWeightSummary) {
+  const dimensionalPackages = summary.packages.filter((pkg) => pkg.usesDimensionalWeight).length;
+  const actualPackages = Math.max(summary.packages.length - dimensionalPackages, 0);
+
+  return formatChargeablePackageCounts(actualPackages, dimensionalPackages);
+}
+
+function formatPackageWord(count: number) {
+  return `${count} package${count === 1 ? "" : "s"}`;
+}
+
+function formatChargeablePackageCounts(actualPackages = 0, dimensionalPackages = 0) {
+  return `${formatPackageWord(actualPackages)} charged by actual weight. ${formatPackageWord(dimensionalPackages)} charged by dimensional weight.`;
+}
+
+function getChargeableWeightBasisLabel(actualPackages = 0, dimensionalPackages = 0) {
+  if (actualPackages > 0 && dimensionalPackages > 0) {
+    return "Mixed billing basis";
+  }
+
+  if (dimensionalPackages > 0) {
+    return "Charged by dimensional weight";
+  }
+
+  return "Charged by actual weight";
 }
 
 const itemCategories = Object.entries(ItemCategory).map(([key, value]) => ({
@@ -249,6 +287,11 @@ interface RateQuote {
   currency: string;
   transitDays: number;
   estimatedDelivery?: string;
+  actualWeight?: number;
+  dimensionalWeight?: number;
+  chargeableWeight?: number;
+  chargeableWeightUnit?: "KG" | "LB";
+  chargeableWeightSource?: "carrier" | "system";
 }
 
 interface RatesResponse {
@@ -314,6 +357,12 @@ interface CheckoutResponse {
   carrierName?: string;
   serviceType?: string;
   serviceName?: string;
+  actualWeight?: number;
+  dimensionalWeight?: number;
+  chargeableWeight?: number;
+  chargeableWeightUnit?: "KG" | "LB";
+  chargeableActualPackageCount?: number;
+  chargeableDimensionalPackageCount?: number;
 }
 
 interface ShipmentPaymentResponse {
@@ -331,6 +380,25 @@ interface ConfirmResponse {
   carrierTrackingNumber: string;
   labelUrl?: string;
   estimatedDelivery?: string;
+}
+
+interface AddressBookEntry {
+  id: string;
+  label: string;
+  source: "default_shipping" | "shipment_history";
+  useForShipper: boolean;
+  useForRecipient: boolean;
+  lastUsedAt: string | null;
+  name: string;
+  phone: string;
+  email?: string | null;
+  countryCode: string;
+  city: string;
+  postalCode?: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  stateOrProvince?: string | null;
+  shortAddress?: string | null;
 }
 
 const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
@@ -363,6 +431,7 @@ const packageTypeLabels: Record<string, string> = Object.fromEntries(
 const carriers = [
   { code: "FEDEX", name: "FedEx" },
   { code: "DHL", name: "DHL" },
+  { code: "ARAMEX", name: "Aramex" },
 ];
 
 function CarrierMark({ carrierCode }: { carrierCode: string }) {
@@ -377,14 +446,29 @@ function CarrierMark({ carrierCode }: { carrierCode: string }) {
     );
   }
 
+  if (carrierCode === "ARAMEX") {
+    return (
+      <div
+        className="inline-flex min-w-[132px] items-center justify-center rounded-md bg-[#D71920] px-4 py-2 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
+        aria-label="Aramex"
+      >
+        <span className="text-xl font-black tracking-tight">Aramex</span>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="relative inline-flex min-w-[120px] items-center justify-center overflow-hidden rounded-md bg-[#FFCC00] px-5 py-2"
+      className="inline-flex min-w-[132px] items-center justify-center rounded-md bg-[#FFCC00] px-4 py-2 shadow-[inset_0_0_0_1px_rgba(212,5,17,0.15)]"
       aria-label="DHL"
     >
-      <span className="absolute inset-x-0 top-2 h-0.5 bg-[#D40511]" />
-      <span className="absolute inset-x-0 bottom-2 h-0.5 bg-[#D40511]" />
-      <span className="text-xl font-black tracking-[0.28em] text-[#D40511]">DHL</span>
+      <img
+        src={dhlLogo}
+        alt="DHL"
+        className="h-[18px] w-auto object-contain"
+        loading="eager"
+        decoding="async"
+      />
     </div>
   );
 }
@@ -396,6 +480,14 @@ function titleCaseLabel(value: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatAddressBookOptionLabel(entry: AddressBookEntry): string {
+  const locationParts = [entry.city?.trim(), entry.countryCode?.trim().toUpperCase()].filter(Boolean);
+  if (entry.source === "default_shipping") {
+    return `${entry.label}${locationParts.length ? ` — ${locationParts.join(", ")}` : ""}`;
+  }
+  return entry.label;
 }
 
 function formatRateServiceMeta(serviceType: string, serviceName: string): string | null {
@@ -425,7 +517,6 @@ const shipmentTypeOptions = [
   { value: "outbound", label: "Outbound", description: "International shipping out of a country" },
 ];
 
-const DDP_DESTINATION_COUNTRIES = new Set(["SA", "AE"]);
 
 interface MyPermissions {
   permissions: string[];
@@ -676,6 +767,7 @@ export default function CreateShipment() {
     },
     onSuccess: (data) => {
       setCheckoutData(data);
+      queryClient.invalidateQueries({ queryKey: ["/api/client/address-book"] });
       setStep(paymentStep);
     },
     onError: (error) => {
@@ -797,16 +889,18 @@ export default function CreateShipment() {
     queryKey: ["/api/client/my-permissions"],
   });
 
+  const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
+
+  const { data: addressBookEntries = [] } = useQuery<AddressBookEntry[]>({
+    queryKey: ["/api/client/address-book"],
+    enabled: !!canCreateShipments,
+  });
+
   const { data: creditAccess } = useQuery<{ creditEnabled: boolean; request: any }>({
     queryKey: ["/api/client/credit-access"],
   });
 
-  const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
-  const ddpEligibleDestination =
-    formData.shipmentType === "inbound" &&
-    DDP_DESTINATION_COUNTRIES.has((formData.recipient.countryCode || "").toUpperCase());
   const invoiceDocument = formData.tradeDocuments[0] ?? null;
-  const totalPackageWeight = formData.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
   const isInternationalShipment =
     formData.shipmentType === "inbound" || formData.shipmentType === "outbound";
   const customsStep = 6;
@@ -814,17 +908,45 @@ export default function CreateShipment() {
   const confirmationStep = paymentStep + 1;
   const selectedQuote = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId) ?? null;
   const selectedCarrierCode = selectedQuote?.carrierCode || formData.carrier || "";
+  const checkoutExtraChargeableWeight = Math.max(
+    0,
+    Number(checkoutData?.chargeableWeight || 0) - Number(checkoutData?.actualWeight || 0),
+  );
+  const checkoutExtraKgCharge =
+    checkoutData?.chargeableWeight && checkoutData.chargeableWeight > 0
+      ? checkoutExtraChargeableWeight * (checkoutData.amount / checkoutData.chargeableWeight)
+      : 0;
+  const checkoutActualPackageCount = checkoutData?.chargeableActualPackageCount ?? 0;
+  const checkoutDimensionalPackageCount = checkoutData?.chargeableDimensionalPackageCount ?? 0;
+  const chargeableWeightSummary = calculateChargeableWeight(
+    formData.packages,
+    formData.weightUnit,
+    formData.dimensionUnit,
+    selectedCarrierCode || "GENERIC",
+  );
+  const dimensionalPackageCount = chargeableWeightSummary.packages.filter((pkg) => pkg.usesDimensionalWeight).length;
+  const actualPackageCount = Math.max(chargeableWeightSummary.packages.length - dimensionalPackageCount, 0);
   const displayedCarriers = rates?.availableCarriers?.length
     ? rates.availableCarriers
     : carriers.filter((carrier) =>
         rates ? rates.quotes.some((quote) => quote.carrierCode === carrier.code) : true,
       );
 
-  useEffect(() => {
-    if (!ddpEligibleDestination && formData.isDdp) {
-      setFormData((prev) => ({ ...prev, isDdp: false }));
-    }
-  }, [ddpEligibleDestination, formData.isDdp]);
+  const shipperAddressOptions = addressBookEntries
+    .filter((entry) => entry.useForShipper)
+    .filter((entry) => formData.shipmentType !== "domestic" || entry.countryCode === "SA")
+    .map((entry) => ({
+      value: entry.id,
+      label: formatAddressBookOptionLabel(entry),
+    }));
+
+  const recipientAddressOptions = addressBookEntries
+    .filter((entry) => entry.useForRecipient)
+    .filter((entry) => formData.shipmentType !== "domestic" || entry.countryCode === "SA")
+    .map((entry) => ({
+      value: entry.id,
+      label: formatAddressBookOptionLabel(entry),
+    }));
 
   useEffect(() => {
     if (!selectedQuote) {
@@ -876,6 +998,37 @@ export default function CreateShipment() {
       ...prev,
       recipient: { ...prev.recipient, [field]: value },
     }));
+  };
+
+  const applySavedAddress = (party: "shipper" | "recipient", entryId: string) => {
+    const entry = addressBookEntries.find((item) => item.id === entryId);
+    if (!entry) {
+      return;
+    }
+
+    const nextAddress = {
+      name: entry.name,
+      phone: entry.phone,
+      email: entry.email || "",
+      countryCode: formData.shipmentType === "domestic" ? "SA" : entry.countryCode,
+      city: entry.city,
+      postalCode: entry.postalCode || "",
+      addressLine1: entry.addressLine1,
+      addressLine2: entry.addressLine2 || "",
+      stateOrProvince: entry.stateOrProvince || "",
+      shortAddress: entry.shortAddress || "",
+    };
+
+    setFormData((prev) =>
+      party === "shipper"
+        ? { ...prev, shipper: nextAddress }
+        : { ...prev, recipient: nextAddress },
+    );
+
+    toast({
+      title: party === "shipper" ? "Sender details filled" : "Recipient details filled",
+      description: `We filled the form using ${entry.label.toLowerCase()}.`,
+    });
   };
 
   const updatePackageItem = (index: number, field: string, value: number) => {
@@ -1388,13 +1541,6 @@ export default function CreateShipment() {
         toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
         return false;
       }
-      if (formData.shipmentType === "inbound" && formData.isDdp && !ddpEligibleDestination) {
-        toast({
-          title: "DDP is only available for imports to Saudi Arabia or the UAE",
-          variant: "destructive",
-        });
-        return false;
-      }
     } else if (currentStep === 4) {
       if (!formData.packageType || formData.packages.length < 1) {
         toast({ title: "Please fill in all package details", variant: "destructive" });
@@ -1547,7 +1693,7 @@ export default function CreateShipment() {
 
   return (
     <ClientLayout clientProfile={account?.profile}>
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className={`p-6 mx-auto ${step === 5 ? "max-w-7xl" : "max-w-3xl"}`}>
         <Link href="/client/shipments">
           <Button variant="ghost" className="mb-6" data-testid="button-back">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -1729,6 +1875,29 @@ export default function CreateShipment() {
               <CardDescription>Enter the pickup address and contact information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border/70 bg-muted/20 p-4 space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Saved sender addresses</p>
+                  <p className="text-xs text-muted-foreground">
+                    Reuse your default shipping address or any sender details you used in previous shipments.
+                  </p>
+                </div>
+                {shipperAddressOptions.length > 0 ? (
+                  <SearchableSelect
+                    value=""
+                    onValueChange={(value) => applySavedAddress("shipper", value)}
+                    options={shipperAddressOptions}
+                    placeholder="Choose a saved sender"
+                    searchPlaceholder="Search saved senders..."
+                    emptyMessage="No saved senders found."
+                    data-testid="select-saved-shipper"
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Saved sender addresses will appear here after you use them in shipments.
+                  </p>
+                )}
+              </div>
               {formData.shipmentType === "outbound" && account?.shippingAddressLine1 && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
                   Pre-filled with your default shipping address. You can edit these details if needed.
@@ -1863,6 +2032,29 @@ export default function CreateShipment() {
               <CardDescription>Enter the delivery address and contact information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border/70 bg-muted/20 p-4 space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Saved recipient addresses</p>
+                  <p className="text-xs text-muted-foreground">
+                    Reuse recipient details from your previous shipments instead of typing them again.
+                  </p>
+                </div>
+                {recipientAddressOptions.length > 0 ? (
+                  <SearchableSelect
+                    value=""
+                    onValueChange={(value) => applySavedAddress("recipient", value)}
+                    options={recipientAddressOptions}
+                    placeholder="Choose a saved recipient"
+                    searchPlaceholder="Search saved recipients..."
+                    emptyMessage="No saved recipients found."
+                    data-testid="select-saved-recipient"
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Saved recipient addresses will appear here after you use them in shipments.
+                  </p>
+                )}
+              </div>
               {formData.shipmentType === "inbound" && account?.shippingAddressLine1 && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-md text-sm text-blue-700 dark:text-blue-300">
                   Pre-filled with your default shipping address. You can edit these details if needed.
@@ -1946,40 +2138,6 @@ export default function CreateShipment() {
                   )}
                 </div>
               </div>
-              {formData.shipmentType === "inbound" && (
-                <div className="rounded-lg border p-4 space-y-3" data-testid="card-ddp-option">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Label htmlFor="ddp-toggle" className="text-sm font-medium cursor-pointer">
-                          Delivered Duty Paid (DDP)
-                        </Label>
-                        <Badge variant={formData.isDdp ? "default" : "secondary"}>
-                          {formData.isDdp ? "DDP Import" : "Standard Import"}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Use DDP when Ezhalha should treat this import as seller-paid delivery responsibility.
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Available only for imports to Saudi Arabia or the UAE.
-                      </p>
-                    </div>
-                    <Switch
-                      id="ddp-toggle"
-                      checked={formData.isDdp}
-                      onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, isDdp: checked }))}
-                      disabled={!ddpEligibleDestination}
-                      data-testid="switch-ddp"
-                    />
-                  </div>
-                  {!ddpEligibleDestination && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Select Saudi Arabia or UAE as the destination country to enable DDP.
-                    </p>
-                  )}
-                </div>
-              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Phone *</Label>
@@ -2173,16 +2331,27 @@ export default function CreateShipment() {
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-lg border bg-muted/20 px-4 py-3">
                   <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Packages</p>
                   <p className="mt-2 text-2xl font-semibold">{formData.packages.length}</p>
                 </div>
                 <div className="rounded-lg border bg-muted/20 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Total Weight</p>
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Billing Basis</p>
                   <p className="mt-2 text-2xl font-semibold">
-                    {totalPackageWeight.toFixed(3)} <span className="text-sm font-medium text-muted-foreground">{formData.weightUnit}</span>
+                    {getChargeableWeightBasisLabel(actualPackageCount, dimensionalPackageCount)}
                   </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatChargeablePackageCounts(actualPackageCount, dimensionalPackageCount)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Billable Weight</p>
+                  <p className="mt-2 text-2xl font-semibold">
+                    {chargeableWeightSummary.chargeableWeight.toFixed(3)}{" "}
+                    <span className="text-sm font-medium text-muted-foreground">{chargeableWeightSummary.weightUnit}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{getChargeableWeightExplanation(chargeableWeightSummary)}</p>
                 </div>
                 <div className="rounded-lg border bg-muted/20 px-4 py-3">
                   <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Package Type</p>
@@ -2190,8 +2359,15 @@ export default function CreateShipment() {
                 </div>
               </div>
 
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
+                Carriers bill the greater of actual weight and dimensional weight per package. We calculate it here for visibility, while each carrier still receives the actual package weight and dimensions for live rating.
+              </div>
+
               <div className="space-y-4">
-                {formData.packages.map((pkg, index) => (
+                {formData.packages.map((pkg, index) => {
+                  const chargeablePackage = chargeableWeightSummary.packages[index];
+
+                  return (
                   <Card key={index} className="relative">
                     <CardHeader className="flex flex-row items-center justify-between gap-2 py-3 px-4">
                       <CardTitle className="text-sm font-medium">
@@ -2255,9 +2431,22 @@ export default function CreateShipment() {
                           />
                         </div>
                       </div>
+                      {chargeablePackage && (
+                        <div className="grid gap-2 rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground md:grid-cols-2">
+                          <div>
+                            <span className="block font-medium text-foreground">Billable</span>
+                            {formatWeight(chargeablePackage.chargeableWeight, chargeablePackage.weightUnit)}
+                          </div>
+                          <div>
+                            <span className="block font-medium text-foreground">Basis</span>
+                            {chargeablePackage.usesDimensionalWeight ? "Dimensional weight" : "Actual weight"}
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
                 <Button
                   variant="outline"
                   onClick={addPackage}
@@ -2297,7 +2486,7 @@ export default function CreateShipment() {
               <RadioGroup
                 value={selectedQuoteId || ""}
                 onValueChange={setSelectedQuoteId}
-                className="grid gap-6 md:grid-cols-2"
+                className="grid gap-6 md:grid-cols-2 xl:grid-cols-3"
               >
                 {displayedCarriers.map((carrier) => {
                   const carrierQuotes = rates.quotes.filter((quote) => quote.carrierCode === carrier.code);
@@ -2310,6 +2499,12 @@ export default function CreateShipment() {
                           {carrierQuotes.length} option{carrierQuotes.length === 1 ? "" : "s"}
                         </Badge>
                       </div>
+                      {carrierQuotes[0]?.chargeableWeight && (
+                        <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">Chargeable weight:</span>{" "}
+                          {formatWeight(carrierQuotes[0].chargeableWeight, carrierQuotes[0].chargeableWeightUnit)}
+                        </div>
+                      )}
 
                       {carrierQuotes.length > 0 ? (
                         <div className="space-y-3">
@@ -2358,6 +2553,11 @@ export default function CreateShipment() {
                                       {quote.estimatedDelivery && (
                                         <span className="whitespace-nowrap">
                                           Est. delivery: {format(new Date(quote.estimatedDelivery), "MMM d")}
+                                        </span>
+                                      )}
+                                      {quote.chargeableWeight && (
+                                        <span className="whitespace-nowrap">
+                                          Billable weight: {formatWeight(quote.chargeableWeight, quote.chargeableWeightUnit)}
                                         </span>
                                       )}
                                     </div>
@@ -2704,6 +2904,51 @@ export default function CreateShipment() {
                   <span>Shipment ID</span>
                   <span className="font-mono">{checkoutData.trackingNumber}</span>
                 </div>
+                {(checkoutData.carrierName || checkoutData.serviceName) && (
+                  <div className="flex justify-between gap-4 text-sm mt-2">
+                    <span>Selected Service</span>
+                    <span className="text-right font-medium">
+                      {[checkoutData.carrierName, checkoutData.serviceName].filter(Boolean).join(" · ")}
+                    </span>
+                  </div>
+                )}
+                <div className="mt-4 rounded-lg border bg-background/70 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h5 className="text-sm font-semibold">Billable Weight Pricing</h5>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatChargeablePackageCounts(checkoutActualPackageCount, checkoutDimensionalPackageCount)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      Billable
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-md border bg-muted/30 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">Billing Basis</p>
+                      <p className="mt-1 font-semibold">
+                        {getChargeableWeightBasisLabel(checkoutActualPackageCount, checkoutDimensionalPackageCount)}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">Billable Weight</p>
+                      <p className="mt-1 font-semibold">
+                        {formatWeight(checkoutData.chargeableWeight, checkoutData.chargeableWeightUnit)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2 border-t pt-3 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">
+                        Extra {checkoutData.chargeableWeightUnit || "KG"} Charge
+                      </span>
+                      <span className="font-medium">
+                        <SarAmount amount={checkoutExtraKgCharge} /> {checkoutData.currency}
+                      </span>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex justify-between text-sm mt-2">
                   <span>Total Amount</span>
                   <span className="font-bold text-lg">
@@ -2716,6 +2961,7 @@ export default function CreateShipment() {
                 <TapCardForm
                   amount={checkoutData.amount}
                   currency={checkoutData.currency}
+                  shipmentId={checkoutData.shipmentId}
                   submitLabel="Pay Now"
                   pending={createShipmentPaymentMutation.isPending || confirmMutation.isPending}
                   onSubmit={(payload) =>
@@ -2813,7 +3059,11 @@ export default function CreateShipment() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Carrier Tracking</span>
-                  <span className="font-mono">{confirmData.carrierTrackingNumber}</span>
+                  <CarrierTrackingLink
+                    trackingNumber={confirmData.carrierTrackingNumber}
+                    carrierCode={confirmData.shipment?.carrierCode}
+                    carrierName={confirmData.shipment?.carrierName}
+                  />
                 </div>
                 {confirmData.estimatedDelivery && (
                   <div className="flex justify-between text-sm">

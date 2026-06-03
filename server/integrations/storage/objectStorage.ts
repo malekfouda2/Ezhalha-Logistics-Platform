@@ -8,6 +8,7 @@ import {
   getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
+import { getIntegrationEnv } from "../../services/integration-runtime";
 
 export const objectStorageClient = new Storage();
 
@@ -23,7 +24,7 @@ export class ObjectStorageService {
   constructor() {}
 
   getPublicObjectSearchPaths(): Array<string> {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
+    const pathsStr = getIntegrationEnv("PUBLIC_OBJECT_SEARCH_PATHS") || "";
     const paths = Array.from(
       new Set(
         pathsStr
@@ -41,7 +42,7 @@ export class ObjectStorageService {
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
+    const dir = getIntegrationEnv("PRIVATE_OBJECT_DIR") || "";
     if (!dir) {
       throw new Error(
         "PRIVATE_OBJECT_DIR not set. Set the environment variable for private object storage."

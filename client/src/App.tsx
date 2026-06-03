@@ -14,17 +14,19 @@ import NotFound from "@/pages/not-found";
 
 // Admin Pages
 import AdminDashboard from "@/pages/admin/dashboard";
+import AdminUsers from "@/pages/admin/users";
 import AdminClients from "@/pages/admin/clients";
 import AdminApplications from "@/pages/admin/applications";
 import AdminShipments from "@/pages/admin/shipments";
 import AdminInvoices from "@/pages/admin/invoices";
 import AdminPayments from "@/pages/admin/payments";
+import AdminRefundRequests from "@/pages/admin/refund-requests";
 import AdminPricing from "@/pages/admin/pricing";
+import AdminDdpPricing from "@/pages/admin/ddp-pricing";
 import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminIntegrationLogs from "@/pages/admin/integration-logs";
+import AdminApps from "@/pages/admin/apps";
 import AdminWebhookEvents from "@/pages/admin/webhook-events";
-import AdminRBAC from "@/pages/admin/rbac";
-import AdminAccountManagers from "@/pages/admin/account-managers";
 import AdminEditClient from "@/pages/admin/edit-client";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
@@ -43,6 +45,7 @@ import ClientSettings from "@/pages/client/settings";
 import PolicyPage from "@/pages/policy";
 import ClientUsers from "@/pages/client/users";
 import ClientBilling from "@/pages/client/billing";
+import ClientDdp from "@/pages/client/ddp";
 import { getPostLoginPath } from "@/lib/auth-routing";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { ADMIN_ROUTE_PERMISSIONS, getFirstAccessibleAdminPath } from "@/lib/admin-navigation";
@@ -137,6 +140,13 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.clients.anyOf}
         />
       </Route>
+      <Route path="/admin/users">
+        <ProtectedRoute
+          component={AdminUsers}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.users.anyOf}
+        />
+      </Route>
       <Route path="/admin/clients/:id/edit">
         <ProtectedRoute
           component={AdminEditClient}
@@ -149,6 +159,13 @@ function Router() {
           component={AdminApplications}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.applications.anyOf}
+        />
+      </Route>
+      <Route path="/admin/shipments/abandoned">
+        <ProtectedRoute
+          component={() => <AdminShipments abandonedOnly />}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.shipments.anyOf}
         />
       </Route>
       <Route path="/admin/shipments">
@@ -168,6 +185,13 @@ function Router() {
       <Route path="/admin/pricing">
         <ProtectedRoute
           component={AdminPricing}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.pricing.anyOf}
+        />
+      </Route>
+      <Route path="/admin/ddp-pricing">
+        <ProtectedRoute
+          component={AdminDdpPricing}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.pricing.anyOf}
         />
@@ -193,11 +217,25 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.payments.anyOf}
         />
       </Route>
+      <Route path="/admin/refund-requests">
+        <ProtectedRoute
+          component={AdminRefundRequests}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.refundRequests.anyOf}
+        />
+      </Route>
       <Route path="/admin/integration-logs">
         <ProtectedRoute
           component={AdminIntegrationLogs}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.integrations.anyOf}
+        />
+      </Route>
+      <Route path="/admin/apps">
+        <ProtectedRoute
+          component={AdminApps}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.apps.anyOf}
         />
       </Route>
       <Route path="/admin/webhook-events">
@@ -208,18 +246,10 @@ function Router() {
         />
       </Route>
       <Route path="/admin/account-managers">
-        <ProtectedRoute
-          component={AdminAccountManagers}
-          requiredUserType="admin"
-          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.accountManagers.anyOf}
-        />
+        <Redirect to="/admin/users" />
       </Route>
       <Route path="/admin/rbac">
-        <ProtectedRoute
-          component={AdminRBAC}
-          requiredUserType="admin"
-          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.accessControl.anyOf}
-        />
+        <Redirect to="/admin/users" />
       </Route>
       <Route path="/admin/policies">
         <ProtectedRoute
@@ -259,6 +289,9 @@ function Router() {
       </Route>
       <Route path="/client/shipments/new">
         <ProtectedRoute component={CreateShipment} requiredUserType="client" />
+      </Route>
+      <Route path="/client/ddp">
+        <ProtectedRoute component={ClientDdp} requiredUserType="client" />
       </Route>
       <Route path="/client/create-shipment">
         <ProtectedRoute component={CreateShipment} requiredUserType="client" />

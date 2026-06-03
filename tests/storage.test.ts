@@ -174,6 +174,43 @@ describe("Storage - Pricing Rules", () => {
       expect(rule.profile).toBe("regular");
     }
   });
+
+  it("should resolve DDP pricing tiers independently from normal shipment tiers", async () => {
+    const uniqueProfile = `ddp_tier_test_${Date.now()}`;
+    const rule = await storage.createPricingRule({
+      profile: uniqueProfile,
+      displayName: "DDP Tier Test",
+      marginPercentage: "30.00",
+      ddpMarginPercentage: "18.00",
+      isActive: true,
+    });
+
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 50)).toBe(18);
+
+    const baseTier = await storage.createDdpPricingTier({
+      profileId: rule.id,
+      billingUnit: "KG",
+      minAmount: "0",
+      marginPercentage: "12.00",
+    });
+    const higherTier = await storage.createDdpPricingTier({
+      profileId: rule.id,
+      billingUnit: "KG",
+      minAmount: "500",
+      marginPercentage: "8.00",
+    });
+
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 499)).toBe(12);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 500)).toBe(8);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "CBM", 500)).toBe(18);
+
+    await storage.updateDdpPricingTier(higherTier.id, { marginPercentage: "7.50" });
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 900)).toBe(7.5);
+
+    await storage.deleteDdpPricingTier(baseTier.id);
+    await storage.deletePricingRule(rule.id);
+    expect(await storage.getDdpPricingTiersByProfileId(rule.id)).toEqual([]);
+  });
 });
 
 describe("Storage - Audit Logs", () => {

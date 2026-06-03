@@ -21,6 +21,7 @@ import {
 } from "recharts";
 
 import { ClientLayout } from "@/components/client-layout";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { EmptyState } from "@/components/empty-state";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { SarAmount } from "@/components/sar-symbol";
@@ -114,6 +115,22 @@ export default function ClientPayments() {
     queryKey: ["/api/client/extra-fees"],
   });
 
+  const paymentRows = (payments ?? []).map((payment) => {
+    const invoice = invoices?.find((item) => item.id === payment.invoiceId) ?? null;
+    const shipment = invoice?.shipmentId
+      ? shipments?.find((item) => item.id === invoice.shipmentId) ?? null
+      : null;
+
+    return {
+      ...payment,
+      invoiceNumber: invoice?.invoiceNumber ?? null,
+      shipmentDisplayId: shipment?.trackingNumber ?? null,
+      carrierTrackingNumber: shipment?.carrierTrackingNumber ?? null,
+      carrierCode: shipment?.carrierCode ?? null,
+      carrierName: shipment?.carrierName ?? null,
+    };
+  });
+
   const completedPayments = payments?.filter((payment) => payment.status === "completed") ?? [];
   const paidInvoices = invoices?.filter((invoice) => invoice.status === "paid") ?? [];
   const openInvoices = invoices?.filter((invoice) => invoice.status !== "paid") ?? [];
@@ -155,7 +172,7 @@ export default function ClientPayments() {
 
   const formatExtraFeeLabel = (fee: ClientExtraFeeNotice) => {
     if (fee.extraFeesType === "COMBINED") return "Weight + Cost";
-    if (fee.extraFeesType === "EXTRA_WEIGHT") return "Extra Weight";
+    if (fee.extraFeesType === "EXTRA_WEIGHT") return fee.weightUnit === "CBM" ? "Extra Volume" : "Extra Weight";
     return "Extra Cost";
   };
 
@@ -369,7 +386,11 @@ export default function ClientPayments() {
                         <div className="space-y-1">
                           <p className="font-mono text-sm">{fee.trackingNumber}</p>
                           {fee.carrierTrackingNumber && (
-                            <p className="text-xs text-muted-foreground">{fee.carrierTrackingNumber}</p>
+                            <CarrierTrackingLink
+                              trackingNumber={fee.carrierTrackingNumber}
+                              carrierName={fee.carrierName}
+                              className="text-xs text-muted-foreground"
+                            />
                           )}
                         </div>
                       </TableCell>
@@ -428,6 +449,9 @@ export default function ClientPayments() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Shipment ID</TableHead>
+                    <TableHead>Invoice Number</TableHead>
+                    <TableHead>Tracking No.</TableHead>
                     <TableHead>Transaction ID</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead>Status</TableHead>
@@ -436,8 +460,26 @@ export default function ClientPayments() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payments.map((payment) => (
+                  {paymentRows.map((payment) => (
                     <TableRow key={payment.id} data-testid={`row-payment-${payment.id}`}>
+                      <TableCell className="font-medium">
+                        {payment.shipmentDisplayId || "—"}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {payment.invoiceNumber || "—"}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {payment.carrierTrackingNumber ? (
+                          <CarrierTrackingLink
+                            trackingNumber={payment.carrierTrackingNumber}
+                            carrierCode={payment.carrierCode}
+                            carrierName={payment.carrierName}
+                            className="text-sm"
+                          />
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
                       <TableCell className="font-mono text-sm">
                         {payment.transactionId || payment.id.slice(0, 8)}
                       </TableCell>

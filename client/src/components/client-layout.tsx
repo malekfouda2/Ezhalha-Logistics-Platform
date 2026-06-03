@@ -24,6 +24,7 @@ import {
   Users,
   ScrollText,
   Clock,
+  DoorOpen,
 } from "lucide-react";
 
 interface ClientLayoutProps {
@@ -48,6 +49,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/client", label: "Dashboard", icon: LayoutDashboard },
   { href: "/client/shipments", label: "Shipments", icon: Package, requiredPermission: "view_shipments" },
+  { href: "/client/ddp", label: "DDP", icon: DoorOpen, requiredPermission: "create_shipments" },
   { href: "/client/invoices", label: "Invoices", icon: FileText, requiredPermission: "view_invoices" },
   { href: "/client/payments", label: "Financial Statements", icon: CreditCard, requiredPermission: "view_payments" },
   { href: "/client/billing", label: "Credit / Billing", icon: Clock, requiredPermission: "view_invoices" },

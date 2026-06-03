@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { LoadingScreen, LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,8 @@ interface CreditInvoiceShipment {
   recipientCity?: string;
   recipientCountry?: string;
   serviceType?: string;
+  carrierCode?: string;
+  carrierName?: string;
   carrierTrackingNumber?: string;
   weight?: string;
   weightUnit?: string;
@@ -274,7 +277,14 @@ export default function ClientBilling() {
                           <TableCell data-testid={`text-tracking-${inv.id}`}>
                             <div className="font-mono text-sm">{inv.shipment?.trackingNumber || "-"}</div>
                             {inv.shipment?.carrierTrackingNumber && (
-                              <div className="text-xs text-muted-foreground">{inv.shipment.carrierTrackingNumber}</div>
+                              <div className="text-xs">
+                                <CarrierTrackingLink
+                                  trackingNumber={inv.shipment.carrierTrackingNumber}
+                                  carrierCode={inv.shipment.carrierCode}
+                                  carrierName={inv.shipment.carrierName}
+                                  className="text-xs text-muted-foreground"
+                                />
+                              </div>
                             )}
                           </TableCell>
                           <TableCell>
@@ -360,7 +370,12 @@ export default function ClientBilling() {
                     {selectedInvoice.shipment.carrierTrackingNumber && (
                       <>
                         <span className="text-muted-foreground">Carrier Tracking</span>
-                        <span className="font-mono text-xs">{selectedInvoice.shipment.carrierTrackingNumber}</span>
+                        <CarrierTrackingLink
+                          trackingNumber={selectedInvoice.shipment.carrierTrackingNumber}
+                          carrierCode={selectedInvoice.shipment.carrierCode}
+                          carrierName={selectedInvoice.shipment.carrierName}
+                          className="text-xs"
+                        />
                       </>
                     )}
                     <span className="text-muted-foreground">Type</span>

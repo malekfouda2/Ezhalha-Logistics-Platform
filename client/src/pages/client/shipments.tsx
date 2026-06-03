@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { StatusBadge } from "@/components/status-badge";
+import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoShipments } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,18 +26,71 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard } from "lucide-react";
 import { SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ClientAccount, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
 
+function canCancelShipment(shipment: Shipment): boolean {
+  const carrierStatus = String((shipment as any).carrierStatus || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "delivered", "cancelled"];
+
+  return (
+    ["created", "processing", "carrier_error", "payment_pending"].includes(shipment.status) &&
+    !pickedUpOrLaterStatuses.includes(carrierStatus)
+  );
+}
+
+function canPayShipment(shipment: Shipment): boolean {
+  return (
+    shipment.paymentStatus !== "paid" &&
+    String((shipment as any).paymentMethod || "PAY_NOW").toUpperCase() !== "CREDIT" &&
+    ["payment_pending", "carrier_error"].includes(String(shipment.status || "").toLowerCase())
+  );
+}
+
+function formatPackageWord(count: number) {
+  return `${count} package${count === 1 ? "" : "s"}`;
+}
+
+function formatChargeablePackageCounts(packages: any[]) {
+  const dimensionalPackages = packages.filter((pkg) => pkg?.usesDimensionalWeight).length;
+  const actualPackages = Math.max(packages.length - dimensionalPackages, 0);
+
+  return `${formatPackageWord(actualPackages)} charged by actual weight. ${formatPackageWord(dimensionalPackages)} charged by dimensional weight.`;
+}
+
+type ShipmentCheckoutSummary = {
+  shipmentId: string;
+  trackingNumber: string;
+  amount: number;
+  originalAmount: number;
+  currency: string;
+  paymentStatus: string;
+  canPay: boolean;
+  activeOffer: null | {
+    recoveryId: string;
+    discountType: string | null;
+    discountValue: number;
+    discountAmount: number;
+    originalAmount: number;
+    finalAmount: number;
+    expiresAt: string | null;
+    channel: string | null;
+  };
+};
+
 export default function ClientShipments() {
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [resumedShipmentId, setResumedShipmentId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const { data: account } = useQuery<ClientAccount>({
@@ -46,24 +101,80 @@ export default function ClientShipments() {
     queryKey: ["/api/client/shipments"],
   });
 
+  const { data: checkoutSummary, isLoading: isLoadingCheckoutSummary } = useQuery<ShipmentCheckoutSummary>({
+    queryKey: ["/api/client/shipments", selectedShipment?.id, "checkout-summary", selectedShipment?.id === resumedShipmentId ? "resume_link" : "direct"],
+    queryFn: async () => {
+      const sourceQuery = selectedShipment?.id === resumedShipmentId ? "?source=resume_link" : "";
+      const response = await fetch(`/api/client/shipments/${selectedShipment!.id}/checkout-summary${sourceQuery}`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Failed to load checkout summary.");
+      }
+      return response.json();
+    },
+    enabled: Boolean(selectedShipment && canPayShipment(selectedShipment)),
+  });
+
   const cancelMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiRequest("POST", `/api/client/shipments/${id}/cancel`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       setSelectedShipment(null);
       toast({
         title: "Shipment Cancelled",
-        description: "Your shipment has been cancelled successfully.",
+        description: data?.refundRequest
+          ? "Your shipment was cancelled and a refund request was submitted for approval."
+          : "Your shipment has been cancelled successfully.",
       });
     },
     onError: (error: Error) => {
       toast({
         title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const payShipmentMutation = useMutation({
+    mutationFn: async (payload: { shipmentId: string; tapTokenId?: string; saveCardForFuture?: boolean; returnPath?: string }) => {
+      const res = await apiRequest("POST", "/api/client/shipments/pay", payload);
+      return res.json() as Promise<{
+        shipmentId: string;
+        trackingNumber: string;
+        paymentId: string;
+        transactionUrl?: string;
+        amount: number;
+        currency: string;
+        paymentStatus: string;
+      }>;
+    },
+    onSuccess: (data) => {
+      if (data.transactionUrl) {
+        window.location.href = data.transactionUrl;
+        return;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/financial-statements"] });
+      setSelectedShipment(null);
+      toast({
+        title: "Payment Successful",
+        description: "Your shipment payment was completed.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Payment Failed",
         description: error.message,
         variant: "destructive",
       });
@@ -77,6 +188,27 @@ export default function ClientShipments() {
     const matchesStatus = statusFilter === "all" || shipment.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  useEffect(() => {
+    if (!shipments?.length) {
+      return;
+    }
+
+    const resumeShipmentId = new URLSearchParams(window.location.search).get("resumeShipment");
+    if (!resumeShipmentId || selectedShipment?.id === resumeShipmentId) {
+      return;
+    }
+
+    const shipmentToResume = shipments.find((shipment) => shipment.id === resumeShipmentId);
+    if (!shipmentToResume) {
+      return;
+    }
+
+    setStatusFilter("all");
+    setResumedShipmentId(resumeShipmentId);
+    setSelectedShipment(shipmentToResume);
+    window.history.replaceState(null, "", "/client/shipments");
+  }, [location, selectedShipment?.id, shipments]);
 
   if (isLoading) {
     return (
@@ -223,7 +355,12 @@ export default function ClientShipments() {
               {selectedShipment.carrierTrackingNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
-                  <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
+                  <CarrierTrackingLink
+                    trackingNumber={selectedShipment.carrierTrackingNumber}
+                    carrierCode={selectedShipment.carrierCode}
+                    carrierName={selectedShipment.carrierName}
+                    className="font-medium"
+                  />
                 </div>
               )}
               {(selectedShipment as any).carrierLabelBase64 && (
@@ -292,19 +429,35 @@ export default function ClientShipments() {
                   <span className="text-xs text-muted-foreground capitalize">({selectedShipment.packageType})</span>
                 </div>
                 {selectedShipment.packagesData ? (
-                  <div className="space-y-2">
-                    {JSON.parse(selectedShipment.packagesData).map((pkg: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between gap-2 text-sm px-2 py-1.5 rounded bg-background">
-                        <span className="font-medium">Pkg {i + 1}</span>
-                        <span>{Number(pkg.weight).toFixed(1)} {selectedShipment.weightUnit || "KG"}</span>
-                        <span className="text-muted-foreground">{pkg.length} x {pkg.width} x {pkg.height} {selectedShipment.dimensionUnit || "CM"}</span>
+                  (() => {
+                    const packages = JSON.parse(selectedShipment.packagesData);
+
+                    return (
+                      <div className="space-y-2">
+                        {packages.map((pkg: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between gap-2 text-sm px-2 py-1.5 rounded bg-background">
+                            <span className="font-medium">Pkg {i + 1}</span>
+                            <span className="font-medium">
+                              Billable: {Number(pkg.chargeableWeight || pkg.weight).toFixed(3)} {pkg.chargeableWeightUnit || selectedShipment.chargeableWeightUnit || selectedShipment.weightUnit || "KG"}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {pkg.usesDimensionalWeight ? "Dimensional" : "Actual"} basis
+                            </span>
+                            <span className="text-muted-foreground">{pkg.length} x {pkg.width} x {pkg.height} {selectedShipment.dimensionUnit || "CM"}</span>
+                          </div>
+                        ))}
+                        {selectedShipment.chargeableWeight && (
+                          <div className="flex justify-between text-sm pt-1 border-t">
+                            <span className="text-muted-foreground">Billable Weight</span>
+                            <span className="font-medium">
+                              {Number(selectedShipment.chargeableWeight).toFixed(3)} {selectedShipment.chargeableWeightUnit || selectedShipment.weightUnit || "KG"}
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">{formatChargeablePackageCounts(packages)}</p>
                       </div>
-                    ))}
-                    <div className="flex justify-between text-sm pt-1 border-t">
-                      <span className="text-muted-foreground">Total Weight</span>
-                      <span className="font-medium">{Number(selectedShipment.weight).toFixed(1)} {selectedShipment.weightUnit || "KG"}</span>
-                    </div>
-                  </div>
+                    );
+                  })()
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -385,10 +538,62 @@ export default function ClientShipments() {
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Total Cost</span>
                   <span className="text-2xl font-bold">
-                    <SarAmount amount={Number(selectedShipment.clientTotalAmountSar ?? selectedShipment.finalPrice ?? 0)} />
+                    <SarAmount amount={checkoutSummary?.amount ?? Number(selectedShipment.clientTotalAmountSar ?? selectedShipment.finalPrice ?? 0)} />
                   </span>
                 </div>
+                {checkoutSummary?.activeOffer && (
+                  <div className="mt-3 space-y-1 border-t pt-3 text-sm">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Original Amount</span>
+                      <span><SarAmount amount={checkoutSummary.activeOffer.originalAmount} /></span>
+                    </div>
+                    <div className="flex justify-between text-green-500">
+                      <span>Recovery Discount</span>
+                      <span>-<SarAmount amount={checkoutSummary.activeOffer.discountAmount} /></span>
+                    </div>
+                    {checkoutSummary.activeOffer.expiresAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Offer expires {format(new Date(checkoutSummary.activeOffer.expiresAt), "MMM d, h:mm a")}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {canPayShipment(selectedShipment) && (
+                <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Complete Payment</span>
+                  </div>
+                  {isLoadingCheckoutSummary ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading payment amount...
+                    </div>
+                  ) : checkoutSummary?.canPay ? (
+                    <TapCardForm
+                      amount={checkoutSummary.amount}
+                      currency={checkoutSummary.currency || selectedShipment.currency || "SAR"}
+                      shipmentId={selectedShipment.id}
+                      submitLabel="Pay Now"
+                      pending={payShipmentMutation.isPending}
+                      onSubmit={(payload) =>
+                        payShipmentMutation.mutate({
+                          shipmentId: selectedShipment.id,
+                          returnPath: "/client/shipments",
+                          ...payload,
+                        })
+                      }
+                      testId="button-pay-selected-shipment"
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      This shipment is not available for online payment right now.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Dates */}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -396,8 +601,7 @@ export default function ClientShipments() {
                 Created {format(new Date(selectedShipment.createdAt), "MMM d, yyyy 'at' h:mm a")}
               </div>
 
-              {/* Cancel Button - Only for processing shipments */}
-              {selectedShipment.status === "processing" && (
+              {canCancelShipment(selectedShipment) && (
                 <Button
                   variant="destructive"
                   className="w-full"

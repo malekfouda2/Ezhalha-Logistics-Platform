@@ -1,8 +1,14 @@
 import "../load-env";
 import crypto from "crypto";
 import type { FedExTradeDocumentTypeValue } from "@shared/schema";
+import {
+  calculateChargeableWeight,
+  convertWeight,
+  type ChargeableWeightSummary,
+} from "@shared/chargeable-weight";
 import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
+import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 
 const COUNTRIES_REQUIRING_STATE = new Set(["US", "CA", "AU", "IN", "BR", "MX", "CN", "JP"]);
 
@@ -242,6 +248,7 @@ export interface RateRequest {
   serviceType?: string;
   packagingType?: string;
   currency?: string;
+  shipDate?: string;
 }
 
 export interface RateResponse {
@@ -252,6 +259,12 @@ export interface RateResponse {
   deliveryDate?: Date;
   serviceName: string;
   packagingType?: string;
+  actualWeight?: number;
+  dimensionalWeight?: number;
+  chargeableWeight?: number;
+  chargeableWeightUnit?: "KG" | "LB";
+  chargeableWeightSource?: "carrier" | "system";
+  chargeableWeightDetails?: ChargeableWeightSummary;
 }
 
 export interface CreateShipmentRequest {
@@ -322,7 +335,7 @@ function isProduction(): boolean {
 }
 
 function isMockAllowed(): boolean {
-  if (process.env.FEDEX_MOCK_MODE === "true") return true;
+  if (getIntegrationEnvBoolean("FEDEX_MOCK_MODE")) return true;
   return !isProduction();
 }
 
@@ -337,6 +350,210 @@ export function parseMoney(value: any): number {
     return parseMoney(value.amount);
   }
   return NaN;
+}
+
+function normalizeCarrierWeightUnit(unit?: string): "KG" | "LB" | undefined {
+  const normalized = String(unit || "").trim().toUpperCase();
+  if (["KG", "KGS", "KILOGRAM", "KILOGRAMS"].includes(normalized)) return "KG";
+  if (["LB", "LBS", "POUND", "POUNDS"].includes(normalized)) return "LB";
+  return undefined;
+}
+
+function buildRateChargeableWeightSummary(
+  request: RateRequest,
+  carrierCode: string,
+): ChargeableWeightSummary {
+  const firstPackage = request.packages[0];
+  return calculateChargeableWeight(
+    request.packages.map((pkg) => ({
+      weight: pkg.weight,
+      length: pkg.dimensions?.length,
+      width: pkg.dimensions?.width,
+      height: pkg.dimensions?.height,
+    })),
+    firstPackage?.weightUnit || "KG",
+    firstPackage?.dimensions?.unit || "CM",
+    carrierCode,
+  );
+}
+
+function extractFedExBillingWeight(rate: any): { value: number; unit: "KG" | "LB" } | undefined {
+  const shipmentDetails = Array.isArray(rate?.ratedShipmentDetails)
+    ? rate.ratedShipmentDetails
+    : [];
+
+  for (const detail of shipmentDetails) {
+    const candidates = [
+      detail?.shipmentRateDetail?.totalBillingWeight,
+      detail?.shipmentRateDetail?.totalDimWeight,
+      detail?.totalBillingWeight,
+      detail?.totalDimWeight,
+    ];
+
+    for (const candidate of candidates) {
+      const value = Number(candidate?.value ?? candidate?.weight);
+      const unit = normalizeCarrierWeightUnit(candidate?.units ?? candidate?.unit);
+      if (Number.isFinite(value) && value > 0 && unit) {
+        return { value, unit };
+      }
+    }
+
+    const ratedPackages = Array.isArray(detail?.ratedPackages) ? detail.ratedPackages : [];
+    const packageWeights = ratedPackages
+      .map((ratedPackage: any) => {
+        const billingWeight = ratedPackage?.packageRateDetail?.billingWeight;
+        const value = Number(billingWeight?.value ?? billingWeight?.weight);
+        const unit = normalizeCarrierWeightUnit(billingWeight?.units ?? billingWeight?.unit);
+        return Number.isFinite(value) && value > 0 && unit ? { value, unit } : null;
+      })
+      .filter((weight: { value: number; unit: "KG" | "LB" } | null): weight is { value: number; unit: "KG" | "LB" } => Boolean(weight));
+
+  if (packageWeights.length > 0) {
+    const unit = packageWeights[0].unit;
+      const value = packageWeights.reduce(
+        (sum: number, weight: { value: number; unit: "KG" | "LB" }) =>
+          sum + convertWeight(weight.value, weight.unit, unit),
+        0,
+      );
+      return { value, unit };
+    }
+  }
+
+  return undefined;
+}
+
+function applyCarrierBillingWeightToSummary(
+  summary: ChargeableWeightSummary,
+  billingWeight?: { value: number; unit: "KG" | "LB" },
+): RateResponse["chargeableWeightDetails"] {
+  if (!billingWeight) {
+    return summary;
+  }
+
+  const chargeableWeight = convertWeight(billingWeight.value, billingWeight.unit, summary.weightUnit);
+  const chargeableWeightKg = convertWeight(billingWeight.value, billingWeight.unit, "KG");
+
+  return {
+    ...summary,
+    chargeableWeight: Number(chargeableWeight.toFixed(3)),
+    chargeableWeightKg: Number(chargeableWeightKg.toFixed(3)),
+  };
+}
+
+function formatFedExShipDateStamp(shipDate?: string): string {
+  if (shipDate) {
+    const parsed = new Date(shipDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().split("T")[0];
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(shipDate.trim())) {
+      return shipDate.trim();
+    }
+  }
+
+  return new Date().toISOString().split("T")[0];
+}
+
+function parseCarrierDate(value: unknown): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return undefined;
+}
+
+function extractFedExDeliveryDate(rate: any): Date | undefined {
+  const commitDetails = Array.isArray(rate?.commitDetails) ? rate.commitDetails : [];
+  const candidates = [
+    rate?.operationalDetail?.deliveryDate,
+    rate?.operationalDetail?.commitDate,
+    rate?.commit?.dateDetail?.dayFormat,
+    rate?.commit?.commitTimestamp,
+    rate?.commit?.deliveryTimestamp,
+    rate?.commit?.deliveryDate,
+    ...commitDetails.flatMap((detail: any) => [
+      detail?.commitTimestamp,
+      detail?.deliveryTimestamp,
+      detail?.deliveryDate,
+      detail?.dateDetail?.dayFormat,
+    ]),
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseCarrierDate(candidate);
+    if (parsed) return parsed;
+  }
+
+  return undefined;
+}
+
+function parseTransitDaysValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.ceil(value);
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return undefined;
+
+  const numericMatch = normalized.match(/\d+/);
+  if (numericMatch) {
+    const parsed = Number(numericMatch[0]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  const wordMap: Record<string, number> = {
+    SAME_DAY: 0,
+    ONE_DAY: 1,
+    TWO_DAYS: 2,
+    THREE_DAYS: 3,
+    FOUR_DAYS: 4,
+    FIVE_DAYS: 5,
+    SIX_DAYS: 6,
+    SEVEN_DAYS: 7,
+    EIGHT_DAYS: 8,
+    NINE_DAYS: 9,
+    TEN_DAYS: 10,
+  };
+
+  return wordMap[normalized];
+}
+
+function daysBetweenDates(startDate: string, endDate?: Date): number | undefined {
+  if (!endDate) return undefined;
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(endDate);
+  end.setUTCHours(0, 0, 0, 0);
+
+  const diff = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+  return Number.isFinite(diff) && diff >= 0 ? diff : undefined;
+}
+
+function extractFedExTransitDays(rate: any, shipDateStamp: string, deliveryDate?: Date): number {
+  const commitDetails = Array.isArray(rate?.commitDetails) ? rate.commitDetails : [];
+  const candidates = [
+    rate?.operationalDetail?.transitTime,
+    rate?.operationalDetail?.customTransitTime,
+    rate?.commit?.transitDays,
+    rate?.commit?.transitTime,
+    ...commitDetails.flatMap((detail: any) => [detail?.transitDays, detail?.transitTime]),
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseTransitDaysValue(candidate);
+    if (parsed !== undefined) return parsed;
+  }
+
+  return daysBetweenDates(shipDateStamp, deliveryDate) ?? 3;
 }
 
 function maskSensitiveData(data: any): any {
@@ -401,30 +618,32 @@ export class FedExAdapter implements CarrierAdapter {
   
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
+  private tokenCredentialFingerprint: string | undefined;
 
   private get clientId(): string | undefined {
-    return process.env.FEDEX_CLIENT_ID || process.env.FEDEX_API_KEY;
+    return getIntegrationEnv("FEDEX_CLIENT_ID") || getIntegrationEnv("FEDEX_API_KEY");
   }
 
   private get clientSecret(): string | undefined {
-    return process.env.FEDEX_CLIENT_SECRET || process.env.FEDEX_SECRET_KEY;
+    return getIntegrationEnv("FEDEX_CLIENT_SECRET") || getIntegrationEnv("FEDEX_SECRET_KEY");
   }
 
   private get accountNumber(): string | undefined {
-    return process.env.FEDEX_ACCOUNT_NUMBER;
+    return getIntegrationEnv("FEDEX_ACCOUNT_NUMBER");
   }
 
   private get webhookSecret(): string | undefined {
-    return process.env.FEDEX_WEBHOOK_SECRET;
+    return getIntegrationEnv("FEDEX_WEBHOOK_SECRET");
   }
 
   private get baseUrl(): string {
-    return process.env.FEDEX_BASE_URL || "https://apis-sandbox.fedex.com";
+    return getIntegrationEnv("FEDEX_BASE_URL") || "https://apis-sandbox.fedex.com";
   }
 
   private get documentBaseUrl(): string {
-    if (process.env.FEDEX_DOCUMENT_BASE_URL) {
-      return process.env.FEDEX_DOCUMENT_BASE_URL;
+    const documentBaseUrl = getIntegrationEnv("FEDEX_DOCUMENT_BASE_URL");
+    if (documentBaseUrl) {
+      return documentBaseUrl;
     }
     return this.baseUrl.includes("sandbox")
       ? "https://documentapitest.prod.fedex.com/sandbox"
@@ -438,6 +657,11 @@ export class FedExAdapter implements CarrierAdapter {
   private invalidateToken(): void {
     this.accessToken = undefined;
     this.tokenExpiry = 0;
+    this.tokenCredentialFingerprint = undefined;
+  }
+
+  private getCredentialFingerprint(): string {
+    return `${this.clientId || ""}:${this.clientSecret || ""}:${this.baseUrl}`;
   }
 
   private async logIntegration(
@@ -560,7 +784,12 @@ export class FedExAdapter implements CarrierAdapter {
       throw new Error("FedEx is not configured. Set FEDEX_CLIENT_ID, FEDEX_CLIENT_SECRET, and FEDEX_ACCOUNT_NUMBER.");
     }
 
-    if (this.accessToken && Date.now() < this.tokenExpiry) {
+    const credentialFingerprint = this.getCredentialFingerprint();
+    if (
+      this.accessToken &&
+      Date.now() < this.tokenExpiry &&
+      this.tokenCredentialFingerprint === credentialFingerprint
+    ) {
       return this.accessToken;
     }
 
@@ -591,6 +820,7 @@ export class FedExAdapter implements CarrierAdapter {
       
       this.accessToken = data.access_token;
       this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
+      this.tokenCredentialFingerprint = credentialFingerprint;
       return this.accessToken!;
     } catch (error) {
       logError("FedEx authentication failed", error);
@@ -830,6 +1060,8 @@ export class FedExAdapter implements CarrierAdapter {
 
     let serviceTypesToTry: string[] = [];
     let packagingTypesToTry: string[] = [];
+    const systemChargeableWeight = buildRateChargeableWeightSummary(request, "FEDEX");
+    const shipDateStamp = formatFedExShipDateStamp(request.shipDate);
 
     try {
       const shipperStreetLines = [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean) as string[];
@@ -931,6 +1163,7 @@ export class FedExAdapter implements CarrierAdapter {
             })),
             packagingType: tryPkg,
             packageCount: request.packages.length,
+            shipDateStamp,
           };
           if (trySvc) {
             requestedShipment.serviceType = trySvc;
@@ -938,6 +1171,9 @@ export class FedExAdapter implements CarrierAdapter {
 
           const rateRequest = {
             accountNumber: { value: this.accountNumber },
+            rateRequestControlParameters: {
+              returnTransitTimes: true,
+            },
             requestedShipment,
           };
 
@@ -950,16 +1186,26 @@ export class FedExAdapter implements CarrierAdapter {
               if (isNaN(baseRate)) {
                 throw new CarrierError("RATE_PARSE_FAILED", `Unable to parse rate for service ${rate.serviceType}`);
               }
+              const carrierBillingWeight = extractFedExBillingWeight(rate);
+              const chargeableWeightDetails = applyCarrierBillingWeightToSummary(
+                systemChargeableWeight,
+                carrierBillingWeight,
+              );
+              const deliveryDate = extractFedExDeliveryDate(rate);
               return {
                 baseRate,
                 currency: rate.ratedShipmentDetails[0].currency,
                 serviceType: rate.serviceType,
-                transitDays: rate.operationalDetail?.transitTime || 3,
-                deliveryDate: rate.operationalDetail?.deliveryDate 
-                  ? new Date(rate.operationalDetail.deliveryDate) 
-                  : undefined,
+                transitDays: extractFedExTransitDays(rate, shipDateStamp, deliveryDate),
+                deliveryDate,
                 serviceName: rate.serviceName,
                 packagingType: tryPkg,
+                actualWeight: chargeableWeightDetails?.actualWeight,
+                dimensionalWeight: chargeableWeightDetails?.dimensionalWeight,
+                chargeableWeight: chargeableWeightDetails?.chargeableWeight,
+                chargeableWeightUnit: chargeableWeightDetails?.weightUnit,
+                chargeableWeightSource: carrierBillingWeight ? "carrier" : "system",
+                chargeableWeightDetails,
               };
             });
             logInfo(`FedEx rate success: got ${rates.length} rates with service=${trySvc || 'AUTO'} packaging=${tryPkg}`);
@@ -1001,7 +1247,8 @@ export class FedExAdapter implements CarrierAdapter {
   }
 
   private getMockRates(request: RateRequest): RateResponse[] {
-    const baseWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+    const chargeableWeightDetails = buildRateChargeableWeightSummary(request, "FEDEX");
+    const baseWeight = chargeableWeightDetails.chargeableWeight;
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
     const rateCurrency = request.currency || "SAR";
     
@@ -1063,7 +1310,15 @@ export class FedExAdapter implements CarrierAdapter {
       international: isInternational 
     });
 
-    return rates;
+    return rates.map((rate) => ({
+      ...rate,
+      actualWeight: chargeableWeightDetails.actualWeight,
+      dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+      chargeableWeight: chargeableWeightDetails.chargeableWeight,
+      chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+      chargeableWeightSource: "system" as const,
+      chargeableWeightDetails,
+    }));
   }
 
   private getSandboxCalculatedRates(
@@ -1071,7 +1326,8 @@ export class FedExAdapter implements CarrierAdapter {
     serviceTypes: string[],
     packagingTypes: string[]
   ): RateResponse[] {
-    const baseWeight = request.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+    const chargeableWeightDetails = buildRateChargeableWeightSummary(request, "FEDEX");
+    const baseWeight = chargeableWeightDetails.chargeableWeight;
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
     const rateCurrency = request.currency || "SAR";
     
@@ -1102,6 +1358,12 @@ export class FedExAdapter implements CarrierAdapter {
         transitDays: Math.max(1, 3 - i),
         serviceName: serviceDisplayNames[svc] || svc.replace(/_/g, " ").replace(/\bFEDEX\b/i, "FedEx"),
         packagingType: bestPkg,
+        actualWeight: chargeableWeightDetails.actualWeight,
+        dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+        chargeableWeight: chargeableWeightDetails.chargeableWeight,
+        chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+        chargeableWeightSource: "system" as const,
+        chargeableWeightDetails,
       };
     });
 
@@ -1148,7 +1410,7 @@ export class FedExAdapter implements CarrierAdapter {
         const token = await this.getAccessToken();
         const formData = new FormData();
         const documentPayload = {
-          workflowName: "ETDPreShipment",
+          workflowName: "ETDPreshipment",
           carrierCode: "FDXE",
           name: request.fileName,
           contentType: request.contentType,
@@ -1224,6 +1486,7 @@ export class FedExAdapter implements CarrierAdapter {
         }
 
         const documentId = responseData?.output?.docId
+          || responseData?.output?.meta?.docId
           || responseData?.output?.documentId
           || responseData?.docId
           || responseData?.documentId
@@ -1278,7 +1541,7 @@ export class FedExAdapter implements CarrierAdapter {
 
     const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
 
-    if (isInternational && process.env.FEDEX_REQUIRE_HS === "true" && request.items) {
+    if (isInternational && getIntegrationEnvBoolean("FEDEX_REQUIRE_HS") && request.items) {
       const missingHs = request.items.filter(item => !item.hsCode);
       if (missingHs.length > 0) {
         throw new CarrierError(
@@ -1642,9 +1905,7 @@ export class FedExAdapter implements CarrierAdapter {
         accountNumber: { value: this.accountNumber },
         senderCountryCode: senderCountryCode || "SA",
         deletionControl: "DELETE_ALL_PACKAGES",
-        trackingNumber: {
-          trackingNumber,
-        },
+        trackingNumber,
       });
 
       logInfo("FedEx shipment cancelled", { trackingNumber });

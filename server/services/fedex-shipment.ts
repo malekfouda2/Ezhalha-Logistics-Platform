@@ -23,6 +23,7 @@ import {
   INTERNAL_COMMERCIAL_INVOICE_OBJECT_PATH,
   renderCommercialInvoicePdfBuffer,
 } from "./commercial-invoice";
+import { getIntegrationEnv } from "./integration-runtime";
 
 const storedTradeDocumentsSchema = z
   .array(shipmentTradeDocumentSchema)
@@ -36,7 +37,7 @@ const localStorageService = new LocalStorageService();
 const objectStorageService = new ObjectStorageService();
 
 function isObjectStorageAvailable(): boolean {
-  return Boolean(process.env.PRIVATE_OBJECT_DIR && process.env.PUBLIC_OBJECT_SEARCH_PATHS);
+  return Boolean(getIntegrationEnv("PRIVATE_OBJECT_DIR") && getIntegrationEnv("PUBLIC_OBJECT_SEARCH_PATHS"));
 }
 
 function normalizeContentType(contentType: string): string {

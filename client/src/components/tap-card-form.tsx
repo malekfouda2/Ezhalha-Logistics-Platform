@@ -46,6 +46,8 @@ type TapCardFormProps = {
   pending?: boolean;
   onSubmit: (payload: SubmitPayload) => void;
   testId?: string;
+  shipmentId?: string;
+  invoiceId?: string;
 };
 
 type TapCardRenderInstance = {
@@ -154,11 +156,18 @@ export function TapCardForm({
   pending = false,
   onSubmit,
   testId,
+  shipmentId,
+  invoiceId,
 }: TapCardFormProps) {
+  const tapConfigUrl = shipmentId
+    ? `/api/client/payments/tap/config?shipmentId=${encodeURIComponent(shipmentId)}`
+    : invoiceId
+      ? `/api/client/payments/tap/config?invoiceId=${encodeURIComponent(invoiceId)}`
+      : "/api/client/payments/tap/config";
   const { data: tapConfig, isLoading: isLoadingConfig } = useQuery<TapPaymentConfig>({
-    queryKey: ["/api/client/payments/tap/config"],
+    queryKey: [tapConfigUrl],
     queryFn: async () => {
-      const response = await fetch("/api/client/payments/tap/config", {
+      const response = await fetch(tapConfigUrl, {
         credentials: "include",
       });
       if (!response.ok) {

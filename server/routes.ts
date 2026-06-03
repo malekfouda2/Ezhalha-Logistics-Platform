@@ -1,11 +1,23 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import session from "express-session";
 import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
-import type { ClientAccount, ClientUserPermission, Invoice, Permission, Role, Shipment, User } from "@shared/schema";
+import type {
+  ClientAccount,
+  ClientUserPermission,
+  Invoice,
+  Payment,
+  Permission,
+  Role,
+  Shipment,
+  AbandonedShipmentRecovery,
+  ShipmentRefundRequest,
+  User,
+} from "@shared/schema";
 import {
   ACCOUNT_MANAGER_SYSTEM_ROLE_DESCRIPTION,
   ACCOUNT_MANAGER_SYSTEM_ROLE_ID,
@@ -16,13 +28,23 @@ import {
   CarrierPayoutBatchStatus,
   ClientPermission,
   ALL_CLIENT_PERMISSIONS,
+  AbandonedShipmentRecoveryChannel,
+  AbandonedShipmentRecoveryStatus,
+  FedExTradeDocumentType,
   InvoiceType,
+  ShipmentRefundApprovalStatus,
+  ShipmentRefundRequestActorType,
+  ShipmentRefundRequestStatus,
   shipmentTradeDocumentSchema,
   ShipmentExtraFeeType,
+  DdpTransportMethod,
+  INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
+  IntegrationAccountCountryBasis,
+  insertDdpPricingLaneSchema,
   type ClientPermissionValue,
 } from "@shared/schema";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
-import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification } from "./services/email";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
 import type { CarrierAdapter, CreateShipmentRequest } from "./integrations/fedex";
 import { carrierService, getCarrierAdapter } from "./integrations/carriers";
@@ -43,6 +65,7 @@ import {
 } from "@shared/application-documents";
 import { buildFedExShipmentRequestFromShipment } from "./services/fedex-shipment";
 import { buildDhlShipmentRequestFromShipment } from "./services/dhl-shipment";
+import { buildGenericCarrierShipmentRequestFromShipment } from "./services/generic-carrier-shipment";
 import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 import { extractPackageDetailsFromDocument } from "./services/package-extraction";
 import {
@@ -50,6 +73,32 @@ import {
   renderCommercialInvoiceHtml,
   renderCommercialInvoicePdfBuffer,
 } from "./services/commercial-invoice";
+import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
+import { normalizeCountryCode } from "@shared/countries";
+import {
+  INTEGRATION_APP_DEFINITIONS,
+  buildEnvAccount,
+  encryptIntegrationPayload,
+  getIntegrationDefinition,
+  loadDefaultIntegrationAccountsIntoEnv,
+  runIntegrationAccountTest,
+  sanitizeIntegrationCredentials,
+  sanitizeIntegrationSettings,
+  serializeIntegrationAccount,
+  serializeIntegrationAccountSafely,
+} from "./services/integration-apps";
+import {
+  getCurrentIntegrationAccountId,
+  getActiveIntegrationAccounts,
+  getEligibleIntegrationAccountsForShipment,
+  getIntegrationAccountCountryBasis,
+  getIntegrationEnv,
+  selectCheapestCarrierAccountPortfolio,
+  withBoundIntegrationAccount,
+  withIntegrationAccount,
+  withShipmentIntegrationAccount,
+} from "./services/integration-runtime";
+import { calculateDdpPrice } from "./services/ddp-pricing";
 
 const SALT_ROUNDS = 10;
 const FINANCIAL_MONTH_WINDOW = 12;
@@ -231,7 +280,14 @@ function normalizePhoneNumber(rawPhone: string | null | undefined, countryCodeHi
   }
 
   if (rawPhone?.trim().startsWith("+")) {
-    const match = rawPhone.replace(/[^\d+]/g, "").match(/^\+(\d{1,4})(\d+)$/);
+    if (digits.startsWith(fallbackDialCode) && digits.length > fallbackDialCode.length) {
+      return {
+        countryCode: fallbackDialCode,
+        number: digits.slice(fallbackDialCode.length).replace(/^0+/, "") || digits.slice(fallbackDialCode.length),
+      };
+    }
+
+    const match = rawPhone.replace(/[^\d+]/g, "").match(/^\+(\d{1,3})(\d+)$/);
     if (match) {
       return {
         countryCode: match[1],
@@ -253,7 +309,31 @@ function normalizePhoneNumber(rawPhone: string | null | undefined, countryCodeHi
   };
 }
 
-function buildTapCustomer(account: ClientAccount) {
+function getClientShippingIntegrationCountryCode(account: ClientAccount): string | undefined {
+  return normalizeCountryCode(account.shippingCountryCode) || normalizeCountryCode(account.country);
+}
+
+function getClientBaseIntegrationCountryCode(account: ClientAccount): string | undefined {
+  return normalizeCountryCode(account.country) || normalizeCountryCode(account.shippingCountryCode);
+}
+
+function getClientIntegrationRoutingOptions(account: ClientAccount, shipperCountryCode?: string | null) {
+  return {
+    shipperCountryCode: normalizeCountryCode(shipperCountryCode) || getClientShippingIntegrationCountryCode(account),
+    clientBaseCountryCode: getClientBaseIntegrationCountryCode(account),
+    clientAccountId: account.id,
+  };
+}
+
+function getShipmentIntegrationRoutingOptions(shipment: Shipment) {
+  return {
+    shipperCountryCode: shipment.senderCountry,
+    recipientCountryCode: shipment.recipientCountry,
+    clientAccountId: shipment.clientAccountId,
+  };
+}
+
+function buildTapCustomer(account: ClientAccount, tapIntegrationAccountId?: string | null) {
   const displayName =
     account.shippingContactName ||
     account.name ||
@@ -262,11 +342,14 @@ function buildTapCustomer(account: ClientAccount) {
   const { firstName, lastName } = splitFullName(displayName);
   const phone = normalizePhoneNumber(
     account.shippingContactPhone || account.phone,
-    account.shippingCountryCode || account.country,
+    account.country || account.shippingCountryCode,
   );
 
   return {
-    ...(account.tapCustomerId ? { id: account.tapCustomerId } : {}),
+    ...(account.tapCustomerId &&
+    (!tapIntegrationAccountId || account.tapIntegrationAccountId === tapIntegrationAccountId)
+      ? { id: account.tapCustomerId }
+      : {}),
     firstName,
     lastName,
     email: account.email,
@@ -274,27 +357,149 @@ function buildTapCustomer(account: ClientAccount) {
   };
 }
 
-function buildTapEmbedConfig(account: ClientAccount) {
-  const customer = buildTapCustomer(account);
+function buildTapEmbedConfig(account: ClientAccount, tapIntegrationAccountId?: string | null) {
+  const customer = buildTapCustomer(account, tapIntegrationAccountId);
+  const merchantId = tapService.getMerchantId() || null;
+  const sanitizedPhone =
+    customer.phone &&
+    /^[1-9]\d{0,2}$/.test(customer.phone.countryCode) &&
+    /^\d{6,15}$/.test(customer.phone.number)
+      ? customer.phone
+      : null;
 
   return {
     configured: tapService.isConfigured(),
     embeddedCardEnabled: tapService.isEmbeddedCardConfigured(),
     hostedRedirectEnabled: tapService.isConfigured(),
     publicKey: tapService.getPublicKey() || null,
-    merchantId: tapService.getMerchantId() || null,
+    merchantId,
     sdkScriptUrl: tapService.getSdkScriptUrl(),
     saveCardEnabled: tapService.isSavedCardsEnabled(),
     supportedBrands: ["VISA", "MASTERCARD", "AMERICAN_EXPRESS", "MADA"],
     locale: "en",
     customer: {
-      tapCustomerId: account.tapCustomerId || null,
+      tapCustomerId: merchantId ? customer.id || null : null,
       firstName: customer.firstName,
       lastName: customer.lastName,
       email: customer.email,
-      phone: customer.phone || null,
+      phone: sanitizedPhone,
     },
   };
+}
+
+function buildZohoCustomerParams(account: ClientAccount) {
+  return {
+    name: account.name,
+    email: account.email,
+    phone: account.phone,
+    companyName: account.companyName || undefined,
+    country: account.country,
+    customerType: account.accountType === "individual" ? "individual" as const : "business" as const,
+    shippingContactName: account.shippingContactName || undefined,
+    shippingContactPhone: account.shippingContactPhone || undefined,
+    shippingCountryCode: account.shippingCountryCode || undefined,
+    shippingStateOrProvince: account.shippingStateOrProvince || undefined,
+    shippingCity: account.shippingCity || undefined,
+    shippingPostalCode: account.shippingPostalCode || undefined,
+    shippingAddressLine1: account.shippingAddressLine1 || undefined,
+    shippingAddressLine2: account.shippingAddressLine2 || undefined,
+    shippingShortAddress: account.shippingShortAddress || undefined,
+    nameAr: account.nameAr || undefined,
+    companyNameAr: account.companyNameAr || undefined,
+    shippingContactNameAr: account.shippingContactNameAr || undefined,
+    shippingContactPhoneAr: account.shippingContactPhoneAr || undefined,
+    shippingCountryCodeAr: account.shippingCountryCodeAr || undefined,
+    shippingStateOrProvinceAr: account.shippingStateOrProvinceAr || undefined,
+    shippingCityAr: account.shippingCityAr || undefined,
+    shippingPostalCodeAr: account.shippingPostalCodeAr || undefined,
+    shippingAddressLine1Ar: account.shippingAddressLine1Ar || undefined,
+    shippingAddressLine2Ar: account.shippingAddressLine2Ar || undefined,
+    shippingShortAddressAr: account.shippingShortAddressAr || undefined,
+  };
+}
+
+async function ensureZohoCustomerForClient(account: ClientAccount, shipperCountryCode?: string | null) {
+  let zohoIntegrationAccountId = account.zohoIntegrationAccountId;
+  return withBoundIntegrationAccount("zoho", zohoIntegrationAccountId, getClientIntegrationRoutingOptions(account, shipperCountryCode), async () => {
+    zohoIntegrationAccountId =
+      getCurrentIntegrationAccountId() || zohoIntegrationAccountId || "env:zoho";
+    if (!zohoService.isConfigured()) {
+      return { zohoCustomerId: account.zohoCustomerId, zohoIntegrationAccountId };
+    }
+
+    if (account.zohoCustomerId && account.zohoIntegrationAccountId === zohoIntegrationAccountId) {
+      return { zohoCustomerId: account.zohoCustomerId, zohoIntegrationAccountId };
+    }
+
+    const zohoCustomerId = await zohoService.createCustomer(buildZohoCustomerParams(account));
+    if (zohoCustomerId) {
+      await storage.updateClientAccount(account.id, { zohoCustomerId, zohoIntegrationAccountId });
+    }
+    return { zohoCustomerId, zohoIntegrationAccountId };
+  });
+}
+
+async function syncInvoiceToZoho(invoice: Invoice, shipment?: Shipment) {
+  const account = await storage.getClientAccount(invoice.clientAccountId);
+  if (!account) return invoice;
+
+  try {
+    const customer = await ensureZohoCustomerForClient(account, shipment?.senderCountry);
+    if (!customer.zohoCustomerId) return invoice;
+    return await withBoundIntegrationAccount("zoho", customer.zohoIntegrationAccountId, getClientIntegrationRoutingOptions(account, shipment?.senderCountry), async () => {
+      if (!zohoService.isConfigured()) return invoice;
+      const result = await zohoService.syncInvoice(invoice.id, {
+        customerId: customer.zohoCustomerId || undefined,
+        customerName: account.name,
+        customerEmail: account.email,
+        invoiceNumber: invoice.invoiceNumber,
+        date: invoice.createdAt.toISOString().split("T")[0],
+        dueDate: invoice.dueDate.toISOString().split("T")[0],
+        lineItems: [{
+          name: shipment ? `Shipment ${shipment.trackingNumber}` : invoice.description || invoice.invoiceNumber,
+          description: invoice.description || undefined,
+          quantity: 1,
+          rate: Number(invoice.amount),
+        }],
+      }, invoice.zohoInvoiceId || undefined);
+      if (!result.zohoInvoiceId) return invoice;
+      return (await storage.updateInvoice(invoice.id, {
+        zohoInvoiceId: result.zohoInvoiceId,
+        zohoInvoiceUrl: result.invoiceUrl || invoice.zohoInvoiceUrl,
+        zohoIntegrationAccountId: customer.zohoIntegrationAccountId,
+      })) || invoice;
+    });
+  } catch (error) {
+    logError("Failed to sync invoice to Zoho", {
+      invoiceId: invoice.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return invoice;
+  }
+}
+
+async function deleteInvoiceFromZoho(invoice: Invoice) {
+  if (!invoice.zohoInvoiceId) return;
+  const account = await storage.getClientAccount(invoice.clientAccountId);
+  if (!account) return;
+
+  try {
+    await withBoundIntegrationAccount(
+      "zoho",
+      invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
+      getClientIntegrationRoutingOptions(account),
+      async () => {
+        if (!zohoService.isConfigured()) return;
+        await zohoService.deleteInvoice(invoice.zohoInvoiceId!);
+      },
+    );
+  } catch (error) {
+    logError("Failed to delete invoice from Zoho", {
+      invoiceId: invoice.id,
+      zohoInvoiceId: invoice.zohoInvoiceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function buildAppBaseUrl(req: Request): string {
@@ -303,8 +508,131 @@ function buildAppBaseUrl(req: Request): string {
   return `${protocol}://${host}`;
 }
 
+type ReusableShipmentAddress = {
+  name: string;
+  phone: string;
+  email?: string | null;
+  countryCode: string;
+  city: string;
+  postalCode?: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  stateOrProvince?: string | null;
+  shortAddress?: string | null;
+};
+
+type AddressBookEntryResponse = ReusableShipmentAddress & {
+  id: string;
+  label: string;
+  source: "default_shipping" | "shipment_history";
+  useForShipper: boolean;
+  useForRecipient: boolean;
+  lastUsedAt: string | null;
+};
+
+function normalizeAddressBookValue(value?: string | null): string {
+  return (value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isReusableShipmentAddress(address: ReusableShipmentAddress | null): address is ReusableShipmentAddress {
+  if (!address) {
+    return false;
+  }
+
+  return Boolean(
+    address.name?.trim() &&
+      address.phone?.trim() &&
+      address.countryCode?.trim() &&
+      address.city?.trim() &&
+      address.addressLine1?.trim(),
+  );
+}
+
+function buildAddressBookKey(address: ReusableShipmentAddress): string {
+  const fingerprint = [
+    normalizeAddressBookValue(address.name),
+    normalizeAddressBookValue(address.phone),
+    normalizeAddressBookValue(address.email),
+    normalizeAddressBookValue(address.countryCode),
+    normalizeAddressBookValue(address.city),
+    normalizeAddressBookValue(address.postalCode),
+    normalizeAddressBookValue(address.addressLine1),
+    normalizeAddressBookValue(address.addressLine2),
+    normalizeAddressBookValue(address.stateOrProvince),
+    normalizeAddressBookValue(address.shortAddress),
+  ].join("|");
+
+  return createHash("sha1").update(fingerprint).digest("hex");
+}
+
+function buildAddressBookLabel(address: ReusableShipmentAddress, source: "default_shipping" | "shipment_history"): string {
+  if (source === "default_shipping") {
+    return "Default shipping address";
+  }
+
+  const locationParts = [address.city?.trim(), address.countryCode?.trim().toUpperCase()].filter(Boolean);
+  return `${address.name.trim()}${locationParts.length ? ` — ${locationParts.join(", ")}` : ""}`;
+}
+
+function buildAccountDefaultShipmentAddress(account: ClientAccount): ReusableShipmentAddress | null {
+  if (!account.shippingContactName || !account.shippingContactPhone || !account.shippingCountryCode || !account.shippingCity || !account.shippingAddressLine1) {
+    return null;
+  }
+
+  return {
+    name: account.shippingContactName,
+    phone: account.shippingContactPhone,
+    email: account.email || null,
+    countryCode: account.shippingCountryCode,
+    city: account.shippingCity,
+    postalCode: account.shippingPostalCode || "",
+    addressLine1: account.shippingAddressLine1,
+    addressLine2: account.shippingAddressLine2 || "",
+    stateOrProvince: account.shippingStateOrProvince || "",
+    shortAddress: account.shippingShortAddress || "",
+  };
+}
+
+function buildShipmentSenderAddress(shipment: Shipment): ReusableShipmentAddress {
+  return {
+    name: shipment.senderName,
+    phone: shipment.senderPhone,
+    email: shipment.senderEmail,
+    countryCode: shipment.senderCountry,
+    city: shipment.senderCity,
+    postalCode: shipment.senderPostalCode || "",
+    addressLine1: shipment.senderAddress,
+    addressLine2: shipment.senderAddressLine2 || "",
+    stateOrProvince: shipment.senderStateOrProvince || "",
+    shortAddress: shipment.senderShortAddress || "",
+  };
+}
+
+function buildShipmentRecipientAddress(shipment: Shipment): ReusableShipmentAddress {
+  return {
+    name: shipment.recipientName,
+    phone: shipment.recipientPhone,
+    email: shipment.recipientEmail,
+    countryCode: shipment.recipientCountry,
+    city: shipment.recipientCity,
+    postalCode: shipment.recipientPostalCode || "",
+    addressLine1: shipment.recipientAddress,
+    addressLine2: shipment.recipientAddressLine2 || "",
+    stateOrProvince: shipment.recipientStateOrProvince || "",
+    shortAddress: shipment.recipientShortAddress || "",
+  };
+}
+
 function resolveCarrierCode(carrier?: string | null): string {
   return carrier?.trim() ? carrier.trim().toUpperCase() : "FEDEX";
+}
+
+function getIntegrationAppKeyForCarrier(carrierCode?: string | null): string {
+  const normalized = resolveCarrierCode(carrierCode).toLowerCase();
+  if (normalized === "fedex") return "fedex";
+  if (normalized === "dhl") return "dhl";
+  if (normalized === "aramex") return "aramex";
+  return normalized;
 }
 
 function getAdapterForShipment(shipment: Shipment): CarrierAdapter {
@@ -323,7 +651,7 @@ async function buildCarrierShipmentRequestFromShipment(
     return buildDhlShipmentRequestFromShipment(shipment);
   }
 
-  throw new Error(`Carrier build is not supported for ${adapter.carrierCode}`);
+  return buildGenericCarrierShipmentRequestFromShipment(shipment);
 }
 
 function roundMoney(value: number): number {
@@ -353,6 +681,7 @@ async function ensureShipmentBillingArtifacts(params: {
       amount: invoiceAmount,
       status: shouldMarkPaid ? "paid" : "pending",
       dueDate: shouldMarkPaid ? new Date() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      tapIntegrationAccountId: params.shipment.tapIntegrationAccountId,
     });
   }
 
@@ -363,6 +692,8 @@ async function ensureShipmentBillingArtifacts(params: {
         paidAt: new Date(),
       })) || invoice;
   }
+
+  invoice = await syncInvoiceToZoho(invoice, params.shipment);
 
   if (!shouldMarkPaid || !params.transactionId) {
     return invoice;
@@ -392,6 +723,7 @@ async function ensureShipmentBillingArtifacts(params: {
       status: "completed",
       paymentMethod: params.paymentMethod,
       transactionId: params.transactionId,
+      integrationAccountId: params.shipment.tapIntegrationAccountId,
     });
     return invoice;
   }
@@ -403,6 +735,7 @@ async function ensureShipmentBillingArtifacts(params: {
     paymentMethod: params.paymentMethod,
     status: "completed",
     transactionId: params.transactionId,
+    integrationAccountId: params.shipment.tapIntegrationAccountId,
   });
 
   return invoice;
@@ -419,6 +752,33 @@ async function finalizePaidShipmentAfterPayment(params: {
 
   if (shipment.status === "cancelled") {
     throw new Error("Cancelled shipments cannot be finalized");
+  }
+
+  if (shipment.fulfillmentType === "ddp_manual") {
+    const updatedShipment =
+      (await storage.updateShipment(shipment.id, {
+        status: "awaiting_review",
+        carrierStatus: "awaiting_review",
+        paymentStatus: "paid",
+      })) || shipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+    });
+
+    await logAudit(
+      userId,
+      "confirm_ddp_shipment",
+      "shipment",
+      updatedShipment.id,
+      `Confirmed manual DDP shipment ${updatedShipment.trackingNumber} for review`,
+      ipAddress,
+    );
+
+    return updatedShipment;
   }
 
   if (shipment.status === "created" && shipment.carrierTrackingNumber) {
@@ -471,7 +831,12 @@ async function finalizePaidShipmentAfterPayment(params: {
         })) || latestShipment;
     }
 
-    const carrierResponse = await carrierAdapter.createShipment(preparedShipment.carrierRequest);
+    const carrierResponse = await withBoundIntegrationAccount(
+      getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+      latestShipment.carrierIntegrationAccountId,
+      getShipmentIntegrationRoutingOptions(latestShipment),
+      () => carrierAdapter.createShipment(preparedShipment.carrierRequest),
+    );
     const updatedShipment =
       (await storage.updateShipment(latestShipment.id, {
         status: "created",
@@ -636,6 +1001,98 @@ async function reconcilePaidShipmentsForClientAccount(clientAccountId: string, i
   return runPromise;
 }
 
+async function getStoredTapIntegrationAccountId(chargeId: string, charge?: TapCharge) {
+  if (charge?.metadata?.tapIntegrationAccountId) {
+    return charge.metadata.tapIntegrationAccountId;
+  }
+
+  const shipment = await storage.getShipmentByPaymentId(chargeId);
+  if (shipment?.tapIntegrationAccountId) {
+    return shipment.tapIntegrationAccountId;
+  }
+
+  const payment = await storage.getPaymentByTransactionId(chargeId);
+  if (!payment) return null;
+  if (payment.integrationAccountId) return payment.integrationAccountId;
+
+  const invoice = await storage.getInvoice(payment.invoiceId);
+  return invoice?.tapIntegrationAccountId || null;
+}
+
+async function retrieveTapChargeFromBoundAccount(chargeId: string) {
+  const boundAccountId = await getStoredTapIntegrationAccountId(chargeId);
+  if (boundAccountId) {
+    return withBoundIntegrationAccount("tap", boundAccountId, {}, () => tapService.retrieveCharge(chargeId));
+  }
+
+  for (const account of await getActiveIntegrationAccounts("tap")) {
+    try {
+      const charge = await withIntegrationAccount(account, () => tapService.retrieveCharge(chargeId));
+      if (charge) return charge;
+    } catch {
+      // Tap callbacks do not include local context for legacy charges, so try the next configured merchant.
+    }
+  }
+
+  return tapService.retrieveCharge(chargeId);
+}
+
+async function validateTapWebhookForBoundAccount(charge: TapCharge, signature?: string) {
+  const boundAccountId = await getStoredTapIntegrationAccountId(charge.id, charge);
+  const validateCurrentAccount = () =>
+    Promise.resolve(
+      tapService.isConfigured()
+        ? tapService.validateWebhookSignature(charge, signature)
+        : process.env.NODE_ENV !== "production",
+    );
+
+  if (boundAccountId) {
+    return withBoundIntegrationAccount("tap", boundAccountId, {}, validateCurrentAccount);
+  }
+
+  for (const account of await getActiveIntegrationAccounts("tap")) {
+    if (await withIntegrationAccount(account, validateCurrentAccount)) {
+      return true;
+    }
+  }
+
+  return validateCurrentAccount();
+}
+
+async function validateFedExWebhookForBoundAccount(
+  payload: string,
+  signature: string | undefined,
+  shipment?: Shipment,
+) {
+  const validateCurrentAccount = () => {
+    const webhookSecret = getIntegrationEnv("FEDEX_WEBHOOK_SECRET");
+    if (!webhookSecret) {
+      return process.env.NODE_ENV !== "production";
+    }
+    if (!signature) return false;
+    const expectedSignature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
+    return signature.length === expectedSignature.length &&
+      timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expectedSignature, "utf8"));
+  };
+
+  if (shipment?.carrierIntegrationAccountId) {
+    return withBoundIntegrationAccount(
+      "fedex",
+      shipment.carrierIntegrationAccountId,
+      getShipmentIntegrationRoutingOptions(shipment),
+      async () => validateCurrentAccount(),
+    );
+  }
+
+  for (const account of await getActiveIntegrationAccounts("fedex")) {
+    if (await withIntegrationAccount(account, async () => validateCurrentAccount())) {
+      return true;
+    }
+  }
+
+  return validateCurrentAccount();
+}
+
 async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
   const shipmentId = charge.metadata?.shipmentId;
   const shipment =
@@ -650,11 +1107,33 @@ async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
   if (shipment.paymentIntentId !== charge.id) {
     updates.paymentIntentId = charge.id;
   }
+  const tapIntegrationAccountId =
+    charge.metadata?.tapIntegrationAccountId ||
+    shipment.tapIntegrationAccountId ||
+    getCurrentIntegrationAccountId() ||
+    "env:tap";
+  if (shipment.tapIntegrationAccountId !== tapIntegrationAccountId) {
+    updates.tapIntegrationAccountId = tapIntegrationAccountId;
+  }
 
   if (tapService.isSuccessfulStatus(charge.status) && shipment.paymentStatus !== "paid") {
     updates.paymentStatus = "paid";
   } else if (tapService.isFailureStatus(charge.status) && shipment.paymentStatus !== "failed") {
     updates.paymentStatus = "failed";
+    const recovery = await storage.getAbandonedShipmentRecoveryByShipmentId(shipment.id);
+    if (recovery?.status === AbandonedShipmentRecoveryStatus.DISCOUNT_SENT) {
+      logInfo("Abandoned recovery payment failed", {
+        source: "abandoned_recovery",
+        event: "payment_failed",
+        shipmentId: shipment.id,
+        recoveryId: recovery.id,
+        clientAccountId: shipment.clientAccountId,
+        trackingNumber: shipment.trackingNumber,
+        chargeId: charge.id,
+        tapStatus: charge.status,
+        tapMessage: charge.response?.message,
+      });
+    }
   }
 
   let latestShipment = shipment;
@@ -671,6 +1150,14 @@ async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
   }
 
   if (tapService.isSuccessfulStatus(charge.status)) {
+    const activeOffer = await getActiveAbandonedRecoveryOffer(latestShipment, { allowPaid: true });
+    if (activeOffer) {
+      latestShipment = await applyAbandonedRecoveryOfferToShipment(latestShipment, activeOffer, {
+        transactionId: charge.id,
+        ipAddress,
+      });
+    }
+
     await finalizePaidShipmentAfterPayment({
       shipment: latestShipment,
       transactionId: charge.id,
@@ -693,13 +1180,18 @@ async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
   }
 
   const payments = await storage.getPaymentsByClientAccount(invoice.clientAccountId);
+  const tapIntegrationAccountId =
+    charge.metadata?.tapIntegrationAccountId ||
+    invoice.tapIntegrationAccountId ||
+    getCurrentIntegrationAccountId() ||
+    "env:tap";
   const matchingPayment =
     payments.find((payment) => payment.invoiceId === invoice.id && payment.transactionId === charge.id) ||
     payments.find((payment) => payment.invoiceId === invoice.id && payment.status === "pending");
 
   if (tapService.isSuccessfulStatus(charge.status)) {
     if (invoice.status !== "paid") {
-      await storage.updateInvoice(invoice.id, { status: "paid", paidAt: new Date() });
+      await storage.updateInvoice(invoice.id, { status: "paid", paidAt: new Date(), tapIntegrationAccountId });
     }
 
     if (matchingPayment) {
@@ -707,6 +1199,7 @@ async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
         status: "completed",
         paymentMethod: "tap",
         transactionId: charge.id,
+        integrationAccountId: tapIntegrationAccountId,
       });
     } else {
       await storage.createPayment({
@@ -715,6 +1208,7 @@ async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
         amount: formatMoney(Number(charge.amount || invoice.amount)),
         paymentMethod: "tap",
         transactionId: charge.id,
+        integrationAccountId: tapIntegrationAccountId,
         status: "completed",
       });
     }
@@ -735,6 +1229,7 @@ async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
       status: "failed",
       paymentMethod: "tap",
       transactionId: charge.id,
+      integrationAccountId: tapIntegrationAccountId,
     });
   }
 }
@@ -751,6 +1246,10 @@ async function syncTapSavedCardFromCharge(charge: TapCharge) {
 
   const tapCustomerId = charge.customer?.id;
   const tapCardId = charge.card?.id;
+  const tapIntegrationAccountId =
+    charge.metadata?.tapIntegrationAccountId ||
+    getCurrentIntegrationAccountId() ||
+    "env:tap";
 
   if (!tapCustomerId && !tapCardId) {
     return;
@@ -761,9 +1260,14 @@ async function syncTapSavedCardFromCharge(charge: TapCharge) {
     return;
   }
 
-  if (tapCustomerId && clientAccount.tapCustomerId !== tapCustomerId) {
+  if (
+    tapCustomerId &&
+    (clientAccount.tapCustomerId !== tapCustomerId ||
+      clientAccount.tapIntegrationAccountId !== tapIntegrationAccountId)
+  ) {
     await storage.updateClientAccount(clientAccountId, {
       tapCustomerId,
+      tapIntegrationAccountId,
     });
   }
 
@@ -774,6 +1278,7 @@ async function syncTapSavedCardFromCharge(charge: TapCharge) {
   const existingCard = await storage.getTapSavedCardByTapCardId(clientAccountId, tapCardId);
   const baseCardFields = {
     clientAccountId,
+    tapIntegrationAccountId,
     tapCustomerId,
     tapCardId,
     paymentAgreementId: charge.payment_agreement?.id || null,
@@ -798,7 +1303,7 @@ async function syncTapSavedCardFromCharge(charge: TapCharge) {
     return;
   }
 
-  const activeCards = await storage.getTapSavedCardsByClientAccount(clientAccountId);
+  const activeCards = await storage.getTapSavedCardsByClientAccount(clientAccountId, tapIntegrationAccountId);
   await storage.createTapSavedCard({
     ...baseCardFields,
     isDefault: activeCards.length === 0,
@@ -832,8 +1337,175 @@ function parseMoneyValue(value: string | number | null | undefined): number {
   return Number(value) || 0;
 }
 
+type ActiveAbandonedRecoveryOffer = {
+  recovery: AbandonedShipmentRecovery;
+  originalAmount: number;
+  discountAmount: number;
+  payableAmount: number;
+};
+
+async function getActiveAbandonedRecoveryOffer(
+  shipment: Shipment,
+  options: { allowPaid?: boolean } = {},
+): Promise<ActiveAbandonedRecoveryOffer | null> {
+  const recovery = await storage.getAbandonedShipmentRecoveryByShipmentId(shipment.id);
+  if (!recovery || recovery.status !== AbandonedShipmentRecoveryStatus.DISCOUNT_SENT) {
+    return null;
+  }
+
+  const paymentStatus = String(shipment.paymentStatus || "pending").toLowerCase();
+  const paymentMethod = String(shipment.paymentMethod || "PAY_NOW").toUpperCase();
+  const shipmentStatus = String(shipment.status || "").toLowerCase();
+
+  if (!options.allowPaid && paymentStatus === "paid") return null;
+  if (paymentMethod === "CREDIT") return null;
+  if (shipmentStatus === "cancelled" || shipmentStatus === "credit_pending") return null;
+  if (recovery.discountExpiresAt && new Date(recovery.discountExpiresAt).getTime() <= Date.now()) {
+    await storage.updateAbandonedShipmentRecovery(recovery.id, {
+      status: AbandonedShipmentRecoveryStatus.EXPIRED,
+      lastAction: "discount_expired",
+    });
+    logInfo("Abandoned recovery offer expired on access", {
+      source: "abandoned_recovery",
+      event: "offer_expired",
+      shipmentId: shipment.id,
+      recoveryId: recovery.id,
+      clientAccountId: shipment.clientAccountId,
+      trackingNumber: shipment.trackingNumber,
+    });
+    return null;
+  }
+
+  const originalAmount = parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+  const recoveredOriginalAmount = Math.max(originalAmount, parseMoneyValue(shipment.finalPrice));
+  const payableAmount = Math.max(0, parseMoneyValue(recovery.discountFinalPrice));
+  const discountAmount = Math.max(0, parseMoneyValue(recovery.discountAmount));
+
+  if (!Number.isFinite(payableAmount) || payableAmount <= 0 || payableAmount >= recoveredOriginalAmount) {
+    return null;
+  }
+
+  return {
+    recovery,
+    originalAmount: recoveredOriginalAmount,
+    discountAmount: Math.min(discountAmount || recoveredOriginalAmount - payableAmount, recoveredOriginalAmount),
+    payableAmount,
+  };
+}
+
+function serializeAbandonedRecoveryOffer(offer: ActiveAbandonedRecoveryOffer | null) {
+  if (!offer) return null;
+
+  return {
+    recoveryId: offer.recovery.id,
+    discountType: offer.recovery.discountType,
+    discountValue: parseMoneyValue(offer.recovery.discountValue),
+    discountAmount: Number(offer.discountAmount.toFixed(2)),
+    originalAmount: Number(offer.originalAmount.toFixed(2)),
+    finalAmount: Number(offer.payableAmount.toFixed(2)),
+    expiresAt: offer.recovery.discountExpiresAt,
+    channel: offer.recovery.discountChannel,
+  };
+}
+
+async function applyAbandonedRecoveryOfferToShipment(
+  shipment: Shipment,
+  offer: ActiveAbandonedRecoveryOffer,
+  params: { transactionId?: string | null; ipAddress?: string },
+): Promise<Shipment> {
+  const payableAmount = formatMoney(offer.payableAmount);
+  const updatedShipment =
+    (await storage.updateShipment(shipment.id, {
+      finalPrice: payableAmount,
+      clientTotalAmountSar: payableAmount,
+    })) || shipment;
+
+  await storage.updateAbandonedShipmentRecovery(offer.recovery.id, {
+    status: AbandonedShipmentRecoveryStatus.RECOVERED,
+    lastAction: "discount_recovered",
+    recoveredAt: new Date(),
+  });
+
+  logInfo("Abandoned recovery offer paid", {
+    source: "abandoned_recovery",
+    event: "offer_paid",
+    shipmentId: shipment.id,
+    recoveryId: offer.recovery.id,
+    clientAccountId: shipment.clientAccountId,
+    trackingNumber: shipment.trackingNumber,
+    originalAmount: offer.originalAmount,
+    discountAmount: offer.discountAmount,
+    finalAmount: offer.payableAmount,
+    transactionId: params.transactionId,
+  });
+
+  await logAudit(
+    undefined,
+    "abandoned_discount_recovered",
+    "shipment",
+    shipment.id,
+    `Applied abandoned shipment recovery discount to ${shipment.trackingNumber}${params.transactionId ? ` via ${params.transactionId}` : ""}`,
+    params.ipAddress,
+  );
+
+  return updatedShipment;
+}
+
+function formatWeightValue(value: number | string | null | undefined): string {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(3) : "0.000";
+}
+
+function buildChargeableWeightSummaryFromShipmentInput(
+  shipmentData: {
+    packages: Array<{ weight: number; length?: number; width?: number; height?: number }>;
+    weightUnit?: string;
+    dimensionUnit?: string;
+  },
+  carrierCode: string,
+): ChargeableWeightSummary {
+  return calculateChargeableWeight(
+    shipmentData.packages,
+    shipmentData.weightUnit || "KG",
+    shipmentData.dimensionUnit || "CM",
+    carrierCode,
+  );
+}
+
+function parseStoredChargeableWeightSummary(value: unknown): ChargeableWeightSummary | null {
+  if (!value) return null;
+  if (typeof value === "object") return value as ChargeableWeightSummary;
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value) as ChargeableWeightSummary;
+  } catch {
+    return null;
+  }
+}
+
+function attachChargeableWeightToPackages(
+  packages: Array<Record<string, unknown>>,
+  summary: ChargeableWeightSummary,
+) {
+  return packages.map((pkg, index) => {
+    const breakdown = summary.packages[index];
+    if (!breakdown) return pkg;
+
+    return {
+      ...pkg,
+      actualWeight: breakdown.actualWeight,
+      dimensionalWeight: breakdown.dimensionalWeight,
+      chargeableWeight: breakdown.chargeableWeight,
+      chargeableWeightUnit: breakdown.weightUnit,
+      usesDimensionalWeight: breakdown.usesDimensionalWeight,
+    };
+  });
+}
+
 function isSameMonthYear(date: Date, month: number, year: number): boolean {
-  return date.getMonth() + 1 === month && date.getFullYear() === year;
+  // PostgreSQL timestamps are stored without a timezone. Drizzle hydrates them as
+  // UTC dates, so UTC fields preserve the persisted calendar month at boundaries.
+  return date.getUTCMonth() + 1 === month && date.getUTCFullYear() === year;
 }
 
 function buildMonthLabel(date: Date): string {
@@ -915,6 +1587,14 @@ function matchesClientPaymentFilter(
     : shipment.paymentStatus !== "paid";
 }
 
+function isAdminFinancialStatementEligible(shipment: Record<string, any>): boolean {
+  return Boolean(
+    shipment.taxScenario &&
+      shipment.accountingCurrency === "SAR" &&
+      shipment.paymentStatus === "paid",
+  );
+}
+
 function matchesCarrierPaymentFilter(
   shipment: Record<string, any>,
   carrierPaymentStatus: "all" | "paid" | "not_paid",
@@ -980,6 +1660,19 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
 }
 
 function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
+  if (
+    shipment.fulfillmentType === "ddp_manual" &&
+    parseMoneyValue(shipment.ddpRatePerUnitSar) > 0
+  ) {
+    const baseRateAmountSar = parseMoneyValue(shipment.baseRate);
+    const markupAmountSar = parseMoneyValue(shipment.marginAmount ?? shipment.margin);
+    const markupFactor = baseRateAmountSar > 0
+      ? 1 + (markupAmountSar / baseRateAmountSar)
+      : 1;
+
+    return roundMoney(parseMoneyValue(shipment.ddpRatePerUnitSar) * markupFactor);
+  }
+
   const grossTotalAmountSar = parseMoneyValue(
     shipment.clientTotalAmountSar ?? shipment.finalPrice,
   );
@@ -990,6 +1683,17 @@ function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   }
 
   return roundMoney(grossTotalAmountSar / weightValue);
+}
+
+function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
+  if (
+    shipment.fulfillmentType === "ddp_manual" &&
+    (shipment.ddpBillingUnit === "KG" || shipment.ddpBillingUnit === "CBM")
+  ) {
+    return shipment.ddpBillingUnit;
+  }
+
+  return shipment.weightUnit || "KG";
 }
 
 function deriveShipmentExtraFees(shipment: Record<string, any>) {
@@ -1148,6 +1852,7 @@ function serializeFinancialShipment(
     extraFeesCostAmountSar: effective.extraFeesCostAmountSar,
     extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
+    extraFeesQuantityUnit: getExtraFeesQuantityUnit(shipment),
     extraFeesAddedAt: shipment.extraFeesAddedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt,
     extraWeightInvoiceStatus,
@@ -1272,7 +1977,7 @@ function buildCarrierPayoutCandidates(shipments: Array<Record<string, any>>) {
 // Rate limiter for general API requests
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window
+  max: process.env.NODE_ENV === "test" ? 1000 : 100, // Keep broad API suites from masking authorization assertions.
   message: { error: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -1509,6 +2214,54 @@ async function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+function normalizeBadgeColor(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (!/^#([0-9a-fA-F]{6})$/.test(normalized)) {
+    return undefined;
+  }
+
+  return normalized.toUpperCase();
+}
+
+function normalizeBadgeStyle(value: unknown): "solid" | "gradient" {
+  return value === "gradient" ? "gradient" : "solid";
+}
+
+function normalizeBadgeIcon(value: unknown): string {
+  const allowedIcons = new Set([
+    "award",
+    "briefcase",
+    "crown",
+    "gem",
+    "rocket",
+    "shield",
+    "sparkles",
+    "star",
+    "user",
+    "zap",
+  ]);
+
+  if (typeof value !== "string") {
+    return "star";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return allowedIcons.has(normalized) ? normalized : "star";
+}
+
+function normalizeBadgeGradientAngle(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 135;
+  }
+
+  return Math.max(0, Math.min(360, Math.round(parsed)));
+}
+
 async function ensureAdminAccess(req: Request, res: Response): Promise<User | null> {
   const user = await ensureAuthenticatedUser(req, res);
   if (!user) {
@@ -1636,16 +2389,20 @@ function mergeRolesWithSystemRoles(roles: Role[]): Role[] {
 }
 
 const ACCOUNT_MANAGER_FIXED_PERMISSION_NAMES = [
+  "dashboard:read",
   "clients:read",
   "clients:update",
   "clients:activate",
   "shipments:read",
+  "shipments:cancel",
   "shipments:update",
   "shipments:track",
   "invoices:read",
   "invoices:download",
   "payments:read",
   "credit-invoices:read",
+  "refund-requests:read",
+  "refund-requests:approve-account-manager",
 ] as const;
 
 function getSystemRoleById(roleId: string): Role | null {
@@ -1759,6 +2516,220 @@ async function ensureAccountManagerClientAccess(
   return false;
 }
 
+const CANCELLABLE_SHIPMENT_STATUSES = new Set([
+  "created",
+  "processing",
+  "carrier_error",
+  "payment_pending",
+]);
+
+const NON_CANCELLABLE_CARRIER_STATUSES = new Set([
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+  "cancelled",
+]);
+
+const CARRIER_CANCELLATION_FAILED_MESSAGE =
+  "We could not cancel this shipment with the carrier automatically. Please contact support to complete the cancellation.";
+
+function canShipmentBeCancelled(shipment: Shipment): boolean {
+  if (!CANCELLABLE_SHIPMENT_STATUSES.has(shipment.status)) {
+    return false;
+  }
+
+  const normalizedCarrierStatus = (shipment.carrierStatus || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!normalizedCarrierStatus) {
+    return true;
+  }
+
+  return !NON_CANCELLABLE_CARRIER_STATUSES.has(normalizedCarrierStatus);
+}
+
+function isShipmentRefundApprovalSatisfied(status: string | null | undefined): boolean {
+  return (
+    status === ShipmentRefundApprovalStatus.APPROVED ||
+    status === ShipmentRefundApprovalStatus.NOT_REQUIRED
+  );
+}
+
+function isShipmentRefundRequestCompleted(request: ShipmentRefundRequest): boolean {
+  return (
+    request.status === ShipmentRefundRequestStatus.COMPLETED ||
+    (
+      isShipmentRefundApprovalSatisfied(request.accountManagerApprovalStatus) &&
+      isShipmentRefundApprovalSatisfied(request.financeApprovalStatus)
+    )
+  );
+}
+
+async function getShipmentRefundPaymentContext(shipment: Shipment): Promise<{
+  requiresRefund: boolean;
+  amount: number;
+  currency: string;
+  invoiceId: string | null;
+  payment: Payment | null;
+}> {
+  const shipmentInvoices = await storage.getInvoicesByShipmentId(shipment.id);
+  const primaryInvoice =
+    shipmentInvoices.find((invoice) => invoice.invoiceType === InvoiceType.SHIPMENT) ||
+    shipmentInvoices[0] ||
+    null;
+
+  const completedPayment =
+    primaryInvoice
+      ? (await storage.getPaymentsByClientAccount(shipment.clientAccountId)).find(
+          (payment) => payment.invoiceId === primaryInvoice.id && payment.status === "completed",
+        ) || null
+      : null;
+
+  const amount = primaryInvoice
+    ? Number(primaryInvoice.amount || 0)
+    : Number(shipment.clientTotalAmountSar ?? shipment.finalPrice ?? 0);
+  const currency = shipment.accountingCurrency || shipment.currency || "SAR";
+  const requiresRefund = Boolean(
+    amount > 0 &&
+      (
+        shipment.paymentStatus === "paid" ||
+        primaryInvoice?.status === "paid" ||
+        completedPayment
+      ),
+  );
+
+  return {
+    requiresRefund,
+    amount,
+    currency,
+    invoiceId: primaryInvoice?.id || null,
+    payment: completedPayment,
+  };
+}
+
+function getRefundActorType(user: User): "CLIENT" | "ACCOUNT_MANAGER" | "ADMIN" {
+  if (user.userType === "client") {
+    return ShipmentRefundRequestActorType.CLIENT;
+  }
+
+  if (user.isAccountManager) {
+    return ShipmentRefundRequestActorType.ACCOUNT_MANAGER;
+  }
+
+  return ShipmentRefundRequestActorType.ADMIN;
+}
+
+async function ensureShipmentRefundRequestForCancellation(params: {
+  shipment: Shipment;
+  user: User;
+}): Promise<ShipmentRefundRequest | null> {
+  const { shipment, user } = params;
+  const existingRequest = await storage.getShipmentRefundRequestByShipmentId(shipment.id);
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const refundPaymentContext = await getShipmentRefundPaymentContext(shipment);
+  if (!refundPaymentContext.requiresRefund) {
+    return null;
+  }
+
+  const assignedAccountManager = await storage.getPrimaryAccountManagerForClient(shipment.clientAccountId);
+  const actorType = getRefundActorType(user);
+  const isCancellingAssignedAccountManager =
+    actorType === ShipmentRefundRequestActorType.ACCOUNT_MANAGER &&
+    assignedAccountManager &&
+    assignedAccountManager.id === user.id;
+  const isCancellingFinanceActor = actorType === ShipmentRefundRequestActorType.ADMIN;
+
+  const accountManagerApprovalStatus = !assignedAccountManager
+    ? ShipmentRefundApprovalStatus.NOT_REQUIRED
+    : isCancellingAssignedAccountManager
+      ? ShipmentRefundApprovalStatus.APPROVED
+      : ShipmentRefundApprovalStatus.PENDING;
+  const financeApprovalStatus = isCancellingFinanceActor
+    ? ShipmentRefundApprovalStatus.APPROVED
+    : ShipmentRefundApprovalStatus.PENDING;
+  const isCompleted =
+    isShipmentRefundApprovalSatisfied(accountManagerApprovalStatus) &&
+    isShipmentRefundApprovalSatisfied(financeApprovalStatus);
+  const now = new Date();
+
+  return storage.createShipmentRefundRequest({
+    shipmentId: shipment.id,
+    clientAccountId: shipment.clientAccountId,
+    invoiceId: refundPaymentContext.invoiceId,
+    amount: formatMoney(refundPaymentContext.amount),
+    currency: refundPaymentContext.currency,
+    status: isCompleted ? ShipmentRefundRequestStatus.COMPLETED : ShipmentRefundRequestStatus.PENDING,
+    requestedByUserId: user.id,
+    requestedByActorType: actorType,
+    accountManagerUserId: assignedAccountManager?.id || null,
+    accountManagerApprovalStatus,
+    accountManagerApprovedByUserId:
+      accountManagerApprovalStatus === ShipmentRefundApprovalStatus.APPROVED ? user.id : null,
+    accountManagerApprovedAt:
+      accountManagerApprovalStatus === ShipmentRefundApprovalStatus.APPROVED ? now : null,
+    financeApprovalStatus,
+    financeApprovedByUserId:
+      financeApprovalStatus === ShipmentRefundApprovalStatus.APPROVED ? user.id : null,
+    financeApprovedAt:
+      financeApprovalStatus === ShipmentRefundApprovalStatus.APPROVED ? now : null,
+    completedAt: isCompleted ? now : null,
+    rejectionReason: null,
+  });
+}
+
+type ShipmentRefundRequestSummary = ShipmentRefundRequest & {
+  shipmentTrackingNumber: string | null;
+  carrierTrackingNumber: string | null;
+  shipmentStatus: string | null;
+  clientName: string;
+  clientAccountNumber: string | null;
+  requestedByName: string | null;
+  accountManagerName: string | null;
+  accountManagerApprovalSatisfied: boolean;
+  financeApprovalSatisfied: boolean;
+  canApproveAsAccountManager: boolean;
+  canApproveAsFinance: boolean;
+};
+
+async function serializeShipmentRefundRequestForAdmin(
+  request: ShipmentRefundRequest,
+  user: User,
+): Promise<ShipmentRefundRequestSummary> {
+  const [shipment, clientAccount, requestedByUser, assignedAccountManager, permissionNames] = await Promise.all([
+    storage.getShipment(request.shipmentId),
+    storage.getClientAccount(request.clientAccountId),
+    storage.getUser(request.requestedByUserId),
+    request.accountManagerUserId ? storage.getUser(request.accountManagerUserId) : Promise.resolve(undefined),
+    getEffectiveAdminPermissionNames(user),
+  ]);
+
+  return {
+    ...request,
+    shipmentTrackingNumber: shipment?.trackingNumber || null,
+    carrierTrackingNumber: shipment?.carrierTrackingNumber || null,
+    shipmentStatus: shipment?.status || null,
+    clientName: clientAccount?.name || "Unknown Client",
+    clientAccountNumber: clientAccount?.accountNumber || null,
+    requestedByName: requestedByUser?.username || requestedByUser?.email || null,
+    accountManagerName: assignedAccountManager?.username || assignedAccountManager?.email || null,
+    accountManagerApprovalSatisfied: isShipmentRefundApprovalSatisfied(request.accountManagerApprovalStatus),
+    financeApprovalSatisfied: isShipmentRefundApprovalSatisfied(request.financeApprovalStatus),
+    canApproveAsAccountManager:
+      user.isAccountManager &&
+      request.accountManagerUserId === user.id &&
+      request.accountManagerApprovalStatus === ShipmentRefundApprovalStatus.PENDING,
+    canApproveAsFinance:
+      !user.isAccountManager &&
+      permissionNames.includes("refund-requests:approve-finance") &&
+      request.financeApprovalStatus === ShipmentRefundApprovalStatus.PENDING,
+  };
+}
+
 async function validateClientProfileValue(profile: string): Promise<void> {
   const pricingRules = await storage.getPricingRules();
   const validProfiles = pricingRules.map((rule) => rule.profile);
@@ -1830,9 +2801,11 @@ async function applyClientAccountUpdates(
     return null;
   }
 
-  if (zohoService.isConfigured() && currentClient.zohoCustomerId) {
+  await withBoundIntegrationAccount("zoho", currentClient.zohoIntegrationAccountId, getClientIntegrationRoutingOptions(updatedClient), async () => {
+    if (!zohoService.isConfigured() || !currentClient.zohoCustomerId) return;
+
     try {
-      await zohoService.updateCustomer(currentClient.zohoCustomerId, {
+      await zohoService.updateCustomer(currentClient.zohoCustomerId!, {
         name: updatedClient.name,
         email: updatedClient.email,
         phone: updatedClient.phone,
@@ -1860,7 +2833,7 @@ async function applyClientAccountUpdates(
     } catch (error) {
       logError("Failed to update Zoho customer", error);
     }
-  }
+  });
 
   return { currentClient, updatedClient };
 }
@@ -2027,6 +3000,7 @@ async function markCreditInvoicePaid(
         status: "paid",
         paidAt: new Date(),
       })) || shipmentInvoice;
+    shipmentInvoice = await syncInvoiceToZoho(shipmentInvoice, shipment || undefined);
 
     await createCompletedPaymentRecord({
       invoiceId: shipmentInvoice.id,
@@ -2111,6 +3085,7 @@ async function markShipmentClientPaymentPaid(shipment: Awaited<ReturnType<typeof
       status: "paid",
       paidAt: new Date(),
     })) || invoice;
+  invoice = await syncInvoiceToZoho(invoice, shipment);
 
   await createCompletedPaymentRecord({
     invoiceId: invoice.id,
@@ -2241,15 +3216,15 @@ function serializeClientExtraFeeNotice(shipment: Record<string, any>) {
     extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
     weightValue: parseMoneyValue(shipment.weight),
-    weightUnit: shipment.weightUnit || "KG",
+    weightUnit: getExtraFeesQuantityUnit(shipment),
     grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
   };
 }
 
-function getInvoiceTypeLabel(invoiceType: string | null | undefined) {
+function getInvoiceTypeLabel(invoiceType: string | null | undefined, shipment?: Record<string, any> | null) {
   if (invoiceType === InvoiceType.EXTRA_WEIGHT) {
-    return "Extra Weight";
+    return getExtraFeesQuantityUnit(shipment || {}) === "CBM" ? "Extra Volume" : "Extra Weight";
   }
   if (invoiceType === InvoiceType.EXTRA_COST) {
     return "Extra Cost";
@@ -2258,7 +3233,7 @@ function getInvoiceTypeLabel(invoiceType: string | null | undefined) {
 }
 
 function buildExtraFeeInvoiceDescription(shipment: Record<string, any>, invoiceType: string) {
-  const feeLabel = getInvoiceTypeLabel(invoiceType);
+  const feeLabel = getInvoiceTypeLabel(invoiceType, shipment);
   return `${feeLabel} adjustment for shipment ${shipment.trackingNumber}`;
 }
 
@@ -2316,6 +3291,7 @@ async function syncShipmentExtraFeeInvoiceForType(params: {
 
   if (outstandingAmountSar <= 0) {
     for (const pendingInvoice of pendingInvoices) {
+      await deleteInvoiceFromZoho(pendingInvoice);
       await storage.updateInvoice(pendingInvoice.id, { deletedAt: new Date() });
     }
     return pendingInvoices[0] ?? extraFeeInvoices[0] ?? null;
@@ -2334,13 +3310,14 @@ async function syncShipmentExtraFeeInvoiceForType(params: {
       })) || invoice;
 
     for (const duplicateInvoice of pendingInvoices.slice(1)) {
+      await deleteInvoiceFromZoho(duplicateInvoice);
       await storage.updateInvoice(duplicateInvoice.id, { deletedAt: new Date() });
     }
 
-    return invoice;
+    return syncInvoiceToZoho(invoice, params.shipment);
   }
 
-  return storage.createInvoice({
+  const createdInvoice = await storage.createInvoice({
     clientAccountId: params.shipment.clientAccountId,
     shipmentId: params.shipment.id,
     invoiceType: params.invoiceType,
@@ -2349,6 +3326,7 @@ async function syncShipmentExtraFeeInvoiceForType(params: {
     status: "pending",
     dueDate,
   });
+  return syncInvoiceToZoho(createdInvoice, params.shipment);
 }
 
 async function syncShipmentExtraFeeInvoices(shipment: Shipment) {
@@ -2400,7 +3378,7 @@ function serializeClientExtraFeeNotices(
       extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
       extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
       weightValue: parseMoneyValue(shipment.weight),
-      weightUnit: shipment.weightUnit || "KG",
+      weightUnit: getExtraFeesQuantityUnit(shipment),
       grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
       extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
       invoiceId: invoice?.id || null,
@@ -2444,6 +3422,11 @@ const DEFAULT_PERMISSIONS = [
   { resource: "payments", action: "read", description: "View payment information" },
   { resource: "payments", action: "create", description: "Process payments" },
   { resource: "payments", action: "refund", description: "Issue payment refunds" },
+
+  // Refund Requests
+  { resource: "refund-requests", action: "read", description: "View shipment refund requests" },
+  { resource: "refund-requests", action: "approve-account-manager", description: "Approve shipment refunds as the assigned account manager" },
+  { resource: "refund-requests", action: "approve-finance", description: "Approve shipment refunds as finance or super admin" },
   
   // Applications
   { resource: "applications", action: "read", description: "View client applications" },
@@ -2781,7 +3764,7 @@ export async function registerRoutes(
     try {
       const data = loginSchema.parse(req.body);
       const identifier = req.ip || data.username;
-      
+
       // Check brute-force protection
       const bruteForceCheck = checkBruteForce(identifier);
       if (bruteForceCheck.blocked) {
@@ -2791,7 +3774,7 @@ export async function registerRoutes(
           error: `Too many failed attempts. Try again in ${bruteForceCheck.remainingTime} seconds.` 
         });
       }
-      
+
       const user = await storage.getUserByUsername(data.username);
 
       if (!user) {
@@ -3008,11 +3991,22 @@ export async function registerRoutes(
   // ============================================
 
   // Admin Dashboard Stats
-  app.get("/api/admin/stats", requireAdminPermission("dashboard", "read"), async (_req, res) => {
-    const clients = await storage.getClientAccounts();
-    const shipments = await storage.getShipments();
-    const applications = await storage.getClientApplications();
-    const invoices = await storage.getInvoices();
+  app.get("/api/admin/stats", requireAdminPermission("dashboard", "read"), async (req, res) => {
+    const adminUser = req.currentUser!;
+    const scopedClientAccountIds = await getScopedClientAccountIds(adminUser);
+    const scopedClientIdSet = scopedClientAccountIds ? new Set(scopedClientAccountIds) : null;
+
+    const allClients = await storage.getClientAccounts();
+    const allShipments = await storage.getShipments();
+    const allApplications = await storage.getClientApplications();
+
+    const clients = scopedClientIdSet
+      ? allClients.filter((client) => scopedClientIdSet.has(client.id))
+      : allClients;
+    const shipments = scopedClientIdSet
+      ? allShipments.filter((shipment) => scopedClientIdSet.has(shipment.clientAccountId))
+      : allShipments;
+    const applications = scopedClientIdSet ? [] : allApplications;
 
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -3080,11 +4074,261 @@ export async function registerRoutes(
     res.json(stats);
   });
 
-  // Admin - Recent Shipments
-  app.get("/api/admin/shipments/recent", requireAdminPermission("shipments", "read"), async (_req, res) => {
-    const shipments = await storage.getShipments();
-    res.json(shipments.slice(0, 10));
+  app.get("/api/admin/refund-requests", requireAdminPermission("refund-requests", "read"), async (req, res) => {
+    try {
+      const adminUser = await storage.getUser(req.session.userId!);
+      if (!adminUser) {
+        return res.status(404).json({ error: "Admin user not found" });
+      }
+
+      const status =
+        typeof req.query.status === "string" && req.query.status.trim()
+          ? req.query.status.trim().toUpperCase()
+          : ShipmentRefundRequestStatus.PENDING;
+      const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 50));
+      const scopedClientAccountIds = await getScopedClientAccountIds(adminUser);
+      const refundRequests = await storage.getShipmentRefundRequests({
+        status: status === "ALL" ? "all" : status,
+        clientAccountIds: scopedClientAccountIds,
+      });
+
+      const serialized = await Promise.all(
+        refundRequests.slice(0, limit).map((request) => serializeShipmentRefundRequestForAdmin(request, adminUser)),
+      );
+
+      res.json(serialized);
+    } catch (error) {
+      logError("Error fetching shipment refund requests", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
+
+  app.post(
+    "/api/admin/refund-requests/:id/approve-account-manager",
+    requireAdminPermission("refund-requests", "approve-account-manager"),
+    async (req, res) => {
+      try {
+        const adminUser = await storage.getUser(req.session.userId!);
+        if (!adminUser) {
+          return res.status(404).json({ error: "Admin user not found" });
+        }
+
+        if (!adminUser.isAccountManager) {
+          return res.status(403).json({ error: "Only the assigned account manager can approve this refund" });
+        }
+
+        const refundRequest = await storage.getShipmentRefundRequest(req.params.id);
+        if (!refundRequest) {
+          return res.status(404).json({ error: "Refund request not found" });
+        }
+
+        if (!(await ensureAccountManagerClientAccess(adminUser, refundRequest.clientAccountId, res))) {
+          return;
+        }
+
+        if (!refundRequest.accountManagerUserId || refundRequest.accountManagerUserId !== adminUser.id) {
+          return res.status(403).json({ error: "This refund request is not assigned to you" });
+        }
+
+        if (refundRequest.accountManagerApprovalStatus !== ShipmentRefundApprovalStatus.PENDING) {
+          return res.status(400).json({ error: "Account manager approval has already been recorded" });
+        }
+
+        const now = new Date();
+        const completed = isShipmentRefundApprovalSatisfied(refundRequest.financeApprovalStatus);
+        const updatedRequest = await storage.updateShipmentRefundRequest(refundRequest.id, {
+          accountManagerApprovalStatus: ShipmentRefundApprovalStatus.APPROVED,
+          accountManagerApprovedByUserId: adminUser.id,
+          accountManagerApprovedAt: now,
+          status: completed ? ShipmentRefundRequestStatus.COMPLETED : refundRequest.status,
+          completedAt: completed ? now : refundRequest.completedAt,
+        });
+
+        await logAudit(
+          req.session.userId,
+          "approve_refund_request_account_manager",
+          "shipment_refund_request",
+          refundRequest.id,
+          `Account manager approved refund request for shipment ${refundRequest.shipmentId}`,
+          req.ip,
+        );
+
+        res.json(updatedRequest);
+      } catch (error) {
+        logError("Error approving shipment refund request as account manager", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/refund-requests/:id/approve-finance",
+    requireAdminPermission("refund-requests", "approve-finance"),
+    async (req, res) => {
+      try {
+        const adminUser = await storage.getUser(req.session.userId!);
+        if (!adminUser) {
+          return res.status(404).json({ error: "Admin user not found" });
+        }
+
+        if (adminUser.isAccountManager) {
+          return res.status(403).json({ error: "Account managers cannot perform the finance approval step" });
+        }
+
+        const refundRequest = await storage.getShipmentRefundRequest(req.params.id);
+        if (!refundRequest) {
+          return res.status(404).json({ error: "Refund request not found" });
+        }
+
+        if (refundRequest.financeApprovalStatus !== ShipmentRefundApprovalStatus.PENDING) {
+          return res.status(400).json({ error: "Finance approval has already been recorded" });
+        }
+
+        const now = new Date();
+        const completed = isShipmentRefundApprovalSatisfied(refundRequest.accountManagerApprovalStatus);
+        const updatedRequest = await storage.updateShipmentRefundRequest(refundRequest.id, {
+          financeApprovalStatus: ShipmentRefundApprovalStatus.APPROVED,
+          financeApprovedByUserId: adminUser.id,
+          financeApprovedAt: now,
+          status: completed ? ShipmentRefundRequestStatus.COMPLETED : refundRequest.status,
+          completedAt: completed ? now : refundRequest.completedAt,
+        });
+
+        await logAudit(
+          req.session.userId,
+          "approve_refund_request_finance",
+          "shipment_refund_request",
+          refundRequest.id,
+          `Finance approval recorded for refund request on shipment ${refundRequest.shipmentId}`,
+          req.ip,
+        );
+
+        res.json(updatedRequest);
+      } catch (error) {
+        logError("Error approving shipment refund request as finance", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    },
+  );
+
+  // Admin - Recent Shipments
+  app.get("/api/admin/shipments/recent", requireAdminPermission("shipments", "read"), async (req, res) => {
+    const adminUser = req.currentUser!;
+    const scopedClientAccountIds = await getScopedClientAccountIds(adminUser);
+    const scopedClientIdSet = scopedClientAccountIds ? new Set(scopedClientAccountIds) : null;
+    const shipments = await storage.getShipments();
+    const visibleShipments = scopedClientIdSet
+      ? shipments.filter((shipment) => scopedClientIdSet.has(shipment.clientAccountId))
+      : shipments;
+
+    res.json(visibleShipments.slice(0, 10));
+  });
+
+  const abandonedRecoveryActionSchema = z.object({
+    channel: z.enum([
+      AbandonedShipmentRecoveryChannel.WHATSAPP,
+      AbandonedShipmentRecoveryChannel.SMS,
+      AbandonedShipmentRecoveryChannel.EMAIL,
+    ]).default(AbandonedShipmentRecoveryChannel.WHATSAPP),
+  });
+
+  const abandonedDiscountSchema = abandonedRecoveryActionSchema.extend({
+    discountType: z.enum(["percent", "fixed"]).default("percent"),
+    discountValue: z.coerce.number().positive().max(100000),
+    expiresIn: z.enum(["24 hours", "48 hours", "7 days"]).default("24 hours"),
+    message: z.string().trim().max(3000).optional(),
+  });
+
+  function isAbandonedShipmentCandidate(shipment: Shipment, recovery?: AbandonedShipmentRecovery) {
+    const paymentMethod = String(shipment.paymentMethod || "PAY_NOW").toUpperCase();
+    const paymentStatus = String(shipment.paymentStatus || "pending").toLowerCase();
+    const status = String(shipment.status || "").toLowerCase();
+
+    if (paymentMethod === "CREDIT") return false;
+    if (status === "cancelled" || status === "credit_pending") return false;
+    if (recovery?.status === AbandonedShipmentRecoveryStatus.DISMISSED) return false;
+    if (recovery && recovery.status !== AbandonedShipmentRecoveryStatus.DISMISSED) return true;
+    return paymentStatus !== "paid";
+  }
+
+  function getRecoveryStatusForShipment(shipment: Shipment, recovery?: AbandonedShipmentRecovery) {
+    if (String(shipment.paymentStatus || "").toLowerCase() === "paid") {
+      return AbandonedShipmentRecoveryStatus.RECOVERED;
+    }
+
+    if (recovery?.status) {
+      return recovery.status;
+    }
+
+    return AbandonedShipmentRecoveryStatus.NOT_CONTACTED;
+  }
+
+  function getDiscountExpiryDate(expiresIn: string) {
+    const now = new Date();
+    if (expiresIn === "48 hours") return new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    if (expiresIn === "7 days") return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  function buildAbandonedDiscountMessage(params: {
+    clientName: string;
+    shipment: Shipment;
+    discountText: string;
+    discountAmount: number;
+    finalPrice: number;
+    expiresIn: string;
+    resumeUrl: string;
+  }) {
+    const firstName = params.clientName.trim().split(/\s+/)[0] || params.clientName;
+    return [
+      `مرحبا ${firstName}`,
+      `لاحظنا إنك شاهدت سعر شحنتك ${params.shipment.trackingNumber} ولم تكمل الدفع.`,
+      `عندنا لك عرض خاص: ${params.discountText} على شحنتك، يوفر لك SAR ${params.discountAmount.toLocaleString()}.`,
+      `السعر بعد الخصم: SAR ${params.finalPrice.toLocaleString()}.`,
+      `العرض ساري لمدة ${params.expiresIn}.`,
+      `أكمل الدفع من هنا: ${params.resumeUrl}`,
+    ].join("\n");
+  }
+
+  function buildShipmentResumePaymentUrl(req: Request, shipmentId: string) {
+    return `${buildAppBaseUrl(req)}/client/shipments?resumeShipment=${encodeURIComponent(shipmentId)}`;
+  }
+
+  function ensureMessageHasResumeLink(message: string, resumeUrl: string) {
+    if (message.includes(resumeUrl)) {
+      return message;
+    }
+
+    return `${message.trim()}\n\nأكمل الدفع من هنا: ${resumeUrl}`;
+  }
+
+  async function getAbandonedShipmentForAction(
+    req: Request,
+    res: Response,
+  ): Promise<{ shipment: Shipment; client: ClientAccount | undefined; recovery: AbandonedShipmentRecovery | undefined } | null> {
+    const adminUser = req.currentUser!;
+    const shipment = await storage.getShipment(req.params.id);
+    if (!shipment) {
+      res.status(404).json({ error: "Shipment not found" });
+      return null;
+    }
+
+    if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
+      return null;
+    }
+
+    const [client, recovery] = await Promise.all([
+      storage.getClientAccount(shipment.clientAccountId),
+      storage.getAbandonedShipmentRecoveryByShipmentId(shipment.id),
+    ]);
+
+    if (!isAbandonedShipmentCandidate(shipment, recovery)) {
+      res.status(400).json({ error: "This shipment is not eligible for abandoned recovery" });
+      return null;
+    }
+
+    return { shipment, client, recovery };
+  }
 
   // Admin - All Shipments
   app.get("/api/admin/shipments", requireAdminPermission("shipments", "read"), async (req, res) => {
@@ -3094,9 +4338,100 @@ export async function registerRoutes(
       const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
+      const abandonedOnly = req.query.abandoned === "true";
       const clientAccountIds = await getScopedClientAccountIds(adminUser);
 
-      const result = await storage.getShipmentsPaginated({ page, limit, search, status, clientAccountIds });
+      if (abandonedOnly) {
+        const [allShipments, recoveries] = await Promise.all([
+          storage.getShipments(),
+          storage.getAbandonedShipmentRecoveries({ clientAccountIds, includeDismissed: true }),
+        ]);
+        const scopedClientIdSet = clientAccountIds ? new Set(clientAccountIds) : null;
+        const recoveryByShipmentId = new Map(recoveries.map((recovery) => [recovery.shipmentId, recovery]));
+        const query = search?.trim().toLowerCase();
+        const candidates = allShipments
+          .filter((shipment) => !scopedClientIdSet || scopedClientIdSet.has(shipment.clientAccountId))
+          .filter((shipment) => isAbandonedShipmentCandidate(shipment, recoveryByShipmentId.get(shipment.id)))
+          .filter((shipment) => {
+            if (!query) return true;
+            return [
+              shipment.trackingNumber,
+              shipment.recipientName,
+              shipment.recipientPhone,
+              shipment.recipientCity,
+              shipment.senderName,
+              shipment.senderPhone,
+              shipment.senderCity,
+            ].some((value) => String(value || "").toLowerCase().includes(query));
+          });
+
+        for (const shipment of candidates) {
+          const recovery = recoveryByShipmentId.get(shipment.id);
+          if (String(shipment.paymentStatus || "").toLowerCase() === "paid" && recovery?.status !== AbandonedShipmentRecoveryStatus.RECOVERED) {
+            const recovered = await storage.upsertAbandonedShipmentRecoveryByShipmentId(
+              shipment.id,
+              {
+                shipmentId: shipment.id,
+                clientAccountId: shipment.clientAccountId,
+                status: AbandonedShipmentRecoveryStatus.RECOVERED,
+                lastAction: "auto_recovered",
+                recoveredAt: new Date(),
+              },
+              {
+                status: AbandonedShipmentRecoveryStatus.RECOVERED,
+                lastAction: "auto_recovered",
+                recoveredAt: new Date(),
+              },
+            );
+            recoveryByShipmentId.set(shipment.id, recovered);
+          }
+        }
+
+        const visibleCandidates = candidates.filter((shipment) => recoveryByShipmentId.get(shipment.id)?.status !== AbandonedShipmentRecoveryStatus.DISMISSED);
+        const total = visibleCandidates.length;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const paginatedShipments = visibleCandidates.slice((page - 1) * limit, page * limit);
+        const visibleRecoveries = Array.from(recoveryByShipmentId.values()).filter((recovery) =>
+          visibleCandidates.some((shipment) => shipment.id === recovery.shipmentId),
+        );
+        const statusCounts = visibleCandidates.reduce(
+          (acc, shipment) => {
+            const recovery = recoveryByShipmentId.get(shipment.id);
+            const recoveryStatus = getRecoveryStatusForShipment(shipment, recovery);
+            acc.all += 1;
+            acc[recoveryStatus] = (acc[recoveryStatus] || 0) + 1;
+            return acc;
+          },
+          {
+            all: 0,
+            [AbandonedShipmentRecoveryStatus.NOT_CONTACTED]: 0,
+            [AbandonedShipmentRecoveryStatus.DISCOUNT_SENT]: 0,
+            [AbandonedShipmentRecoveryStatus.EXPIRED]: 0,
+            [AbandonedShipmentRecoveryStatus.REMINDER_SENT]: 0,
+            [AbandonedShipmentRecoveryStatus.RECOVERED]: 0,
+            [AbandonedShipmentRecoveryStatus.DISMISSED]: 0,
+          } as Record<string, number>,
+        );
+        const lostRevenue = visibleCandidates.reduce((sum, shipment) => sum + Number(shipment.finalPrice || 0), 0);
+
+        return res.json({
+          shipments: paginatedShipments,
+          total,
+          page,
+          totalPages,
+          recoveries: visibleRecoveries,
+          metrics: {
+            statusCounts,
+            lostRevenue,
+            recoveryRate: statusCounts.all > 0
+              ? Math.round(((statusCounts[AbandonedShipmentRecoveryStatus.RECOVERED] || 0) / statusCounts.all) * 100)
+              : 0,
+            discountsSent: statusCounts[AbandonedShipmentRecoveryStatus.DISCOUNT_SENT] || 0,
+          },
+        });
+      }
+
+      const result = await storage.getShipmentsPaginated({ page, limit, search, status, clientAccountIds, abandonedOnly });
       res.json(result);
     } catch (error) {
       logError("Error fetching shipments", error);
@@ -3104,9 +4439,208 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/shipments/:id/abandoned-recovery/discount", requireAdminPermission("shipments", "update"), async (req, res) => {
+    try {
+      const parsed = abandonedDiscountSchema.parse(req.body);
+      const context = await getAbandonedShipmentForAction(req, res);
+      if (!context) return;
+
+      const { shipment, client } = context;
+      const shipmentAmount = Number(shipment.finalPrice || 0);
+      const discountAmount = parsed.discountType === "percent"
+        ? Math.min(shipmentAmount, Math.round((shipmentAmount * parsed.discountValue) / 100))
+        : Math.min(shipmentAmount, parsed.discountValue);
+      const discountFinalPrice = Math.max(0, shipmentAmount - discountAmount);
+      const discountText = parsed.discountType === "percent"
+        ? `خصم ${parsed.discountValue}%`
+        : `خصم SAR ${parsed.discountValue.toLocaleString()}`;
+      const resumeUrl = buildShipmentResumePaymentUrl(req, shipment.id);
+      const message = ensureMessageHasResumeLink(parsed.message || buildAbandonedDiscountMessage({
+        clientName: client?.name || shipment.recipientName || shipment.senderName || "عميلنا",
+        shipment,
+        discountText,
+        discountAmount,
+        finalPrice: discountFinalPrice,
+        expiresIn: parsed.expiresIn,
+        resumeUrl,
+      }), resumeUrl);
+      const expiresAt = getDiscountExpiryDate(parsed.expiresIn);
+      let deliveryStatus = "queued";
+
+      if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
+        const sent = await sendEmail({
+          to: client.email,
+          subject: `Special offer for shipment ${shipment.trackingNumber}`,
+          html: message.replace(/\n/g, "<br>"),
+        });
+        deliveryStatus = sent ? "sent" : "email_not_configured";
+      }
+
+      const recovery = await storage.upsertAbandonedShipmentRecoveryByShipmentId(
+        shipment.id,
+        {
+          shipmentId: shipment.id,
+          clientAccountId: shipment.clientAccountId,
+          status: AbandonedShipmentRecoveryStatus.DISCOUNT_SENT,
+          lastAction: `discount_${deliveryStatus}`,
+          discountType: parsed.discountType,
+          discountValue: parsed.discountValue.toFixed(2),
+          discountAmount: discountAmount.toFixed(2),
+          discountFinalPrice: discountFinalPrice.toFixed(2),
+          discountChannel: parsed.channel,
+          discountExpiresAt: expiresAt,
+          discountMessage: message,
+          discountSentAt: new Date(),
+          createdByUserId: req.session.userId,
+          updatedByUserId: req.session.userId,
+        },
+        {
+          status: AbandonedShipmentRecoveryStatus.DISCOUNT_SENT,
+          lastAction: `discount_${deliveryStatus}`,
+          discountType: parsed.discountType,
+          discountValue: parsed.discountValue.toFixed(2),
+          discountAmount: discountAmount.toFixed(2),
+          discountFinalPrice: discountFinalPrice.toFixed(2),
+          discountChannel: parsed.channel,
+          discountExpiresAt: expiresAt,
+          discountMessage: message,
+          discountSentAt: new Date(),
+          updatedByUserId: req.session.userId,
+        },
+      );
+
+      logInfo("Abandoned recovery offer sent", {
+        source: "abandoned_recovery",
+        event: "offer_sent",
+        shipmentId: shipment.id,
+        recoveryId: recovery.id,
+        clientAccountId: shipment.clientAccountId,
+        trackingNumber: shipment.trackingNumber,
+        channel: parsed.channel,
+        deliveryStatus,
+        discountType: parsed.discountType,
+        discountValue: parsed.discountValue,
+        discountAmount,
+        finalAmount: discountFinalPrice,
+        expiresAt,
+      });
+
+      await logAudit(req.session.userId, "send_abandoned_discount", "shipment", shipment.id,
+        `Recorded ${parsed.channel} discount offer for abandoned shipment ${shipment.trackingNumber}`, req.ip);
+
+      res.json({ recovery, deliveryStatus });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error sending abandoned shipment discount", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/shipments/:id/abandoned-recovery/reminder", requireAdminPermission("shipments", "update"), async (req, res) => {
+    try {
+      const parsed = abandonedRecoveryActionSchema.parse(req.body);
+      const context = await getAbandonedShipmentForAction(req, res);
+      if (!context) return;
+
+      const { shipment, client, recovery: existingRecovery } = context;
+      const resumeUrl = buildShipmentResumePaymentUrl(req, shipment.id);
+      let deliveryStatus = "queued";
+      if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
+        const sent = await sendEmail({
+          to: client.email,
+          subject: `Reminder: complete shipment ${shipment.trackingNumber}`,
+          html: `You can still complete payment for shipment <strong>${shipment.trackingNumber}</strong>.<br><a href="${resumeUrl}">Resume payment</a>`,
+        });
+        deliveryStatus = sent ? "sent" : "email_not_configured";
+      }
+
+      const currentReminderCount = existingRecovery?.reminderCount || 0;
+      const recovery = await storage.upsertAbandonedShipmentRecoveryByShipmentId(
+        shipment.id,
+        {
+          shipmentId: shipment.id,
+          clientAccountId: shipment.clientAccountId,
+          status: existingRecovery?.status || AbandonedShipmentRecoveryStatus.NOT_CONTACTED,
+          lastAction: `reminder_${deliveryStatus}`,
+          reminderChannel: parsed.channel,
+          reminderCount: currentReminderCount + 1,
+          reminderSentAt: new Date(),
+          createdByUserId: req.session.userId,
+          updatedByUserId: req.session.userId,
+        },
+        {
+          status: existingRecovery?.status || AbandonedShipmentRecoveryStatus.NOT_CONTACTED,
+          lastAction: `reminder_${deliveryStatus}`,
+          reminderChannel: parsed.channel,
+          reminderCount: currentReminderCount + 1,
+          reminderSentAt: new Date(),
+          updatedByUserId: req.session.userId,
+        },
+      );
+
+      await logAudit(req.session.userId, "send_abandoned_reminder", "shipment", shipment.id,
+        `Recorded ${parsed.channel} reminder for abandoned shipment ${shipment.trackingNumber}`, req.ip);
+
+      res.json({ recovery, deliveryStatus });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error sending abandoned shipment reminder", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/shipments/:id/abandoned-recovery/dismiss", requireAdminPermission("shipments", "update"), async (req, res) => {
+    try {
+      const context = await getAbandonedShipmentForAction(req, res);
+      if (!context) return;
+
+      const { shipment } = context;
+      const recovery = await storage.upsertAbandonedShipmentRecoveryByShipmentId(
+        shipment.id,
+        {
+          shipmentId: shipment.id,
+          clientAccountId: shipment.clientAccountId,
+          status: AbandonedShipmentRecoveryStatus.DISMISSED,
+          lastAction: "dismissed",
+          dismissedAt: new Date(),
+          createdByUserId: req.session.userId,
+          updatedByUserId: req.session.userId,
+        },
+        {
+          status: AbandonedShipmentRecoveryStatus.DISMISSED,
+          lastAction: "dismissed",
+          dismissedAt: new Date(),
+          updatedByUserId: req.session.userId,
+        },
+      );
+
+      await logAudit(req.session.userId, "dismiss_abandoned_shipment", "shipment", shipment.id,
+        `Dismissed abandoned shipment ${shipment.trackingNumber}`, req.ip);
+
+      res.json({ recovery });
+    } catch (error) {
+      logError("Error dismissing abandoned shipment", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - Update Shipment Status (cancelled is handled by dedicated cancel endpoint)
   const statusUpdateSchema = z.object({
-    status: z.enum(["created", "processing", "in_transit", "delivered"]),
+    status: z.enum([
+      "created",
+      "processing",
+      "awaiting_review",
+      "booked",
+      "supplier_pickup",
+      "in_transit",
+      "customs_clearance",
+      "out_for_delivery",
+      "delivered",
+    ]),
   });
 
   app.patch("/api/admin/shipments/:id/status", requireAdminPermission("shipments", "update"), async (req, res) => {
@@ -3114,16 +4648,22 @@ export async function registerRoutes(
       const adminUser = req.currentUser!;
       const { id } = req.params;
       const parseResult = statusUpdateSchema.safeParse(req.body);
-      
+
       if (!parseResult.success) {
         return res.status(400).json({ error: parseResult.error.errors[0].message });
       }
-      
+
       const { status } = parseResult.data;
 
       const shipment = await storage.getShipment(id);
       if (!shipment) {
         return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (
+        shipment.fulfillmentType !== "ddp_manual" &&
+        ["awaiting_review", "booked", "supplier_pickup", "customs_clearance", "out_for_delivery"].includes(status)
+      ) {
+        return res.status(400).json({ error: "This status is only available for manual DDP shipments." });
       }
 
       if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
@@ -3146,26 +4686,39 @@ export async function registerRoutes(
   app.post("/api/admin/shipments/:id/cancel", requireAdminPermission("shipments", "cancel"), async (req, res) => {
     try {
       const { id } = req.params;
-      
+      const adminUser = await storage.getUser(req.session.userId!);
+      if (!adminUser) {
+        return res.status(404).json({ error: "Admin user not found" });
+      }
+
       const shipment = await storage.getShipment(id);
       if (!shipment) {
         return res.status(404).json({ error: "Shipment not found" });
       }
 
-      if (shipment.status === "delivered") {
-        return res.status(400).json({ error: "Cannot cancel delivered shipment" });
+      if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
+        return;
       }
 
       if (shipment.status === "cancelled") {
         return res.status(400).json({ error: "Shipment already cancelled" });
       }
 
+      if (!canShipmentBeCancelled(shipment)) {
+        return res.status(400).json({ error: "Shipments can only be cancelled before the carrier marks them as picked up" });
+      }
+
       if (shipment.carrierTrackingNumber) {
         try {
           const carrierAdapter = getAdapterForShipment(shipment);
-          const cancelledWithCarrier = await carrierAdapter.cancelShipment(
-            shipment.carrierTrackingNumber,
-            shipment.senderCountry,
+          const cancelledWithCarrier = await withBoundIntegrationAccount(
+            getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+            shipment.carrierIntegrationAccountId,
+            getShipmentIntegrationRoutingOptions(shipment),
+            () => carrierAdapter.cancelShipment(
+              shipment.carrierTrackingNumber!,
+              shipment.senderCountry,
+            ),
           );
 
           if (!cancelledWithCarrier) {
@@ -3177,19 +4730,18 @@ export async function registerRoutes(
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
-          const errMsg = isCarrierErr ? (cancelError as CarrierError).carrierMessage : (cancelError as Error).message;
 
           logError("Carrier cancel failed", cancelError);
           await storage.updateShipment(id, {
             carrierErrorCode: errCode,
-            carrierErrorMessage: `Cancel failed: ${errMsg}`,
+            carrierErrorMessage: `Cancel failed: ${CARRIER_CANCELLATION_FAILED_MESSAGE}`,
             carrierLastAttemptAt: new Date(),
           });
 
           return res.status(502).json({
-            error: "Failed to cancel with carrier",
+            error: CARRIER_CANCELLATION_FAILED_MESSAGE,
             carrierErrorCode: errCode,
-            carrierErrorMessage: errMsg,
+            carrierErrorMessage: CARRIER_CANCELLATION_FAILED_MESSAGE,
           });
         }
       }
@@ -3198,11 +4750,21 @@ export async function registerRoutes(
         status: "cancelled",
         carrierStatus: "cancelled",
       });
+
+      const refundRequest = updated
+        ? await ensureShipmentRefundRequestForCancellation({
+            shipment: updated,
+            user: adminUser,
+          })
+        : null;
       
       await logAudit(req.session.userId, "cancel_shipment", "shipment", id,
         `Cancelled shipment ${shipment.trackingNumber}`, req.ip);
       
-      res.json(updated);
+      res.json({
+        shipment: updated,
+        refundRequest,
+      });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
@@ -3239,7 +4801,12 @@ export async function registerRoutes(
             tradeDocumentsData: preparedShipment.tradeDocumentsData,
           });
         }
-        carrierResponse = await carrierAdapter.createShipment(preparedShipment.carrierRequest);
+        carrierResponse = await withBoundIntegrationAccount(
+          getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+          shipment.carrierIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(shipment),
+          () => carrierAdapter.createShipment(preparedShipment.carrierRequest),
+        );
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
         const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
@@ -3452,28 +5019,9 @@ export async function registerRoutes(
         });
 
         // Create Zoho Books customer (if configured)
-        if (zohoService.isConfigured()) {
-          try {
-            const zohoCustomerId = await zohoService.createCustomer({
-              name: application.name,
-              email: application.email,
-              phone: application.phone,
-              companyName: application.companyName || undefined,
-              country: application.country,
-              customerType: application.accountType === 'individual' ? 'individual' : 'business',
-              billingCity: application.shippingCity || undefined,
-              billingState: (application as any).shippingStateOrProvince || undefined,
-              billingPostalCode: application.shippingPostalCode || undefined,
-              billingStreet: application.shippingAddressLine1 || undefined,
-              billingStreet2: application.shippingAddressLine2 || undefined,
-            });
-            if (zohoCustomerId) {
-              await storage.updateClientAccount(clientAccount.id, { zohoCustomerId });
-            }
-          } catch (error) {
-            logError("Failed to create Zoho customer", error);
-          }
-        }
+        await ensureZohoCustomerForClient(clientAccount).catch((error) => {
+          logError("Failed to create Zoho customer", error);
+        });
 
         // Create user for client - generate unique username if needed
         let username = application.email.split("@")[0];
@@ -3718,27 +5266,9 @@ export async function registerRoutes(
       });
 
       // Create Zoho Books customer (if configured)
-      if (zohoService.isConfigured()) {
-        try {
-          const zohoCustomerId = await zohoService.createCustomer({
-            name,
-            email,
-            phone,
-            companyName: companyName || undefined,
-            country,
-            billingCity: shippingCity || undefined,
-            billingState: shippingStateOrProvince || undefined,
-            billingPostalCode: shippingPostalCode || undefined,
-            billingStreet: shippingAddressLine1 || undefined,
-            billingStreet2: shippingAddressLine2 || undefined,
-          });
-          if (zohoCustomerId) {
-            await storage.updateClientAccount(client.id, { zohoCustomerId });
-          }
-        } catch (error) {
-          logError("Failed to create Zoho customer", error);
-        }
-      }
+      await ensureZohoCustomerForClient(client).catch((error) => {
+        logError("Failed to create Zoho customer", error);
+      });
 
       // Create user for the client with a hashed password
       let username = email.split("@")[0];
@@ -4247,9 +5777,7 @@ export async function registerRoutes(
         !clientAccountIds || clientAccountIds.includes(shipment.clientAccountId),
       );
 
-      const accountingShipments = scopedShipments.filter(
-        (shipment) => shipment.taxScenario && shipment.accountingCurrency === "SAR",
-      );
+      const accountingShipments = scopedShipments.filter(isAdminFinancialStatementEligible);
       const excludedLegacyShipmentCount = scopedShipments.length - accountingShipments.length;
 
       const searchedShipments = accountingShipments.filter((shipment) => {
@@ -4890,7 +6418,7 @@ export async function registerRoutes(
                 component.invoiceType === InvoiceType.EXTRA_WEIGHT && component.weightValue !== undefined
                   ? formatMoney(component.weightValue)
                   : null,
-              weightUnit: shipment.weightUnit,
+              weightUnit: getExtraFeesQuantityUnit(shipment),
               extraCostAmountSar:
                 component.invoiceType === InvoiceType.EXTRA_COST && component.costAmountSar !== undefined
                   ? formatMoney(component.costAmountSar)
@@ -4935,6 +6463,36 @@ export async function registerRoutes(
       }
       logError("Error updating shipment extra fees", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/ddp/shipments/:id/charges", requireAdminPermission("shipments", "update"), async (req, res) => {
+    try {
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (shipment.fulfillmentType !== "ddp_manual") {
+        return res.status(400).json({ error: "Manual DDP charges can only be added to DDP shipments." });
+      }
+      const { description, amount } = z.object({
+        description: z.string().trim().min(3).max(500),
+        amount: z.coerce.number().positive().max(1_000_000),
+      }).parse(req.body);
+      const invoice = await storage.createInvoice({
+        clientAccountId: shipment.clientAccountId,
+        shipmentId: shipment.id,
+        invoiceType: InvoiceType.DDP_ADJUSTMENT,
+        description: `DDP adjustment for ${shipment.trackingNumber}: ${description}`,
+        amount: formatMoney(amount),
+        status: "pending",
+        dueDate: new Date(),
+      });
+      const syncedInvoice = await syncInvoiceToZoho(invoice, shipment);
+      await logAudit(req.session.userId, "create_ddp_adjustment", "invoice", invoice.id, `Added SAR ${formatMoney(amount)} DDP adjustment to ${shipment.trackingNumber}`, req.ip);
+      res.status(201).json(syncedInvoice);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to add DDP shipment adjustment", error);
+      res.status(500).json({ error: "Failed to add DDP shipment adjustment" });
     }
   });
 
@@ -5378,15 +6936,157 @@ export async function registerRoutes(
   });
 
   // Admin - Pricing Rules
+  const optionalDdpInteger = z.preprocess(
+    (value) => value === "" || value === null || value === undefined ? undefined : value,
+    z.coerce.number().int().nonnegative().optional(),
+  );
+  const optionalDdpDecimal = (precision: number) => z.preprocess(
+    (value) => value === "" || value === null || value === undefined ? undefined : value,
+    z.coerce.number().nonnegative().optional(),
+  ).transform((value) => value == null ? null : value.toFixed(precision));
+  const isDuplicateDdpLaneError = (error: unknown): boolean =>
+    typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+  const invalidDdpTransitRange = (lane: {
+    airTransitDaysMin?: number | null;
+    airTransitDaysMax?: number | null;
+    seaTransitDaysMin?: number | null;
+    seaTransitDaysMax?: number | null;
+  }): string | undefined => {
+    if (lane.airTransitDaysMin != null && lane.airTransitDaysMax != null && lane.airTransitDaysMin > lane.airTransitDaysMax) {
+      return "Air transit minimum days cannot exceed maximum days.";
+    }
+    if (lane.seaTransitDaysMin != null && lane.seaTransitDaysMax != null && lane.seaTransitDaysMin > lane.seaTransitDaysMax) {
+      return "Sea transit minimum days cannot exceed maximum days.";
+    }
+    return undefined;
+  };
+
+  const ddpPricingLaneSchema = insertDdpPricingLaneSchema.omit({
+    originCity: true,
+    destinationCity: true,
+  }).extend({
+    originCountryCode: z.string().trim().length(2).transform((value) => value.toUpperCase()),
+    destinationCountryCode: z.string().trim().length(2).transform((value) => value.toUpperCase()),
+    currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).default("SAR"),
+    airBaseRatePerKg: optionalDdpDecimal(2),
+    seaBaseRatePerCbm: optionalDdpDecimal(2),
+    minimumBillableKg: z.coerce.number().nonnegative().transform((value) => value.toFixed(3)),
+    kgRoundingIncrement: z.coerce.number().positive().transform((value) => value.toFixed(3)),
+    minimumBillableCbm: z.coerce.number().nonnegative().transform((value) => value.toFixed(4)),
+    cbmRoundingIncrement: z.coerce.number().positive().transform((value) => value.toFixed(4)),
+    minimumShipmentCharge: z.coerce.number().nonnegative().transform((value) => value.toFixed(2)),
+    volumetricDivisor: z.coerce.number().int().positive().default(6000),
+    airTransitDaysMin: optionalDdpInteger,
+    airTransitDaysMax: optionalDdpInteger,
+    seaTransitDaysMin: optionalDdpInteger,
+    seaTransitDaysMax: optionalDdpInteger,
+  });
+
+  app.get("/api/admin/ddp-pricing", requireAdminPermission("pricing-rules", "read"), async (_req, res) => {
+    res.json(await storage.getDdpPricingLanes());
+  });
+
+  app.post("/api/admin/ddp-pricing", requireAdminPermission("pricing-rules", "create"), async (req, res) => {
+    try {
+      const lane = ddpPricingLaneSchema.parse(req.body);
+      if (Number(lane.airBaseRatePerKg) <= 0 && Number(lane.seaBaseRatePerCbm) <= 0) {
+        return res.status(400).json({ error: "Configure at least one DDP transport rate." });
+      }
+      const transitRangeError = invalidDdpTransitRange(lane);
+      if (transitRangeError) {
+        return res.status(400).json({ error: transitRangeError });
+      }
+      const created = await storage.createDdpPricingLane({ ...lane, originCity: "", destinationCity: "" });
+      await logAudit(req.session.userId, "create_ddp_lane", "ddp_pricing_lane", created.id, `Created DDP lane ${created.originCountryCode} to ${created.destinationCountryCode}`, req.ip);
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      if (isDuplicateDdpLaneError(error)) {
+        return res.status(409).json({ error: "A DDP lane already exists for this origin and destination." });
+      }
+      logError("Failed to create DDP pricing lane", error);
+      res.status(500).json({ error: "Failed to create DDP pricing lane" });
+    }
+  });
+
+  app.patch("/api/admin/ddp-pricing/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const updates = ddpPricingLaneSchema.partial().parse(req.body);
+      const existingLane = await storage.getDdpPricingLane(req.params.id);
+      if (!existingLane) return res.status(404).json({ error: "DDP lane not found" });
+      if (Number(updates.airBaseRatePerKg ?? existingLane.airBaseRatePerKg) <= 0 && Number(updates.seaBaseRatePerCbm ?? existingLane.seaBaseRatePerCbm) <= 0) {
+        return res.status(400).json({ error: "Configure at least one DDP transport rate." });
+      }
+      const transitRangeError = invalidDdpTransitRange({ ...existingLane, ...updates });
+      if (transitRangeError) {
+        return res.status(400).json({ error: transitRangeError });
+      }
+      const shouldNormalizeLaneScope = updates.originCountryCode !== undefined || updates.destinationCountryCode !== undefined;
+      const lane = await storage.updateDdpPricingLane(req.params.id, {
+        ...updates,
+        ...(shouldNormalizeLaneScope ? { originCity: "", destinationCity: "" } : {}),
+      });
+      if (!lane) return res.status(404).json({ error: "DDP lane not found" });
+      await logAudit(req.session.userId, "update_ddp_lane", "ddp_pricing_lane", lane.id, `Updated DDP lane ${lane.originCountryCode} to ${lane.destinationCountryCode}`, req.ip);
+      res.json(lane);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      if (isDuplicateDdpLaneError(error)) {
+        return res.status(409).json({ error: "A DDP lane already exists for this origin and destination." });
+      }
+      logError("Failed to update DDP pricing lane", error);
+      res.status(500).json({ error: "Failed to update DDP pricing lane" });
+    }
+  });
+
+  app.delete("/api/admin/ddp-pricing/:id", requireAdminPermission("pricing-rules", "delete"), async (req, res) => {
+    await storage.deleteDdpPricingLane(req.params.id);
+    await logAudit(req.session.userId, "delete_ddp_lane", "ddp_pricing_lane", req.params.id, "Deleted DDP pricing lane", req.ip);
+    res.json({ success: true });
+  });
+
   app.get("/api/admin/pricing", requireAdminPermission("pricing-rules", "read"), async (_req, res) => {
     const rules = await storage.getPricingRules();
     res.json(rules);
   });
 
+  app.get("/api/profile-badges", requireAuth, async (_req, res) => {
+    const rules = await storage.getPricingRules();
+    res.json(
+      rules
+        .filter((rule) => rule.isActive)
+        .map((rule) => ({
+          profile: rule.profile,
+          displayName: rule.displayName,
+          badgeColor: rule.badgeColor,
+          badgeStyle: rule.badgeStyle,
+          badgeGradientFrom: rule.badgeGradientFrom,
+          badgeGradientTo: rule.badgeGradientTo,
+          badgeGradientAngle: rule.badgeGradientAngle,
+          badgeIcon: rule.badgeIcon,
+        })),
+    );
+  });
+
   // Admin - Create Pricing Profile
   app.post("/api/admin/pricing", requireAdminPermission("pricing-rules", "create"), async (req, res) => {
     try {
-      const { profile, displayName, marginPercentage } = req.body;
+      const {
+        profile,
+        displayName,
+        marginPercentage,
+        ddpMarginPercentage,
+        badgeColor,
+        badgeStyle,
+        badgeGradientFrom,
+        badgeGradientTo,
+        badgeGradientAngle,
+        badgeIcon,
+      } = req.body;
       
       if (!profile || !displayName) {
         return res.status(400).json({ error: "Profile key and display name are required" });
@@ -5408,16 +7108,38 @@ export async function registerRoutes(
       if (isNaN(margin) || margin < 0 || margin > 100) {
         return res.status(400).json({ error: "Invalid margin percentage" });
       }
+      const ddpMargin = parseFloat(ddpMarginPercentage || marginPercentage || "15");
+      if (isNaN(ddpMargin) || ddpMargin < 0 || ddpMargin > 100) {
+        return res.status(400).json({ error: "Invalid DDP markup percentage" });
+      }
+
+      const normalizedBadgeColor = normalizeBadgeColor(badgeColor);
+      if (badgeColor !== undefined && !normalizedBadgeColor) {
+        return res.status(400).json({ error: "Invalid badge color" });
+      }
+      const normalizedBadgeStyle = normalizeBadgeStyle(badgeStyle);
+      const normalizedGradientFrom = normalizeBadgeColor(badgeGradientFrom);
+      const normalizedGradientTo = normalizeBadgeColor(badgeGradientTo);
+      if (normalizedBadgeStyle === "gradient" && (!normalizedGradientFrom || !normalizedGradientTo)) {
+        return res.status(400).json({ error: "Invalid badge gradient colors" });
+      }
 
       const newRule = await storage.createPricingRule({
         profile: profileKey,
         displayName: displayName.trim(),
         marginPercentage: margin.toFixed(2),
+        ddpMarginPercentage: ddpMargin.toFixed(2),
+        badgeColor: normalizedBadgeColor || "#6B7280",
+        badgeStyle: normalizedBadgeStyle,
+        badgeGradientFrom: normalizedGradientFrom,
+        badgeGradientTo: normalizedGradientTo,
+        badgeGradientAngle: normalizeBadgeGradientAngle(badgeGradientAngle),
+        badgeIcon: normalizeBadgeIcon(badgeIcon),
         isActive: true,
       });
 
       await logAudit(req.session.userId, "create_pricing_profile", "pricing_rule", newRule.id,
-        `Created pricing profile: ${displayName} with ${margin}% margin`, req.ip);
+        `Created pricing profile: ${displayName} with ${margin}% margin and ${newRule.badgeStyle} badge styling`, req.ip);
 
       res.status(201).json(newRule);
     } catch (error) {
@@ -5430,9 +7152,31 @@ export async function registerRoutes(
   app.patch("/api/admin/pricing/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
       const { id } = req.params;
-      const { marginPercentage, displayName, isActive } = req.body;
+      const {
+        marginPercentage,
+        ddpMarginPercentage,
+        displayName,
+        isActive,
+        badgeColor,
+        badgeStyle,
+        badgeGradientFrom,
+        badgeGradientTo,
+        badgeGradientAngle,
+        badgeIcon,
+      } = req.body;
       
-      const updates: { marginPercentage?: string; displayName?: string; isActive?: boolean } = {};
+      const updates: {
+        marginPercentage?: string;
+        ddpMarginPercentage?: string;
+        displayName?: string;
+        isActive?: boolean;
+        badgeColor?: string | null;
+        badgeStyle?: "solid" | "gradient";
+        badgeGradientFrom?: string | null;
+        badgeGradientTo?: string | null;
+        badgeGradientAngle?: number;
+        badgeIcon?: string;
+      } = {};
 
       if (marginPercentage !== undefined) {
         const margin = parseFloat(marginPercentage);
@@ -5440,6 +7184,13 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Invalid margin percentage" });
         }
         updates.marginPercentage = margin.toFixed(2);
+      }
+      if (ddpMarginPercentage !== undefined) {
+        const ddpMargin = parseFloat(ddpMarginPercentage);
+        if (isNaN(ddpMargin) || ddpMargin < 0 || ddpMargin > 100) {
+          return res.status(400).json({ error: "Invalid DDP markup percentage" });
+        }
+        updates.ddpMarginPercentage = ddpMargin.toFixed(2);
       }
 
       if (displayName !== undefined) {
@@ -5453,6 +7204,42 @@ export async function registerRoutes(
         updates.isActive = isActive;
       }
 
+      if (badgeColor !== undefined) {
+        const normalizedBadgeColor = normalizeBadgeColor(badgeColor);
+        if (!normalizedBadgeColor) {
+          return res.status(400).json({ error: "Invalid badge color" });
+        }
+        updates.badgeColor = normalizedBadgeColor;
+      }
+
+      if (badgeStyle !== undefined) {
+        updates.badgeStyle = normalizeBadgeStyle(badgeStyle);
+      }
+
+      if (badgeGradientFrom !== undefined) {
+        const normalizedGradientFrom = normalizeBadgeColor(badgeGradientFrom);
+        if (!normalizedGradientFrom) {
+          return res.status(400).json({ error: "Invalid gradient start color" });
+        }
+        updates.badgeGradientFrom = normalizedGradientFrom;
+      }
+
+      if (badgeGradientTo !== undefined) {
+        const normalizedGradientTo = normalizeBadgeColor(badgeGradientTo);
+        if (!normalizedGradientTo) {
+          return res.status(400).json({ error: "Invalid gradient end color" });
+        }
+        updates.badgeGradientTo = normalizedGradientTo;
+      }
+
+      if (badgeGradientAngle !== undefined) {
+        updates.badgeGradientAngle = normalizeBadgeGradientAngle(badgeGradientAngle);
+      }
+
+      if (badgeIcon !== undefined) {
+        updates.badgeIcon = normalizeBadgeIcon(badgeIcon);
+      }
+
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ error: "No valid updates provided" });
       }
@@ -5464,8 +7251,12 @@ export async function registerRoutes(
 
       const changeDetails = [];
       if (updates.marginPercentage) changeDetails.push(`margin to ${updates.marginPercentage}%`);
+      if (updates.ddpMarginPercentage) changeDetails.push(`DDP markup to ${updates.ddpMarginPercentage}%`);
       if (updates.displayName) changeDetails.push(`name to "${updates.displayName}"`);
       if (updates.isActive !== undefined) changeDetails.push(`active to ${updates.isActive}`);
+      if (updates.badgeColor) changeDetails.push(`badge color to ${updates.badgeColor}`);
+      if (updates.badgeStyle) changeDetails.push(`badge style to ${updates.badgeStyle}`);
+      if (updates.badgeIcon) changeDetails.push(`badge icon to ${updates.badgeIcon}`);
 
       await logAudit(req.session.userId, "update_pricing", "pricing_rule", id,
         `Updated ${changeDetails.join(", ")}`, req.ip);
@@ -5564,6 +7355,12 @@ export async function registerRoutes(
     minAmount: z.number().min(0, "Minimum amount must be 0 or greater").optional(),
     marginPercentage: z.number().min(0, "Margin must be 0 or greater").max(1000, "Margin cannot exceed 1000%").optional(),
   });
+  const ddpPricingTierSchema = pricingTierSchema.extend({
+    billingUnit: z.enum(["KG", "CBM"]),
+  });
+  const ddpPricingTierUpdateSchema = pricingTierUpdateSchema.extend({
+    billingUnit: z.enum(["KG", "CBM"]).optional(),
+  });
 
   app.patch("/api/admin/pricing/tiers/:tierId", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
@@ -5605,6 +7402,78 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       logError("Error deleting pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin - DDP Pricing Tiers
+  app.get("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
+    try {
+      res.json(await storage.getDdpPricingTiersByProfileId(req.params.id));
+    } catch (error) {
+      logError("Error fetching DDP pricing tiers", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const { billingUnit, minAmount, marginPercentage } = ddpPricingTierSchema.parse(req.body);
+      const profile = await storage.getPricingRuleById(req.params.id);
+      if (!profile) {
+        return res.status(404).json({ error: "Pricing profile not found" });
+      }
+
+      const tier = await storage.createDdpPricingTier({
+        profileId: profile.id,
+        billingUnit,
+        minAmount: String(minAmount),
+        marginPercentage: String(marginPercentage),
+      });
+      await logAudit(req.session.userId, "create_ddp_pricing_tier", "ddp_pricing_tier", tier.id,
+        `Created DDP pricing tier for ${profile.displayName}: ${minAmount}+ ${billingUnit} at ${marginPercentage}%`, req.ip);
+      res.status(201).json(tier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error creating DDP pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/pricing/ddp-tiers/:tierId", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const validated = ddpPricingTierUpdateSchema.parse(req.body);
+      const updates: Record<string, string> = {};
+      if (validated.billingUnit !== undefined) updates.billingUnit = validated.billingUnit;
+      if (validated.minAmount !== undefined) updates.minAmount = String(validated.minAmount);
+      if (validated.marginPercentage !== undefined) updates.marginPercentage = String(validated.marginPercentage);
+
+      const tier = await storage.updateDdpPricingTier(req.params.tierId, updates);
+      if (!tier) {
+        return res.status(404).json({ error: "DDP pricing tier not found" });
+      }
+      await logAudit(req.session.userId, "update_ddp_pricing_tier", "ddp_pricing_tier", tier.id,
+        `Updated DDP pricing tier: ${tier.minAmount}+ ${tier.billingUnit} at ${tier.marginPercentage}%`, req.ip);
+      res.json(tier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Error updating DDP pricing tier", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/pricing/ddp-tiers/:tierId", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      await storage.deleteDdpPricingTier(req.params.tierId);
+      await logAudit(req.session.userId, "delete_ddp_pricing_tier", "ddp_pricing_tier", req.params.tierId,
+        "Deleted DDP pricing tier", req.ip);
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting DDP pricing tier", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -5702,6 +7571,371 @@ export async function registerRoutes(
     } catch (error) {
       logError("Error fetching integration logs", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  const integrationAccountPayloadSchema = z.object({
+    appKey: z.string().min(1),
+    accountName: z.string().min(1).max(120),
+    environment: z.enum(["sandbox", "production"]).default("sandbox"),
+    countryCode: z.string().length(2).transform((value) => value.toUpperCase()).optional().nullable(),
+    region: z.string().max(80).optional().nullable(),
+    priority: z.number().int().min(1).max(9999).default(100),
+    isActive: z.boolean().default(true),
+    isDefault: z.boolean().default(false),
+    credentials: z.record(z.string()).default({}),
+    settings: z.record(z.string()).default({}),
+  });
+
+  function validateIntegrationCredentials(definition: NonNullable<ReturnType<typeof getIntegrationDefinition>>, credentials: Record<string, string>) {
+    const missing = definition.credentialFields
+      .filter((field) => field.required)
+      .filter((field) => !credentials[field.key]?.trim())
+      .map((field) => field.label);
+
+    if (missing.length > 0) {
+      throw new Error(`Missing required credentials: ${missing.join(", ")}`);
+    }
+  }
+
+  function stripUnchangedCredentialPlaceholders(credentials: Record<string, string>) {
+    return Object.fromEntries(
+      Object.entries(credentials).filter(([, value]) => {
+        const trimmed = String(value || "").trim();
+        return trimmed.length > 0 && !trimmed.includes("••");
+      }),
+    );
+  }
+
+  function mergeIntegrationCredentialUpdates(
+    definition: NonNullable<ReturnType<typeof getIntegrationDefinition>>,
+    currentCredentials: Record<string, string>,
+    submittedCredentials: Record<string, string>,
+  ) {
+    const nextCredentials = { ...currentCredentials };
+    for (const field of definition.credentialFields) {
+      if (!(field.key in submittedCredentials)) continue;
+      const value = String(submittedCredentials[field.key] || "").trim();
+      if (value.includes("••")) continue;
+      if (value) {
+        nextCredentials[field.key] = value;
+      } else {
+        delete nextCredentials[field.key];
+      }
+    }
+    return sanitizeIntegrationCredentials(definition, nextCredentials);
+  }
+
+  const webAppSettingsSchema = z.object({
+    integrationAccountCountryBasis: z.enum([
+      IntegrationAccountCountryBasis.SHIPPING_ACCOUNT_COUNTRY,
+      IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY,
+    ]),
+  });
+
+  app.get("/api/admin/settings/web-app", requireAdminPermission("settings", "read"), async (_req, res) => {
+    res.json({
+      integrationAccountCountryBasis: await getIntegrationAccountCountryBasis(),
+    });
+  });
+
+  app.patch("/api/admin/settings/web-app", requireAdminPermission("settings", "update"), async (req, res) => {
+    try {
+      const data = webAppSettingsSchema.parse(req.body);
+      await storage.upsertPlatformSetting({
+        key: INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
+        value: data.integrationAccountCountryBasis,
+        updatedByUserId: req.session.userId || null,
+      });
+      await logAudit(
+        req.session.userId,
+        "update_web_app_settings",
+        "platform_setting",
+        INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
+        `Updated integration account country basis to ${data.integrationAccountCountryBasis}`,
+        req.ip,
+      );
+      res.json(data);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to update web app settings", error);
+      res.status(500).json({ error: "Failed to update web app settings" });
+    }
+  });
+
+  // Admin - Apps / Integration Account Management
+  app.get("/api/admin/apps", requireAdminPermission("integrations", "read"), async (_req, res) => {
+    try {
+      const storedAccounts = await storage.getIntegrationAccounts();
+      const serializedStoredAccounts = storedAccounts.map((account) => ({
+        ...serializeIntegrationAccountSafely(account),
+        source: "database",
+      }));
+
+      const envAccounts = INTEGRATION_APP_DEFINITIONS
+        .map((definition) => buildEnvAccount(definition.key))
+        .filter((account): account is NonNullable<ReturnType<typeof buildEnvAccount>> => Boolean(account));
+
+      res.json({
+        categories: [
+          { key: "all", label: "All" },
+          { key: "shipping", label: "Shipping Carriers" },
+          { key: "payment", label: "Payment Gateways" },
+          { key: "ai", label: "AI & Extraction" },
+          { key: "accounting", label: "Accounting" },
+          { key: "notifications", label: "Notifications" },
+          { key: "storage", label: "Storage" },
+        ],
+        apps: INTEGRATION_APP_DEFINITIONS.map((definition) => {
+          const storedAppAccounts = serializedStoredAccounts.filter((account) => account.appKey === definition.key);
+          const accounts = [
+            ...storedAppAccounts,
+            ...envAccounts.filter((account: any) => account?.appKey === definition.key),
+          ];
+          const activeAccounts = accounts.filter((account: any) => account.isActive);
+          const countedAccounts = accounts.filter(
+            (account: any) => account.source !== "environment" || account.isActive,
+          );
+
+          return {
+            ...definition,
+            configured: activeAccounts.length > 0,
+            accountCount: countedAccounts.length,
+            activeAccountCount: activeAccounts.length,
+            accounts,
+          };
+        }),
+      });
+    } catch (error) {
+      logError("Error fetching apps", error);
+      res.status(500).json({ error: "Failed to fetch apps" });
+    }
+  });
+
+  app.post("/api/admin/apps/accounts", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    try {
+      const data = integrationAccountPayloadSchema.parse(req.body);
+      const definition = getIntegrationDefinition(data.appKey);
+      if (!definition) {
+        return res.status(400).json({ error: "Unsupported app integration" });
+      }
+
+      const cleanCredentials = sanitizeIntegrationCredentials(
+        definition,
+        stripUnchangedCredentialPlaceholders(data.credentials),
+      );
+      const cleanSettings = sanitizeIntegrationSettings(definition, data.settings || {});
+      validateIntegrationCredentials(definition, cleanCredentials);
+
+      if (data.isDefault) {
+        await storage.unsetDefaultIntegrationAccounts(data.appKey, data.environment, data.countryCode);
+      }
+
+      const account = await storage.createIntegrationAccount({
+        appKey: definition.key,
+        appName: definition.name,
+        category: definition.category,
+        accountName: data.accountName,
+        environment: data.environment,
+        countryCode: data.countryCode || null,
+        region: data.region || null,
+        priority: data.priority,
+        isActive: data.isActive,
+        isDefault: data.isDefault,
+        credentialsEncrypted: encryptIntegrationPayload(cleanCredentials),
+        settings: JSON.stringify(cleanSettings),
+        capabilities: JSON.stringify(definition.capabilities),
+        createdByUserId: req.session.userId,
+        updatedByUserId: req.session.userId,
+      });
+      await loadDefaultIntegrationAccountsIntoEnv();
+
+      await logAudit(req.session.userId, "create_integration_account", "integration_account", account.id,
+        `Created ${definition.name} integration account ${account.accountName}`, req.ip);
+
+      res.status(201).json(serializeIntegrationAccount(account));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      if (error instanceof Error && (
+        error.message.startsWith("Missing required credentials") ||
+        error.message.startsWith("Unsupported integration field") ||
+        error.message.includes("must use an approved HTTPS provider host") ||
+        error.message.includes("must be a valid URL")
+      )) {
+        return res.status(400).json({ error: error.message });
+      }
+      logError("Error creating integration account", error);
+      res.status(500).json({ error: "Failed to create integration account" });
+    }
+  });
+
+  app.patch("/api/admin/apps/accounts/:id", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    try {
+      const existing = await storage.getIntegrationAccount(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Integration account not found" });
+      }
+
+      const data = integrationAccountPayloadSchema.partial().parse(req.body);
+      if (data.appKey && data.appKey !== existing.appKey) {
+        return res.status(400).json({ error: "An integration account cannot be moved to another app" });
+      }
+      const definition = getIntegrationDefinition(data.appKey || existing.appKey);
+      if (!definition) {
+        return res.status(400).json({ error: "Unsupported app integration" });
+      }
+
+      let currentCredentials: Record<string, string> = {};
+      try {
+        currentCredentials = serializeIntegrationAccount(existing, true).credentials as Record<string, string>;
+      } catch {
+        // Allow an admin to repair records after an encryption-key rotation by
+        // replacing the complete credential set from the Apps page.
+      }
+      const cleanCredentials = data.credentials
+        ? mergeIntegrationCredentialUpdates(definition, currentCredentials, data.credentials)
+        : currentCredentials;
+      const cleanSettings = data.settings
+        ? sanitizeIntegrationSettings(definition, data.settings)
+        : undefined;
+      const nextCredentials = cleanCredentials;
+      validateIntegrationCredentials(definition, nextCredentials);
+
+      const environment = data.environment || existing.environment;
+      const countryCode = data.countryCode !== undefined ? data.countryCode : existing.countryCode;
+      const isDefault = data.isDefault ?? existing.isDefault;
+      if (isDefault) {
+        await storage.unsetDefaultIntegrationAccounts(existing.appKey, environment, countryCode);
+      }
+
+      const updated = await storage.updateIntegrationAccount(existing.id, {
+        accountName: data.accountName ?? existing.accountName,
+        environment,
+        countryCode: countryCode || null,
+        region: data.region !== undefined ? data.region : existing.region,
+        priority: data.priority ?? existing.priority,
+        isActive: data.isActive ?? existing.isActive,
+        isDefault,
+        credentialsEncrypted: data.credentials
+          ? encryptIntegrationPayload(nextCredentials)
+          : existing.credentialsEncrypted,
+        settings: cleanSettings ? JSON.stringify(cleanSettings) : existing.settings,
+        lastTestedAt: null,
+        lastTestSuccess: null,
+        lastTestMessage: null,
+        updatedByUserId: req.session.userId,
+      });
+      await loadDefaultIntegrationAccountsIntoEnv();
+
+      await logAudit(req.session.userId, "update_integration_account", "integration_account", existing.id,
+        `Updated ${definition.name} integration account ${updated?.accountName || existing.accountName}`, req.ip);
+
+      res.json(updated ? serializeIntegrationAccount(updated) : null);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      if (error instanceof Error && (
+        error.message.startsWith("Missing required credentials") ||
+        error.message.startsWith("Unsupported integration field") ||
+        error.message.includes("must use an approved HTTPS provider host") ||
+        error.message.includes("must be a valid URL")
+      )) {
+        return res.status(400).json({ error: error.message });
+      }
+      logError("Error updating integration account", error);
+      res.status(500).json({ error: "Failed to update integration account" });
+    }
+  });
+
+  app.delete("/api/admin/apps/accounts/:id", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    try {
+      const existing = await storage.getIntegrationAccount(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Integration account not found" });
+      }
+
+      const [shipments, invoices, clients] = await Promise.all([
+        storage.getShipments(),
+        storage.getInvoices(),
+        storage.getClientAccounts(),
+      ]);
+      const isBound =
+        shipments.some((shipment) =>
+          shipment.carrierIntegrationAccountId === existing.id ||
+          shipment.tapIntegrationAccountId === existing.id,
+        ) ||
+        invoices.some((invoice) =>
+          invoice.tapIntegrationAccountId === existing.id ||
+          invoice.zohoIntegrationAccountId === existing.id,
+        ) ||
+        clients.some((client) =>
+          client.tapIntegrationAccountId === existing.id ||
+          client.zohoIntegrationAccountId === existing.id,
+        );
+      if (isBound) {
+        return res.status(409).json({
+          error: "This account is already used by operational records. Disable it instead so existing shipments and callbacks remain available.",
+        });
+      }
+
+      await storage.deleteIntegrationAccount(existing.id);
+      await loadDefaultIntegrationAccountsIntoEnv();
+      await logAudit(req.session.userId, "delete_integration_account", "integration_account", existing.id,
+        `Deleted ${existing.appName} integration account ${existing.accountName}`, req.ip);
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting integration account", error);
+      res.status(500).json({ error: "Failed to delete integration account" });
+    }
+  });
+
+  app.post("/api/admin/apps/accounts/:id/test", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    try {
+      const account = await storage.getIntegrationAccount(req.params.id);
+      if (!account) {
+        return res.status(404).json({ error: "Integration account not found" });
+      }
+
+      const startedAt = Date.now();
+      const result = await runIntegrationAccountTest(account);
+
+      const updated = await storage.updateIntegrationAccount(account.id, {
+        lastTestedAt: new Date(),
+        lastTestSuccess: result.success,
+        lastTestMessage: result.message,
+        updatedByUserId: req.session.userId,
+      });
+
+      await storage.createIntegrationLog({
+        serviceName: account.appKey,
+        operation: "validate_credentials",
+        success: result.success,
+        duration: Date.now() - startedAt,
+        errorMessage: result.success ? null : result.message,
+        requestPayload: JSON.stringify({
+          accountId: account.id,
+          accountName: account.accountName,
+          environment: account.environment,
+          countryCode: account.countryCode,
+        }),
+        responsePayload: JSON.stringify({
+          message: result.message,
+        }),
+      });
+
+      await logAudit(req.session.userId, "test_integration_account", "integration_account", account.id,
+        `Tested ${account.appName} integration account ${account.accountName}: ${result.success ? "success" : "failed"}`, req.ip);
+
+      res.json({ ...result, account: updated ? serializeIntegrationAccount(updated) : null });
+    } catch (error) {
+      logError("Error testing integration account", error);
+      res.status(500).json({ error: "Failed to test integration account" });
     }
   });
 
@@ -6694,9 +8928,10 @@ export async function registerRoutes(
       }
 
       // Sync to Zoho Books if configured and customer exists
-      if (zohoService.isConfigured() && currentClient?.zohoCustomerId) {
+      await withBoundIntegrationAccount("zoho", currentClient?.zohoIntegrationAccountId, getClientIntegrationRoutingOptions(updated), async () => {
+        if (!zohoService.isConfigured() || !currentClient?.zohoCustomerId) return;
         try {
-          await zohoService.updateCustomer(currentClient.zohoCustomerId, {
+          await zohoService.updateCustomer(currentClient.zohoCustomerId!, {
             name: updated.name,
             email: updated.email,
             phone: updated.phone,
@@ -6714,7 +8949,7 @@ export async function registerRoutes(
         } catch (error) {
           logError("Failed to update Zoho customer", error);
         }
-      }
+      });
 
       await logAudit(req.session.userId, "update_profile", "client_account", user.clientAccountId,
         `Client updated their profile`, req.ip);
@@ -6762,10 +8997,116 @@ export async function registerRoutes(
       if (!perms || !perms.permissions.includes(permission)) {
         return res.status(403).json({ error: "Permission denied" });
       }
-      
+
       next();
     };
   };
+
+  app.get(
+    "/api/client/address-book",
+    requireClient,
+    requireClientPermission(ClientPermission.CREATE_SHIPMENTS),
+    async (req, res) => {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const [account, clientShipments] = await Promise.all([
+        storage.getClientAccount(user.clientAccountId),
+        storage.getShipmentsByClientAccount(user.clientAccountId),
+      ]);
+
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const entriesByKey = new Map<string, AddressBookEntryResponse>();
+
+      const addEntry = (
+        address: ReusableShipmentAddress | null,
+        options: {
+          source: "default_shipping" | "shipment_history";
+          useForShipper: boolean;
+          useForRecipient: boolean;
+          lastUsedAt?: Date | null;
+        },
+      ) => {
+        if (!isReusableShipmentAddress(address)) {
+          return;
+        }
+
+        const key = buildAddressBookKey(address);
+        const existing = entriesByKey.get(key);
+        const lastUsedAtIso = options.lastUsedAt ? options.lastUsedAt.toISOString() : null;
+
+        if (!existing) {
+          entriesByKey.set(key, {
+            id: key,
+            label: buildAddressBookLabel(address, options.source),
+            source: options.source,
+            useForShipper: options.useForShipper,
+            useForRecipient: options.useForRecipient,
+            lastUsedAt: lastUsedAtIso,
+            ...address,
+          });
+          return;
+        }
+
+        const existingTime = existing.lastUsedAt ? new Date(existing.lastUsedAt).getTime() : 0;
+        const incomingTime = options.lastUsedAt ? options.lastUsedAt.getTime() : 0;
+        const shouldPromoteDefault = options.source === "default_shipping" && existing.source !== "default_shipping";
+
+        entriesByKey.set(key, {
+          ...existing,
+          email: existing.email || address.email || null,
+          useForShipper: existing.useForShipper || options.useForShipper,
+          useForRecipient: existing.useForRecipient || options.useForRecipient,
+          source: shouldPromoteDefault ? "default_shipping" : existing.source,
+          label: shouldPromoteDefault ? buildAddressBookLabel(address, "default_shipping") : existing.label,
+          lastUsedAt: incomingTime > existingTime ? lastUsedAtIso : existing.lastUsedAt,
+        });
+      };
+
+      addEntry(buildAccountDefaultShipmentAddress(account), {
+        source: "default_shipping",
+        useForShipper: true,
+        useForRecipient: true,
+        lastUsedAt: account.createdAt,
+      });
+
+      for (const shipment of clientShipments) {
+        addEntry(buildShipmentSenderAddress(shipment), {
+          source: "shipment_history",
+          useForShipper: true,
+          useForRecipient: false,
+          lastUsedAt: shipment.createdAt,
+        });
+
+        addEntry(buildShipmentRecipientAddress(shipment), {
+          source: "shipment_history",
+          useForShipper: false,
+          useForRecipient: true,
+          lastUsedAt: shipment.createdAt,
+        });
+      }
+
+      const entries = Array.from(entriesByKey.values()).sort((a, b) => {
+        if (a.source === "default_shipping" && b.source !== "default_shipping") return -1;
+        if (b.source === "default_shipping" && a.source !== "default_shipping") return 1;
+
+        const aTime = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+        const bTime = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+        if (aTime !== bTime) {
+          return bTime - aTime;
+        }
+
+        return a.label.localeCompare(b.label);
+      });
+
+      res.json(entries);
+    },
+  );
 
   // Client - Get Users in Account
   app.get("/api/client/users", requireClient, requirePrimaryContact, async (req, res) => {
@@ -7089,6 +9430,60 @@ export async function registerRoutes(
     res.json(shipments.slice(0, 5));
   });
 
+  app.get("/api/client/abandoned-recovery/offers", requireClient, requireClientPermission(ClientPermission.VIEW_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const recoveries = await storage.getAbandonedShipmentRecoveries({
+        clientAccountIds: [user.clientAccountId],
+        includeDismissed: false,
+      });
+      const activeOffers = [];
+
+      for (const recovery of recoveries) {
+        if (recovery.status !== AbandonedShipmentRecoveryStatus.DISCOUNT_SENT) {
+          continue;
+        }
+
+        const shipment = await storage.getShipment(recovery.shipmentId);
+        if (!shipment || shipment.clientAccountId !== user.clientAccountId) {
+          continue;
+        }
+
+        const activeOffer = await getActiveAbandonedRecoveryOffer(shipment);
+        if (!activeOffer) {
+          continue;
+        }
+
+        activeOffers.push({
+          shipmentId: shipment.id,
+          trackingNumber: shipment.trackingNumber,
+          recipientName: shipment.recipientName,
+          destination: [shipment.recipientCity, shipment.recipientCountry].filter(Boolean).join(", "),
+          carrierName: shipment.carrierName,
+          serviceType: shipment.serviceType,
+          currency: shipment.currency || "SAR",
+          createdAt: shipment.createdAt,
+          offer: serializeAbandonedRecoveryOffer(activeOffer),
+        });
+      }
+
+      activeOffers.sort((a, b) => {
+        const aExpiry = a.offer?.expiresAt ? new Date(a.offer.expiresAt).getTime() : 0;
+        const bExpiry = b.offer?.expiresAt ? new Date(b.offer.expiresAt).getTime() : 0;
+        return aExpiry - bExpiry;
+      });
+
+      res.json(activeOffers);
+    } catch (error) {
+      logError("Failed to load active abandoned recovery offers", error);
+      res.status(500).json({ error: "Failed to load active offers" });
+    }
+  });
+
   // Client - All Shipments
   app.get("/api/client/shipments", requireClient, requireClientPermission(ClientPermission.VIEW_SHIPMENTS), async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
@@ -7205,6 +9600,7 @@ export async function registerRoutes(
     dimensionUnit: z.enum(["IN", "CM"]).default("CM"),
     packageType: z.string().default("YOUR_PACKAGING"),
     currency: z.string().default("SAR"),
+    shipDate: z.string().optional(),
     items: z.array(shipmentItemInputSchema).optional().default([]),
     tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional().default([]),
   });
@@ -7237,22 +9633,36 @@ export async function registerRoutes(
             ? data.recipientCountryCode || "SA"
             : data.recipientCountryCode || data.shipperCountryCode || "SA";
 
-        const extraction = await extractInvoiceItemsFromDocument(
+        const extraction = await withShipmentIntegrationAccount(
+          "gemini",
           {
-            fileName: data.fileName,
-            objectPath: data.objectPath,
-            contentType: data.contentType,
+            shipperCountryCode: data.shipperCountryCode,
+            recipientCountryCode: destinationCountry,
           },
-          {
-            fallbackCountryOfOrigin: data.shipperCountryCode,
-            fallbackCurrency: "SAR",
-          },
+          () => extractInvoiceItemsFromDocument(
+            {
+              fileName: data.fileName,
+              objectPath: data.objectPath,
+              contentType: data.contentType,
+            },
+            {
+              fallbackCountryOfOrigin: data.shipperCountryCode,
+              fallbackCurrency: "SAR",
+            },
+          ),
         );
 
-        const hsEnrichment = await enrichInvoiceItemsWithHsCodes(extraction.items, {
-          clientAccountId: user?.clientAccountId || undefined,
-          destinationCountry,
-        });
+        const hsEnrichment = await withShipmentIntegrationAccount(
+          "fedex",
+          {
+            shipperCountryCode: data.shipperCountryCode,
+            recipientCountryCode: destinationCountry,
+          },
+          () => enrichInvoiceItemsWithHsCodes(extraction.items, {
+            clientAccountId: user?.clientAccountId || undefined,
+            destinationCountry,
+          }),
+        );
 
         const { warnings, ...clientExtraction } = extraction;
 
@@ -7285,11 +9695,15 @@ export async function registerRoutes(
     async (req, res) => {
       try {
         const data = packageExtractionSchema.parse(req.body);
-        const extraction = await extractPackageDetailsFromDocument({
-          fileName: data.fileName,
-          objectPath: data.objectPath,
-          contentType: data.contentType,
-        });
+        const extraction = await withShipmentIntegrationAccount(
+          "gemini",
+          {},
+          () => extractPackageDetailsFromDocument({
+            fileName: data.fileName,
+            objectPath: data.objectPath,
+            contentType: data.contentType,
+          }),
+        );
 
         const { warnings, ...clientExtraction } = extraction;
         const totalWeight = clientExtraction.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
@@ -7314,6 +9728,245 @@ export async function registerRoutes(
     },
   );
 
+  const ddpPackageSchema = z.object({
+    weight: z.number().nonnegative().default(0),
+    length: z.number().nonnegative().default(0),
+    width: z.number().nonnegative().default(0),
+    height: z.number().nonnegative().default(0),
+  });
+  const ddpOriginSchema = z.object({
+    countryCode: z.string().trim().length(2, "Select an origin country").transform((value) => value.toUpperCase()),
+  });
+
+  const ddpRateSchema = z.object({
+    transportMethod: z.enum([DdpTransportMethod.AIR, DdpTransportMethod.SEA]),
+    shipper: ddpOriginSchema,
+    recipient: addressSchema,
+    supplierName: z.string().trim().min(1, "Supplier name is required"),
+    supplierPhone: z.string().trim().min(1, "Supplier phone is required"),
+    packages: z.array(ddpPackageSchema).min(1, "At least one package is required"),
+    totalCbm: z.number().nonnegative().optional(),
+  });
+
+  app.get("/api/client/ddp/lanes", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (_req, res) => {
+    const lanes = (await storage.getDdpPricingLanes()).filter(
+      (lane) => lane.isActive && !lane.originCity?.trim() && !lane.destinationCity?.trim(),
+    );
+    res.json(lanes.map((lane) => ({
+      id: lane.id,
+      originCountryCode: lane.originCountryCode,
+      originCity: lane.originCity,
+      destinationCountryCode: lane.destinationCountryCode,
+      destinationCity: lane.destinationCity,
+      airAvailable: Number(lane.airBaseRatePerKg) > 0,
+      seaAvailable: Number(lane.seaBaseRatePerCbm) > 0,
+    })));
+  });
+
+  app.post("/api/client/ddp/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const data = ddpRateSchema.parse(req.body);
+      const lane = await storage.findDdpPricingLane({
+        originCountryCode: data.shipper.countryCode,
+        destinationCountryCode: data.recipient.countryCode,
+        destinationCity: data.recipient.city,
+      });
+      if (!lane) {
+        return res.status(404).json({ error: "DDP pricing is not configured for this origin and destination yet." });
+      }
+      const account = await storage.getClientAccount(user.clientAccountId);
+      const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+      const basePricing = calculateDdpPrice({
+        lane,
+        transportMethod: data.transportMethod,
+        packages: data.packages,
+        totalCbm: data.totalCbm,
+        markupPercentage: 0,
+      });
+      const markupPercentage = pricingRule
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        : 0;
+      const pricing = calculateDdpPrice({
+        lane,
+        transportMethod: data.transportMethod,
+        packages: data.packages,
+        totalCbm: data.totalCbm,
+        markupPercentage,
+      });
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      const quote = await storage.createShipmentRateQuote({
+        clientAccountId: user.clientAccountId,
+        shipmentData: JSON.stringify({ ...data, isDdp: true, fulfillmentType: "ddp_manual", ddpPricingLaneId: lane.id, ddpPricing: pricing }),
+        carrierCode: "DDP",
+        carrierName: "DDP",
+        serviceType: data.transportMethod,
+        serviceName: `DDP ${data.transportMethod === "air" ? "Air" : "Sea"}`,
+        actualWeight: pricing.actualWeightKg.toFixed(3),
+        dimensionalWeight: pricing.dimensionalWeightKg.toFixed(3),
+        chargeableWeight: pricing.billableQuantity.toFixed(3),
+        chargeableWeightUnit: pricing.billingUnit,
+        chargeableWeightDetails: JSON.stringify(pricing),
+        baseRate: pricing.baseRateSar.toFixed(2),
+        marginPercentage: pricing.markupPercentage.toFixed(2),
+        marginAmount: pricing.markupAmountSar.toFixed(2),
+        finalPrice: pricing.totalAmountSar.toFixed(2),
+        currency: lane.currency,
+        transitDays: pricing.transitDaysMax,
+        expiresAt,
+      });
+      res.json({ quoteId: quote.id, expiresAt, pricing });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to calculate DDP pricing" });
+    }
+  });
+
+  app.post("/api/client/ddp/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const body = z.object({
+        quoteId: z.string().uuid(),
+        items: z.array(shipmentItemInputSchema).min(1, "Please add at least one shipment item."),
+        tradeDocuments: z.array(shipmentTradeDocumentSchema).min(1, "A commercial invoice is required.").max(5),
+        specialInstructions: z.string().max(2000).optional(),
+        customsComplianceAccepted: z.literal(true),
+        termsAccepted: z.literal(true),
+        brokerAuthorizationAccepted: z.literal(true),
+      }).parse(req.body);
+      if (!body.tradeDocuments.some((document) => document.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)) {
+        return res.status(400).json({ error: "A commercial invoice is required." });
+      }
+      const quote = await storage.getShipmentRateQuote(body.quoteId);
+      if (!quote || quote.clientAccountId !== user.clientAccountId || quote.carrierCode !== "DDP" || quote.expiresAt < new Date()) {
+        return res.status(404).json({ error: "DDP quote not found or expired" });
+      }
+      const data = JSON.parse(quote.shipmentData);
+      const lane = await storage.getDdpPricingLane(data.ddpPricingLaneId);
+      if (!lane?.isActive) {
+        return res.status(400).json({ error: "This DDP lane is no longer available." });
+      }
+      const account = await storage.getClientAccount(user.clientAccountId);
+      const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+      const basePricing = calculateDdpPrice({
+        lane,
+        transportMethod: data.transportMethod,
+        packages: data.packages,
+        totalCbm: data.totalCbm,
+        markupPercentage: 0,
+      });
+      const markupPercentage = pricingRule
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        : 0;
+      const pricing = calculateDdpPrice({
+        lane,
+        transportMethod: data.transportMethod,
+        packages: data.packages,
+        totalCbm: data.totalCbm,
+        markupPercentage,
+      });
+      if (Math.abs(pricing.totalAmountSar - Number(quote.finalPrice)) > 0.01) {
+        return res.status(400).json({ error: "DDP price changed. Please request a fresh quote." });
+      }
+      const hsPreparedItems = await enrichItemsWithHsCodes(body.items, {
+        clientAccountId: user.clientAccountId,
+        destinationCountry: data.recipient.countryCode,
+      });
+      const accountingSnapshot = calculateShipmentAccounting({
+        shipmentType: "inbound",
+        isDdp: true,
+        recipientCountryCode: data.recipient.countryCode,
+        baseRate: pricing.baseRateSar,
+        marginAmount: pricing.markupAmountSar,
+      });
+      const firstPackage = data.packages[0];
+      const acceptedAt = new Date();
+      const shipment = await storage.createShipment({
+        clientAccountId: user.clientAccountId,
+        senderName: data.supplierName,
+        senderAddress: "Pickup coordination required",
+        senderAddressLine2: null,
+        senderCity: lane.originCity || "Pickup coordination required",
+        senderStateOrProvince: null,
+        senderPostalCode: null,
+        senderCountry: data.shipper.countryCode,
+        senderPhone: data.supplierPhone,
+        senderEmail: null,
+        recipientName: data.recipient.name,
+        recipientAddress: data.recipient.addressLine1,
+        recipientAddressLine2: data.recipient.addressLine2 || null,
+        recipientCity: data.recipient.city,
+        recipientStateOrProvince: data.recipient.stateOrProvince || null,
+        recipientPostalCode: data.recipient.postalCode,
+        recipientCountry: data.recipient.countryCode,
+        recipientPhone: data.recipient.phone,
+        recipientEmail: data.recipient.email || null,
+        weight: pricing.actualWeightKg.toFixed(2),
+        weightUnit: "KG",
+        dimensionalWeight: pricing.dimensionalWeightKg.toFixed(3),
+        chargeableWeight: pricing.billableQuantity.toFixed(3),
+        chargeableWeightUnit: pricing.billingUnit,
+        chargeableWeightDetails: JSON.stringify(pricing),
+        length: String(firstPackage.length || 0),
+        width: String(firstPackage.width || 0),
+        height: String(firstPackage.height || 0),
+        dimensionUnit: "CM",
+        packageType: "DDP_MANUAL",
+        numberOfPackages: data.packages.length,
+        packagesData: JSON.stringify(data.packages),
+        shipmentType: "inbound",
+        fulfillmentType: "ddp_manual",
+        ddpPricingLaneId: lane.id,
+        ddpTransportMethod: data.transportMethod,
+        ddpSupplierName: data.supplierName,
+        ddpSupplierPhone: data.supplierPhone,
+        ddpTotalCbm: pricing.totalCbm.toFixed(4),
+        ddpBillableQuantity: pricing.billableQuantity.toFixed(4),
+        ddpBillingUnit: pricing.billingUnit,
+        ddpRatePerUnitSar: pricing.ratePerUnitSar.toFixed(2),
+        ddpSpecialInstructions: body.specialInstructions || null,
+        ddpTermsAcceptedAt: acceptedAt,
+        ddpBrokerAuthorizationAcceptedAt: acceptedAt,
+        serviceType: data.transportMethod,
+        currency: lane.currency,
+        status: "payment_pending",
+        baseRate: quote.baseRate,
+        marginAmount: quote.marginAmount,
+        margin: quote.marginAmount,
+        finalPrice: quote.finalPrice,
+        ...getShipmentAccountingInsert(accountingSnapshot),
+        carrierCode: "DDP",
+        carrierName: "DDP",
+        carrierServiceType: data.transportMethod,
+        paymentStatus: "pending",
+        itemsData: JSON.stringify(hsPreparedItems.items),
+        tradeDocumentsData: JSON.stringify(body.tradeDocuments),
+      });
+      await logAudit(req.session.userId, "checkout_ddp_shipment", "shipment", shipment.id, `Created DDP checkout for ${shipment.trackingNumber}`, req.ip);
+      res.json({
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        amount: pricing.totalAmountSar,
+        currency: lane.currency,
+        pricing,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create DDP checkout", error);
+      res.status(500).json({ error: "Failed to create DDP checkout" });
+    }
+  });
+
   // STEP 1: Rate Discovery - Get rates from all carriers
   app.post("/api/client/shipments/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
@@ -7324,9 +9977,9 @@ export async function registerRoutes(
 
       const data = shipmentInputSchema.parse(req.body);
 
-      if (data.isDdp && !isDdpEligibleForShipment(data.shipmentType, data.recipient.countryCode)) {
+      if (data.isDdp) {
         return res.status(400).json({
-          error: "DDP is only available for import shipments to Saudi Arabia or the UAE",
+          error: "Use the dedicated DDP flow for door-to-door shipments.",
         });
       }
 
@@ -7347,22 +10000,7 @@ export async function registerRoutes(
 
       const carrierAdapters = data.carrier?.trim()
         ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
-        : carrierService.getSupportedCarriers().filter((adapter) =>
-            process.env.NODE_ENV !== "production" || adapter.isConfigured(),
-          );
-
-      const availableCarriers = carrierAdapters
-        .filter((adapter) => process.env.NODE_ENV !== "production" || adapter.isConfigured())
-        .map((adapter) => ({
-          code: adapter.carrierCode,
-          name: adapter.name,
-        }));
-
-      if (availableCarriers.length === 0) {
-        return res.status(503).json({
-          error: "No carriers are currently available for live rating.",
-        });
-      }
+        : carrierService.getSupportedCarriers();
 
       // Map to carrier adapter format
       const rateRequest = {
@@ -7404,32 +10042,75 @@ export async function registerRoutes(
         serviceType: data.serviceType,
         packagingType: data.packageType,
         currency: data.currency,
+        shipDate: data.shipDate,
       };
 
       const carrierRateResults = await Promise.all(
         carrierAdapters.map(async (carrierAdapter) => {
-          try {
-            const carrierRates = await carrierAdapter.getRates(rateRequest);
-            return {
-              carrierAdapter,
-              carrierRates,
-              error: null,
-            };
-          } catch (error) {
-            logError("Carrier rate lookup failed", {
-              carrierCode: carrierAdapter.carrierCode,
-              carrierName: carrierAdapter.name,
-              error: error instanceof Error ? error.message : String(error),
-            });
+          const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
+          const routingOptions = {
+            shipperCountryCode: data.shipper.countryCode,
+            recipientCountryCode: data.recipient.countryCode,
+            clientAccountId: user.clientAccountId,
+          };
+          const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
+          const accountRateResults = await Promise.all(
+            managedAccounts.map(async (integrationAccount) => {
+              try {
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: await withIntegrationAccount(
+                    integrationAccount,
+                    () => carrierAdapter.getRates(rateRequest),
+                  ),
+                };
+              } catch (error) {
+                logError("Carrier account rate lookup failed", {
+                  carrierCode: carrierAdapter.carrierCode,
+                  carrierName: carrierAdapter.name,
+                  integrationAccountId: integrationAccount.id,
+                  integrationAccountName: integrationAccount.accountName,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>>,
+                };
+              }
+            }),
+          );
 
-            return {
-              carrierAdapter,
-              carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>>,
-              error,
-            };
+          if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
+            try {
+              accountRateResults.push({
+                integrationAccountId: `env:${appKey}`,
+                carrierRates: await carrierAdapter.getRates(rateRequest),
+              });
+            } catch (error) {
+              logError("Carrier environment rate lookup failed", {
+                carrierCode: carrierAdapter.carrierCode,
+                carrierName: carrierAdapter.name,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
+
+          const winningAccountResult = selectCheapestCarrierAccountPortfolio(accountRateResults);
+
+          return {
+            carrierAdapter,
+            integrationAccountId: winningAccountResult?.integrationAccountId || null,
+            carrierRates: winningAccountResult?.carrierRates || [],
+          };
         }),
       );
+
+      const availableCarriers = carrierRateResults
+        .filter((result) => result.carrierRates.length > 0)
+        .map(({ carrierAdapter }) => ({
+          code: carrierAdapter.carrierCode,
+          name: carrierAdapter.name,
+        }));
 
       // Store quotes with pricing and return to client
       const quotes: Array<{
@@ -7442,12 +10123,17 @@ export async function registerRoutes(
         currency: string;
         transitDays: number;
         estimatedDelivery?: Date;
+        actualWeight: number;
+        dimensionalWeight: number;
+        chargeableWeight: number;
+        chargeableWeightUnit: "KG" | "LB";
+        chargeableWeightSource: "carrier" | "system";
       }> = [];
 
       // Quote expiration: 30 minutes
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
-      for (const { carrierAdapter, carrierRates } of carrierRateResults) {
+      for (const { carrierAdapter, carrierRates, integrationAccountId } of carrierRateResults) {
         for (const rate of carrierRates) {
           const marginPercentage = pricingRule
             ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
@@ -7466,14 +10152,25 @@ export async function registerRoutes(
             ...data,
             carrier: carrierAdapter.carrierCode,
             effectivePackagingType: rate.packagingType || data.packageType,
+            chargeableWeightDetails:
+              rate.chargeableWeightDetails ||
+              buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode),
           };
+          const chargeableWeightDetails = parseStoredChargeableWeightSummary(quoteShipmentData.chargeableWeightDetails)
+            || buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode);
           const quote = await storage.createShipmentRateQuote({
             clientAccountId: user.clientAccountId,
             shipmentData: JSON.stringify(quoteShipmentData),
             carrierCode: carrierAdapter.carrierCode,
             carrierName: carrierAdapter.name,
+            carrierIntegrationAccountId: integrationAccountId,
             serviceType: rate.serviceType,
             serviceName: rate.serviceName,
+            actualWeight: formatWeightValue(chargeableWeightDetails.actualWeight),
+            dimensionalWeight: formatWeightValue(chargeableWeightDetails.dimensionalWeight),
+            chargeableWeight: formatWeightValue(chargeableWeightDetails.chargeableWeight),
+            chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+            chargeableWeightDetails: JSON.stringify(chargeableWeightDetails),
             baseRate: rate.baseRate.toFixed(2),
             marginPercentage: marginPercentage.toFixed(2),
             marginAmount: marginAmount.toFixed(2),
@@ -7494,6 +10191,11 @@ export async function registerRoutes(
             currency: rate.currency,
             transitDays: rate.transitDays,
             estimatedDelivery: rate.deliveryDate,
+            actualWeight: chargeableWeightDetails.actualWeight,
+            dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+            chargeableWeight: chargeableWeightDetails.chargeableWeight,
+            chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+            chargeableWeightSource: rate.chargeableWeightSource || "system",
           });
         }
       }
@@ -7552,6 +10254,9 @@ export async function registerRoutes(
       if (quote.clientAccountId !== user.clientAccountId) {
         return res.status(403).json({ error: "Access denied" });
       }
+      if (quote.carrierCode === "DDP") {
+        return res.status(400).json({ error: "Use the dedicated DDP checkout flow for this quote." });
+      }
 
       // Recalculate price server-side to prevent tampering
       const storedShipmentData = JSON.parse(quote.shipmentData);
@@ -7580,9 +10285,9 @@ export async function registerRoutes(
       if (shipmentData.shipmentType !== "domestic" && shipmentItems.length === 0) {
         return res.status(400).json({ error: "Please add at least one shipment item before checkout." });
       }
-      if (shipmentData.isDdp && !isDdpEligibleForShipment(shipmentData.shipmentType, shipmentData.recipient.countryCode)) {
+      if (shipmentData.isDdp) {
         return res.status(400).json({
-          error: "DDP is only available for import shipments to Saudi Arabia or the UAE",
+          error: "Use the dedicated DDP checkout flow for door-to-door shipments.",
         });
       }
       const account = await storage.getClientAccount(user.clientAccountId);
@@ -7641,6 +10346,14 @@ export async function registerRoutes(
         });
       }
 
+      const chargeableWeightDetails =
+        parseStoredChargeableWeightSummary(quote.chargeableWeightDetails) ||
+        parseStoredChargeableWeightSummary(shipmentData.chargeableWeightDetails) ||
+        buildChargeableWeightSummaryFromShipmentInput(shipmentData, quote.carrierCode);
+      const packagesWithChargeableWeight = attachChargeableWeightToPackages(
+        shipmentData.packages,
+        chargeableWeightDetails,
+      );
       const totalShipmentWeight = shipmentData.packages.reduce((sum: number, p: { weight: number }) => sum + p.weight, 0);
 
       // Create draft shipment with payment pending status
@@ -7668,13 +10381,17 @@ export async function registerRoutes(
         recipientShortAddress: shipmentData.recipient.shortAddress,
         weight: totalShipmentWeight.toString(),
         weightUnit: shipmentData.weightUnit,
+        dimensionalWeight: formatWeightValue(chargeableWeightDetails.dimensionalWeight),
+        chargeableWeight: formatWeightValue(chargeableWeightDetails.chargeableWeight),
+        chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+        chargeableWeightDetails: JSON.stringify(chargeableWeightDetails),
         length: shipmentData.packages[0].length.toString(),
         width: shipmentData.packages[0].width.toString(),
         height: shipmentData.packages[0].height.toString(),
         dimensionUnit: shipmentData.dimensionUnit,
         packageType: shipmentData.effectivePackagingType || shipmentData.packageType,
         numberOfPackages: shipmentData.packages.length,
-        packagesData: JSON.stringify(shipmentData.packages),
+        packagesData: JSON.stringify(packagesWithChargeableWeight),
         itemsData: normalizedShipmentItems.length > 0 ? JSON.stringify(normalizedShipmentItems) : undefined,
         tradeDocumentsData: shipmentData.tradeDocuments?.length
           ? JSON.stringify(shipmentData.tradeDocuments)
@@ -7690,6 +10407,7 @@ export async function registerRoutes(
         ...getShipmentAccountingInsert(accountingSnapshot),
         carrierCode: quote.carrierCode,
         carrierName: quote.carrierName,
+        carrierIntegrationAccountId: quote.carrierIntegrationAccountId,
         carrierServiceType: quote.serviceType,
         paymentStatus: "pending",
         estimatedDelivery: quote.estimatedDelivery,
@@ -7707,6 +10425,12 @@ export async function registerRoutes(
         carrierName: quote.carrierName,
         serviceType: quote.serviceType,
         serviceName: quote.serviceName,
+        actualWeight: chargeableWeightDetails.actualWeight,
+        dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+        chargeableWeight: chargeableWeightDetails.chargeableWeight,
+        chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+        chargeableActualPackageCount: chargeableWeightDetails.packages.filter((pkg) => !pkg.usesDimensionalWeight).length,
+        chargeableDimensionalPackageCount: chargeableWeightDetails.packages.filter((pkg) => pkg.usesDimensionalWeight).length,
       };
 
       // Store idempotency record
@@ -7728,6 +10452,58 @@ export async function registerRoutes(
     shipmentId: z.string().uuid("Invalid shipment ID"),
     tapTokenId: z.string().min(1).optional(),
     saveCardForFuture: z.boolean().optional(),
+    returnPath: z.string().startsWith("/client/").max(200).optional(),
+  });
+
+  app.get("/api/client/shipments/:id/checkout-summary", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const activeOffer = await getActiveAbandonedRecoveryOffer(shipment);
+      const amount = activeOffer?.payableAmount ?? parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+      const source = typeof req.query.source === "string" ? req.query.source : undefined;
+
+      if (activeOffer && source === "resume_link") {
+        logInfo("Abandoned recovery offer resumed", {
+          source: "abandoned_recovery",
+          event: "offer_resumed",
+          shipmentId: shipment.id,
+          recoveryId: activeOffer.recovery.id,
+          clientAccountId: shipment.clientAccountId,
+          trackingNumber: shipment.trackingNumber,
+          ipAddress: req.ip,
+        });
+      }
+
+      res.json({
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        amount,
+        originalAmount: activeOffer?.originalAmount ?? amount,
+        currency: shipment.currency || "SAR",
+        paymentStatus: shipment.paymentStatus || "pending",
+        activeOffer: serializeAbandonedRecoveryOffer(activeOffer),
+        canPay:
+          shipment.paymentStatus !== "paid" &&
+          String(shipment.paymentMethod || "PAY_NOW").toUpperCase() !== "CREDIT" &&
+          ["payment_pending", "carrier_error"].includes(String(shipment.status || "").toLowerCase()),
+      });
+    } catch (error) {
+      logError("Failed to load shipment checkout summary", error);
+      res.status(500).json({ error: "Failed to load shipment checkout summary" });
+    }
   });
 
   app.post("/api/client/shipments/pay", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
@@ -7737,7 +10513,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Client account not found" });
       }
 
-      const { shipmentId, tapTokenId, saveCardForFuture } = shipmentPaymentSchema.parse(req.body);
+      const { shipmentId, tapTokenId, saveCardForFuture, returnPath } = shipmentPaymentSchema.parse(req.body);
       const shipment = await storage.getShipment(shipmentId);
       if (!shipment) {
         return res.status(404).json({ error: "Shipment not found" });
@@ -7760,14 +10536,20 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Client account not found" });
       }
 
+      const activeOffer = await getActiveAbandonedRecoveryOffer(shipment);
+      const payableAmount = activeOffer?.payableAmount ?? parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+
       const appBaseUrl = buildAppBaseUrl(req);
-      const chargeResult = await tapService.createCharge({
-        amount: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
+      let tapIntegrationAccountId = shipment.tapIntegrationAccountId;
+      const chargeResult = await withBoundIntegrationAccount("tap", tapIntegrationAccountId, getClientIntegrationRoutingOptions(account, shipment.senderCountry), () => {
+        tapIntegrationAccountId = getCurrentIntegrationAccountId() || tapIntegrationAccountId || "env:tap";
+        return tapService.createCharge({
+        amount: payableAmount,
         currency: (shipment.currency || "SAR").toUpperCase(),
         description: `Shipment ${shipment.trackingNumber}`,
         redirectUrl: `${appBaseUrl}/api/payments/tap/redirect`,
         postUrl: `${appBaseUrl}/api/webhooks/tap`,
-        customer: buildTapCustomer(account),
+        customer: buildTapCustomer(account, tapIntegrationAccountId),
         reference: {
           transaction: shipment.trackingNumber,
           order: shipment.id,
@@ -7775,15 +10557,27 @@ export async function registerRoutes(
         metadata: {
           kind: "shipment",
           shipmentId: shipment.id,
-          clientAccountId: user.clientAccountId,
+          clientAccountId: user.clientAccountId!,
           trackingNumber: shipment.trackingNumber,
+          tapIntegrationAccountId,
+          ...(activeOffer
+            ? {
+                abandonedRecoveryId: activeOffer.recovery.id,
+                abandonedDiscountAmount: activeOffer.discountAmount.toFixed(2),
+                abandonedOriginalAmount: activeOffer.originalAmount.toFixed(2),
+              }
+            : {}),
+          payableAmount: payableAmount.toFixed(2),
+          ...(returnPath ? { returnPath } : {}),
         },
         sourceId: tapTokenId || DEFAULT_TAP_SOURCE_ID,
         saveCard: Boolean(saveCardForFuture && tapService.isSavedCardsEnabled()),
+        });
       });
 
       await storage.updateShipment(shipment.id, {
         paymentIntentId: chargeResult.chargeId,
+        tapIntegrationAccountId,
       });
 
       if (tapService.isSuccessfulStatus(chargeResult.status)) {
@@ -7795,9 +10589,10 @@ export async function registerRoutes(
         trackingNumber: shipment.trackingNumber,
         paymentId: chargeResult.chargeId,
         transactionUrl: chargeResult.transactionUrl,
-        amount: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
+        amount: payableAmount,
         currency: shipment.currency || "SAR",
         paymentStatus: chargeResult.status,
+        activeOffer: serializeAbandonedRecoveryOffer(activeOffer),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -7848,7 +10643,12 @@ export async function registerRoutes(
 
       let verifiedTapCharge: TapCharge | null = null;
       if (effectivePaymentId) {
-        verifiedTapCharge = await tapService.retrieveCharge(effectivePaymentId);
+        verifiedTapCharge = await withBoundIntegrationAccount(
+          "tap",
+          shipment.tapIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(shipment),
+          () => tapService.retrieveCharge(effectivePaymentId),
+        );
         if (!verifiedTapCharge || !tapService.isSuccessfulStatus(verifiedTapCharge.status)) {
           return res.status(400).json({ error: "Payment not confirmed" });
         }
@@ -7929,7 +10729,6 @@ export async function registerRoutes(
       }
 
       const data = createShipmentSchema.parse(req.body);
-
       // Get client account to determine pricing
       const account = await storage.getClientAccount(user.clientAccountId);
       if (!account) {
@@ -7970,38 +10769,9 @@ export async function registerRoutes(
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
 
-      // Sync invoice to Zoho Books (if configured)
-      if (zohoService.isConfigured()) {
-        try {
-          const clientAccount = await storage.getClientAccount(user.clientAccountId);
-          if (clientAccount) {
-            const zohoResult = await zohoService.syncInvoice(invoice.id, {
-              customerId: clientAccount.zohoCustomerId || undefined,
-              customerName: clientAccount.name,
-              customerEmail: clientAccount.email,
-              invoiceNumber: invoice.invoiceNumber,
-              date: new Date().toISOString().split('T')[0],
-              dueDate: invoice.dueDate.toISOString().split('T')[0],
-              lineItems: [{
-                name: `Shipment ${shipment.trackingNumber}`,
-                description: `${data.senderCity} to ${data.recipientCity}`,
-                quantity: 1,
-                rate: Number(finalPrice),
-              }],
-            });
-            
-            if (zohoResult.zohoInvoiceId) {
-              await storage.updateInvoice(invoice.id, {
-                zohoInvoiceId: zohoResult.zohoInvoiceId,
-                zohoInvoiceUrl: zohoResult.invoiceUrl,
-              });
-            }
-          }
-        } catch (error) {
-          logError("Failed to sync invoice to Zoho", error);
-          // Don't fail the shipment creation if Zoho sync fails
-        }
-      }
+      // Keep the legacy creation endpoint aligned with the managed Zoho
+      // routing used by the checkout flow.
+      await syncInvoiceToZoho(invoice, shipment);
 
       // Log shipment creation
       await logAudit(req.session.userId, "create_shipment", "shipment", shipment.id,
@@ -8040,16 +10810,25 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Not authorized" });
       }
 
-      if (shipment.status !== "processing" && shipment.status !== "carrier_error") {
-        return res.status(400).json({ error: "Can only cancel shipments that are still processing or in carrier error" });
+      if (shipment.status === "cancelled") {
+        return res.status(400).json({ error: "Shipment already cancelled" });
+      }
+
+      if (!canShipmentBeCancelled(shipment)) {
+        return res.status(400).json({ error: "Shipments can only be cancelled before the carrier marks them as picked up" });
       }
 
       if (shipment.carrierTrackingNumber) {
         try {
           const carrierAdapter = getAdapterForShipment(shipment);
-          const cancelledWithCarrier = await carrierAdapter.cancelShipment(
-            shipment.carrierTrackingNumber,
-            shipment.senderCountry,
+          const cancelledWithCarrier = await withBoundIntegrationAccount(
+            getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+            shipment.carrierIntegrationAccountId,
+            getShipmentIntegrationRoutingOptions(shipment),
+            () => carrierAdapter.cancelShipment(
+              shipment.carrierTrackingNumber!,
+              shipment.senderCountry,
+            ),
           );
 
           if (!cancelledWithCarrier) {
@@ -8061,19 +10840,18 @@ export async function registerRoutes(
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
-          const errMsg = isCarrierErr ? (cancelError as CarrierError).carrierMessage : (cancelError as Error).message;
 
           logError("Client carrier cancel failed", cancelError);
           await storage.updateShipment(id, {
             carrierErrorCode: errCode,
-            carrierErrorMessage: `Cancel failed: ${errMsg}`,
+            carrierErrorMessage: `Cancel failed: ${CARRIER_CANCELLATION_FAILED_MESSAGE}`,
             carrierLastAttemptAt: new Date(),
           });
 
           return res.status(502).json({
-            error: "Failed to cancel with carrier",
+            error: CARRIER_CANCELLATION_FAILED_MESSAGE,
             carrierErrorCode: errCode,
-            carrierErrorMessage: errMsg,
+            carrierErrorMessage: CARRIER_CANCELLATION_FAILED_MESSAGE,
           });
         }
       }
@@ -8082,11 +10860,21 @@ export async function registerRoutes(
         status: "cancelled",
         carrierStatus: "cancelled",
       });
+
+      const refundRequest = updated
+        ? await ensureShipmentRefundRequestForCancellation({
+            shipment: updated,
+            user,
+          })
+        : null;
       
       await logAudit(req.session.userId, "cancel_shipment", "shipment", id,
         `Client cancelled shipment ${shipment.trackingNumber}`, req.ip);
       
-      res.json(updated);
+      res.json({
+        shipment: updated,
+        refundRequest,
+      });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
@@ -8285,15 +11073,17 @@ export async function registerRoutes(
       await storage.updateShipment(shipmentId, {
         paymentMethod: "CREDIT",
         paymentStatus: "unpaid",
-        status: "credit_pending",
+        status: shipment.fulfillmentType === "ddp_manual" ? "awaiting_review" : "credit_pending",
       });
 
-      const payLaterAddrValidation = validateShippingAddresses(
-        { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
-        { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
-      );
-      if (!payLaterAddrValidation.valid) {
-        return res.status(400).json({ error: "Address validation failed", details: payLaterAddrValidation.errors });
+      if (shipment.fulfillmentType !== "ddp_manual") {
+        const payLaterAddrValidation = validateShippingAddresses(
+          { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
+          { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
+        );
+        if (!payLaterAddrValidation.valid) {
+          return res.status(400).json({ error: "Address validation failed", details: payLaterAddrValidation.errors });
+        }
       }
 
       let carrierTrackingNumber = "";
@@ -8301,6 +11091,12 @@ export async function registerRoutes(
       let estimatedDelivery: Date | undefined;
 
       try {
+        if (shipment.fulfillmentType === "ddp_manual") {
+          await storage.updateShipment(shipmentId, {
+            status: "awaiting_review",
+            carrierStatus: "awaiting_review",
+          });
+        } else {
         const carrierAdapter = getAdapterForShipment(shipment);
         const preparedShipment = await buildCarrierShipmentRequestFromShipment(shipment, carrierAdapter);
         if (preparedShipment.tradeDocumentsData !== shipment.tradeDocumentsData) {
@@ -8308,7 +11104,12 @@ export async function registerRoutes(
             tradeDocumentsData: preparedShipment.tradeDocumentsData,
           });
         }
-        const carrierResponse = await carrierAdapter.createShipment(preparedShipment.carrierRequest);
+        const carrierResponse = await withBoundIntegrationAccount(
+          getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+          shipment.carrierIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(shipment),
+          () => carrierAdapter.createShipment(preparedShipment.carrierRequest),
+        );
         carrierTrackingNumber = carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber;
         labelUrl = carrierResponse.labelUrl || "";
         estimatedDelivery = carrierResponse.estimatedDelivery;
@@ -8326,6 +11127,7 @@ export async function registerRoutes(
           carrierLastAttemptAt: new Date(),
           carrierAttempts: (shipment.carrierAttempts || 0) + 1,
         });
+        }
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
         const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
@@ -8342,7 +11144,7 @@ export async function registerRoutes(
         });
 
         await storage.createCreditNotificationEvent({
-          clientAccountId: user.clientAccountId,
+          clientAccountId: user.clientAccountId!,
           creditInvoiceId: creditInvoice.id,
           type: "INVOICE_CREATED",
           sentAt: now,
@@ -8422,6 +11224,8 @@ export async function registerRoutes(
             recipientCity: shipment.recipientCity,
             recipientCountry: shipment.recipientCountry,
             serviceType: shipment.serviceType,
+            carrierCode: shipment.carrierCode,
+            carrierName: shipment.carrierName,
             carrierTrackingNumber: shipment.carrierTrackingNumber,
             weight: shipment.weight,
             weightUnit: shipment.weightUnit,
@@ -8506,7 +11310,7 @@ export async function registerRoutes(
       };
       const invoiceLineTitle =
         invoice.invoiceType === InvoiceType.EXTRA_WEIGHT
-          ? "Extra Weight"
+          ? getInvoiceTypeLabel(invoice.invoiceType, shipment)
           : invoice.invoiceType === InvoiceType.EXTRA_COST
             ? "Extra Cost"
             : "Shipping Service";
@@ -8671,7 +11475,29 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Client account not found" });
       }
 
-      res.json(buildTapEmbedConfig(account));
+      const shipmentId = typeof req.query.shipmentId === "string" ? req.query.shipmentId : undefined;
+      const invoiceId = typeof req.query.invoiceId === "string" ? req.query.invoiceId : undefined;
+      const shipment = shipmentId ? await storage.getShipment(shipmentId) : undefined;
+      const invoice = invoiceId ? await storage.getInvoice(invoiceId) : undefined;
+      if (shipment && shipment.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (invoice && invoice.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const boundTapIntegrationAccountId =
+        shipment?.tapIntegrationAccountId ||
+        invoice?.tapIntegrationAccountId ||
+        (!shipmentId && !invoiceId ? account.tapIntegrationAccountId : undefined);
+      res.json(await withBoundIntegrationAccount("tap", boundTapIntegrationAccountId, getClientIntegrationRoutingOptions(account, shipment?.senderCountry), async () => {
+        const tapIntegrationAccountId =
+          getCurrentIntegrationAccountId() || boundTapIntegrationAccountId || "env:tap";
+        return {
+          ...buildTapEmbedConfig(account, tapIntegrationAccountId),
+          tapIntegrationAccountId,
+        };
+      }));
     } catch (error) {
       logError("Failed to fetch Tap payment config", error);
       res.status(500).json({ error: "Failed to fetch payment config" });
@@ -8705,7 +11531,10 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Saved card not found" });
       }
 
-      const cards = await storage.getTapSavedCardsByClientAccount(user.clientAccountId);
+      const cards = await storage.getTapSavedCardsByClientAccount(
+        user.clientAccountId,
+        card.tapIntegrationAccountId,
+      );
       await Promise.all(cards.map((savedCard) =>
         storage.updateTapSavedCard(savedCard.id, {
           isDefault: savedCard.id === card.id,
@@ -8734,7 +11563,12 @@ export async function registerRoutes(
 
       if (card.tapCustomerId && card.tapCardId) {
         try {
-          await tapService.deleteSavedCard(card.tapCustomerId, card.tapCardId);
+          await withBoundIntegrationAccount(
+            "tap",
+            card.tapIntegrationAccountId,
+            {},
+            () => tapService.deleteSavedCard(card.tapCustomerId!, card.tapCardId!),
+          );
         } catch (error) {
           logError("Tap saved card delete failed remotely", {
             cardId: card.id,
@@ -8750,7 +11584,10 @@ export async function registerRoutes(
         status: "deleted",
       });
 
-      const remainingCards = await storage.getTapSavedCardsByClientAccount(user.clientAccountId);
+      const remainingCards = await storage.getTapSavedCardsByClientAccount(
+        user.clientAccountId,
+        card.tapIntegrationAccountId,
+      );
       if (remainingCards.length > 0 && !remainingCards.some((savedCard) => savedCard.isDefault)) {
         await storage.updateTapSavedCard(remainingCards[0].id, { isDefault: true });
       }
@@ -8849,13 +11686,16 @@ export async function registerRoutes(
       }
 
       const existingPayments = await storage.getPaymentsByClientAccount(user.clientAccountId);
-      const chargeResult = await tapService.createCharge({
+      let tapIntegrationAccountId = invoice.tapIntegrationAccountId;
+      const chargeResult = await withBoundIntegrationAccount("tap", tapIntegrationAccountId, getClientIntegrationRoutingOptions(account), () => {
+        tapIntegrationAccountId = getCurrentIntegrationAccountId() || tapIntegrationAccountId || "env:tap";
+        return tapService.createCharge({
         amount: Number(invoice.amount),
         currency: "SAR",
         description: `Invoice ${invoice.invoiceNumber}`,
         redirectUrl: `${buildAppBaseUrl(req)}/api/payments/tap/redirect`,
         postUrl: `${buildAppBaseUrl(req)}/api/webhooks/tap`,
-        customer: buildTapCustomer(account),
+        customer: buildTapCustomer(account, tapIntegrationAccountId),
         reference: {
           transaction: invoice.invoiceNumber,
           order: invoice.id,
@@ -8864,11 +11704,17 @@ export async function registerRoutes(
           kind: "invoice",
           invoiceId: invoice.id,
           invoiceNumber: invoice.invoiceNumber,
-          clientAccountId: user.clientAccountId,
+          clientAccountId: user.clientAccountId!,
+          tapIntegrationAccountId,
         },
         sourceId: tapTokenId || DEFAULT_TAP_SOURCE_ID,
         saveCard: Boolean(saveCardForFuture && tapService.isSavedCardsEnabled()),
+        });
       });
+
+      if (invoice.tapIntegrationAccountId !== tapIntegrationAccountId) {
+        await storage.updateInvoice(invoice.id, { tapIntegrationAccountId });
+      }
 
       for (const payment of existingPayments.filter((payment) => payment.invoiceId === invoice.id && payment.status === "pending")) {
         await storage.updatePayment(payment.id, { status: "failed" });
@@ -8881,6 +11727,7 @@ export async function registerRoutes(
         paymentMethod: "tap",
         status: tapService.isSuccessfulStatus(chargeResult.status) ? "completed" : "pending",
         transactionId: chargeResult.chargeId,
+        integrationAccountId: tapIntegrationAccountId,
       });
 
       if (tapService.isSuccessfulStatus(chargeResult.status)) {
@@ -8929,9 +11776,35 @@ export async function registerRoutes(
       }
 
       // Get tracking from carrier
+      if (shipment.fulfillmentType === "ddp_manual") {
+        return res.json({
+          shipmentId: shipment.id,
+          trackingNumber: shipment.trackingNumber,
+          carrierTrackingNumber: null,
+          status: shipment.status,
+          carrier: "DDP",
+          estimatedDelivery: shipment.estimatedDelivery,
+          actualDelivery: shipment.actualDelivery,
+          tracking: {
+            trackingNumber: shipment.trackingNumber,
+            status: shipment.status,
+            events: [{
+              status: shipment.status,
+              description: "DDP shipment status is managed by ezhalha.",
+              timestamp: shipment.updatedAt,
+            }],
+          },
+        });
+      }
+
       const trackingNumber = shipment.carrierTrackingNumber || shipment.trackingNumber;
       const carrierAdapter = getAdapterForShipment(shipment);
-      const tracking = await carrierAdapter.trackShipment(trackingNumber);
+      const tracking = await withBoundIntegrationAccount(
+        getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+        shipment.carrierIntegrationAccountId,
+        getShipmentIntegrationRoutingOptions(shipment),
+        () => carrierAdapter.trackShipment(trackingNumber),
+      );
 
       res.json({
         shipmentId: shipment.id,
@@ -8979,7 +11852,14 @@ export async function registerRoutes(
       const user = await storage.getUser(req.session.userId!);
       const clientAccountId = user?.clientAccountId || undefined;
 
-      const result = await lookupHsCode(params, clientAccountId);
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        {
+          shipperCountryCode: params.countryOfOrigin,
+          recipientCountryCode: params.destinationCountry,
+        },
+        () => lookupHsCode(params, clientAccountId),
+      );
 
       res.json(result);
     } catch (error) {
@@ -9046,29 +11926,36 @@ export async function registerRoutes(
 
       const data = rateRequestSchema.parse(req.body);
 
-      const rates = await fedexAdapter.getRates({
-        shipper: {
-          name: "Origin",
-          streetLine1: "",
-          city: data.senderCity,
-          postalCode: data.senderPostalCode || "",
-          countryCode: data.senderCountry,
-          phone: "",
+      const rates = await withShipmentIntegrationAccount(
+        "fedex",
+        {
+          shipperCountryCode: data.senderCountry,
+          recipientCountryCode: data.recipientCountry,
         },
-        recipient: {
-          name: "Destination",
-          streetLine1: "",
-          city: data.recipientCity,
-          postalCode: data.recipientPostalCode || "",
-          countryCode: data.recipientCountry,
-          phone: "",
-        },
-        packages: [{
-          weight: data.weight,
-          weightUnit: "LB",
-          packageType: data.packageType,
-        }],
-      });
+        () => fedexAdapter.getRates({
+          shipper: {
+            name: "Origin",
+            streetLine1: "",
+            city: data.senderCity,
+            postalCode: data.senderPostalCode || "",
+            countryCode: data.senderCountry,
+            phone: "",
+          },
+          recipient: {
+            name: "Destination",
+            streetLine1: "",
+            city: data.recipientCity,
+            postalCode: data.recipientPostalCode || "",
+            countryCode: data.recipientCountry,
+            phone: "",
+          },
+          packages: [{
+            weight: data.weight,
+            weightUnit: "LB",
+            packageType: data.packageType,
+          }],
+        }),
+      );
 
       res.json({ rates, carrier: "FedEx", isConfigured: fedexAdapter.isConfigured() });
     } catch (error) {
@@ -9097,7 +11984,11 @@ export async function registerRoutes(
       });
 
       const address = addressSchema.parse(req.body);
-      const result = await fedexAdapter.validateAddress({ address });
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        { recipientCountryCode: address.countryCode },
+        () => fedexAdapter.validateAddress({ address }),
+      );
       
       await logAudit(req.session.userId!, "validate_address", "shipment", undefined, 
         `Address validation: ${address.streetLine1}, ${address.city || 'N/A'}`, req.ip);
@@ -9122,7 +12013,11 @@ export async function registerRoutes(
       });
 
       const data = postalCodeSchema.parse(req.body);
-      const result = await fedexAdapter.validatePostalCode(data);
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        { recipientCountryCode: data.countryCode },
+        () => fedexAdapter.validatePostalCode(data),
+      );
       
       await logAudit(req.session.userId!, "validate_postal_code", "shipment", undefined, 
         `Postal code validation: ${data.postalCode}, ${data.countryCode}`, req.ip);
@@ -9155,7 +12050,14 @@ export async function registerRoutes(
       });
 
       const data = serviceSchema.parse(req.body);
-      const result = await fedexAdapter.checkServiceAvailability(data);
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        {
+          shipperCountryCode: data.origin.countryCode,
+          recipientCountryCode: data.destination.countryCode,
+        },
+        () => fedexAdapter.checkServiceAvailability(data),
+      );
       
       await logAudit(req.session.userId!, "check_service_availability", "shipment", undefined, 
         `Service check: ${data.origin.postalCode} -> ${data.destination.postalCode}`, req.ip);
@@ -9209,7 +12111,14 @@ export async function registerRoutes(
       });
 
       const data = rateSchema.parse(req.body);
-      const rates = await fedexAdapter.getRates(data);
+      const rates = await withShipmentIntegrationAccount(
+        "fedex",
+        {
+          shipperCountryCode: data.shipper.countryCode,
+          recipientCountryCode: data.recipient.countryCode,
+        },
+        () => fedexAdapter.getRates(data),
+      );
       
       await logAudit(req.session.userId!, "get_rates", "shipment", undefined, 
         `Rate request: ${data.shipper.city} -> ${data.recipient.city}`, req.ip);
@@ -9236,7 +12145,14 @@ export async function registerRoutes(
 
       const trackingNumber = shipment.carrierTrackingNumber || shipment.trackingNumber;
       const carrierAdapter = getAdapterForShipment(shipment);
-      const tracking = await carrierAdapter.trackShipment(trackingNumber);
+      const tracking = await withShipmentIntegrationAccount(
+        getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+        {
+          shipperCountryCode: shipment.senderCountry,
+          recipientCountryCode: shipment.recipientCountry,
+        },
+        () => carrierAdapter.trackShipment(trackingNumber),
+      );
       
       await logAudit(req.session.userId!, "track_shipment", "shipment", shipment.id, 
         `Tracked shipment: ${trackingNumber}`, req.ip);
@@ -9330,17 +12246,24 @@ export async function registerRoutes(
       let services: Array<{ serviceType: string; packagingType: string; displayName: string; isInternational: boolean; validPackagingTypes?: string[] }> = [];
 
       try {
-        const saResult = await fedexAdapter.checkServiceAvailability({
-          origin: {
-            postalCode: params.shipperPostal || "",
-            countryCode: shipperCC,
+        const saResult = await withShipmentIntegrationAccount(
+          "fedex",
+          {
+            shipperCountryCode: shipperCC,
+            recipientCountryCode: recipientCC,
           },
-          destination: {
-            postalCode: params.recipientPostal || "",
-            countryCode: recipientCC,
-          },
-          shipDate: params.shipDate,
-        });
+          () => fedexAdapter.checkServiceAvailability({
+            origin: {
+              postalCode: params.shipperPostal || "",
+              countryCode: shipperCC,
+            },
+            destination: {
+              postalCode: params.recipientPostal || "",
+              countryCode: recipientCC,
+            },
+            shipDate: params.shipDate,
+          }),
+        );
 
         if (saResult.services && saResult.services.length > 0) {
           services = saResult.services
@@ -9367,30 +12290,37 @@ export async function registerRoutes(
       if (services.length === 0) {
         try {
           const weightNum = parseFloat(params.weight) || 1;
-          const rateResult = await fedexAdapter.getRates({
-            shipper: {
-              name: "Origin",
-              streetLine1: "",
-              city: params.shipperCity,
-              postalCode: params.shipperPostal || "",
-              countryCode: shipperCC,
-              phone: "",
+          const rateResult = await withShipmentIntegrationAccount(
+            "fedex",
+            {
+              shipperCountryCode: shipperCC,
+              recipientCountryCode: recipientCC,
             },
-            recipient: {
-              name: "Destination",
-              streetLine1: "",
-              city: params.recipientCity,
-              postalCode: params.recipientPostal || "",
-              countryCode: recipientCC,
-              phone: "",
-            },
-            packages: [{
-              weight: weightNum,
-              weightUnit: "KG",
-              packageType: params.packagingType || "YOUR_PACKAGING",
-            }],
-            packagingType: params.packagingType || "YOUR_PACKAGING",
-          });
+            () => fedexAdapter.getRates({
+              shipper: {
+                name: "Origin",
+                streetLine1: "",
+                city: params.shipperCity,
+                postalCode: params.shipperPostal || "",
+                countryCode: shipperCC,
+                phone: "",
+              },
+              recipient: {
+                name: "Destination",
+                streetLine1: "",
+                city: params.recipientCity,
+                postalCode: params.recipientPostal || "",
+                countryCode: recipientCC,
+                phone: "",
+              },
+              packages: [{
+                weight: weightNum,
+                weightUnit: "KG",
+                packageType: params.packagingType || "YOUR_PACKAGING",
+              }],
+              packagingType: params.packagingType || "YOUR_PACKAGING",
+            }),
+          );
 
           const seen = new Set<string>();
           services = rateResult
@@ -9449,7 +12379,11 @@ export async function registerRoutes(
         return res.status(400).json({ error: validationErrors.join("; "), validationErrors });
       }
 
-      const result = await fedexAdapter.validateAddress({ address });
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        { recipientCountryCode: cc },
+        () => fedexAdapter.validateAddress({ address }),
+      );
 
       await logAudit(req.session.userId!, "validate_address", "fedex", undefined,
         `Address validation: ${address.streetLine1}, ${address.city || "N/A"}, ${cc}`, req.ip);
@@ -9476,10 +12410,14 @@ export async function registerRoutes(
 
       const params = querySchema.parse(req.query);
 
-      const result = await fedexAdapter.validatePostalCode({
-        postalCode: params.postal,
-        countryCode: params.country,
-      });
+      const result = await withShipmentIntegrationAccount(
+        "fedex",
+        { recipientCountryCode: params.country },
+        () => fedexAdapter.validatePostalCode({
+          postalCode: params.postal,
+          countryCode: params.country,
+        }),
+      );
 
       await logAudit(req.session.userId!, "validate_postal_code", "fedex", undefined,
         `Postal code validation: ${params.postal}, ${params.country}`, req.ip);
@@ -9500,17 +12438,17 @@ export async function registerRoutes(
   // FedEx Webhook Handler
   app.post("/api/webhooks/fedex", async (req, res) => {
     try {
-      const webhookSecret = process.env.FEDEX_WEBHOOK_SECRET;
-
-      if (process.env.NODE_ENV === "production" && !webhookSecret) {
-        return res.status(500).json({ error: "Webhook not configured" });
-      }
-
       const rawBody = (req as any).rawBody;
       const payload = rawBody ? rawBody.toString() : JSON.stringify(req.body);
       const signature = req.headers["x-fedex-signature"] as string | undefined;
+      const event = req.body;
+      const shipments = await storage.getShipments();
+      const webhookShipment = shipments.find((shipment) =>
+        shipment.trackingNumber === event.trackingNumber ||
+        shipment.carrierTrackingNumber === event.trackingNumber
+      );
 
-      if (webhookSecret && !validateWebhookSignature(payload, signature, webhookSecret)) {
+      if (!(await validateFedExWebhookForBoundAccount(payload, signature, webhookShipment))) {
         await storage.createWebhookEvent({
           source: "fedex",
           eventType: "signature_validation_failed",
@@ -9523,7 +12461,6 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid signature" });
       }
 
-      const event = req.body;
       const eventType = event.eventType || "unknown";
 
       const fedexWebhookPayloadSchema = z.object({
@@ -9560,8 +12497,7 @@ export async function registerRoutes(
       });
 
       if (eventType === "shipment.status_update" && event.trackingNumber) {
-        const shipments = await storage.getShipments();
-        const shipment = shipments.find(s => 
+        const shipment = webhookShipment || shipments.find(s =>
           s.trackingNumber === event.trackingNumber || 
           s.carrierTrackingNumber === event.trackingNumber
         );
@@ -9577,9 +12513,14 @@ export async function registerRoutes(
           
           const newStatus = statusMap[event.status] || shipment.status;
           const updates: Record<string, any> = {};
+          const normalizedCarrierStatus = String(event.status).toLowerCase();
           
           if (newStatus !== shipment.status) {
             updates.status = newStatus;
+          }
+
+          if (normalizedCarrierStatus && normalizedCarrierStatus !== shipment.carrierStatus) {
+            updates.carrierStatus = normalizedCarrierStatus;
           }
           
           if (newStatus === "delivered" && !shipment.actualDelivery) {
@@ -9611,7 +12552,7 @@ export async function registerRoutes(
         return res.redirect("/client/payments?paymentStatus=failed&message=missing_payment_id");
       }
 
-      const charge = await tapService.retrieveCharge(tapId);
+      const charge = await retrieveTapChargeFromBoundAccount(tapId);
       if (!charge) {
         return res.redirect("/client/payments?paymentStatus=failed&message=charge_not_found");
       }
@@ -9633,16 +12574,20 @@ export async function registerRoutes(
 
       const target = charge.metadata?.kind;
       const message = encodeURIComponent(charge.response?.message || "Payment was not completed");
-      const shipmentCreatePath = "/client/shipments/new";
+      const shipmentReturnPath =
+        typeof charge.metadata?.returnPath === "string" && charge.metadata.returnPath.startsWith("/client/")
+          ? charge.metadata.returnPath
+          : "/client/shipments/new";
 
       if (target === "shipment" && charge.metadata?.shipmentId) {
+        const separator = shipmentReturnPath.includes("?") ? "&" : "?";
         if (tapService.isSuccessfulStatus(charge.status)) {
-          return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=success`);
+          return res.redirect(`${shipmentReturnPath}${separator}shipmentId=${charge.metadata.shipmentId}&paymentStatus=success`);
         }
         if (tapService.isFailureStatus(charge.status)) {
-          return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=failed&message=${message}`);
+          return res.redirect(`${shipmentReturnPath}${separator}shipmentId=${charge.metadata.shipmentId}&paymentStatus=failed&message=${message}`);
         }
-        return res.redirect(`${shipmentCreatePath}?shipmentId=${charge.metadata.shipmentId}&paymentStatus=pending`);
+        return res.redirect(`${shipmentReturnPath}${separator}shipmentId=${charge.metadata.shipmentId}&paymentStatus=pending`);
       }
 
       if (target === "invoice" && charge.metadata?.invoiceId) {
@@ -9677,7 +12622,8 @@ export async function registerRoutes(
       const signature = req.headers["hashstring"] as string | undefined;
       const charge = req.body as TapCharge;
 
-      if (tapService.isConfigured() && !tapService.validateWebhookSignature(req.body, signature)) {
+      const tapWebhookSignatureValid = await validateTapWebhookForBoundAccount(charge, signature);
+      if (!tapWebhookSignatureValid) {
         await storage.createWebhookEvent({
           source: "tap",
           eventType: "signature_validation_failed",

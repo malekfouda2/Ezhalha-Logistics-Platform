@@ -58,7 +58,7 @@ describe("Shipment Accounting", () => {
     expect(snapshot.revenueExcludingTaxAmountSar).toBeCloseTo(373.91, 2);
   });
 
-  it("supports DDP import only for Saudi Arabia and UAE destinations", () => {
+  it("supports manually configured inbound DDP lanes", () => {
     const snapshot = calculateShipmentAccounting({
       shipmentType: ShipmentType.INBOUND,
       isDdp: true,
@@ -76,17 +76,15 @@ describe("Shipment Accounting", () => {
   it("rejects invalid DDP combinations", () => {
     expect(() =>
       resolveShipmentTaxScenario(ShipmentType.OUTBOUND, true, "AE"),
-    ).toThrow("DDP is only available for import shipments to Saudi Arabia or the UAE");
+    ).toThrow("DDP is only available for inbound door-to-door shipments");
 
-    expect(() =>
-      resolveShipmentTaxScenario(ShipmentType.INBOUND, true, "EG"),
-    ).toThrow("DDP is only available for import shipments to Saudi Arabia or the UAE");
+    expect(resolveShipmentTaxScenario(ShipmentType.INBOUND, true, "EG")).toBe(ShipmentTaxScenario.DDP);
   });
 
   it("checks DDP eligibility helper", () => {
     expect(isDdpEligibleForShipment(ShipmentType.INBOUND, "SA")).toBe(true);
     expect(isDdpEligibleForShipment(ShipmentType.INBOUND, "AE")).toBe(true);
-    expect(isDdpEligibleForShipment(ShipmentType.INBOUND, "EG")).toBe(false);
+    expect(isDdpEligibleForShipment(ShipmentType.INBOUND, "EG")).toBe(true);
     expect(isDdpEligibleForShipment(ShipmentType.OUTBOUND, "SA")).toBe(false);
   });
 });

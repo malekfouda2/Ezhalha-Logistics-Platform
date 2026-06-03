@@ -8,6 +8,7 @@ import {
   extractPackagesWithGemini,
   isGeminiPackageExtractionConfigured,
 } from "./gemini-package-extraction";
+import { getIntegrationEnv, getIntegrationEnvBoolean } from "./integration-runtime";
 
 const localStorageService = new LocalStorageService();
 const objectStorageService = new ObjectStorageService();
@@ -80,11 +81,11 @@ function isLikelySummaryRow(row: string[]): boolean {
 }
 
 function shouldUseGeminiOnWarning(result: { warnings: string[] }): boolean {
-  return process.env.GEMINI_INVOICE_FALLBACK_ON_WARNING === "true" && result.warnings.length > 0;
+  return getIntegrationEnvBoolean("GEMINI_INVOICE_FALLBACK_ON_WARNING") && result.warnings.length > 0;
 }
 
 function isObjectStorageAvailable(): boolean {
-  return Boolean(process.env.PRIVATE_OBJECT_DIR && process.env.PUBLIC_OBJECT_SEARCH_PATHS);
+  return Boolean(getIntegrationEnv("PRIVATE_OBJECT_DIR") && getIntegrationEnv("PUBLIC_OBJECT_SEARCH_PATHS"));
 }
 
 function normalizeContentType(contentType: string): string {

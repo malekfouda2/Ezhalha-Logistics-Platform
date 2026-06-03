@@ -11,6 +11,7 @@
 
 import "../load-env";
 import { storage } from "../storage";
+import { getIntegrationEnv } from "../services/integration-runtime";
 
 export interface ZohoInvoiceParams {
   customerId?: string;
@@ -73,19 +74,53 @@ export interface ZohoCustomerParams {
 }
 
 export class ZohoService {
-  private clientId: string | undefined;
-  private clientSecret: string | undefined;
-  private refreshToken: string | undefined;
-  private organizationId: string | undefined;
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
-  private apiDomain: string = 'https://www.zohoapis.sa';
+  private tokenCredentialFingerprint: string | undefined;
+  private tokenApiDomain: string | undefined;
 
-  constructor() {
-    this.clientId = process.env.ZOHO_CLIENT_ID;
-    this.clientSecret = process.env.ZOHO_CLIENT_SECRET;
-    this.refreshToken = process.env.ZOHO_REFRESH_TOKEN;
-    this.organizationId = process.env.ZOHO_ORGANIZATION_ID;
+  private get clientId() {
+    return getIntegrationEnv("ZOHO_CLIENT_ID");
+  }
+
+  private get clientSecret() {
+    return getIntegrationEnv("ZOHO_CLIENT_SECRET");
+  }
+
+  private get refreshToken() {
+    return getIntegrationEnv("ZOHO_REFRESH_TOKEN");
+  }
+
+  private get organizationId() {
+    return getIntegrationEnv("ZOHO_ORGANIZATION_ID");
+  }
+
+  private get accountsBaseUrl() {
+    return (getIntegrationEnv("ZOHO_ACCOUNTS_BASE_URL") || "https://accounts.zoho.sa").replace(/\/+$/, "");
+  }
+
+  private get apiDomain() {
+    return (this.tokenApiDomain || getIntegrationEnv("ZOHO_API_BASE_URL") || "https://www.zohoapis.sa").replace(/\/+$/, "");
+  }
+
+  private getCredentialFingerprint() {
+    return `${this.clientId || ""}:${this.refreshToken || ""}:${this.organizationId || ""}:${this.accountsBaseUrl}:${getIntegrationEnv("ZOHO_API_BASE_URL") || ""}`;
+  }
+
+  private buildInvoicePayload(params: ZohoInvoiceParams) {
+    return {
+      customer_id: params.customerId,
+      invoice_number: params.invoiceNumber,
+      date: params.date,
+      due_date: params.dueDate,
+      line_items: params.lineItems.map(item => ({
+        name: item.name,
+        description: item.description,
+        quantity: item.quantity,
+        rate: item.rate,
+      })),
+      notes: params.notes,
+    };
   }
 
   isConfigured(): boolean {
@@ -97,13 +132,17 @@ export class ZohoService {
       return null;
     }
 
-    if (this.accessToken && Date.now() < this.tokenExpiry) {
+    const credentialFingerprint = this.getCredentialFingerprint();
+    if (this.accessToken && Date.now() < this.tokenExpiry && this.tokenCredentialFingerprint === credentialFingerprint) {
       return this.accessToken;
+    }
+    if (this.tokenCredentialFingerprint !== credentialFingerprint) {
+      this.tokenApiDomain = undefined;
     }
 
     const startTime = Date.now();
     try {
-      const response = await fetch('https://accounts.zoho.sa/oauth/v2/token', {
+      const response = await fetch(`${this.accountsBaseUrl}/oauth/v2/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -132,9 +171,10 @@ export class ZohoService {
       
       this.accessToken = data.access_token;
       this.tokenExpiry = Date.now() + (data.expires_in * 1000) - 60000;
+      this.tokenCredentialFingerprint = credentialFingerprint;
       
       if (data.api_domain) {
-        this.apiDomain = data.api_domain;
+        this.tokenApiDomain = data.api_domain;
       }
       
       await storage.createIntegrationLog({
@@ -183,19 +223,7 @@ export class ZohoService {
             'Authorization': `Zoho-oauthtoken ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            customer_id: params.customerId,
-            invoice_number: params.invoiceNumber,
-            date: params.date,
-            due_date: params.dueDate,
-            line_items: params.lineItems.map(item => ({
-              name: item.name,
-              description: item.description,
-              quantity: item.quantity,
-              rate: item.rate,
-            })),
-            notes: params.notes,
-          }),
+          body: JSON.stringify(this.buildInvoicePayload(params)),
         }
       );
       
@@ -243,6 +271,119 @@ export class ZohoService {
         requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber }),
       });
       return null;
+    }
+  }
+
+  async updateInvoice(zohoInvoiceId: string, params: ZohoInvoiceParams): Promise<boolean> {
+    if (!this.isConfigured()) {
+      console.log("Zoho not configured, skipping invoice update");
+      return false;
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) {
+      console.log("Zoho access token not available, skipping invoice update");
+      return false;
+    }
+
+    const startTime = Date.now();
+    try {
+      const response = await fetch(
+        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(this.buildInvoicePayload(params)),
+        },
+      );
+      const data = await response.json();
+      const duration = Date.now() - startTime;
+
+      if (data.code !== 0) {
+        await storage.createIntegrationLog({
+          serviceName: "zoho",
+          operation: "update_invoice",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data.message,
+          duration,
+          requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber, zohoInvoiceId }),
+        });
+        return false;
+      }
+
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "update_invoice",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber, zohoInvoiceId }),
+      });
+      return true;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "update_invoice",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ invoiceNumber: params.invoiceNumber, zohoInvoiceId }),
+      });
+      return false;
+    }
+  }
+
+  async deleteInvoice(zohoInvoiceId: string): Promise<boolean> {
+    if (!this.isConfigured()) {
+      console.log("Zoho not configured, skipping invoice deletion");
+      return false;
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) {
+      console.log("Zoho access token not available, skipping invoice deletion");
+      return false;
+    }
+
+    const startTime = Date.now();
+    try {
+      const response = await fetch(
+        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        },
+      );
+      const data = await response.json();
+      const duration = Date.now() - startTime;
+      const success = data.code === 0;
+
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "delete_invoice",
+        success,
+        statusCode: response.status,
+        errorMessage: success ? undefined : data.message,
+        duration,
+        requestPayload: JSON.stringify({ zohoInvoiceId }),
+      });
+      return success;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "delete_invoice",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify({ zohoInvoiceId }),
+      });
+      return false;
     }
   }
 
@@ -493,10 +634,15 @@ export class ZohoService {
     }
   }
 
-  async syncInvoice(invoiceId: string, params: ZohoInvoiceParams): Promise<ZohoInvoiceResult> {
+  async syncInvoice(invoiceId: string, params: ZohoInvoiceParams, zohoInvoiceId?: string): Promise<ZohoInvoiceResult> {
     if (!this.isConfigured()) {
       console.log("Zoho not configured, skipping invoice sync");
       return { zohoInvoiceId: "", invoiceUrl: "" };
+    }
+
+    if (zohoInvoiceId) {
+      const updated = await this.updateInvoice(zohoInvoiceId, params);
+      return updated ? { zohoInvoiceId, invoiceUrl: "" } : { zohoInvoiceId: "", invoiceUrl: "" };
     }
 
     const result = await this.createInvoice(params);

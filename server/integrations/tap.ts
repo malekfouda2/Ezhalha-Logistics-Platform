@@ -2,6 +2,7 @@ import "../load-env";
 import crypto from "crypto";
 
 import { storage } from "../storage";
+import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 
 export interface TapChargeCustomer {
   id?: string;
@@ -133,18 +134,40 @@ function normalizeTapStatus(status: string | undefined | null): string {
 }
 
 export class TapService {
-  private secretKey = process.env.TAP_SECRET_KEY;
-  private publicKey = process.env.TAP_PUBLIC_KEY;
-  private merchantId = process.env.TAP_MERCHANT_ID;
-  private baseUrl = (process.env.TAP_BASE_URL || TAP_API_BASE).replace(/\/+$/, "");
-  private savedCardsEnabled = process.env.TAP_ENABLE_SAVED_CARDS === "true";
+  private get secretKey() {
+    return getIntegrationEnv("TAP_SECRET_KEY");
+  }
+
+  private get publicKey() {
+    return getIntegrationEnv("TAP_PUBLIC_KEY");
+  }
+
+  private get merchantId() {
+    return getIntegrationEnv("TAP_MERCHANT_ID");
+  }
+
+  private get baseUrl() {
+    return (getIntegrationEnv("TAP_BASE_URL") || TAP_API_BASE).replace(/\/+$/, "");
+  }
+
+  private get savedCardsEnabled() {
+    return getIntegrationEnvBoolean("TAP_ENABLE_SAVED_CARDS");
+  }
 
   isConfigured(): boolean {
     return Boolean(this.secretKey);
   }
 
   isEmbeddedCardConfigured(): boolean {
-    return Boolean(this.publicKey && this.merchantId);
+    if (!this.publicKey) {
+      return false;
+    }
+
+    if (process.env.NODE_ENV === "production") {
+      return Boolean(this.merchantId);
+    }
+
+    return true;
   }
 
   getPublicKey(): string | undefined {

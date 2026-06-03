@@ -134,6 +134,7 @@ type FinancialShipment = Omit<
   extraFeesCostAmountSar: number;
   extraWeightAmountSar: number;
   extraFeesRateSarPerWeight: number;
+  extraFeesQuantityUnit: string;
   extraFeesAddedAt: string | null;
   extraFeesEmailSentAt: string | null;
   extraWeightInvoiceStatus: "paid" | "pending" | "failed" | null;
@@ -204,6 +205,10 @@ function roundMoney(value: number): number {
 }
 
 function getExtraFeesRate(shipment: FinancialShipment): number {
+  if (shipment.extraFeesRateSarPerWeight > 0) {
+    return shipment.extraFeesRateSarPerWeight;
+  }
+
   if (!shipment.weightValue || shipment.weightValue <= 0) {
     return 0;
   }
@@ -211,9 +216,13 @@ function getExtraFeesRate(shipment: FinancialShipment): number {
   return roundMoney((shipment.clientTotalAmountSar || 0) / shipment.weightValue);
 }
 
-function formatExtraFeesTypeLabel(type: FinancialShipment["extraFeesType"]) {
-  if (type === "COMBINED") return "Weight + Cost";
-  if (type === "EXTRA_WEIGHT") return "Extra Weight";
+function getExtraFeesUnit(shipment: FinancialShipment): string {
+  return shipment.extraFeesQuantityUnit || shipment.weightUnit || "KG";
+}
+
+function formatExtraFeesTypeLabel(type: FinancialShipment["extraFeesType"], unit?: string) {
+  if (type === "COMBINED") return unit === "CBM" ? "Volume + Cost" : "Weight + Cost";
+  if (type === "EXTRA_WEIGHT") return unit === "CBM" ? "Extra Volume" : "Extra Weight";
   if (type === "EXTRA_COST") return "Extra Cost";
   return "Extra Fees";
 }
@@ -1008,7 +1017,7 @@ export default function AdminPayments() {
                             <div className="flex flex-wrap items-center gap-1">
                               {shipment.extraFeesType && (
                                 <Badge variant="secondary" className="text-[10px]">
-                                  {formatExtraFeesTypeLabel(shipment.extraFeesType)}
+                                  {formatExtraFeesTypeLabel(shipment.extraFeesType, getExtraFeesUnit(shipment))}
                                 </Badge>
                               )}
                               {shipment.extraFeesType === "EXTRA_WEIGHT" && shipment.isExtraWeightPaid && (
@@ -1031,7 +1040,7 @@ export default function AdminPayments() {
                                     "text-green-600 dark:text-green-400 font-medium",
                                 )}
                               >
-                                Weight: {shipment.extraFeesWeightValue.toFixed(2)} {shipment.weightUnit || "KG"}
+                                Billable adjustment: {shipment.extraFeesWeightValue.toFixed(2)} {getExtraFeesUnit(shipment)}
                                 {shipment.isExtraWeightPaid ? " · Paid" : ""}
                               </p>
                             )}
@@ -1585,17 +1594,17 @@ export default function AdminPayments() {
               <div className="grid gap-2">
                 <Label>Current Rate</Label>
                 <p className="text-sm text-muted-foreground">
-                  <SarAmount amount={getExtraFeesRate(extraFeesDialogShipment)} /> per {extraFeesDialogShipment.weightUnit || "KG"} = gross total / total weight
+                  <SarAmount amount={getExtraFeesRate(extraFeesDialogShipment)} /> per {getExtraFeesUnit(extraFeesDialogShipment)}
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="extra-weight-input">Extra Weight</Label>
+                <Label htmlFor="extra-weight-input">Extra Billable {getExtraFeesUnit(extraFeesDialogShipment)}</Label>
                 <Input
                   id="extra-weight-input"
                   inputMode="decimal"
                   value={extraWeightInput}
                   onChange={(e) => setExtraWeightInput(e.target.value)}
-                  placeholder={`0.00 ${extraFeesDialogShipment.weightUnit || "KG"}`}
+                  placeholder={`0.00 ${getExtraFeesUnit(extraFeesDialogShipment)}`}
                   data-testid="input-extra-fees-weight"
                 />
                 <p className="text-xs text-muted-foreground">

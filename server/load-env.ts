@@ -37,6 +37,10 @@ export function loadLocalEnv(): void {
   }
 
   envLoaded = true;
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
   const envPath = path.resolve(process.cwd(), ".env");
   if (!fs.existsSync(envPath)) {
     return;

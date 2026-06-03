@@ -1,6 +1,7 @@
 import { logInfo } from "../services/logger";
 import { fedexAdapter, type CarrierAdapter } from "./fedex";
 import { dhlAdapter } from "./dhl";
+import { aramexAdapter } from "./aramex";
 
 export class CarrierService {
   private adapters = new Map<string, CarrierAdapter>();
@@ -8,6 +9,7 @@ export class CarrierService {
   constructor() {
     this.registerAdapter(fedexAdapter);
     this.registerAdapter(dhlAdapter);
+    this.registerAdapter(aramexAdapter);
   }
 
   registerAdapter(adapter: CarrierAdapter): void {

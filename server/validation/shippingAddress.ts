@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getIntegrationEnv } from "../services/integration-runtime";
 
 export const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
   "AE", "QA", "BH", "OM", "HK", "IE", "PA", "BO", "BS", "BZ",
@@ -78,7 +79,7 @@ export function validateShippingAddresses(
   shipper: AddressInput,
   recipient: AddressInput
 ): ValidationResult {
-  const strictMode = process.env.FEDEX_STRICT_ADDRESS !== "false";
+  const strictMode = getIntegrationEnv("FEDEX_STRICT_ADDRESS") !== "false";
 
   const shipperErrors = validateSingleAddress(shipper, "shipper", strictMode);
   const recipientErrors = validateSingleAddress(recipient, "recipient", strictMode);

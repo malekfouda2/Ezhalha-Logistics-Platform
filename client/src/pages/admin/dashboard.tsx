@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -39,12 +40,15 @@ import {
   ArrowRight,
   Clock,
   Banknote,
+  RotateCcw,
 } from "lucide-react";
 import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import type { AdminDashboardStats, Shipment, ClientApplication } from "@shared/schema";
 import { format } from "date-fns";
 import { useAdminAccess } from "@/hooks/use-admin-access";
+import { queryClient, readJsonResponse } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const shipmentChartConfig: ChartConfig = {
   value: {
@@ -76,11 +80,55 @@ function formatStatusLabel(status: string): string {
     .join(" ");
 }
 
+interface AdminRefundRequestSummary {
+  id: string;
+  shipmentId: string;
+  shipmentTrackingNumber: string | null;
+  carrierTrackingNumber: string | null;
+  shipmentStatus: string | null;
+  clientName: string;
+  clientAccountNumber: string | null;
+  amount: string;
+  currency: string;
+  status: string;
+  requestedByName: string | null;
+  requestedByActorType: string;
+  accountManagerName: string | null;
+  accountManagerApprovalStatus: string;
+  financeApprovalStatus: string;
+  accountManagerApprovalSatisfied: boolean;
+  financeApprovalSatisfied: boolean;
+  canApproveAsAccountManager: boolean;
+  canApproveAsFinance: boolean;
+  createdAt: string;
+}
+
+function formatRefundApprovalLabel(status: string): string {
+  if (status === "NOT_REQUIRED") return "Not required";
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getRefundApprovalBadgeClass(status: string): string {
+  if (status === "APPROVED" || status === "NOT_REQUIRED") {
+    return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200";
+  }
+  if (status === "PENDING") {
+    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200";
+  }
+  return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200";
+}
+
 export default function AdminDashboard() {
   const adminAccess = useAdminAccess();
   const canReadDashboard = adminAccess.hasPermission("dashboard", "read");
   const canReadShipments = adminAccess.hasPermission("shipments", "read");
   const canReadApplications = adminAccess.hasPermission("applications", "read");
+  const canReadRefundRequests = adminAccess.hasPermission("refund-requests", "read");
+  const { toast } = useToast();
 
   const { data: stats, isLoading: statsLoading } = useQuery<AdminDashboardStats>({
     queryKey: ["/api/admin/stats"],
@@ -95,6 +143,82 @@ export default function AdminDashboard() {
   const { data: pendingApplications, isLoading: appsLoading } = useQuery<ClientApplication[]>({
     queryKey: ["/api/admin/applications/pending"],
     enabled: canReadApplications,
+  });
+
+  const { data: refundRequests, isLoading: refundsLoading } = useQuery<AdminRefundRequestSummary[]>({
+    queryKey: ["/api/admin/refund-requests", "dashboard"],
+    enabled: canReadRefundRequests,
+    queryFn: async () => {
+      const res = await fetch("/api/admin/refund-requests?status=PENDING&limit=5", {
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to fetch refund requests");
+      }
+
+      return readJsonResponse<AdminRefundRequestSummary[]>(res);
+    },
+  });
+
+  const approveAccountManagerRefundMutation = useMutation({
+    mutationFn: async (refundRequestId: string) => {
+      const res = await fetch(`/api/admin/refund-requests/${refundRequestId}/approve-account-manager`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to approve refund request");
+      }
+
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/refund-requests"] });
+      toast({
+        title: "Refund approved",
+        description: "Your account manager approval has been recorded.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Approval failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const approveFinanceRefundMutation = useMutation({
+    mutationFn: async (refundRequestId: string) => {
+      const res = await fetch(`/api/admin/refund-requests/${refundRequestId}/approve-finance`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to approve refund request");
+      }
+
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/refund-requests"] });
+      toast({
+        title: "Refund approved",
+        description: "The finance approval has been recorded.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Approval failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
   if (statsLoading) {
@@ -141,6 +265,13 @@ export default function AdminDashboard() {
             icon={Banknote}
             trend={stats?.trends?.revenue}
           />
+          {canReadRefundRequests && (
+            <StatCard
+              title="Pending Refunds"
+              value={refundRequests?.length ?? 0}
+              icon={RotateCcw}
+            />
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -314,6 +445,101 @@ export default function AdminDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {canReadRefundRequests && (
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle className="text-lg">Refund Requests Awaiting Approval</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {refundsLoading ? (
+                  <div className="h-36 flex items-center justify-center">
+                    <LoadingScreen message="Loading refund requests..." />
+                  </div>
+                ) : refundRequests && refundRequests.length > 0 ? (
+                  <div className="space-y-4">
+                    {refundRequests.map((refundRequest) => (
+                      <div
+                        key={refundRequest.id}
+                        className="rounded-lg border p-4 space-y-3"
+                        data-testid={`refund-request-${refundRequest.id}`}
+                      >
+                        <div className="flex items-start justify-between gap-4 flex-wrap">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium">{refundRequest.shipmentTrackingNumber || refundRequest.shipmentId}</span>
+                              {refundRequest.carrierTrackingNumber && (
+                                <span className="text-sm text-muted-foreground">
+                                  Carrier: {refundRequest.carrierTrackingNumber}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {refundRequest.clientName}
+                              {refundRequest.clientAccountNumber ? ` • ${refundRequest.clientAccountNumber}` : ""}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Requested by {refundRequest.requestedByName || "Unknown"} on{" "}
+                              {format(new Date(refundRequest.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-muted-foreground">Refund Amount</p>
+                            <p className="text-lg font-semibold">
+                              <SarAmount amount={Number(refundRequest.amount || 0)} />
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 flex-wrap text-sm">
+                          <Badge className={getRefundApprovalBadgeClass(refundRequest.accountManagerApprovalStatus)}>
+                            AM: {formatRefundApprovalLabel(refundRequest.accountManagerApprovalStatus)}
+                          </Badge>
+                          <Badge className={getRefundApprovalBadgeClass(refundRequest.financeApprovalStatus)}>
+                            Finance: {formatRefundApprovalLabel(refundRequest.financeApprovalStatus)}
+                          </Badge>
+                          {refundRequest.accountManagerName && (
+                            <span className="text-muted-foreground">
+                              Account Manager: {refundRequest.accountManagerName}
+                            </span>
+                          )}
+                        </div>
+
+                        {(refundRequest.canApproveAsAccountManager || refundRequest.canApproveAsFinance) && (
+                          <div className="flex justify-end gap-2">
+                            {refundRequest.canApproveAsAccountManager && (
+                              <Button
+                                size="sm"
+                                onClick={() => approveAccountManagerRefundMutation.mutate(refundRequest.id)}
+                                disabled={approveAccountManagerRefundMutation.isPending}
+                                data-testid={`button-approve-refund-am-${refundRequest.id}`}
+                              >
+                                Approve As Account Manager
+                              </Button>
+                            )}
+                            {refundRequest.canApproveAsFinance && (
+                              <Button
+                                size="sm"
+                                onClick={() => approveFinanceRefundMutation.mutate(refundRequest.id)}
+                                disabled={approveFinanceRefundMutation.isPending}
+                                data-testid={`button-approve-refund-finance-${refundRequest.id}`}
+                              >
+                                Approve As Finance
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-24 flex items-center justify-center text-muted-foreground">
+                    No refund requests are waiting right now.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-lg">Performance Overview</CardTitle>

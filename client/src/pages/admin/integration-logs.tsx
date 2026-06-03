@@ -98,7 +98,7 @@ export default function AdminIntegrationLogs() {
           <div>
             <h1 className="text-2xl font-bold">Integration Logs</h1>
             <p className="text-muted-foreground">
-              Monitor API calls to external services (FedEx, DHL, Tap, Zoho)
+              Monitor API calls to external services (FedEx, DHL, Aramex, Tap, Zoho)
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="button-refresh">

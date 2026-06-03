@@ -6,7 +6,14 @@ import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
 import { fedexAdapter } from "../server/integrations/fedex";
 import { storage } from "../server/storage";
-import { ACCOUNT_MANAGER_SYSTEM_ROLE_ID, InvoiceType } from "../shared/schema";
+import { processAbandonedRecoveryExpirations } from "../server/services/abandoned-recovery";
+import {
+  ACCOUNT_MANAGER_SYSTEM_ROLE_ID,
+  AbandonedShipmentRecoveryStatus,
+  INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
+  IntegrationAccountCountryBasis,
+  InvoiceType,
+} from "../shared/schema";
 
 let app: express.Express;
 let server: ReturnType<typeof createServer>;
@@ -124,6 +131,94 @@ afterAll(() => {
   server.close();
 });
 
+describe("Admin - Apps", () => {
+  it("should manage an encrypted integration account without replacing masked secrets", async () => {
+    const appsRes = await asAdmin.get("/api/admin/apps");
+    expect(appsRes.status).toBe(200);
+    expect(appsRes.body.apps.some((app: any) => app.key === "gemini")).toBe(true);
+
+    const createRes = await asAdmin
+      .post("/api/admin/apps/accounts")
+      .send({
+        appKey: "gemini",
+        accountName: `Gemini regression ${Date.now()}`,
+        environment: "sandbox",
+        countryCode: "ZZ",
+        region: "Regression",
+        priority: 100,
+        isActive: true,
+        isDefault: false,
+        credentials: {
+          GEMINI_API_KEY: "regression-secret-key",
+          GEMINI_INVOICE_EXTRACTION_MODEL: "gemini-2.5-flash-lite",
+        },
+        settings: {
+          GEMINI_INVOICE_FALLBACK_ON_WARNING: "true",
+        },
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.credentials.GEMINI_API_KEY).toContain("••••");
+    const accountId = createRes.body.id as string;
+
+    const updateRes = await asAdmin
+      .patch(`/api/admin/apps/accounts/${accountId}`)
+      .send({
+        accountName: "Gemini regression updated",
+        credentials: {
+          GEMINI_API_KEY: createRes.body.credentials.GEMINI_API_KEY,
+        },
+        settings: {
+          GEMINI_INVOICE_FALLBACK_ON_WARNING: "false",
+        },
+      });
+
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.accountName).toBe("Gemini regression updated");
+    expect(updateRes.body.credentials.GEMINI_API_KEY).toContain("••••");
+    expect(updateRes.body.settings.GEMINI_INVOICE_FALLBACK_ON_WARNING).toBe("false");
+
+    const deleteRes = await asAdmin.delete(`/api/admin/apps/accounts/${accountId}`);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.success).toBe(true);
+  });
+});
+
+describe("Admin - Web App Settings", () => {
+  it("should persist the integration account country basis and reject invalid values", async () => {
+    const previousSetting = await storage.getPlatformSetting(INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY);
+
+    try {
+      const initialRes = await asAdmin.get("/api/admin/settings/web-app");
+      expect(initialRes.status).toBe(200);
+      expect([
+        IntegrationAccountCountryBasis.SHIPPING_ACCOUNT_COUNTRY,
+        IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY,
+      ]).toContain(initialRes.body.integrationAccountCountryBasis);
+
+      const updateRes = await asAdmin
+        .patch("/api/admin/settings/web-app")
+        .send({ integrationAccountCountryBasis: IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.integrationAccountCountryBasis).toBe(IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY);
+
+      const persisted = await storage.getPlatformSetting(INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY);
+      expect(persisted?.value).toBe(IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY);
+
+      const invalidRes = await asAdmin
+        .patch("/api/admin/settings/web-app")
+        .send({ integrationAccountCountryBasis: "recipient_country" });
+      expect(invalidRes.status).toBe(400);
+    } finally {
+      await storage.upsertPlatformSetting({
+        key: INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
+        value: previousSetting?.value || IntegrationAccountCountryBasis.SHIPPING_ACCOUNT_COUNTRY,
+        updatedByUserId: previousSetting?.updatedByUserId || null,
+      });
+    }
+  });
+});
+
 describe("Admin - Dashboard", () => {
   it("GET /api/admin/stats should return stats", async () => {
     const res = await asAdmin.get("/api/admin/stats");
@@ -197,7 +292,7 @@ describe("Admin - Financial Statements", () => {
       carrierCode: "FEDEX",
       carrierName: "FedEx",
       carrierTrackingNumber: `FDX-${unique}`,
-      paymentStatus: "pending",
+      paymentStatus: "paid",
     });
 
     const now = new Date();
@@ -222,8 +317,150 @@ describe("Admin - Financial Statements", () => {
     expect(Number(matchedShipment.netProfitAmountSar)).toBe(20);
     expect(Number(matchedShipment.extraFeesAmountSar)).toBe(27.6);
     expect(matchedShipment.carrierTrackingId).toBe(`FDX-${unique}`);
-    expect(matchedShipment.canMarkPaid).toBe(true);
-    expect(matchedShipment.isClientPaid).toBe(false);
+    expect(matchedShipment.canMarkPaid).toBe(false);
+    expect(matchedShipment.isClientPaid).toBe(true);
+  });
+
+  it("GET /api/admin/financial-statements should exclude unpaid and payment-pending shipments by default", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `Excluded Financial Client ${unique}`,
+      email: `excluded_financial_client_${unique}@test.com`,
+      phone: "5551234568",
+      country: "Saudi Arabia",
+      profile: "regular",
+      accountType: "company",
+      companyName: "Excluded Financial Co",
+      isActive: true,
+      shippingContactName: "Excluded Finance Contact",
+      shippingContactPhone: "5551234568",
+      shippingCountryCode: "SA",
+      shippingStateOrProvince: "Riyadh",
+      shippingCity: "Riyadh",
+      shippingPostalCode: "12345",
+      shippingAddressLine1: "101 Finance Street",
+      shippingShortAddress: "RCTB4360",
+    });
+
+    const paidShipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Warehouse KSA",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5550000101",
+      recipientName: "Paid Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Jeddah",
+      recipientCountry: "SA",
+      recipientPhone: "5550000102",
+      weight: "5.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      status: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "138.00",
+      accountingCurrency: "SAR",
+      taxScenario: "DCE",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "15.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "18.00",
+      clientTotalAmountSar: "138.00",
+      systemCostTotalAmountSar: "115.00",
+      taxPayableAmountSar: "3.00",
+      revenueExcludingTaxAmountSar: "120.00",
+      currency: "SAR",
+      paymentStatus: "paid",
+    });
+
+    const unpaidShipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Warehouse KSA",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5550000201",
+      recipientName: "Unpaid Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Jeddah",
+      recipientCountry: "SA",
+      recipientPhone: "5550000202",
+      weight: "5.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      status: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "138.00",
+      accountingCurrency: "SAR",
+      taxScenario: "DCE",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "15.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "18.00",
+      clientTotalAmountSar: "138.00",
+      systemCostTotalAmountSar: "115.00",
+      taxPayableAmountSar: "3.00",
+      revenueExcludingTaxAmountSar: "120.00",
+      currency: "SAR",
+      paymentStatus: "pending",
+    });
+
+    const paymentPendingShipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Warehouse KSA",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5550000301",
+      recipientName: "Payment Pending Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Jeddah",
+      recipientCountry: "SA",
+      recipientPhone: "5550000302",
+      weight: "5.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      status: "payment_pending",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "138.00",
+      accountingCurrency: "SAR",
+      taxScenario: "DCE",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "15.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "18.00",
+      clientTotalAmountSar: "138.00",
+      systemCostTotalAmountSar: "115.00",
+      taxPayableAmountSar: "3.00",
+      revenueExcludingTaxAmountSar: "120.00",
+      currency: "SAR",
+      paymentStatus: "paid",
+    });
+
+    const res = await asAdmin.get(
+      `/api/admin/financial-statements?search=${encodeURIComponent(paidShipment.trackingNumber)}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(1);
+    expect(res.body.summary.totalShipments).toBe(1);
+    expect(res.body.shipments).toHaveLength(1);
+    expect(res.body.shipments[0].id).toBe(paidShipment.id);
+    expect(res.body.shipments.some((entry: any) => entry.id === unpaidShipment.id)).toBe(false);
+    expect(res.body.shipments.some((entry: any) => entry.id === paymentPendingShipment.id)).toBe(false);
   });
 
   it("GET /api/admin/financial-statements should support searching multiple shipments in one query", async () => {
@@ -280,7 +517,7 @@ describe("Admin - Financial Statements", () => {
       taxPayableAmountSar: "3.00",
       revenueExcludingTaxAmountSar: "100.00",
       currency: "SAR",
-      paymentStatus: "pending",
+      paymentStatus: "paid",
     });
 
     const shipmentB = await storage.createShipment({
@@ -316,7 +553,7 @@ describe("Admin - Financial Statements", () => {
       taxPayableAmountSar: "4.50",
       revenueExcludingTaxAmountSar: "120.00",
       currency: "SAR",
-      paymentStatus: "pending",
+      paymentStatus: "paid",
     });
 
     const res = await asAdmin.get(
@@ -383,7 +620,7 @@ describe("Admin - Financial Statements", () => {
       taxPayableAmountSar: "4.50",
       revenueExcludingTaxAmountSar: "150.00",
       currency: "SAR",
-      paymentStatus: "unpaid",
+      paymentStatus: "paid",
     });
 
     const now = new Date();
@@ -775,6 +1012,61 @@ describe("Admin - Financial Statements", () => {
     const resetInvoices = await storage.getInvoicesByShipmentId(shipment.id);
     expect(resetInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_WEIGHT)).toBeUndefined();
     expect(resetInvoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_COST)).toBeUndefined();
+  });
+
+  it("PATCH /api/admin/financial-statements/shipments/:id/extra-fees should use the DDP KG lane rate and markup", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `DDP Extra Fees Client ${unique}`,
+      email: `ddp_extra_fees_client_${unique}@test.com`,
+      phone: "5551234777",
+      country: "Saudi Arabia",
+      profile: "regular",
+      accountType: "company",
+      companyName: "DDP Extra Fees Co",
+      isActive: true,
+    });
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "DDP Supplier",
+      senderAddress: "Pickup coordination required",
+      senderCity: "Pickup coordination required",
+      senderCountry: "AE",
+      senderPhone: "5550004001",
+      recipientName: "DDP Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5550004002",
+      weight: "2.00",
+      weightUnit: "KG",
+      packageType: "DDP_MANUAL",
+      shipmentType: "inbound",
+      fulfillmentType: "ddp_manual",
+      ddpBillingUnit: "KG",
+      ddpRatePerUnitSar: "30.00",
+      status: "awaiting_review",
+      baseRate: "60.00",
+      marginAmount: "12.00",
+      margin: "12.00",
+      finalPrice: "72.00",
+      clientTotalAmountSar: "72.00",
+      currency: "SAR",
+      paymentStatus: "paid",
+    });
+
+    const saveRes = await asAdmin
+      .patch(`/api/admin/financial-statements/shipments/${shipment.id}/extra-fees`)
+      .send({ extraWeightValue: "1.00" });
+
+    expect(saveRes.status).toBe(200);
+    expect(saveRes.body.extraFeesQuantityUnit).toBe("KG");
+    expect(Number(saveRes.body.extraFeesRateSarPerWeight)).toBe(36);
+    expect(Number(saveRes.body.extraFeesAmountSar)).toBe(36);
+
+    const invoices = await storage.getInvoicesByShipmentId(shipment.id);
+    expect(Number(invoices.find((invoice) => invoice.invoiceType === InvoiceType.EXTRA_WEIGHT)?.amount)).toBe(36);
   });
 
   it("POST /api/admin/financial-statements/shipments/:id/mark-carrier-paid should mark the carrier settlement on a shipment", async () => {
@@ -1506,6 +1798,211 @@ describe("Admin - Shipments", () => {
     expect(Array.isArray(res.body.shipments)).toBe(true);
   });
 
+  it("GET /api/admin/shipments?abandoned=true should return unpaid online checkout shipments only", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `Abandoned Shipments Client ${unique}`,
+      email: `abandoned_shipments_${unique}@test.com`,
+      phone: "5558100001",
+      country: "Saudi Arabia",
+      profile: "regular",
+      isActive: true,
+    });
+    const recipientPrefix = `Abandoned Recipient ${unique}`;
+    const baseShipment = {
+      clientAccountId: clientAccount.id,
+      senderName: "Abandoned Sender",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5558100002",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5558100003",
+      weight: "2.00",
+      weightUnit: "KG",
+      length: "20.00",
+      width: "15.00",
+      height: "10.00",
+      dimensionUnit: "CM",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      baseRate: "100.00",
+      margin: "20.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+      currency: "SAR",
+      carrierCode: "DHL",
+      carrierName: "DHL",
+    };
+
+    const pendingShipment = await storage.createShipment({
+      ...baseShipment,
+      recipientName: `${recipientPrefix} Pending`,
+      status: "payment_pending",
+      paymentMethod: "PAY_NOW",
+      paymentStatus: "pending",
+    });
+    const createdUnpaidShipment = await storage.createShipment({
+      ...baseShipment,
+      recipientName: `${recipientPrefix} Created`,
+      status: "created",
+      paymentMethod: "PAY_NOW",
+      paymentStatus: "unpaid",
+    });
+    const paidShipment = await storage.createShipment({
+      ...baseShipment,
+      recipientName: `${recipientPrefix} Paid`,
+      status: "created",
+      paymentMethod: "PAY_NOW",
+      paymentStatus: "paid",
+    });
+    const creditShipment = await storage.createShipment({
+      ...baseShipment,
+      recipientName: `${recipientPrefix} Credit`,
+      status: "credit_pending",
+      paymentMethod: "CREDIT",
+      paymentStatus: "unpaid",
+    });
+
+    const res = await asAdmin.get(
+      `/api/admin/shipments?abandoned=true&search=${encodeURIComponent(recipientPrefix)}&limit=20`,
+    );
+
+    expect(res.status).toBe(200);
+    const resultIds = res.body.shipments.map((shipment: any) => shipment.id);
+    expect(resultIds).toContain(pendingShipment.id);
+    expect(resultIds).toContain(createdUnpaidShipment.id);
+    expect(resultIds).not.toContain(paidShipment.id);
+    expect(resultIds).not.toContain(creditShipment.id);
+  });
+
+  it("POST /api/admin/shipments/:id/abandoned-recovery/discount should include a resume payment link", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `Abandoned Offer Client ${unique}`,
+      email: `abandoned_offer_${unique}@test.com`,
+      phone: "5558200001",
+      country: "Saudi Arabia",
+      profile: "regular",
+      isActive: true,
+    });
+    const shipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Offer Sender",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5558200002",
+      recipientName: "Offer Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5558200003",
+      weight: "2.00",
+      weightUnit: "KG",
+      length: "20.00",
+      width: "15.00",
+      height: "10.00",
+      dimensionUnit: "CM",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      status: "payment_pending",
+      paymentMethod: "PAY_NOW",
+      paymentStatus: "pending",
+      baseRate: "100.00",
+      margin: "20.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+      clientTotalAmountSar: "120.00",
+      currency: "SAR",
+      carrierCode: "DHL",
+      carrierName: "DHL",
+    });
+
+    const res = await asAdmin
+      .post(`/api/admin/shipments/${shipment.id}/abandoned-recovery/discount`)
+      .send({
+        channel: "Email",
+        discountType: "percent",
+        discountValue: 10,
+        expiresIn: "24 hours",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.recovery.status).toBe(AbandonedShipmentRecoveryStatus.DISCOUNT_SENT);
+    expect(res.body.recovery.discountMessage).toContain(`/client/shipments?resumeShipment=${encodeURIComponent(shipment.id)}`);
+  });
+
+  it("processAbandonedRecoveryExpirations should mark expired recovery discounts as expired", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `Expired Offer Client ${unique}`,
+      email: `expired_offer_${unique}@test.com`,
+      phone: "5558300001",
+      country: "Saudi Arabia",
+      profile: "regular",
+      isActive: true,
+    });
+    const shipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Expired Sender",
+      senderAddress: "100 Sender Road",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5558300002",
+      recipientName: "Expired Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5558300003",
+      weight: "2.00",
+      weightUnit: "KG",
+      length: "20.00",
+      width: "15.00",
+      height: "10.00",
+      dimensionUnit: "CM",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic",
+      isDdp: false,
+      status: "payment_pending",
+      paymentMethod: "PAY_NOW",
+      paymentStatus: "pending",
+      baseRate: "100.00",
+      margin: "20.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+      clientTotalAmountSar: "120.00",
+      currency: "SAR",
+      carrierCode: "DHL",
+      carrierName: "DHL",
+    });
+    const recovery = await storage.createAbandonedShipmentRecovery({
+      shipmentId: shipment.id,
+      clientAccountId: clientAccount.id,
+      status: AbandonedShipmentRecoveryStatus.DISCOUNT_SENT,
+      lastAction: "discount_sent",
+      discountType: "fixed",
+      discountValue: "20.00",
+      discountAmount: "20.00",
+      discountFinalPrice: "100.00",
+      discountChannel: "Email",
+      discountExpiresAt: new Date(Date.now() - 60_000),
+      discountMessage: "Expired offer",
+    });
+
+    const expiredCount = await processAbandonedRecoveryExpirations();
+
+    expect(expiredCount).toBeGreaterThanOrEqual(1);
+    const updatedRecovery = await storage.getAbandonedShipmentRecoveryByShipmentId(shipment.id);
+    expect(updatedRecovery?.id).toBe(recovery.id);
+    expect(updatedRecovery?.status).toBe(AbandonedShipmentRecoveryStatus.EXPIRED);
+    expect(updatedRecovery?.lastAction).toBe("discount_expired");
+  });
+
   it("POST /api/admin/shipments/:id/retry-carrier should preserve and upload trade documents", async () => {
     const unique = Date.now();
     const clientAccount = await storage.createClientAccount({
@@ -1648,6 +2145,7 @@ describe("Admin - Shipments", () => {
       carrierStatus: "created",
       baseRate: "100.00",
       marginAmount: "20.00",
+      margin: "20.00",
       finalPrice: "120.00",
     });
 
@@ -1657,7 +2155,10 @@ describe("Admin - Shipments", () => {
       const res = await asAdmin.post(`/api/admin/shipments/${shipment.id}/cancel`).send({});
 
       expect(res.status).toBe(502);
-      expect(res.body.error).toBe("Failed to cancel with carrier");
+      expect(res.body.error).toBe(
+        "We could not cancel this shipment with the carrier automatically. Please contact support to complete the cancellation.",
+      );
+      expect(res.body.carrierErrorMessage).toBe(res.body.error);
 
       const updatedShipment = await storage.getShipment(shipment.id);
       expect(updatedShipment?.status).toBe("created");
@@ -1731,6 +2232,84 @@ describe("Admin - Pricing Rules", () => {
         isActive: true,
       });
     expect(res.status).toBe(400);
+  });
+
+  it("should create and update DDP pricing lanes as country-to-country routes", async () => {
+    const createRes = await asAdmin
+      .post("/api/admin/ddp-pricing")
+      .send({
+        originCountryCode: "zx",
+        originCity: "Legacy Origin City",
+        destinationCountryCode: "zy",
+        destinationCity: "Legacy Destination City",
+        airBaseRatePerKg: 25,
+        minimumBillableKg: 1,
+        kgRoundingIncrement: 0.5,
+        minimumBillableCbm: 0,
+        cbmRoundingIncrement: 0.1,
+        minimumShipmentCharge: 25,
+        volumetricDivisor: 6000,
+        isActive: true,
+      });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.originCountryCode).toBe("ZX");
+    expect(createRes.body.originCity).toBe("");
+    expect(createRes.body.destinationCountryCode).toBe("ZY");
+    expect(createRes.body.destinationCity).toBe("");
+
+    try {
+      const updateRes = await asAdmin
+        .patch(`/api/admin/ddp-pricing/${createRes.body.id}`)
+        .send({
+          originCountryCode: "zx",
+          originCity: "Ignored Origin City",
+          destinationCountryCode: "zz",
+          destinationCity: "Ignored Destination City",
+        });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.originCountryCode).toBe("ZX");
+      expect(updateRes.body.originCity).toBe("");
+      expect(updateRes.body.destinationCountryCode).toBe("ZZ");
+      expect(updateRes.body.destinationCity).toBe("");
+    } finally {
+      await storage.deleteDdpPricingLane(createRes.body.id);
+    }
+  });
+
+  it("should create, update, list, and delete DDP pricing tiers for a profile", async () => {
+    const rule = await storage.createPricingRule({
+      profile: `ddp_api_profile_${Date.now()}`,
+      displayName: "DDP API Profile",
+      marginPercentage: "15.00",
+      ddpMarginPercentage: "12.00",
+      isActive: true,
+    });
+
+    try {
+      const createRes = await asAdmin
+        .post(`/api/admin/pricing/${rule.id}/ddp-tiers`)
+        .send({ billingUnit: "CBM", minAmount: 2.5, marginPercentage: 9 });
+      expect(createRes.status).toBe(201);
+
+      const listRes = await asAdmin.get(`/api/admin/pricing/${rule.id}/ddp-tiers`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body).toHaveLength(1);
+      expect(listRes.body[0].billingUnit).toBe("CBM");
+      expect(listRes.body[0].marginPercentage).toBe("9.00");
+
+      const updateRes = await asAdmin
+        .patch(`/api/admin/pricing/ddp-tiers/${createRes.body.id}`)
+        .send({ billingUnit: "KG", marginPercentage: 7.5 });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.marginPercentage).toBe("7.50");
+      expect(updateRes.body.billingUnit).toBe("KG");
+
+      const deleteRes = await asAdmin.delete(`/api/admin/pricing/ddp-tiers/${createRes.body.id}`);
+      expect(deleteRes.status).toBe(200);
+      expect(deleteRes.body.success).toBe(true);
+    } finally {
+      await storage.deletePricingRule(rule.id);
+    }
   });
 });
 
@@ -1954,25 +2533,31 @@ describe("Admin - Account Managers", () => {
     expect(res.body.isAccountManager).toBe(true);
     expect(res.body.managedClientIds).toEqual([assignedClientId]);
     expect(res.body.permissions).toEqual(expect.arrayContaining([
+      "dashboard:read",
       "clients:read",
       "clients:update",
       "clients:activate",
       "shipments:read",
+      "shipments:cancel",
       "shipments:update",
       "invoices:read",
       "invoices:download",
       "payments:read",
       "credit-invoices:read",
+      "refund-requests:read",
+      "refund-requests:approve-account-manager",
     ]));
   });
 
   it("should scope list endpoints to only assigned clients", async () => {
-    const [clientsRes, shipmentsRes, invoicesRes, paymentsRes, creditInvoicesRes] = await Promise.all([
+    const [clientsRes, shipmentsRes, invoicesRes, paymentsRes, creditInvoicesRes, statsRes, recentShipmentsRes] = await Promise.all([
       asAccountManager.get("/api/admin/clients"),
       asAccountManager.get("/api/admin/shipments"),
       asAccountManager.get("/api/admin/invoices"),
       asAccountManager.get("/api/admin/payments"),
       asAccountManager.get("/api/admin/credit-invoices"),
+      asAccountManager.get("/api/admin/stats"),
+      asAccountManager.get("/api/admin/shipments/recent"),
     ]);
 
     expect(clientsRes.status).toBe(200);
@@ -1993,6 +2578,15 @@ describe("Admin - Account Managers", () => {
     expect(creditInvoicesRes.status).toBe(200);
     expect(creditInvoicesRes.body.invoices.map((invoice: any) => invoice.id)).toContain(assignedCreditInvoiceId);
     expect(creditInvoicesRes.body.invoices.every((invoice: any) => invoice.clientAccountId === assignedClientId)).toBe(true);
+
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.body.totalClients).toBe(1);
+    expect(statsRes.body.totalShipments).toBe(1);
+    expect(statsRes.body.totalRevenue).toBe(120);
+
+    expect(recentShipmentsRes.status).toBe(200);
+    expect(recentShipmentsRes.body.map((shipment: any) => shipment.id)).toContain(assignedShipmentId);
+    expect(recentShipmentsRes.body.map((shipment: any) => shipment.id)).not.toContain(unassignedShipmentId);
   });
 
   it("should require admin approval for account manager client profile changes", async () => {
@@ -2051,5 +2645,83 @@ describe("Admin - Account Managers", () => {
       .patch(`/api/admin/shipments/${unassignedShipmentId}/status`)
       .send({ status: "in_transit" });
     expect(updateUnassignedShipmentRes.status).toBe(403);
+  });
+
+  it("should let account managers cancel assigned shipments and require finance approval to complete the refund", async () => {
+    const unique = Date.now();
+    const refundShipment = await storage.createShipment({
+      clientAccountId: assignedClientId,
+      senderName: "Refund Assigned Sender",
+      senderAddress: "123 Assigned Street",
+      senderCity: "Riyadh",
+      senderCountry: "SA",
+      senderPhone: "5555100001",
+      recipientName: "Refund Assigned Recipient",
+      recipientAddress: "456 Assigned Avenue",
+      recipientCity: "Jeddah",
+      recipientCountry: "SA",
+      recipientPhone: "5555100002",
+      weight: "2.50",
+      packageType: "parcel",
+      status: "created",
+      paymentStatus: "paid",
+      carrierStatus: "created",
+      baseRate: "100.00",
+      margin: "20.00",
+      marginAmount: "20.00",
+      finalPrice: "120.00",
+      clientTotalAmountSar: "120.00",
+      currency: "SAR",
+      accountingCurrency: "SAR",
+    });
+
+    const invoice = await storage.createInvoice({
+      clientAccountId: assignedClientId,
+      shipmentId: refundShipment.id,
+      amount: "120.00",
+      status: "paid",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      paidAt: new Date(),
+    });
+
+    await storage.createPayment({
+      invoiceId: invoice.id,
+      clientAccountId: assignedClientId,
+      amount: "120.00",
+      paymentMethod: "tap",
+      status: "completed",
+      transactionId: `am_refund_tx_${unique}`,
+    });
+
+    const cancelRes = await asAccountManager.post(`/api/admin/shipments/${refundShipment.id}/cancel`).send({});
+
+    expect(cancelRes.status).toBe(200);
+    expect(cancelRes.body.shipment.status).toBe("cancelled");
+    expect(cancelRes.body.refundRequest).toBeTruthy();
+    expect(cancelRes.body.refundRequest.accountManagerApprovalStatus).toBe("APPROVED");
+    expect(cancelRes.body.refundRequest.financeApprovalStatus).toBe("PENDING");
+    expect(cancelRes.body.refundRequest.status).toBe("PENDING");
+
+    const refundQueueRes = await asAdmin.get("/api/admin/refund-requests?status=PENDING");
+    expect(refundQueueRes.status).toBe(200);
+    const queuedRefund = refundQueueRes.body.find((request: any) => request.shipmentId === refundShipment.id);
+    expect(queuedRefund).toBeDefined();
+    expect(queuedRefund.accountManagerApprovalSatisfied).toBe(true);
+    expect(queuedRefund.financeApprovalSatisfied).toBe(false);
+    expect(queuedRefund.canApproveAsFinance).toBe(true);
+
+    const financeApprovalRes = await asAdmin
+      .post(`/api/admin/refund-requests/${queuedRefund.id}/approve-finance`)
+      .send({});
+
+    expect(financeApprovalRes.status).toBe(200);
+    expect(financeApprovalRes.body.status).toBe("COMPLETED");
+    expect(financeApprovalRes.body.financeApprovalStatus).toBe("APPROVED");
+    expect(financeApprovalRes.body.completedAt).toBeTruthy();
+  });
+
+  it("should prevent account managers from cancelling unassigned shipments", async () => {
+    const cancelRes = await asAccountManager.post(`/api/admin/shipments/${unassignedShipmentId}/cancel`).send({});
+    expect(cancelRes.status).toBe(403);
   });
 });

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -7,9 +8,11 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Form,
   FormControl,
@@ -19,11 +22,12 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest, readJsonResponse } from "@/lib/queryClient";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Lock, User, Mail, Calendar, Settings, KeyRound } from "lucide-react";
+import { Shield, Lock, User, Mail, Calendar, Settings, KeyRound, Route } from "lucide-react";
+import { IntegrationAccountCountryBasis, type IntegrationAccountCountryBasisValue } from "@shared/schema";
 
 const passwordFormSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
@@ -36,9 +40,30 @@ const passwordFormSchema = z.object({
 
 type PasswordFormData = z.infer<typeof passwordFormSchema>;
 
+type WebAppSettings = {
+  integrationAccountCountryBasis: IntegrationAccountCountryBasisValue;
+};
+
 export default function AdminSettings() {
   const { user, checkAuth } = useAuth();
   const { toast } = useToast();
+  const [integrationAccountCountryBasis, setIntegrationAccountCountryBasis] =
+    useState<IntegrationAccountCountryBasisValue>(IntegrationAccountCountryBasis.SHIPPING_ACCOUNT_COUNTRY);
+
+  const { data: webAppSettings, isLoading: webAppSettingsLoading } = useQuery<WebAppSettings>({
+    queryKey: ["/api/admin/settings/web-app"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/settings/web-app", { credentials: "include" });
+      return readJsonResponse(res);
+    },
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (webAppSettings) {
+      setIntegrationAccountCountryBasis(webAppSettings.integrationAccountCountryBasis);
+    }
+  }, [webAppSettings]);
 
   const passwordForm = useForm<PasswordFormData>({
     resolver: zodResolver(passwordFormSchema),
@@ -78,6 +103,29 @@ export default function AdminSettings() {
   const onPasswordSubmit = (data: PasswordFormData) => {
     changePasswordMutation.mutate(data);
   };
+
+  const updateWebAppSettingsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", "/api/admin/settings/web-app", {
+        integrationAccountCountryBasis,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/web-app"] });
+      toast({
+        title: "Web App Settings Updated",
+        description: "Regional integration account routing has been updated.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could Not Update Web App Settings",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   if (!user) {
     return (
@@ -184,13 +232,66 @@ export default function AdminSettings() {
                   Admin Access
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Your visible pages and API access are controlled by the roles assigned to this admin user in the Access Control section.
+                  Your visible pages and API access are controlled by the roles assigned to this admin user in the Users section.
                 </p>
               </div>
               <div className="rounded-md border border-dashed p-4">
                 <p className="text-sm text-muted-foreground">
                   Profile editing for admin identities can be expanded later, but password management and account visibility are fully functional now.
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Route className="h-5 w-5" />
+                Web App Settings
+              </CardTitle>
+              <CardDescription>
+                Choose which country determines the regional carrier, Tap, and Zoho integration accounts used by the platform.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <RadioGroup
+                value={integrationAccountCountryBasis}
+                onValueChange={(value) => setIntegrationAccountCountryBasis(value as IntegrationAccountCountryBasisValue)}
+                className="grid gap-3 md:grid-cols-2"
+                disabled={webAppSettingsLoading}
+              >
+                <Label className="flex cursor-pointer items-start gap-3 rounded-lg border p-4">
+                  <RadioGroupItem value={IntegrationAccountCountryBasis.SHIPPING_ACCOUNT_COUNTRY} />
+                  <span className="space-y-1">
+                    <span className="block font-medium">Shipping account country</span>
+                    <span className="block text-sm font-normal text-muted-foreground">
+                      Route shipment charges through accounts configured for the shipment sender country. Non-shipment operations use the client's default shipping country.
+                    </span>
+                  </span>
+                </Label>
+                <Label className="flex cursor-pointer items-start gap-3 rounded-lg border p-4">
+                  <RadioGroupItem value={IntegrationAccountCountryBasis.CLIENT_BASE_ACCOUNT_COUNTRY} />
+                  <span className="space-y-1">
+                    <span className="block font-medium">Client base account country</span>
+                    <span className="block text-sm font-normal text-muted-foreground">
+                      Route charges consistently through accounts configured for the client's registered base country.
+                    </span>
+                  </span>
+                </Label>
+              </RadioGroup>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => updateWebAppSettingsMutation.mutate()}
+                  disabled={
+                    webAppSettingsLoading ||
+                    updateWebAppSettingsMutation.isPending ||
+                    integrationAccountCountryBasis === webAppSettings?.integrationAccountCountryBasis
+                  }
+                  data-testid="button-save-web-app-settings"
+                >
+                  {updateWebAppSettingsMutation.isPending ? "Saving..." : "Save Web App Settings"}
+                </Button>
               </div>
             </CardContent>
           </Card>

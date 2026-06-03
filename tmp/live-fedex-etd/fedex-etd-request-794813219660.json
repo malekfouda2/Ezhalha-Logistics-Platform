@@ -1,0 +1,76 @@
+{
+  "trackingNumber": "EZHFEDEXETD58451395",
+  "carrierRequest": {
+    "shipper": {
+      "name": "Origin Sender",
+      "streetLine1": "100 Export Way",
+      "city": "Houston",
+      "stateOrProvince": "Texas",
+      "postalCode": "77001",
+      "countryCode": "US",
+      "phone": "+1 555 111 2222",
+      "email": "origin@example.com"
+    },
+    "recipient": {
+      "name": "Saudi Receiver",
+      "streetLine1": "3885 Al Bandariyyah Street",
+      "streetLine2": "8118 Al Falah",
+      "city": "Riyadh",
+      "stateOrProvince": "Riyadh",
+      "postalCode": "13314",
+      "countryCode": "SA",
+      "phone": "+966 555 123 456",
+      "email": "receiver@example.com"
+    },
+    "packages": [
+      {
+        "weight": 2,
+        "weightUnit": "KG",
+        "dimensions": {
+          "length": 20,
+          "width": 15,
+          "height": 10,
+          "unit": "CM"
+        },
+        "packageType": "FEDEX_10KG_BOX"
+      }
+    ],
+    "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
+    "packagingType": "FEDEX_10KG_BOX",
+    "labelFormat": "PDF",
+    "commodityDescription": "Wireless Keyboard, USB-C Charger",
+    "declaredValue": 250,
+    "currency": "USD",
+    "commercialInvoiceNumber": "EZI-CI-EZHFEDEXETD58451395",
+    "commercialInvoiceDate": "2026-05-07",
+    "items": [
+      {
+        "description": "Wireless Keyboard",
+        "category": "electronics",
+        "material": "plastic",
+        "hsCode": "847160",
+        "countryOfOrigin": "US",
+        "quantity": 1,
+        "unitPrice": 200,
+        "currency": "USD"
+      },
+      {
+        "description": "USB-C Charger",
+        "category": "electronics",
+        "material": "plastic",
+        "hsCode": "850440",
+        "countryOfOrigin": "US",
+        "quantity": 1,
+        "unitPrice": 50,
+        "currency": "USD"
+      }
+    ],
+    "tradeDocuments": [
+      {
+        "documentType": "COMMERCIAL_INVOICE",
+        "uploadedDocumentId": "IApMD4ufxNZxn8yx"
+      }
+    ]
+  },
+  "tradeDocumentsData": "[{\"fileName\":\"ezi-ci-ezhfedexetd58451395.pdf\",\"objectPath\":\"internal://commercial-invoice\",\"contentType\":\"application/pdf\",\"size\":2994,\"documentType\":\"COMMERCIAL_INVOICE\",\"uploadedDocumentId\":\"IApMD4ufxNZxn8yx\",\"uploadedAt\":\"2026-05-07T12:54:16.359Z\"}]"
+}

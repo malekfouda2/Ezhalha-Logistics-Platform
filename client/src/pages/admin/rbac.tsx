@@ -69,7 +69,12 @@ interface ClientListResponse {
   clients: AssignedClientSummary[];
 }
 
-export default function AdminRBAC() {
+interface AdminRBACPanelProps {
+  embedded?: boolean;
+  showHeader?: boolean;
+}
+
+export function AdminRBACPanel({ embedded = false, showHeader = true }: AdminRBACPanelProps = {}) {
   const adminAccess = useAdminAccess();
   const [activeTab, setActiveTab] = useState("roles");
   const [newRoleName, setNewRoleName] = useState("");
@@ -441,6 +446,10 @@ export default function AdminRBAC() {
     (canReadUsers && activeTab === "admin-users" && adminUsersLoading);
 
   if (isPageLoading) {
+    if (embedded) {
+      return <LoadingScreen message="Loading access control settings..." />;
+    }
+
     return (
       <AdminLayout>
         <LoadingScreen message="Loading access control settings..." />
@@ -448,10 +457,10 @@ export default function AdminRBAC() {
     );
   }
 
-  return (
-    <AdminLayout>
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+  const content = (
+      <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
+        {showHeader && (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">Access Control (RBAC)</h1>
             <p className="text-muted-foreground">
@@ -473,6 +482,7 @@ export default function AdminRBAC() {
             </Badge>
           </div>
         </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
@@ -1313,6 +1323,15 @@ export default function AdminRBAC() {
           </Dialog>
         )}
       </div>
-    </AdminLayout>
   );
+
+  if (embedded) {
+    return content;
+  }
+
+  return <AdminLayout>{content}</AdminLayout>;
+}
+
+export default function AdminRBAC() {
+  return <AdminRBACPanel />;
 }

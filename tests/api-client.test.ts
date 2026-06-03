@@ -6,8 +6,9 @@ import bcrypt from "bcrypt";
 import { registerRoutes } from "../server/routes";
 import { fedexAdapter } from "../server/integrations/fedex";
 import { dhlAdapter } from "../server/integrations/dhl";
+import { tapService } from "../server/integrations/tap";
 import { storage } from "../server/storage";
-import { InvoiceType } from "../shared/schema";
+import { AbandonedShipmentRecoveryStatus, InvoiceType } from "../shared/schema";
 import {
   serializeApplicationDocumentReference,
 } from "../shared/application-documents";
@@ -192,7 +193,7 @@ describe("Client - Shipments", () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it("POST /api/client/shipments/rates should reject invalid DDP destinations", async () => {
+  it("POST /api/client/shipments/rates should redirect DDP requests to the dedicated flow", async () => {
     const res = await clientAgent
       .post("/api/client/shipments/rates")
       .send({
@@ -228,7 +229,187 @@ describe("Client - Shipments", () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("DDP is only available for import shipments to Saudi Arabia or the UAE");
+    expect(res.body.error).toBe("Use the dedicated DDP flow for door-to-door shipments.");
+  });
+
+  it("GET /api/client/ddp/lanes should hide legacy origin-city lanes from the simplified flow", async () => {
+    const countryLane = await storage.createDdpPricingLane({
+      originCountryCode: "LX",
+      originCity: "",
+      destinationCountryCode: "LY",
+      destinationCity: "",
+      currency: "SAR",
+      airBaseRatePerKg: "40.00",
+      seaBaseRatePerCbm: null,
+      minimumBillableKg: "1.000",
+      kgRoundingIncrement: "0.500",
+      minimumBillableCbm: "0.0000",
+      cbmRoundingIncrement: "0.1000",
+      minimumShipmentCharge: "40.00",
+      volumetricDivisor: 6000,
+      isActive: true,
+    });
+    const cityLane = await storage.createDdpPricingLane({
+      originCountryCode: "LX",
+      originCity: "",
+      destinationCountryCode: "LZ",
+      destinationCity: "Legacy Destination City",
+      currency: "SAR",
+      airBaseRatePerKg: "40.00",
+      seaBaseRatePerCbm: null,
+      minimumBillableKg: "1.000",
+      kgRoundingIncrement: "0.500",
+      minimumBillableCbm: "0.0000",
+      cbmRoundingIncrement: "0.1000",
+      minimumShipmentCharge: "40.00",
+      volumetricDivisor: 6000,
+      isActive: true,
+    });
+
+    try {
+      const res = await clientAgent.get("/api/client/ddp/lanes");
+
+      expect(res.status).toBe(200);
+      expect(res.body.some((lane: { id: string }) => lane.id === countryLane.id)).toBe(true);
+      expect(res.body.some((lane: { id: string }) => lane.id === cityLane.id)).toBe(false);
+    } finally {
+      await storage.deleteDdpPricingLane(countryLane.id);
+      await storage.deleteDdpPricingLane(cityLane.id);
+    }
+  });
+
+  it("POST /api/client/ddp/rates should calculate a manual DDP lane quote", async () => {
+    const lane = await storage.createDdpPricingLane({
+      originCountryCode: "ZZ",
+      originCity: "",
+      destinationCountryCode: "YY",
+      destinationCity: "",
+      currency: "SAR",
+      airBaseRatePerKg: "40.00",
+      seaBaseRatePerCbm: null,
+      minimumBillableKg: "2.000",
+      kgRoundingIncrement: "0.500",
+      minimumBillableCbm: "0.0000",
+      cbmRoundingIncrement: "0.1000",
+      minimumShipmentCharge: "100.00",
+      volumetricDivisor: 6000,
+      isActive: true,
+    });
+
+    try {
+      const res = await clientAgent
+        .post("/api/client/ddp/rates")
+        .send({
+          transportMethod: "air",
+          shipper: {
+            countryCode: "ZZ",
+          },
+          recipient: {
+            name: "DDP Recipient",
+            phone: "5553334444",
+            email: "recipient@example.com",
+            countryCode: "YY",
+            city: "Destination City",
+            postalCode: "20000",
+            addressLine1: "200 Recipient Road",
+          },
+          supplierName: "DDP Supplier",
+          supplierPhone: "5551112222",
+          packages: [{ weight: 2, length: 10, width: 10, height: 10 }],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("quoteId");
+      expect(res.body.pricing.billingUnit).toBe("KG");
+      expect(res.body.pricing.baseRateSar).toBe(100);
+      expect(res.body.pricing.totalAmountSar).toBeGreaterThanOrEqual(100);
+    } finally {
+      await storage.deleteDdpPricingLane(lane.id);
+    }
+  });
+
+  it("should submit a manual DDP shipment for review through credit without booking a carrier", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+    await storage.updateClientAccount(clientUser!.clientAccountId!, { creditEnabled: true } as any);
+
+    const lane = await storage.createDdpPricingLane({
+      originCountryCode: "QX",
+      originCity: "",
+      destinationCountryCode: "QY",
+      destinationCity: "",
+      currency: "SAR",
+      airBaseRatePerKg: "30.00",
+      seaBaseRatePerCbm: null,
+      minimumBillableKg: "1.000",
+      kgRoundingIncrement: "0.500",
+      minimumBillableCbm: "0.0000",
+      cbmRoundingIncrement: "0.1000",
+      minimumShipmentCharge: "50.00",
+      volumetricDivisor: 6000,
+      isActive: true,
+    });
+
+    try {
+      const tradeDocument = await uploadTradeDocumentThroughApi(clientAgent, "ddp-commercial-invoice.pdf");
+      const ratesRes = await clientAgent
+        .post("/api/client/ddp/rates")
+        .send({
+          transportMethod: "air",
+          shipper: {
+            countryCode: "QX",
+          },
+          recipient: {
+            name: "DDP Recipient",
+            phone: "5553334444",
+            email: "recipient@example.com",
+            countryCode: "QY",
+            city: "Destination City",
+            postalCode: "20000",
+            addressLine1: "200 Recipient Road",
+          },
+          supplierName: "DDP Supplier",
+          supplierPhone: "5551112222",
+          packages: [{ weight: 2, length: 10, width: 10, height: 10 }],
+        });
+      expect(ratesRes.status).toBe(200);
+
+      const checkoutRes = await clientAgent
+        .post("/api/client/ddp/checkout")
+        .send({
+          quoteId: ratesRes.body.quoteId,
+          items: [{
+            itemName: "DDP Test Item",
+            category: "test",
+            countryOfOrigin: "QX",
+            hsCode: "847160",
+            price: 100,
+            quantity: 1,
+            currency: "SAR",
+          }],
+          tradeDocuments: [tradeDocument],
+          customsComplianceAccepted: true,
+          termsAccepted: true,
+          brokerAuthorizationAccepted: true,
+        });
+      expect(checkoutRes.status).toBe(200);
+
+      const payLaterRes = await clientAgent
+        .post(`/api/client/shipments/${checkoutRes.body.shipmentId}/pay-later`)
+        .send({});
+      expect(payLaterRes.status).toBe(200);
+
+      const shipment = await storage.getShipment(checkoutRes.body.shipmentId);
+      expect(shipment?.fulfillmentType).toBe("ddp_manual");
+      expect(shipment?.carrierCode).toBe("DDP");
+      expect(shipment?.carrierStatus).toBe("awaiting_review");
+      expect(shipment?.status).toBe("awaiting_review");
+      expect(shipment?.carrierTrackingNumber).toBeFalsy();
+      expect(shipment?.senderName).toBe("DDP Supplier");
+      expect(shipment?.senderAddress).toBe("Pickup coordination required");
+    } finally {
+      await storage.deleteDdpPricingLane(lane.id);
+    }
   });
 
   it("POST /api/client/shipments/rates should reject unsupported trade document content types", async () => {
@@ -651,6 +832,7 @@ describe("Client - Shipments", () => {
       carrierStatus: "processing",
       baseRate: "100.00",
       marginAmount: "20.00",
+      margin: "20.00",
       finalPrice: "120.00",
     });
 
@@ -660,7 +842,10 @@ describe("Client - Shipments", () => {
       const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/cancel`).send({});
 
       expect(res.status).toBe(502);
-      expect(res.body.error).toBe("Failed to cancel with carrier");
+      expect(res.body.error).toBe(
+        "We could not cancel this shipment with the carrier automatically. Please contact support to complete the cancellation.",
+      );
+      expect(res.body.carrierErrorMessage).toBe(res.body.error);
 
       const updatedShipment = await storage.getShipment(shipment.id);
       expect(updatedShipment?.status).toBe("processing");
@@ -669,6 +854,117 @@ describe("Client - Shipments", () => {
     } finally {
       cancelSpy.mockRestore();
     }
+  });
+
+  it("POST /api/client/shipments/:id/cancel should create a refund request for paid shipments before pickup", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+
+    const unique = Date.now();
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Refund Sender",
+      senderAddress: "100 Refund Road",
+      senderStateOrProvince: "Texas",
+      senderPostalCode: "77001",
+      senderCity: "Houston",
+      senderCountry: "US",
+      senderPhone: "5554100201",
+      recipientName: "Refund Recipient",
+      recipientAddress: "200 Refund Road",
+      recipientCity: "Riyadh",
+      recipientPostalCode: "11564",
+      recipientCountry: "SA",
+      recipientPhone: "5554100202",
+      weight: "3.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound",
+      status: "created",
+      paymentStatus: "paid",
+      carrierCode: "DHL",
+      carrierStatus: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "120.00",
+      clientTotalAmountSar: "120.00",
+      currency: "SAR",
+      accountingCurrency: "SAR",
+    });
+
+    const invoice = await storage.createInvoice({
+      clientAccountId: clientUser!.clientAccountId!,
+      shipmentId: shipment.id,
+      amount: "120.00",
+      status: "paid",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      paidAt: new Date(),
+    });
+
+    await storage.createPayment({
+      invoiceId: invoice.id,
+      clientAccountId: clientUser!.clientAccountId!,
+      amount: "120.00",
+      paymentMethod: "tap",
+      status: "completed",
+      transactionId: `refund_tx_${unique}`,
+    });
+
+    const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/cancel`).send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.shipment.status).toBe("cancelled");
+    expect(res.body.refundRequest).toBeTruthy();
+    expect(res.body.refundRequest.status).toBe("PENDING");
+    expect(res.body.refundRequest.financeApprovalStatus).toBe("PENDING");
+    expect(res.body.refundRequest.accountManagerApprovalStatus).toBe("NOT_REQUIRED");
+    expect(res.body.refundRequest.amount).toBe("120.00");
+
+    const storedRefundRequest = await storage.getShipmentRefundRequestByShipmentId(shipment.id);
+    expect(storedRefundRequest?.invoiceId).toBe(invoice.id);
+    expect(storedRefundRequest?.requestedByActorType).toBe("CLIENT");
+  });
+
+  it("POST /api/client/shipments/:id/cancel should block shipments already picked up by the carrier", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Picked Sender",
+      senderAddress: "100 Picked Road",
+      senderStateOrProvince: "Texas",
+      senderPostalCode: "77001",
+      senderCity: "Houston",
+      senderCountry: "US",
+      senderPhone: "5554200201",
+      recipientName: "Picked Recipient",
+      recipientAddress: "200 Picked Road",
+      recipientCity: "Riyadh",
+      recipientPostalCode: "11564",
+      recipientCountry: "SA",
+      recipientPhone: "5554200202",
+      weight: "3.00",
+      weightUnit: "KG",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound",
+      status: "created",
+      paymentStatus: "paid",
+      carrierStatus: "picked_up",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "120.00",
+    });
+
+    const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/cancel`).send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("before the carrier marks them as picked up");
+
+    const updatedShipment = await storage.getShipment(shipment.id);
+    expect(updatedShipment?.status).toBe("created");
   });
 });
 
@@ -828,6 +1124,130 @@ describe("Client - Payments", () => {
     expect(shipmentPayment?.status).toBe("completed");
     expect(shipmentPayment?.paymentMethod).toBe("tap");
     expect(shipmentPayment?.transactionId).toBe("chg_test_shipment_webhook");
+  });
+
+  it("POST /api/client/shipments/pay should apply active abandoned recovery discounts", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    expect(clientUser?.clientAccountId).toBeDefined();
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Recovery Discount Sender",
+      senderAddress: "100 Sender Road",
+      senderStateOrProvince: "Texas",
+      senderPostalCode: "77001",
+      senderCity: "Houston",
+      senderCountry: "US",
+      senderPhone: "5551210001",
+      recipientName: "Recovery Discount Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientPostalCode: "11564",
+      recipientCountry: "SA",
+      recipientPhone: "5551210002",
+      weight: "3.00",
+      weightUnit: "KG",
+      length: "20.00",
+      width: "15.00",
+      height: "10.00",
+      dimensionUnit: "CM",
+      packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound",
+      isDdp: false,
+      status: "payment_pending",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "120.00",
+      accountingCurrency: "SAR",
+      taxScenario: "EXPORT",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "0.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "2.61",
+      clientTotalAmountSar: "120.00",
+      systemCostTotalAmountSar: "100.00",
+      taxPayableAmountSar: "2.61",
+      revenueExcludingTaxAmountSar: "117.39",
+      currency: "SAR",
+      itemsData: JSON.stringify([
+        {
+          itemName: "Recovery Shipment Item",
+          category: "electronics",
+          countryOfOrigin: "US",
+          hsCode: "847160",
+          price: 120,
+          quantity: 1,
+        },
+      ]),
+      paymentStatus: "pending",
+    });
+
+    await storage.createAbandonedShipmentRecovery({
+      shipmentId: shipment.id,
+      clientAccountId: clientUser!.clientAccountId!,
+      status: AbandonedShipmentRecoveryStatus.DISCOUNT_SENT,
+      lastAction: "discount_sent",
+      discountType: "fixed",
+      discountValue: "30.00",
+      discountAmount: "30.00",
+      discountFinalPrice: "90.00",
+      discountChannel: "Email",
+      discountExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      discountMessage: "Complete your shipment with a discount",
+    });
+
+    const summaryRes = await clientAgent.get(`/api/client/shipments/${shipment.id}/checkout-summary`);
+    expect(summaryRes.status).toBe(200);
+    expect(summaryRes.body.amount).toBe(90);
+    expect(summaryRes.body.activeOffer.discountAmount).toBe(30);
+
+    const offersRes = await clientAgent.get("/api/client/abandoned-recovery/offers");
+    expect(offersRes.status).toBe(200);
+    const activeOffer = offersRes.body.find((offer: { shipmentId: string }) => offer.shipmentId === shipment.id);
+    expect(activeOffer).toBeDefined();
+    expect(activeOffer.offer.finalAmount).toBe(90);
+
+    const tapChargeSpy = vi.spyOn(tapService, "createCharge").mockImplementation(async (params) => {
+      const charge = {
+        id: "tap_mock_abandoned_recovery_discount",
+        object: "charge",
+        status: "CAPTURED",
+        amount: params.amount,
+        currency: params.currency.toUpperCase(),
+        metadata: params.metadata,
+      };
+
+      return {
+        chargeId: charge.id,
+        status: charge.status,
+        amount: params.amount,
+        currency: params.currency.toUpperCase(),
+        charge,
+      };
+    });
+
+    try {
+      const paymentRes = await createShipmentPaymentThroughApi(clientAgent, shipment.id);
+      expect(paymentRes.body.amount).toBe(90);
+      expect(paymentRes.body.activeOffer.finalAmount).toBe(90);
+      expect(tapChargeSpy).toHaveBeenCalledWith(expect.objectContaining({ amount: 90 }));
+
+      const updatedShipment = await storage.getShipment(shipment.id);
+      expect(updatedShipment?.paymentStatus).toBe("paid");
+      expect(updatedShipment?.finalPrice).toBe("90.00");
+      expect(updatedShipment?.clientTotalAmountSar).toBe("90.00");
+
+      const updatedRecovery = await storage.getAbandonedShipmentRecoveryByShipmentId(shipment.id);
+      expect(updatedRecovery?.status).toBe(AbandonedShipmentRecoveryStatus.RECOVERED);
+      expect(updatedRecovery?.lastAction).toBe("discount_recovered");
+
+      const invoice = await storage.getInvoiceByShipmentId(shipment.id);
+      expect(invoice?.status).toBe("paid");
+      expect(invoice?.amount).toBe("90.00");
+    } finally {
+      tapChargeSpy.mockRestore();
+    }
   });
 
   it("GET /api/client/shipments should reconcile already-paid shipments that are still pending finalization", async () => {

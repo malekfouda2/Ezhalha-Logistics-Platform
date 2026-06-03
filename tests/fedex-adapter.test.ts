@@ -173,6 +173,51 @@ describe("FedExAdapter", () => {
     await expect(adapter.trackShipment("794811298978")).rejects.toThrow("TRACKING_FAILED");
   });
 
+  it("sends the FedEx cancel request with the tracking number as a string", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              access_token: "fedex-test-token",
+              expires_in: 3600,
+            }),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ output: {} }), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }),
+        ),
+    );
+
+    const adapter = new FedExAdapter();
+
+    await expect(adapter.cancelShipment("794811298978", "US")).resolves.toBe(true);
+
+    const fetchMock = vi.mocked(fetch);
+    const cancelRequestInit = fetchMock.mock.calls[1]?.[1];
+    const payload = JSON.parse(String(cancelRequestInit?.body));
+
+    expect(payload).toMatchObject({
+      accountNumber: { value: "123456789" },
+      senderCountryCode: "US",
+      deletionControl: "DELETE_ALL_PACKAGES",
+      trackingNumber: "794811298978",
+    });
+  });
+
   it("throws a carrier error when real cancellation fails for a configured FedEx adapter", async () => {
     vi.stubGlobal(
       "fetch",

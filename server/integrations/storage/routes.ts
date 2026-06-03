@@ -3,9 +3,10 @@ import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { LocalStorageService } from "./localStorage";
 import { createHmac } from "crypto";
 import path from "path";
+import { getIntegrationEnv } from "../../services/integration-runtime";
 
 function isObjectStorageAvailable(): boolean {
-  return !!(process.env.PRIVATE_OBJECT_DIR && process.env.PUBLIC_OBJECT_SEARCH_PATHS);
+  return !!(getIntegrationEnv("PRIVATE_OBJECT_DIR") && getIntegrationEnv("PUBLIC_OBJECT_SEARCH_PATHS"));
 }
 
 function requireAuthenticated(req: Request, res: Response, next: NextFunction) {

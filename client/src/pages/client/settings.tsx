@@ -220,12 +220,6 @@ export default function ClientSettings() {
   const watchedShippingCountry = shippingForm.watch("shippingCountryCode");
   const showShortAddress = watchedShippingCountry === "SA";
 
-  const profileBenefits: Record<string, string[]> = {
-    regular: ["Standard shipping rates", "Email support"],
-    mid_level: ["15% discount on all shipments", "Priority email support", "Monthly reports"],
-    vip: ["25% discount on all shipments", "24/7 phone support", "Dedicated account manager", "Custom reporting"],
-  };
-
   if (isLoading) {
     return (
       <ClientLayout>
@@ -415,23 +409,6 @@ export default function ClientSettings() {
                 <span className="text-sm text-muted-foreground">Current Tier</span>
                 <ProfileBadge profile={account?.profile || "regular"} />
               </div>
-              <Separator />
-              <div>
-                <span className="text-sm font-medium">Your Benefits:</span>
-                <ul className="mt-2 space-y-1">
-                  {(profileBenefits[account?.profile as keyof typeof profileBenefits] || profileBenefits.regular).map(
-                    (benefit, index) => (
-                      <li key={index} className="text-sm text-muted-foreground flex items-center gap-2">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                        {benefit}
-                      </li>
-                    )
-                  )}
-                </ul>
-              </div>
-              <p className="text-xs text-muted-foreground mt-4">
-                Contact your account manager to upgrade your tier.
-              </p>
             </CardContent>
           </Card>
 

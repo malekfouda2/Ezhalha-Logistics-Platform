@@ -110,7 +110,11 @@ function formatFieldValue(value: unknown) {
   return String(value);
 }
 
-export default function AdminAccountManagers() {
+interface AccountManagersPanelProps {
+  embedded?: boolean;
+}
+
+export function AccountManagersPanel({ embedded = false }: AccountManagersPanelProps = {}) {
   const adminAccess = useAdminAccess();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("account-managers");
@@ -274,16 +278,14 @@ export default function AdminAccountManagers() {
   };
 
   if (isPageLoading) {
-    return (
-      <AdminLayout>
-        <LoadingScreen message="Loading account managers..." />
-      </AdminLayout>
-    );
+    const loading = <LoadingScreen message="Loading account managers..." />;
+    return embedded ? loading : <AdminLayout>{loading}</AdminLayout>;
   }
 
-  return (
-    <AdminLayout>
-      <div className="p-6 space-y-6">
+  const content = (
+    <>
+    <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
+      {!embedded && (
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">Account Managers</h1>
@@ -302,6 +304,7 @@ export default function AdminAccountManagers() {
             </Badge>
           </div>
         </div>
+      )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
@@ -323,7 +326,7 @@ export default function AdminAccountManagers() {
             <TabsContent value="account-managers" className="space-y-4">
               <Card>
                 <CardContent className="pt-6 text-sm text-muted-foreground">
-                  Create new account managers from the Access Control page by assigning the built-in
+                  Create new account managers from the Users page by assigning the built-in
                   {" "}
                   <span className="font-medium text-foreground">Account Manager</span>
                   {" "}
@@ -628,6 +631,12 @@ export default function AdminAccountManagers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </AdminLayout>
+    </>
   );
+
+  return embedded ? content : <AdminLayout>{content}</AdminLayout>;
+}
+
+export default function AdminAccountManagers() {
+  return <AccountManagersPanel />;
 }

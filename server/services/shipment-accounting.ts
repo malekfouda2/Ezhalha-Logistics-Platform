@@ -7,8 +7,6 @@ import {
 
 export const ACCOUNTING_CURRENCY = "SAR";
 export const VAT_RATE = 0.15;
-export const DDP_ELIGIBLE_DESTINATIONS = new Set(["SA", "AE"]);
-
 export interface ShipmentAccountingInput {
   shipmentType: ShipmentTypeValue;
   isDdp?: boolean;
@@ -38,12 +36,9 @@ function roundCurrency(value: number): number {
 
 export function isDdpEligibleForShipment(
   shipmentType: ShipmentTypeValue,
-  recipientCountryCode: string,
+  _recipientCountryCode: string,
 ): boolean {
-  return (
-    shipmentType === ShipmentType.INBOUND &&
-    DDP_ELIGIBLE_DESTINATIONS.has((recipientCountryCode || "").toUpperCase())
-  );
+  return shipmentType === ShipmentType.INBOUND;
 }
 
 export function resolveShipmentTaxScenario(
@@ -53,7 +48,7 @@ export function resolveShipmentTaxScenario(
 ): ShipmentTaxScenarioValue {
   if (isDdp) {
     if (!isDdpEligibleForShipment(shipmentType, recipientCountryCode)) {
-      throw new Error("DDP is only available for import shipments to Saudi Arabia or the UAE");
+      throw new Error("DDP is only available for inbound door-to-door shipments");
     }
     return ShipmentTaxScenario.DDP;
   }

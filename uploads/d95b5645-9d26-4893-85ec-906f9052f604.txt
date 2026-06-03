@@ -1,0 +1,3 @@
+Item Description	Qty	Unit Price	Amount	Origin
+Wireless Keyboard	2	150.00	300.00	US
+Gaming Mouse	1	90.00	90.00	US

@@ -122,6 +122,7 @@ function persistSystemLog(level: string, message: string, error?: Error | unknow
 
 function extractSource(message: string): string {
   if (message.includes("FedEx") || message.includes("FEDEX") || message.includes("fedex")) return "fedex";
+  if (message.includes("Aramex") || message.includes("ARAMEX") || message.includes("aramex")) return "aramex";
   if (message.includes("Zoho") || message.includes("ZOHO") || message.includes("zoho")) return "zoho";
   if (message.includes("Tap") || message.includes("tap")) return "tap";
   if (message.includes("Moyasar") || message.includes("moyasar")) return "moyasar";

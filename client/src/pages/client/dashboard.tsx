@@ -31,7 +31,7 @@ import {
   Cell,
   ResponsiveContainer,
 } from "recharts";
-import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users } from "lucide-react";
+import { Package, Truck, CheckCircle, FileText, Plus, ArrowRight, Crown, Star, Users, Gift, Clock } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { ProfileBadge } from "@/components/profile-badge";
@@ -61,25 +61,43 @@ function formatStatusLabel(status: string): string {
     .join(" ");
 }
 
-const profileTierInfo: Record<string, { name: string; icon: typeof Crown; benefit: string; color: string }> = {
+const profileTierInfo: Record<string, { name: string; icon: typeof Crown; color: string }> = {
   regular: {
     name: "Regular",
     icon: Users,
-    benefit: "Standard shipping rates",
     color: "text-muted-foreground",
   },
   mid_level: {
     name: "Mid-Level",
     icon: Star,
-    benefit: "15% discount on shipping rates",
     color: "text-blue-500",
   },
   vip: {
     name: "VIP",
     icon: Crown,
-    benefit: "25% discount on shipping rates",
     color: "text-amber-500",
   },
+};
+
+type ActiveRecoveryOffer = {
+  shipmentId: string;
+  trackingNumber: string;
+  recipientName: string;
+  destination: string;
+  carrierName?: string | null;
+  serviceType?: string | null;
+  currency: string;
+  createdAt: string;
+  offer: {
+    recoveryId: string;
+    discountType: string | null;
+    discountValue: number;
+    discountAmount: number;
+    originalAmount: number;
+    finalAmount: number;
+    expiresAt: string | null;
+    channel: string | null;
+  };
 };
 
 export default function ClientDashboard() {
@@ -95,6 +113,10 @@ export default function ClientDashboard() {
 
   const { data: recentShipments, isLoading: shipmentsLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/client/shipments/recent"],
+  });
+
+  const { data: activeOffers } = useQuery<ActiveRecoveryOffer[]>({
+    queryKey: ["/api/client/abandoned-recovery/offers"],
   });
 
   if (accountLoading || statsLoading) {
@@ -131,7 +153,6 @@ export default function ClientDashboard() {
                           <span className="font-medium">{tierInfo.name} Tier</span>
                           <ProfileBadge profile={account.profile} />
                         </div>
-                        <p className="text-sm text-muted-foreground">{tierInfo.benefit}</p>
                       </div>
                     </>
                   );
@@ -144,6 +165,57 @@ export default function ClientDashboard() {
             Create Shipment
           </Button>
         </div>
+
+        {activeOffers && activeOffers.length > 0 && (
+          <Card className="overflow-hidden border-primary/30 bg-gradient-to-r from-primary/10 via-amber-500/10 to-background">
+            <CardContent className="p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-2xl bg-primary/15 p-3 text-primary">
+                    <Gift className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-primary">Active recovery offer</p>
+                    <h2 className="text-xl font-bold">
+                      Save <SarAmount amount={activeOffers[0].offer.discountAmount} /> on shipment {activeOffers[0].trackingNumber}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Complete payment for {activeOffers[0].destination || activeOffers[0].recipientName} before the offer expires.
+                    </p>
+                    {activeOffers[0].offer.expiresAt && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" />
+                        Expires {format(new Date(activeOffers[0].offer.expiresAt), "MMM d, h:mm a")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="rounded-xl border bg-background/70 px-4 py-3 text-sm">
+                    <div className="text-muted-foreground line-through">
+                      <SarAmount amount={activeOffers[0].offer.originalAmount} />
+                    </div>
+                    <div className="text-lg font-extrabold">
+                      <SarAmount amount={activeOffers[0].offer.finalAmount} />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => navigate(`/client/shipments?resumeShipment=${activeOffers[0].shipmentId}`)}
+                    data-testid="button-resume-active-offer"
+                  >
+                    Resume Payment
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              {activeOffers.length > 1 && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  You have {activeOffers.length - 1} more active offer{activeOffers.length - 1 === 1 ? "" : "s"} waiting in your shipments.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           <StatCard

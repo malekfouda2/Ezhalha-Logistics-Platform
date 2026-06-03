@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Mail,
   Bug,
+  RotateCcw,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -39,17 +40,24 @@ interface AdminLayoutProps {
 
 const iconByHref = {
   "/admin": LayoutDashboard,
+  "/admin/users": Users,
   "/admin/clients": Users,
   "/admin/applications": ClipboardList,
   "/admin/shipments": Package,
+  "/admin/shipments/abandoned": Package,
+  "/admin/financial-management": Banknote,
   "/admin/invoices": FileText,
   "/admin/payments": CreditCard,
+  "/admin/refund-requests": RotateCcw,
   "/admin/credit-requests": ShieldCheck,
   "/admin/credit-invoices": Clock,
   "/admin/pricing": Banknote,
+  "/admin/ddp-pricing": Banknote,
+  "/admin/system": Settings,
   "/admin/system-logs": Bug,
   "/admin/audit-logs": Shield,
   "/admin/integration-logs": Plug,
+  "/admin/apps": Plug,
   "/admin/webhook-events": Webhook,
   "/admin/account-managers": Users,
   "/admin/rbac": Shield,
@@ -92,7 +100,44 @@ export function AdminLayout({ children }: AdminLayoutProps) {
           {visibleNavItems.map((item) => {
             const isActive = location === item.href || 
               (item.href !== "/admin" && location.startsWith(item.href));
-            const Icon = iconByHref[item.href];
+            const Icon = iconByHref[item.href as keyof typeof iconByHref] || Package;
+            const visibleChildren = item.children?.filter((child) =>
+              hasAdminPermissionAccess(adminAccess.permissions, child.permissions),
+            );
+
+            if (visibleChildren?.length) {
+              return (
+                <DropdownMenu key={item.href}>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className={cn(
+                        "flex w-full items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors hover-elevate active-elevate-2",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent"
+                      )}
+                      data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Icon className="h-5 w-5 flex-shrink-0" />
+                      <span className="flex-1 text-left">{item.label}</span>
+                      <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    {visibleChildren.map((child) => (
+                      <Link key={child.href} href={child.href}>
+                        <DropdownMenuItem
+                          data-testid={`nav-${child.label.toLowerCase().replace(/\s+/g, "-")}`}
+                          className={cn(location === child.href && "bg-accent")}
+                        >
+                          {child.label}
+                        </DropdownMenuItem>
+                      </Link>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            }
             
             return (
               <Link key={item.href} href={item.href}>

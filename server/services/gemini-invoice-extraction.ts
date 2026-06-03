@@ -80,11 +80,11 @@ const geminiInvoiceExtractionJsonSchema = {
 } as const;
 
 function getGeminiModel(): string {
-  return process.env.GEMINI_INVOICE_EXTRACTION_MODEL || "gemini-2.5-flash-lite";
+  return getIntegrationEnv("GEMINI_INVOICE_EXTRACTION_MODEL") || "gemini-2.5-flash-lite";
 }
 
 function getGeminiApiKey(): string | undefined {
-  return process.env.GEMINI_API_KEY;
+  return getIntegrationEnv("GEMINI_API_KEY");
 }
 
 function getGeminiGenerateContentEndpoint(model: string): string {
@@ -247,3 +247,4 @@ export async function extractInvoiceItemsWithGemini(options: {
     detectedCurrency: parsed.detectedCurrency,
   };
 }
+import { getIntegrationEnv } from "./integration-runtime";

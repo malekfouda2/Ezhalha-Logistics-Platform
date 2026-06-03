@@ -1,5 +1,6 @@
 import "../load-env";
 import crypto from "crypto";
+import { calculateChargeableWeight } from "@shared/chargeable-weight";
 import {
   CarrierError,
   parseMoney,
@@ -21,6 +22,7 @@ import {
 } from "./fedex";
 import { logError, logInfo } from "../services/logger";
 import { storage } from "../storage";
+import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -49,7 +51,7 @@ function isProduction(): boolean {
 }
 
 function isMockAllowed(): boolean {
-  if (process.env.DHL_MOCK_MODE === "true") return true;
+  if (getIntegrationEnvBoolean("DHL_MOCK_MODE")) return true;
   return !isProduction();
 }
 
@@ -238,6 +240,21 @@ function buildPackages(request: RateRequest | CreateShipmentRequest) {
         }
       : {}),
   }));
+}
+
+function buildRateChargeableWeightSummary(request: RateRequest | CreateShipmentRequest) {
+  const firstPackage = request.packages[0];
+  return calculateChargeableWeight(
+    request.packages.map((pkg) => ({
+      weight: pkg.weight,
+      length: pkg.dimensions?.length,
+      width: pkg.dimensions?.width,
+      height: pkg.dimensions?.height,
+    })),
+    firstPackage?.weightUnit || "KG",
+    firstPackage?.dimensions?.unit || "CM",
+    "DHL",
+  );
 }
 
 function defaultProductCode(request: RateRequest | CreateShipmentRequest): string {
@@ -433,6 +450,7 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
     : Array.isArray(data?.product)
       ? data.product
       : [];
+  const chargeableWeightDetails = buildRateChargeableWeightSummary(request);
 
   return products
     .map((product: any) => {
@@ -453,11 +471,14 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
 
       const estimatedDelivery =
         parseEstimatedDate(product.deliveryCapabilities?.estimatedDeliveryDateAndTime) ||
+        parseEstimatedDate(product.deliveryCapabilities?.deliveryDateAndTime) ||
+        parseEstimatedDate(product.deliveryCapabilities?.deliveryTime) ||
+        parseEstimatedDate(product.deliveryDateAndTime) ||
         parseEstimatedDate(product.estimatedDeliveryDateAndTime);
       const transitDays = Number(
         product.deliveryCapabilities?.totalTransitDays ??
           product.totalTransitDays ??
-          product.deliveryCapabilities?.deliveryTypeCode ??
+          product.pickupCapabilities?.totalTransitDays ??
           3,
       );
 
@@ -473,6 +494,12 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
           product.localProductCode ||
           serviceType,
         packagingType: request.packagingType,
+        actualWeight: chargeableWeightDetails.actualWeight,
+        dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+        chargeableWeight: chargeableWeightDetails.chargeableWeight,
+        chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+        chargeableWeightSource: "system",
+        chargeableWeightDetails,
       } satisfies RateResponse;
     })
     .filter((rate: RateResponse | null): rate is RateResponse => {
@@ -589,20 +616,21 @@ export class DhlAdapter implements CarrierAdapter {
   carrierCode = "DHL";
 
   private get apiKey(): string | undefined {
-    return process.env.DHL_API_KEY;
+    return getIntegrationEnv("DHL_API_KEY");
   }
 
   private get apiSecret(): string | undefined {
-    return process.env.DHL_API_SECRET;
+    return getIntegrationEnv("DHL_API_SECRET");
   }
 
   private get accountNumber(): string | undefined {
-    return process.env.DHL_ACCOUNT_NUMBER;
+    return getIntegrationEnv("DHL_ACCOUNT_NUMBER");
   }
 
   private get baseUrl(): string {
-    if (process.env.DHL_BASE_URL) {
-      return process.env.DHL_BASE_URL.replace(/\/+$/, "");
+    const configuredBaseUrl = getIntegrationEnv("DHL_BASE_URL");
+    if (configuredBaseUrl) {
+      return configuredBaseUrl.replace(/\/+$/, "");
     }
 
     return isProduction()
@@ -821,7 +849,10 @@ export class DhlAdapter implements CarrierAdapter {
           receiverDetails: buildPartyDetails(request.recipient, true),
         },
         accounts: [{ typeCode: "shipper", number: this.accountNumber }],
-        plannedShippingDateAndTime: normalizePlannedShippingDate(undefined, request.shipper.countryCode),
+        plannedShippingDateAndTime: normalizePlannedShippingDate(
+          request.shipDate,
+          request.shipper.countryCode,
+        ),
         unitOfMeasurement: toMetricOrImperial(request.packages[0]?.weightUnit),
         isCustomsDeclarable:
           normalizeCountryCode(request.shipper.countryCode) !== normalizeCountryCode(request.recipient.countryCode),
@@ -859,12 +890,13 @@ export class DhlAdapter implements CarrierAdapter {
   }
 
   private getMockRates(request: RateRequest): RateResponse[] {
-    const totalWeight = request.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0);
+    const chargeableWeightDetails = buildRateChargeableWeightSummary(request);
+    const totalWeight = chargeableWeightDetails.chargeableWeight;
     const isInternational =
       normalizeCountryCode(request.shipper.countryCode) !== normalizeCountryCode(request.recipient.countryCode);
     const currency = request.currency || "SAR";
 
-    return isInternational
+    const rates = isInternational
       ? [
           {
             baseRate: parseMoney(105 + totalWeight * 4.5),
@@ -893,6 +925,16 @@ export class DhlAdapter implements CarrierAdapter {
             packagingType: request.packagingType,
           },
         ];
+
+    return rates.map((rate) => ({
+      ...rate,
+      actualWeight: chargeableWeightDetails.actualWeight,
+      dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+      chargeableWeight: chargeableWeightDetails.chargeableWeight,
+      chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+      chargeableWeightSource: "system" as const,
+      chargeableWeightDetails,
+    }));
   }
 
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {

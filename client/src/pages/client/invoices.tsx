@@ -33,9 +33,10 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
 
-function formatInvoiceTypeLabel(invoiceType?: string | null) {
-  if (invoiceType === "EXTRA_WEIGHT") return "Extra Weight";
+function formatInvoiceTypeLabel(invoiceType?: string | null, description?: string | null) {
+  if (invoiceType === "EXTRA_WEIGHT") return description?.startsWith("Extra Volume") ? "Extra Volume" : "Extra Weight";
   if (invoiceType === "EXTRA_COST") return "Extra Cost";
+  if (invoiceType === "DDP_ADJUSTMENT") return "DDP Adjustment";
   return "Shipment";
 }
 
@@ -249,7 +250,7 @@ export default function ClientInvoices() {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">
-                          {formatInvoiceTypeLabel(invoice.invoiceType)}
+                          {formatInvoiceTypeLabel(invoice.invoiceType, invoice.description)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -348,6 +349,7 @@ export default function ClientInvoices() {
               <TapCardForm
                 amount={Number(selectedInvoice.amount)}
                 currency="SAR"
+                invoiceId={selectedInvoice.id}
                 submitLabel="Pay with Tap"
                 pending={createPaymentCharge.isPending}
                 onSubmit={(payload) =>

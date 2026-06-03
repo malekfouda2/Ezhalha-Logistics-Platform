@@ -5,7 +5,10 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
 import { startCreditReminderScheduler } from "./services/credit-reminder";
+import { startAbandonedRecoveryScheduler } from "./services/abandoned-recovery";
 import { validateFedExEnvOnStartup } from "./integrations/fedex";
+import { validateAramexEnvOnStartup } from "./integrations/aramex";
+import { loadDefaultIntegrationAccountsIntoEnv } from "./services/integration-apps";
 
 const app = express();
 const httpServer = createServer(app);
@@ -64,7 +67,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await loadDefaultIntegrationAccountsIntoEnv();
   validateFedExEnvOnStartup();
+  validateAramexEnvOnStartup();
 
   // Initialize database with default data if empty
   await storage.initializeDefaults();
@@ -109,6 +114,7 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
       startCreditReminderScheduler();
+      startAbandonedRecoveryScheduler();
       if (typeof process.send === "function") {
         process.send("ready");
       }
