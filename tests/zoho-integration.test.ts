@@ -61,7 +61,7 @@ describe("Zoho regional invoice synchronization", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://www.zohoapis.eu/books/v3/invoices/zoho-invoice-1?organization_id=organization-id",
+      "https://www.zohoapis.eu/books/v3/invoices/zoho-invoice-1?organization_id=organization-id&ignore_auto_number_generation=true",
       expect.objectContaining({ method: "PUT" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

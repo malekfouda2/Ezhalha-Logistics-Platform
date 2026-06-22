@@ -612,7 +612,10 @@ async function testAramex(credentials: Record<string, string>, environment: stri
 
 async function testTap(credentials: Record<string, string>): Promise<IntegrationAccountTestResult> {
   const baseUrl = normalizeBaseUrl(credentials.TAP_BASE_URL, "https://api.tap.company/v2");
-  const response = await fetchWithTimeout(`${baseUrl}/charges?limit=1`, {
+  // Tap has no charge-list endpoint (GET /charges 404s), so probe the GET
+  // charge-by-id endpoint with a sentinel id. A valid secret key is accepted
+  // (Tap replies 400/404 for the bad id); an invalid key returns 401/403.
+  const response = await fetchWithTimeout(`${baseUrl}/charges/chg_connectivity_probe`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${credentials.TAP_SECRET_KEY}`,
@@ -621,8 +624,15 @@ async function testTap(credentials: Record<string, string>): Promise<Integration
   });
   const detail = await readProviderMessage(response);
 
-  if (response.ok) {
-    return { success: true, message: "Tap API validation succeeded. The secret key can access charges." };
+  if (response.status === 401 || response.status === 403 || looksLikeAuthenticationFailure(detail)) {
+    return {
+      success: false,
+      message: providerStatusMessage("Tap authentication failed", response, detail),
+    };
+  }
+
+  if (response.status < 500) {
+    return { success: true, message: "Tap API reachable and the secret key was accepted." };
   }
 
   return {
