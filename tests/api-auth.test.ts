@@ -139,6 +139,33 @@ describe("Authentication - Login", () => {
     expect(res.body.error).toBe("Invalid credentials");
   });
 
+  it("should login successfully with email as the identifier", async () => {
+    const res = await request
+      .post("/api/auth/login")
+      .send({ username: `${testClientUsername}@test.com`, password: TEST_CLIENT_PASSWORD });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user).toBeDefined();
+    expect(res.body.user.email).toBe(`${testClientUsername}@test.com`);
+  });
+
+  it("should stamp lastLoginAt on successful login", async () => {
+    const beforeLogin = await storage.getUserByUsername(testClientUsername);
+    expect(beforeLogin).toBeDefined();
+
+    const res = await request
+      .post("/api/auth/login")
+      .send({ username: testClientUsername, password: TEST_CLIENT_PASSWORD });
+
+    expect(res.status).toBe(200);
+
+    const afterLogin = await storage.getUserByUsername(testClientUsername);
+    expect(afterLogin?.lastLoginAt).toBeTruthy();
+    expect(new Date(afterLogin!.lastLoginAt!).getTime()).toBeGreaterThan(
+      new Date(beforeLogin?.lastLoginAt || 0).getTime(),
+    );
+  });
+
   it("should return 400 for empty body", async () => {
     const res = await request.post("/api/auth/login").send({});
     expect(res.status).toBe(400);

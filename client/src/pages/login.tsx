@@ -83,10 +83,10 @@ export default function LoginPage() {
                   name="username"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Username</FormLabel>
+                      <FormLabel>Email or username</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter your username"
+                          placeholder="Enter your email or username"
                           autoComplete="username"
                           data-testid="input-username"
                           {...field}

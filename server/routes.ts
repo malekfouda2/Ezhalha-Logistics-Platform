@@ -1,12 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { createHash, createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "crypto";
 import session from "express-session";
 import bcrypt from "bcrypt";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { storage } from "./storage";
 import type {
+  Department,
   ClientAccount,
   ClientUserPermission,
   Invoice,
@@ -16,6 +17,7 @@ import type {
   Shipment,
   AbandonedShipmentRecovery,
   ShipmentRefundRequest,
+  UserInvitation,
   User,
 } from "@shared/schema";
 import {
@@ -32,6 +34,8 @@ import {
   AbandonedShipmentRecoveryStatus,
   FedExTradeDocumentType,
   InvoiceType,
+  OperationEventAudience,
+  OperationShipmentKind,
   ShipmentRefundApprovalStatus,
   ShipmentRefundRequestActorType,
   ShipmentRefundRequestStatus,
@@ -43,6 +47,16 @@ import {
   insertDdpPricingLaneSchema,
   type ClientPermissionValue,
 } from "@shared/schema";
+import {
+  DEFAULT_INTERNAL_DEPARTMENTS,
+  HIERARCHY_LEVEL_LABELS,
+  HIERARCHY_LEVEL_SORT_ORDER,
+  INTERNAL_DEPARTMENT_STYLE_PRESETS,
+  InternalDepartmentSlug,
+  RoleHierarchyLevel,
+  UserInvitationStatus,
+  type RoleHierarchyLevelValue,
+} from "@shared/internal-users";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
@@ -99,6 +113,53 @@ import {
   withShipmentIntegrationAccount,
 } from "./services/integration-runtime";
 import { calculateDdpPrice } from "./services/ddp-pricing";
+import {
+  OperationInputError,
+  OPERATION_PERMISSION_NAMES,
+  OPERATION_ROLE_NAMES,
+  canViewOperationFinancialBreakdown,
+  completeOperationTask,
+  createOperationEvent,
+  createOperationNote,
+  ensureDefaultOperationTasks,
+  ensureOperationAssignmentForShipment,
+  ensureOperationProfile,
+  getOperationRoleNames,
+  getOperationShipmentDetail,
+  getOperationSummary,
+  getOperationViewerScope,
+  getOperationsUsers,
+  getUnreadNotificationCount,
+  listNotificationsForUser,
+  listOperationShipments,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notifyUser,
+  notifyUsers,
+  reassignOperationShipment,
+  recordShipmentStatusChange,
+  resolveAttentionFlags,
+  resolveSpecialHandling,
+  setOperationShipmentAssignments,
+  updateOperationShipmentStatus,
+  upsertSpecialHandling,
+  validateDdpStageTransition,
+} from "./services/operations";
+import {
+  TaskPermissionError,
+  TaskStateError,
+  addTaskComment,
+  completeTask,
+  createTask,
+  getTaskDetail,
+  getTaskSummary,
+  getTaskUsers,
+  listTasks,
+  reopenTask,
+  updateTask,
+  type TaskListFilters,
+  type TaskViewKey,
+} from "./services/tasks";
 
 const SALT_ROUNDS = 10;
 const FINANCIAL_MONTH_WINDOW = 12;
@@ -778,6 +839,21 @@ async function finalizePaidShipmentAfterPayment(params: {
       ipAddress,
     );
 
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
+    });
+    if (shipment.status !== updatedShipment.status) {
+      await recordShipmentStatusChange({
+        shipment: updatedShipment,
+        previousStatus: shipment.status,
+        nextStatus: updatedShipment.status,
+        actorUserId: userId,
+        source: "payment_finalization",
+      });
+    }
+
     return updatedShipment;
   }
 
@@ -792,6 +868,12 @@ async function finalizePaidShipmentAfterPayment(params: {
       transactionId,
       paymentMethod,
       invoiceStatus: "paid",
+    });
+
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
     });
 
     return updatedShipment;
@@ -868,6 +950,19 @@ async function finalizePaidShipmentAfterPayment(params: {
       `Confirmed shipment ${updatedShipment.trackingNumber} with carrier tracking ${carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber}`,
       ipAddress,
     );
+
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
+    });
+    await recordShipmentStatusChange({
+      shipment: updatedShipment,
+      previousStatus: shipment.status,
+      nextStatus: updatedShipment.status,
+      actorUserId: userId,
+      source: "carrier_creation",
+    });
 
     return updatedShipment;
   } catch (carrierError) {
@@ -1502,6 +1597,169 @@ function attachChargeableWeightToPackages(
   });
 }
 
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === "object" && value !== null) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function roundQuantity(value: number, precision = 4): number {
+  return Number(value.toFixed(precision));
+}
+
+async function calculateDdpExtraWeightCharge(params: {
+  shipment: Shipment;
+  targetExtraWeightQuantity: number;
+}) {
+  const targetExtraWeightQuantity = Math.max(0, roundQuantity(params.targetExtraWeightQuantity));
+  const extraCostAmountSar = parseMoneyValue(params.shipment.extraFeesCostAmountSar);
+  const billingUnit = params.shipment.ddpBillingUnit === "CBM" ? "CBM" : "KG";
+
+  if (targetExtraWeightQuantity <= 0) {
+    return {
+      billingUnit,
+      targetExtraWeightQuantity: 0,
+      targetExtraWeightAmountSar: 0,
+      targetTotalExtraFeesAmountSar: roundMoney(extraCostAmountSar),
+      effectiveRateSarPerUnit: 0,
+      usedLaneFormula: false,
+    };
+  }
+
+  const lane = params.shipment.ddpPricingLaneId
+    ? await storage.getDdpPricingLane(params.shipment.ddpPricingLaneId)
+    : undefined;
+
+  if (!lane || params.shipment.fulfillmentType !== "ddp_manual") {
+    const ratePerWeight = getExtraFeesRateSarPerWeight(params.shipment);
+    const targetExtraWeightAmountSar = roundMoney(targetExtraWeightQuantity * ratePerWeight);
+    return {
+      billingUnit,
+      targetExtraWeightQuantity,
+      targetExtraWeightAmountSar,
+      targetTotalExtraFeesAmountSar: roundMoney(targetExtraWeightAmountSar + extraCostAmountSar),
+      effectiveRateSarPerUnit: ratePerWeight,
+      usedLaneFormula: false,
+    };
+  }
+
+  const chargeDetails = parseJsonObject(params.shipment.chargeableWeightDetails);
+  const currentRawQuantity = billingUnit === "CBM"
+    ? Number(
+        chargeDetails?.totalCbm ??
+          params.shipment.ddpTotalCbm ??
+          params.shipment.ddpBillableQuantity ??
+          params.shipment.chargeableWeight,
+      ) || 0
+    : Number(
+        chargeDetails?.rawBillableQuantity ??
+          params.shipment.ddpBillableQuantity ??
+          params.shipment.chargeableWeight ??
+          params.shipment.weight,
+      ) || 0;
+
+  const updatedRawQuantity = roundQuantity(currentRawQuantity + targetExtraWeightQuantity);
+  const transportMethod = params.shipment.ddpTransportMethod === DdpTransportMethod.SEA
+    ? DdpTransportMethod.SEA
+    : DdpTransportMethod.AIR;
+  const basePricing = calculateDdpPrice({
+    lane,
+    transportMethod,
+    packages: billingUnit === "KG" ? [{ weight: updatedRawQuantity }] : [],
+    totalCbm: billingUnit === "CBM" ? updatedRawQuantity : parseMoneyValue(params.shipment.ddpTotalCbm),
+    markupPercentage: 0,
+  });
+
+  const account = await storage.getClientAccount(params.shipment.clientAccountId);
+  const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+  const markupPercentage = pricingRule
+    ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+    : 0;
+  const pricedQuote = calculateDdpPrice({
+    lane,
+    transportMethod,
+    packages: billingUnit === "KG" ? [{ weight: updatedRawQuantity }] : [],
+    totalCbm: billingUnit === "CBM" ? updatedRawQuantity : parseMoneyValue(params.shipment.ddpTotalCbm),
+    markupPercentage,
+  });
+
+  const currentShipmentAmountSar = parseMoneyValue(
+    params.shipment.clientTotalAmountSar ?? params.shipment.finalPrice,
+  );
+  const targetExtraWeightAmountSar = roundMoney(
+    Math.max(pricedQuote.totalAmountSar - currentShipmentAmountSar, 0),
+  );
+
+  return {
+    billingUnit,
+    targetExtraWeightQuantity,
+    targetExtraWeightAmountSar,
+    targetTotalExtraFeesAmountSar: roundMoney(targetExtraWeightAmountSar + extraCostAmountSar),
+    effectiveRateSarPerUnit: targetExtraWeightQuantity > 0
+      ? roundMoney(targetExtraWeightAmountSar / targetExtraWeightQuantity)
+      : 0,
+    usedLaneFormula: true,
+  };
+}
+
+async function buildDdpExtraWeightAdjustmentQuote(params: {
+  shipment: Shipment;
+  targetMeasuredQuantity: number;
+}) {
+  const billingUnit = params.shipment.ddpBillingUnit === "CBM" ? "CBM" : "KG";
+  const chargeDetails = parseJsonObject(params.shipment.chargeableWeightDetails);
+  const baseMeasuredQuantity = billingUnit === "CBM"
+    ? Number(
+        chargeDetails?.totalCbm ??
+          params.shipment.ddpTotalCbm ??
+          params.shipment.ddpBillableQuantity ??
+          params.shipment.chargeableWeight,
+      ) || 0
+    : Number(
+        chargeDetails?.rawBillableQuantity ??
+          params.shipment.ddpBillableQuantity ??
+          params.shipment.chargeableWeight ??
+          params.shipment.weight,
+      ) || 0;
+
+  const currentExtraWeightQuantity = parseMoneyValue(params.shipment.extraFeesWeightValue);
+  const currentMeasuredQuantity = roundQuantity(baseMeasuredQuantity + currentExtraWeightQuantity);
+  const normalizedTargetMeasuredQuantity = Math.max(0, roundQuantity(params.targetMeasuredQuantity));
+  const targetExtraWeightQuantity = Math.max(
+    0,
+    roundQuantity(normalizedTargetMeasuredQuantity - baseMeasuredQuantity),
+  );
+  const quote = await calculateDdpExtraWeightCharge({
+    shipment: params.shipment,
+    targetExtraWeightQuantity,
+  });
+  const currentExtraWeightAmountSar = Math.max(
+    parseMoneyValue(params.shipment.extraFeesAmountSar) - parseMoneyValue(params.shipment.extraFeesCostAmountSar),
+    0,
+  );
+
+  return {
+    ...quote,
+    baseMeasuredQuantity: roundQuantity(baseMeasuredQuantity),
+    currentMeasuredQuantity,
+    targetMeasuredQuantity: normalizedTargetMeasuredQuantity,
+    currentExtraWeightQuantity: roundQuantity(currentExtraWeightQuantity),
+    adjustmentQuantity: roundQuantity(normalizedTargetMeasuredQuantity - currentMeasuredQuantity),
+    currentExtraWeightAmountSar: roundMoney(currentExtraWeightAmountSar),
+    deltaAmountSar: roundMoney(quote.targetExtraWeightAmountSar - currentExtraWeightAmountSar),
+  };
+}
+
 function isSameMonthYear(date: Date, month: number, year: number): boolean {
   // PostgreSQL timestamps are stored without a timezone. Drizzle hydrates them as
   // UTC dates, so UTC fields preserve the persisted calendar month at boundaries.
@@ -1660,10 +1918,20 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
 }
 
 function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
-  if (
-    shipment.fulfillmentType === "ddp_manual" &&
-    parseMoneyValue(shipment.ddpRatePerUnitSar) > 0
-  ) {
+  if (shipment.fulfillmentType === "ddp_manual") {
+    const storedWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
+    const storedExtraCostAmountSar = parseMoneyValue(shipment.extraFeesCostAmountSar);
+    const storedTotalAmountSar = parseMoneyValue(shipment.extraFeesAmountSar);
+    const storedWeightAmountSar = roundMoney(Math.max(storedTotalAmountSar - storedExtraCostAmountSar, 0));
+
+    if (shipment.ddpPricingLaneId && storedWeightValue > 0 && storedWeightAmountSar > 0) {
+      return roundMoney(storedWeightAmountSar / storedWeightValue);
+    }
+
+    if (parseMoneyValue(shipment.ddpRatePerUnitSar) <= 0) {
+      return 0;
+    }
+
     const baseRateAmountSar = parseMoneyValue(shipment.baseRate);
     const markupAmountSar = parseMoneyValue(shipment.marginAmount ?? shipment.margin);
     const markupFactor = baseRateAmountSar > 0
@@ -1701,10 +1969,6 @@ function deriveShipmentExtraFees(shipment: Record<string, any>) {
   const storedTotalAmountSar = parseMoneyValue(shipment.extraFeesAmountSar);
   const extraFeesWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
   const extraFeesRateSarPerWeight = getExtraFeesRateSarPerWeight(shipment);
-  const extraWeightAmountSar = extraFeesWeightValue > 0
-    ? roundMoney(extraFeesWeightValue * extraFeesRateSarPerWeight)
-    : 0;
-
   const explicitExtraCostAmountSar = parseMoneyValue(shipment.extraFeesCostAmountSar);
   const extraFeesCostAmountSar =
     explicitExtraCostAmountSar > 0
@@ -1712,6 +1976,18 @@ function deriveShipmentExtraFees(shipment: Record<string, any>) {
       : storedType === ShipmentExtraFeeType.EXTRA_COST && storedTotalAmountSar > 0
         ? storedTotalAmountSar
         : 0;
+  const storedWeightAmountSar =
+    shipment.fulfillmentType === "ddp_manual" &&
+    shipment.ddpPricingLaneId &&
+    extraFeesWeightValue > 0 &&
+    storedTotalAmountSar > 0
+      ? roundMoney(Math.max(storedTotalAmountSar - extraFeesCostAmountSar, 0))
+      : 0;
+  const extraWeightAmountSar = extraFeesWeightValue > 0
+    ? storedWeightAmountSar > 0
+      ? storedWeightAmountSar
+      : roundMoney(extraFeesWeightValue * extraFeesRateSarPerWeight)
+    : 0;
 
   const extraFeesAmountSar =
     extraWeightAmountSar > 0 || extraFeesCostAmountSar > 0
@@ -1977,7 +2253,11 @@ function buildCarrierPayoutCandidates(shipments: Array<Record<string, any>>) {
 // Rate limiter for general API requests
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === "test" ? 1000 : 100, // Keep broad API suites from masking authorization assertions.
+  max:
+    process.env.NODE_ENV === "test"
+      ? 1000
+      : Math.max(Number(process.env.API_RATE_LIMIT_MAX || 1000) || 1000, 100),
+  keyGenerator: (req) => req.session?.userId ? `user:${req.session.userId}` : `ip:${ipKeyGenerator(req.ip || "")}`,
   message: { error: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -2059,6 +2339,7 @@ import {
   loginSchema,
   applicationFormSchema,
   createShipmentSchema,
+  TASK_PERMISSION_NAMES,
   type BrandingConfig,
   type AdminDashboardStats,
   type ClientDashboardStats,
@@ -2075,6 +2356,8 @@ const createAdminUserSchema = z.object({
   username: z.string().trim().min(3, "Username must be at least 3 characters"),
   email: z.string().trim().email("Invalid email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
+  userType: z.enum(["admin", "operations"]).default("admin"),
+  operationLevel: z.enum(["manager", "team_lead", "specialist", "agent"]).default("agent"),
   roleIds: z.array(z.string().min(1)).default([]),
   accountManagerClientIds: z.array(z.string().min(1)).default([]),
   isActive: z.boolean().default(true),
@@ -2094,6 +2377,62 @@ const replaceAccountManagerAssignmentsSchema = z.object({
 
 const reviewAccountManagerChangeRequestSchema = z.object({
   adminNotes: z.string().trim().max(2000, "Admin notes must be 2000 characters or fewer").optional(),
+});
+
+const hierarchyLevelSchema = z.enum([
+  RoleHierarchyLevel.AGENT,
+  RoleHierarchyLevel.SPECIALIST,
+  RoleHierarchyLevel.TEAM_LEAD,
+  RoleHierarchyLevel.MANAGER,
+  RoleHierarchyLevel.PLATFORM_ADMIN,
+]);
+
+const departmentIconKeySchema = z.enum(
+  Array.from(new Set(INTERNAL_DEPARTMENT_STYLE_PRESETS.map((preset) => preset.iconKey))) as [string, ...string[]],
+);
+
+const departmentColorKeySchema = z.enum(
+  Array.from(new Set(INTERNAL_DEPARTMENT_STYLE_PRESETS.map((preset) => preset.colorKey))) as [string, ...string[]],
+);
+
+const createDepartmentSchema = z.object({
+  name: z.string().trim().min(2, "Department name is required"),
+  description: z.string().trim().max(500, "Description must be 500 characters or fewer").optional(),
+  iconKey: departmentIconKeySchema,
+  colorKey: departmentColorKeySchema,
+  sortOrder: z.number().int().optional(),
+});
+
+const updateDepartmentSchema = createDepartmentSchema.partial();
+
+const createHierarchicalRoleSchema = z.object({
+  name: z.string().trim().min(2, "Role name is required"),
+  departmentId: z.string().trim().optional(),
+  hierarchyLevel: hierarchyLevelSchema.optional(),
+  description: z.string().trim().max(1000, "Description must be 1000 characters or fewer").optional(),
+  permissionIds: z.array(z.string().min(1)).default([]),
+  isActive: z.boolean().default(true),
+  sortOrder: z.number().int().optional(),
+});
+
+const updateHierarchicalRoleSchema = createHierarchicalRoleSchema.partial();
+
+const createInvitationSchema = z.object({
+  fullName: z.string().trim().min(2, "Full name is required"),
+  email: z.string().trim().email("Invalid email address"),
+  departmentId: z.string().trim().min(1, "Department is required"),
+  roleId: z.string().trim().min(1, "Role is required"),
+  personalMessage: z.string().trim().max(2000, "Personal message must be 2000 characters or fewer").optional(),
+});
+
+const updateInternalUserSchema = z.object({
+  fullName: z.string().trim().min(2, "Full name is required").optional(),
+  email: z.string().trim().email("Invalid email address").optional(),
+  roleId: z.string().trim().min(1, "Role is required").optional(),
+});
+
+const acceptInvitationSchema = z.object({
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 import MemoryStore from "memorystore";
 import pgSession from "connect-pg-simple";
@@ -2318,6 +2657,73 @@ function requireAdminPermission(resource: string, action: string) {
   };
 }
 
+async function ensureOperationsAccess(req: Request, res: Response): Promise<User | null> {
+  const user = await ensureAuthenticatedUser(req, res);
+  if (!user) {
+    return null;
+  }
+
+  if (user.userType !== "operations" && user.userType !== "admin") {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+
+  return user;
+}
+
+async function getEffectiveOperationsPermissionNames(user: User): Promise<string[]> {
+  if (user.userType === "admin") {
+    return getEffectiveAdminPermissionNames(user);
+  }
+
+  const permissions = await storage.getAdminPermissions(user.id);
+  return Array.from(new Set(permissions.map((permission) => permission.name))).sort();
+}
+
+function requireOperationsPermission(resource: string, action: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const user = await ensureOperationsAccess(req, res);
+    if (!user) {
+      return;
+    }
+
+    const permissionNames = await getEffectiveOperationsPermissionNames(user);
+    if (!permissionNames.includes(`${resource}:${action}`)) {
+      return res.status(403).json({ error: "Permission denied" });
+    }
+
+    next();
+  };
+}
+
+// Tasks are an internal-only collaboration surface: admin + operations users only,
+// never client sessions. Returns the authenticated internal user or null (response sent).
+async function ensureInternalUser(req: Request, res: Response): Promise<User | null> {
+  const user = await ensureAuthenticatedUser(req, res);
+  if (!user) {
+    return null;
+  }
+  if (user.userType !== "admin" && user.userType !== "operations") {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return user;
+}
+
+function requireTaskPermission(action: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const user = await ensureInternalUser(req, res);
+    if (!user) {
+      return;
+    }
+    const permissionNames = await getEffectiveOperationsPermissionNames(user);
+    if (!permissionNames.includes(`${action}`)) {
+      return res.status(403).json({ error: "Permission denied" });
+    }
+    next();
+  };
+}
+
 type AdminUserSummary = Pick<
   User,
   | "id"
@@ -2359,6 +2765,46 @@ type AdminClientSummary = ClientAccount & {
   assignedAccountManager?: AssignedAccountManagerSummary | null;
 };
 
+type InternalDepartmentRef = Pick<Department, "id" | "name" | "slug" | "iconKey" | "colorKey">;
+
+type InternalRoleRef = Pick<Role, "id" | "name" | "hierarchyLevel">;
+
+type InternalStaffUserRow = {
+  kind: "user";
+  id: string;
+  fullName: string;
+  username: string;
+  email: string;
+  department: InternalDepartmentRef | null;
+  role: InternalRoleRef | null;
+  status: "active" | "inactive";
+  lastLoginAt: Date | null;
+  userType: User["userType"];
+  isActive: boolean;
+};
+
+type InternalInvitationRow = {
+  kind: "invitation";
+  id: string;
+  fullName: string;
+  email: string;
+  department: InternalDepartmentRef | null;
+  role: InternalRoleRef | null;
+  status: "pending" | "revoked" | "accepted" | "expired";
+  lastLoginAt: null;
+  userType: "admin" | "operations";
+  isActive: false;
+  sentAt: Date;
+  expiresAt: Date;
+};
+
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_BASE_URL =
+  process.env.APP_URL ||
+  process.env.FRONTEND_URL ||
+  process.env.APP_BASE_URL ||
+  "http://localhost:5001";
+
 function isAccountManagerSystemRoleId(roleId: string): boolean {
   return roleId === ACCOUNT_MANAGER_SYSTEM_ROLE_ID;
 }
@@ -2372,6 +2818,10 @@ function buildAccountManagerSystemRole(): Role {
     id: ACCOUNT_MANAGER_SYSTEM_ROLE_ID,
     name: ACCOUNT_MANAGER_SYSTEM_ROLE_NAME,
     description: ACCOUNT_MANAGER_SYSTEM_ROLE_DESCRIPTION,
+    departmentId: null,
+    hierarchyLevel: null,
+    sortOrder: 999,
+    isSystem: true,
     isActive: true,
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -2894,6 +3344,500 @@ async function buildAdminUserSummary(user: User, availableRoles?: Role[]): Promi
   };
 }
 
+function getUserDisplayName(user?: Pick<User, "fullName" | "username" | "email"> | null): string {
+  return user?.fullName?.trim() || user?.username || user?.email || "Unknown user";
+}
+
+function slugifyValue(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function buildInvitationTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function createInvitationToken() {
+  const token = `${randomUUID()}${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  return {
+    token,
+    tokenHash: buildInvitationTokenHash(token),
+    expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+  };
+}
+
+function buildInvitationAcceptUrl(token: string): string {
+  return `${APP_BASE_URL.replace(/\/$/, "")}/invite/accept/${token}`;
+}
+
+function isCuratedDepartmentStyle(iconKey: string, colorKey: string): boolean {
+  return INTERNAL_DEPARTMENT_STYLE_PRESETS.some(
+    (preset) => preset.iconKey === iconKey && preset.colorKey === colorKey,
+  );
+}
+
+function getDepartmentUserType(slug?: string | null): "admin" | "operations" {
+  return slug === InternalDepartmentSlug.OPERATIONS ? "operations" : "admin";
+}
+
+function getOperationProfileLevelForHierarchy(level?: string | null): string {
+  switch (level) {
+    case RoleHierarchyLevel.MANAGER:
+      return "manager";
+    case RoleHierarchyLevel.TEAM_LEAD:
+      return "team_lead";
+    case RoleHierarchyLevel.SPECIALIST:
+      return "specialist";
+    case RoleHierarchyLevel.AGENT:
+    default:
+      return "agent";
+  }
+}
+
+function getOperationRoleNameByProfileLevel(level?: string | null): string {
+  switch (level) {
+    case "manager":
+      return OPERATION_ROLE_NAMES.manager;
+    case "team_lead":
+    case "lead":
+      return OPERATION_ROLE_NAMES.teamLead;
+    case "specialist":
+      return OPERATION_ROLE_NAMES.specialist;
+    case "agent":
+    default:
+      return OPERATION_ROLE_NAMES.agent;
+  }
+}
+
+function getDefaultHierarchyLevelForDepartment(department?: Pick<Department, "slug"> | null): RoleHierarchyLevelValue {
+  if (department?.slug === InternalDepartmentSlug.PLATFORM) {
+    return RoleHierarchyLevel.PLATFORM_ADMIN;
+  }
+
+  return RoleHierarchyLevel.AGENT;
+}
+
+function getRoleHierarchySort(level?: string | null): number {
+  if (!level) return 999;
+  return HIERARCHY_LEVEL_SORT_ORDER[level as RoleHierarchyLevelValue] ?? 999;
+}
+
+async function generateUniqueUsername(fullName: string, email: string): Promise<string> {
+  const emailBase = email.split("@")[0] || "user";
+  const nameBase = slugifyValue(fullName).replace(/-/g, ".") || slugifyValue(emailBase).replace(/-/g, ".");
+  const base = (nameBase || "user").slice(0, 28);
+
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const suffix = attempt === 0 ? "" : `${attempt + 1}`;
+    const candidate = `${base}${suffix}`.slice(0, 32);
+    if (!candidate) {
+      continue;
+    }
+    const existing = await storage.getUserByUsername(candidate);
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  return `user.${Date.now()}`;
+}
+
+async function syncRolePermissions(roleId: string, permissionIds: string[]) {
+  const uniquePermissionIds = Array.from(new Set(permissionIds.filter(Boolean)));
+  const existingAssignments = await storage.getRolePermissions(roleId);
+  const existingPermissionIds = new Set(existingAssignments.map((assignment) => assignment.permissionId));
+
+  for (const permissionId of uniquePermissionIds) {
+    if (!existingPermissionIds.has(permissionId)) {
+      await storage.assignRolePermission({ roleId, permissionId });
+    }
+  }
+
+  for (const assignment of existingAssignments) {
+    if (!uniquePermissionIds.includes(assignment.permissionId)) {
+      await storage.removeRolePermission(roleId, assignment.permissionId);
+    }
+  }
+}
+
+async function serializeRoleWithPermissions(
+  role: Role,
+  allPermissions?: Permission[],
+): Promise<Role & { permissions: Permission[] }> {
+  const permissions = allPermissions || await storage.getPermissions();
+
+  // The account-manager system role is synthetic (no role_permissions rows); its
+  // access is a fixed permission set, mirroring GET /api/admin/roles/:id.
+  if (isAccountManagerSystemRoleId(role.id)) {
+    const fixedPermissionNames = new Set<string>(ACCOUNT_MANAGER_FIXED_PERMISSION_NAMES);
+    return {
+      ...role,
+      permissions: permissions
+        .filter((permission) => fixedPermissionNames.has(permission.name))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
+  const rolePermissionAssignments = await storage.getRolePermissions(role.id);
+  const assignedPermissionIds = new Set(rolePermissionAssignments.map((assignment) => assignment.permissionId));
+
+  return {
+    ...role,
+    permissions: permissions
+      .filter((permission) => assignedPermissionIds.has(permission.id))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+function getRoleDisplayName(role?: Pick<Role, "name"> | null): string | null {
+  return role?.name || null;
+}
+
+function getDepartmentRef(department?: Department | null): InternalDepartmentRef | null {
+  if (!department) return null;
+  return {
+    id: department.id,
+    name: department.name,
+    slug: department.slug,
+    iconKey: department.iconKey,
+    colorKey: department.colorKey,
+  };
+}
+
+function getRoleRef(role?: Role | null): InternalRoleRef | null {
+  if (!role) return null;
+  return {
+    id: role.id,
+    name: getRoleDisplayName(role) || role.name,
+    hierarchyLevel: role.hierarchyLevel,
+  };
+}
+
+function getInvitationEffectiveStatus(invitation: UserInvitation): InternalInvitationRow["status"] {
+  if (invitation.status === UserInvitationStatus.PENDING && invitation.expiresAt.getTime() <= Date.now()) {
+    return "expired";
+  }
+
+  return invitation.status as InternalInvitationRow["status"];
+}
+
+async function refreshInvitationStatus(invitation: UserInvitation): Promise<UserInvitation> {
+  const effectiveStatus = getInvitationEffectiveStatus(invitation);
+  if (effectiveStatus === invitation.status) {
+    return invitation;
+  }
+
+  return (await storage.updateUserInvitation(invitation.id, { status: effectiveStatus })) || invitation;
+}
+
+function sortDepartmentRoles(roles: Role[]) {
+  return [...roles].sort((left, right) => {
+    const hierarchyDiff = getRoleHierarchySort(left.hierarchyLevel) - getRoleHierarchySort(right.hierarchyLevel);
+    if (hierarchyDiff !== 0) return hierarchyDiff;
+    const sortDiff = (left.sortOrder || 0) - (right.sortOrder || 0);
+    if (sortDiff !== 0) return sortDiff;
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function getFallbackDepartmentForUser(user: User, departmentsBySlug: Map<string, Department>): Department | null {
+  if (user.isAccountManager) {
+    return departmentsBySlug.get(InternalDepartmentSlug.ACCOUNT_MANAGEMENT) || null;
+  }
+
+  if (user.userType === "operations") {
+    return departmentsBySlug.get(InternalDepartmentSlug.OPERATIONS) || null;
+  }
+
+  return departmentsBySlug.get(InternalDepartmentSlug.PLATFORM) || null;
+}
+
+function getPrimaryRoleForUser(
+  user: User,
+  assignedRoles: Role[],
+  fallbackRolesByDepartmentSlug: Map<string, Role>,
+  departmentsById: Map<string, Department>,
+): Role | null {
+  const assignedDepartmentRoles = sortDepartmentRoles(
+    assignedRoles.filter((role) => role.departmentId && departmentsById.has(role.departmentId)),
+  );
+
+  if (assignedDepartmentRoles.length > 0) {
+    return assignedDepartmentRoles[0];
+  }
+
+  if (user.isAccountManager) {
+    return fallbackRolesByDepartmentSlug.get(InternalDepartmentSlug.ACCOUNT_MANAGEMENT) || null;
+  }
+
+  if (user.userType === "operations") {
+    return fallbackRolesByDepartmentSlug.get(InternalDepartmentSlug.OPERATIONS) || null;
+  }
+
+  return fallbackRolesByDepartmentSlug.get(InternalDepartmentSlug.PLATFORM) || null;
+}
+
+async function buildInternalStaffUserRow(
+  user: User,
+  assignedRoles: Role[],
+  departmentsById: Map<string, Department>,
+  departmentsBySlug: Map<string, Department>,
+  fallbackRolesByDepartmentSlug: Map<string, Role>,
+): Promise<InternalStaffUserRow> {
+  const primaryRole = getPrimaryRoleForUser(user, assignedRoles, fallbackRolesByDepartmentSlug, departmentsById);
+  const department =
+    (primaryRole?.departmentId ? departmentsById.get(primaryRole.departmentId) : null) ||
+    getFallbackDepartmentForUser(user, departmentsBySlug);
+
+  return {
+    kind: "user",
+    id: user.id,
+    fullName: getUserDisplayName(user),
+    username: user.username,
+    email: user.email,
+    department: getDepartmentRef(department),
+    role: getRoleRef(primaryRole),
+    status: user.isActive ? "active" : "inactive",
+    lastLoginAt: user.lastLoginAt || null,
+    userType: user.userType,
+    isActive: user.isActive,
+  };
+}
+
+function buildInternalInvitationRow(
+  invitation: UserInvitation,
+  departmentsById: Map<string, Department>,
+  rolesById: Map<string, Role>,
+): InternalInvitationRow {
+  const department = departmentsById.get(invitation.departmentId) || null;
+  const role = rolesById.get(invitation.roleId) || null;
+
+  return {
+    kind: "invitation",
+    id: invitation.id,
+    fullName: invitation.fullName,
+    email: invitation.email,
+    department: getDepartmentRef(department),
+    role: getRoleRef(role),
+    status: getInvitationEffectiveStatus(invitation),
+    lastLoginAt: null,
+    userType: getDepartmentUserType(department?.slug),
+    isActive: false,
+    sentAt: invitation.sentAt,
+    expiresAt: invitation.expiresAt,
+  };
+}
+
+async function sendStaffInvitationEmail(params: {
+  invitation: UserInvitation;
+  token: string;
+  department: Department;
+  role: Role;
+}) {
+  const acceptUrl = buildInvitationAcceptUrl(params.token);
+  const personalMessage = params.invitation.personalMessage?.trim();
+
+  return sendEmail({
+    to: params.invitation.email,
+    subject: `Invitation to join ezhalha`,
+    html: `
+      <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#111827">
+        <h2 style="margin:0 0 12px">You're invited to ezhalha</h2>
+        <p style="margin:0 0 12px">Hello ${params.invitation.fullName},</p>
+        <p style="margin:0 0 12px">
+          You were invited to join ezhalha as <strong>${params.role.name}</strong>
+          in <strong>${params.department.name}</strong>.
+        </p>
+        ${personalMessage ? `<p style="margin:0 0 12px">${personalMessage}</p>` : ""}
+        <p style="margin:24px 0">
+          <a href="${acceptUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#ff5a1f;color:#ffffff;text-decoration:none;font-weight:600">
+            Accept invitation
+          </a>
+        </p>
+        <p style="margin:0;color:#6b7280">This invitation expires on ${params.invitation.expiresAt.toLocaleDateString()}.</p>
+      </div>
+    `,
+  });
+}
+
+function getFallbackRoleByDepartmentSlug(
+  roles: Role[],
+  departmentSlug: string,
+  hierarchyLevel: RoleHierarchyLevelValue,
+  departmentsById: Map<string, Department>,
+): Role | null {
+  return (
+    sortDepartmentRoles(
+      roles.filter((role) => {
+        if (!role.departmentId) return false;
+        const department = departmentsById.get(role.departmentId);
+        return department?.slug === departmentSlug && role.hierarchyLevel === hierarchyLevel;
+      }),
+    )[0] || null
+  );
+}
+
+async function listInternalStaffUserRows(): Promise<InternalStaffUserRow[]> {
+  const [departments, roles, adminUsers, operationsUsers] = await Promise.all([
+    storage.getDepartments(),
+    storage.getRoles(),
+    storage.getUsersByUserType("admin"),
+    storage.getUsersByUserType("operations"),
+  ]);
+
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const departmentsBySlug = new Map(departments.map((department) => [department.slug, department]));
+  const fallbackRolesByDepartmentSlug = new Map<string, Role>();
+  const platformRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.PLATFORM,
+    RoleHierarchyLevel.PLATFORM_ADMIN,
+    departmentsById,
+  );
+  const operationsRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.OPERATIONS,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+  const accountManagementRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+
+  if (platformRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.PLATFORM, platformRole);
+  if (operationsRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.OPERATIONS, operationsRole);
+  if (accountManagementRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.ACCOUNT_MANAGEMENT, accountManagementRole);
+
+  return Promise.all(
+    [...adminUsers, ...operationsUsers].map(async (user) => {
+      const assignedRoles = await getAssignedRolesForUser(user, roles);
+      return buildInternalStaffUserRow(
+        user,
+        assignedRoles,
+        departmentsById,
+        departmentsBySlug,
+        fallbackRolesByDepartmentSlug,
+      );
+    }),
+  );
+}
+
+async function listInternalInvitationRows(params?: { status?: string }): Promise<InternalInvitationRow[]> {
+  const [departments, roles, invitations] = await Promise.all([
+    storage.getDepartments(),
+    storage.getRoles(),
+    storage.getUserInvitations(params),
+  ]);
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const rolesById = new Map(roles.map((role) => [role.id, role]));
+
+  const normalizedInvitations = await Promise.all(invitations.map(refreshInvitationStatus));
+  return normalizedInvitations.map((invitation) => buildInternalInvitationRow(invitation, departmentsById, rolesById));
+}
+
+async function buildInternalStaffUserDetail(user: User) {
+  const [departments, roles, assignedRoles, effectivePermissions, auditRows] = await Promise.all([
+    storage.getDepartments(),
+    storage.getRoles(),
+    getAssignedRolesForUser(user),
+    storage.getAdminPermissions(user.id),
+    storage.getAuditLogs(),
+  ]);
+
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const departmentsBySlug = new Map(departments.map((department) => [department.slug, department]));
+  const fallbackRolesByDepartmentSlug = new Map<string, Role>();
+  const platformRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.PLATFORM,
+    RoleHierarchyLevel.PLATFORM_ADMIN,
+    departmentsById,
+  );
+  const operationsRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.OPERATIONS,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+  const accountManagementRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+
+  if (platformRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.PLATFORM, platformRole);
+  if (operationsRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.OPERATIONS, operationsRole);
+  if (accountManagementRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.ACCOUNT_MANAGEMENT, accountManagementRole);
+
+  const row = await buildInternalStaffUserRow(
+    user,
+    assignedRoles,
+    departmentsById,
+    departmentsBySlug,
+    fallbackRolesByDepartmentSlug,
+  );
+
+  const uniquePermissions = effectivePermissions
+    .filter(
+      (permission, index, collection) =>
+        collection.findIndex((candidate) => candidate.id === permission.id) === index,
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const userAuditRows = auditRows
+    .filter((auditRow) => auditRow.entityType === "user" && auditRow.entityId === user.id)
+    .map((auditRow) => ({
+      id: auditRow.id,
+      action: auditRow.action,
+      details: auditRow.details,
+      createdAt: auditRow.createdAt?.toISOString() || new Date().toISOString(),
+    }));
+
+  const activity = [
+    {
+      id: `created-${user.id}`,
+      action: "account_created",
+      details: `Account created for ${getUserDisplayName(user)}`,
+      createdAt: user.createdAt.toISOString(),
+    },
+    ...userAuditRows.filter((auditRow) => auditRow.action !== "create_admin_user"),
+    ...(
+      user.lastLoginAt && !userAuditRows.some((auditRow) => auditRow.action === "login")
+        ? [{
+            id: `last-login-${user.id}`,
+            action: "last_login",
+            details: `Last login for ${getUserDisplayName(user)}`,
+            createdAt: user.lastLoginAt.toISOString(),
+          }]
+        : []
+    ),
+  ]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 12);
+
+  return {
+    row,
+    createdAt: user.createdAt.toISOString(),
+    phone: null,
+    permissions: uniquePermissions.map((permission) => ({
+      id: permission.id,
+      name: permission.name,
+      resource: permission.resource,
+      action: permission.action,
+      description: permission.description,
+    })),
+    activity,
+  };
+}
+
 // Middleware to check client role
 async function requireClient(req: Request, res: Response, next: NextFunction) {
   const user = await ensureAuthenticatedUser(req, res);
@@ -3409,6 +4353,28 @@ const DEFAULT_PERMISSIONS = [
   { resource: "shipments", action: "delete", description: "Delete shipments" },
   { resource: "shipments", action: "cancel", description: "Cancel shipments" },
   { resource: "shipments", action: "track", description: "Track shipment status" },
+
+  // Operations Hub
+  { resource: "operations", action: "read", description: "View operations hub queues and shipment details" },
+  { resource: "operations", action: "update", description: "Update operations shipment statuses and tasks" },
+  { resource: "operations", action: "assign", description: "Assign or reassign operations shipments" },
+  { resource: "operations", action: "message-client", description: "Send client-facing operations messages" },
+  { resource: "operations", action: "financial-breakdown", description: "View internal operations financial breakdown" },
+  { resource: "operations", action: "special-handling", description: "Create and manage special handling requests" },
+  { resource: "operations", action: "attention", description: "Manage operations attention flags" },
+
+  // Notifications
+  { resource: "notifications", action: "read", description: "View in-app notifications" },
+  { resource: "notifications", action: "update", description: "Mark notifications as read" },
+
+  // Tasks (internal-only collaboration)
+  { resource: "tasks", action: "read", description: "View internal tasks" },
+  { resource: "tasks", action: "create", description: "Create internal tasks" },
+  { resource: "tasks", action: "update", description: "Edit internal task details" },
+  { resource: "tasks", action: "assign", description: "Assign or reassign internal tasks" },
+  { resource: "tasks", action: "complete", description: "Complete assigned internal tasks" },
+  { resource: "tasks", action: "reopen", description: "Reopen completed internal tasks" },
+  { resource: "task-comments", action: "create", description: "Comment on internal tasks" },
   
   // Invoices
   { resource: "invoices", action: "create", description: "Create new invoices" },
@@ -3541,33 +4507,396 @@ async function seedDefaultPermissions() {
   }
 }
 
+async function ensureInternalDepartmentBootstrap() {
+  for (const seed of DEFAULT_INTERNAL_DEPARTMENTS) {
+    const existingDepartments = await storage.getDepartments();
+    const existing =
+      existingDepartments.find((department) => department.slug === seed.slug) ||
+      existingDepartments.find((department) => department.name.toLowerCase() === seed.name.toLowerCase());
+
+    if (!existing) {
+      try {
+        await storage.createDepartment(seed);
+      } catch (error) {
+        const current = await storage.getDepartmentBySlug(seed.slug);
+        if (!current) {
+          throw error;
+        }
+      }
+      continue;
+    }
+
+    await storage.updateDepartment(existing.id, {
+      name: seed.name,
+      slug: seed.slug,
+      description: seed.description,
+      iconKey: seed.iconKey,
+      colorKey: seed.colorKey,
+      sortOrder: seed.sortOrder,
+      isSystem: seed.isSystem,
+    });
+  }
+}
+
+async function ensureUserIdentityBootstrap() {
+  const userGroups = await Promise.all([
+    storage.getUsersByUserType("admin"),
+    storage.getUsersByUserType("operations"),
+    storage.getUsersByUserType("client"),
+  ]);
+
+  for (const user of userGroups.flat()) {
+    if (user.fullName?.trim()) {
+      continue;
+    }
+
+    const fallbackName = user.username || user.email.split("@")[0] || "User";
+    await storage.updateUser(user.id, {
+      fullName: fallbackName,
+      updatedAt: new Date(),
+    });
+  }
+}
+
+function uniquePermissionNames(permissionNames: string[]) {
+  return Array.from(new Set(permissionNames.filter(Boolean)));
+}
+
+function getSeededPermissionNames(
+  departmentSlug: string,
+  hierarchyLevel: RoleHierarchyLevelValue,
+  allPermissionNames: string[],
+): string[] {
+  // Tasks are an internal-only collaboration surface available to every internal
+  // role in v1, so grant the task permission family on top of role-specific access.
+  const base = getBaseSeededPermissionNames(departmentSlug, hierarchyLevel, allPermissionNames);
+  const taskPermissionNames = TASK_PERMISSION_NAMES.filter((name) => allPermissionNames.includes(name));
+  return uniquePermissionNames([...base, ...taskPermissionNames]);
+}
+
+function getBaseSeededPermissionNames(
+  departmentSlug: string,
+  hierarchyLevel: RoleHierarchyLevelValue,
+  allPermissionNames: string[],
+): string[] {
+  const has = (permissionName: string) => allPermissionNames.includes(permissionName);
+  const pick = (...permissionNames: string[]) => permissionNames.filter(has);
+
+  if (departmentSlug === InternalDepartmentSlug.PLATFORM) {
+    return allPermissionNames;
+  }
+
+  if (departmentSlug === InternalDepartmentSlug.OPERATIONS) {
+    if (hierarchyLevel === RoleHierarchyLevel.MANAGER) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "operations:read",
+          "operations:update",
+          "operations:assign",
+          "operations:message-client",
+          "operations:financial-breakdown",
+          "operations:special-handling",
+          "operations:attention",
+          "notifications:read",
+          "notifications:update",
+          "shipments:read",
+          "shipments:update",
+          "shipments:track",
+          "shipments:cancel",
+          "clients:read",
+          "invoices:read",
+          "payments:read",
+          "pricing-rules:read",
+        ),
+      );
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.TEAM_LEAD) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "operations:read",
+          "operations:update",
+          "operations:assign",
+          "operations:message-client",
+          "operations:special-handling",
+          "operations:attention",
+          "notifications:read",
+          "notifications:update",
+          "shipments:read",
+          "shipments:update",
+          "shipments:track",
+          "clients:read",
+          "invoices:read",
+        ),
+      );
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.SPECIALIST) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "operations:read",
+          "operations:update",
+          "operations:message-client",
+          "operations:special-handling",
+          "operations:attention",
+          "notifications:read",
+          "notifications:update",
+          "shipments:read",
+          "shipments:track",
+          "clients:read",
+          "invoices:read",
+        ),
+      );
+    }
+
+    return uniquePermissionNames(
+      pick(
+        "dashboard:read",
+        "operations:read",
+        "operations:update",
+        "operations:message-client",
+        "notifications:read",
+        "notifications:update",
+        "shipments:read",
+        "shipments:track",
+        "clients:read",
+      ),
+    );
+  }
+
+  if (departmentSlug === InternalDepartmentSlug.FINANCE) {
+    if (hierarchyLevel === RoleHierarchyLevel.MANAGER) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "clients:read",
+          "invoices:create",
+          "invoices:read",
+          "invoices:update",
+          "invoices:download",
+          "invoices:sync",
+          "payments:read",
+          "payments:create",
+          "payments:refund",
+          "refund-requests:read",
+          "refund-requests:approve-finance",
+          "credit-requests:read",
+          "credit-requests:approve",
+          "credit-requests:reject",
+          "credit-requests:revoke",
+          "credit-invoices:read",
+          "credit-invoices:update",
+          "credit-invoices:cancel",
+          "pricing-rules:read",
+        ),
+      );
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.TEAM_LEAD) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "clients:read",
+          "invoices:read",
+          "invoices:update",
+          "invoices:download",
+          "payments:read",
+          "refund-requests:read",
+          "refund-requests:approve-finance",
+          "credit-requests:read",
+          "credit-requests:approve",
+          "credit-requests:reject",
+          "credit-invoices:read",
+          "credit-invoices:update",
+          "pricing-rules:read",
+        ),
+      );
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.SPECIALIST) {
+      return uniquePermissionNames(
+        pick(
+          "dashboard:read",
+          "clients:read",
+          "invoices:read",
+          "invoices:update",
+          "invoices:download",
+          "payments:read",
+          "refund-requests:read",
+          "credit-requests:read",
+          "credit-invoices:read",
+          "credit-invoices:update",
+        ),
+      );
+    }
+
+    return uniquePermissionNames(
+      pick(
+        "dashboard:read",
+        "invoices:read",
+        "invoices:download",
+        "payments:read",
+        "credit-invoices:read",
+      ),
+    );
+  }
+
+  if (departmentSlug === InternalDepartmentSlug.ACCOUNT_MANAGEMENT) {
+    const basePermissionNames = uniquePermissionNames(
+      pick(...ACCOUNT_MANAGER_FIXED_PERMISSION_NAMES),
+    );
+
+    if (hierarchyLevel === RoleHierarchyLevel.MANAGER) {
+      return uniquePermissionNames([
+        ...basePermissionNames,
+        ...pick(
+          "account-managers:read",
+          "account-managers:assign",
+          "account-manager-requests:read",
+          "account-manager-requests:approve",
+          "account-manager-requests:reject",
+        ),
+      ]);
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.TEAM_LEAD) {
+      return uniquePermissionNames([
+        ...basePermissionNames,
+        ...pick(
+          "account-managers:read",
+          "account-manager-requests:read",
+          "account-manager-requests:approve",
+          "account-manager-requests:reject",
+        ),
+      ]);
+    }
+
+    if (hierarchyLevel === RoleHierarchyLevel.SPECIALIST) {
+      return uniquePermissionNames([
+        ...basePermissionNames,
+        ...pick("account-managers:read", "account-manager-requests:read"),
+      ]);
+    }
+
+    return basePermissionNames;
+  }
+
+  const commonManager = uniquePermissionNames(
+    pick(
+      "dashboard:read",
+      "clients:create",
+      "clients:read",
+      "clients:update",
+      "clients:activate",
+      "shipments:create",
+      "shipments:read",
+      "shipments:update",
+      "shipments:track",
+      "invoices:read",
+      "payments:read",
+      "pricing-rules:read",
+      "applications:read",
+      "notifications:read",
+      "notifications:update",
+    ),
+  );
+
+  if (hierarchyLevel === RoleHierarchyLevel.MANAGER) {
+    return commonManager;
+  }
+
+  if (hierarchyLevel === RoleHierarchyLevel.TEAM_LEAD) {
+    return uniquePermissionNames(
+      pick(
+        "dashboard:read",
+        "clients:read",
+        "clients:update",
+        "shipments:create",
+        "shipments:read",
+        "shipments:update",
+        "shipments:track",
+        "invoices:read",
+        "pricing-rules:read",
+        "applications:read",
+        "notifications:read",
+        "notifications:update",
+      ),
+    );
+  }
+
+  if (hierarchyLevel === RoleHierarchyLevel.SPECIALIST) {
+    return uniquePermissionNames(
+      pick(
+        "dashboard:read",
+        "clients:read",
+        "clients:update",
+        "shipments:create",
+        "shipments:read",
+        "shipments:track",
+        "invoices:read",
+        "applications:read",
+        "notifications:read",
+        "notifications:update",
+      ),
+    );
+  }
+
+  return uniquePermissionNames(
+    pick(
+      "dashboard:read",
+      "clients:read",
+      "shipments:create",
+      "shipments:read",
+      "shipments:track",
+      "notifications:read",
+      "notifications:update",
+    ),
+  );
+}
+
 async function ensureSuperAdminBootstrap() {
   try {
-    const allPermissions = await storage.getPermissions();
-    const allRoles = await storage.getRoles();
-    let superAdminRole = allRoles.find((role) => role.name === "super_admin");
+    const [allPermissions, allRoles, departments] = await Promise.all([
+      storage.getPermissions(),
+      storage.getRoles(),
+      storage.getDepartments(),
+    ]);
+    const platformDepartment = departments.find((department) => department.slug === InternalDepartmentSlug.PLATFORM);
+    if (!platformDepartment) {
+      throw new Error("Platform department missing during bootstrap");
+    }
 
-    if (!superAdminRole) {
-      superAdminRole = await storage.createRole({
-        name: "super_admin",
-        description: "Bootstrap role with full administrative access",
+    let adminRole =
+      allRoles.find((role) => role.name === "Admin") ||
+      allRoles.find((role) => role.name === "super_admin");
+
+    if (!adminRole) {
+      adminRole = await storage.createRole({
+        name: "Admin",
+        description: "Platform administration and full system access",
+        departmentId: platformDepartment.id,
+        hierarchyLevel: RoleHierarchyLevel.PLATFORM_ADMIN,
+        sortOrder: HIERARCHY_LEVEL_SORT_ORDER[RoleHierarchyLevel.PLATFORM_ADMIN],
+        isSystem: true,
         isActive: true,
       });
-    } else if (!superAdminRole.isActive) {
-      superAdminRole = await storage.updateRole(superAdminRole.id, { isActive: true }) || superAdminRole;
+    } else {
+      adminRole =
+        (await storage.updateRole(adminRole.id, {
+          name: "Admin",
+          description: "Platform administration and full system access",
+          departmentId: platformDepartment.id,
+          hierarchyLevel: RoleHierarchyLevel.PLATFORM_ADMIN,
+          sortOrder: HIERARCHY_LEVEL_SORT_ORDER[RoleHierarchyLevel.PLATFORM_ADMIN],
+          isSystem: true,
+          isActive: true,
+        })) || adminRole;
     }
 
-    const assignedPermissions = await storage.getRolePermissions(superAdminRole.id);
-    const assignedPermissionIds = new Set(assignedPermissions.map((permission) => permission.permissionId));
-
-    for (const permission of allPermissions) {
-      if (!assignedPermissionIds.has(permission.id)) {
-        await storage.assignRolePermission({
-          roleId: superAdminRole.id,
-          permissionId: permission.id,
-        });
-      }
-    }
+    await syncRolePermissions(adminRole.id, allPermissions.map((permission) => permission.id));
 
     const adminUsers = await storage.getUsersByUserType("admin");
     const adminRoleAssignments = await Promise.all(
@@ -3577,18 +4906,227 @@ async function ensureSuperAdminBootstrap() {
       })),
     );
 
-    if (adminRoleAssignments.some((assignment) => assignment.roles.length > 0)) {
-      return;
-    }
-
     for (const assignment of adminRoleAssignments) {
-      await storage.assignUserRole({
-        userId: assignment.user.id,
-        roleId: superAdminRole.id,
-      });
+      if (assignment.roles.length === 0) {
+        await storage.assignUserRole({
+          userId: assignment.user.id,
+          roleId: adminRole.id,
+        });
+      }
     }
   } catch (error) {
     logError("Error bootstrapping super admin role", error);
+  }
+}
+
+async function ensureHierarchicalRoleBootstrap() {
+  try {
+    const [departments, allPermissions, existingRoles] = await Promise.all([
+      storage.getDepartments(),
+      storage.getPermissions(),
+      storage.getRoles(),
+    ]);
+    const departmentBySlug = new Map(departments.map((department) => [department.slug, department]));
+    const allPermissionNames = allPermissions.map((permission) => permission.name);
+    const permissionByName = new Map(allPermissions.map((permission) => [permission.name, permission]));
+
+    const roleConfigs: Array<{
+      departmentSlug: string;
+      name: string;
+      legacyNames?: readonly string[];
+      hierarchyLevel: RoleHierarchyLevelValue;
+      description: string;
+    }> = [
+      {
+        departmentSlug: InternalDepartmentSlug.OPERATIONS,
+        name: OPERATION_ROLE_NAMES.manager,
+        legacyNames: ["operations_director"],
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Full operational oversight across shipment queues, assignment, and escalation.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.OPERATIONS,
+        name: OPERATION_ROLE_NAMES.teamLead,
+        legacyNames: ["operations_manager"],
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Manages operations workload, assignment, and escalation across their team.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.OPERATIONS,
+        name: OPERATION_ROLE_NAMES.specialist,
+        legacyNames: ["operations_lead"],
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Handles day-to-day shipment execution, updates, and coordination.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.OPERATIONS,
+        name: OPERATION_ROLE_NAMES.agent,
+        legacyNames: ["operations_agent"],
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Supports assigned shipments with limited operational actions.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.SALES,
+        name: "Sales Manager",
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Owns sales performance, client relationships, and commercial decisions.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.SALES,
+        name: "Sales Team Lead",
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Leads sales execution, team coordination, and pipeline follow-up.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.SALES,
+        name: "Sales Specialist",
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Manages day-to-day commercial follow-up and client coordination.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.SALES,
+        name: "Sales Agent",
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Handles assigned outreach and shipment request support.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.CUSTOMER_SERVICE,
+        name: "Customer Service Manager",
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Owns support quality, escalations, and service operations.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.CUSTOMER_SERVICE,
+        name: "Customer Service Team Lead",
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Leads support queue handling and team coordination.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.CUSTOMER_SERVICE,
+        name: "Customer Service Officer",
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Resolves customer cases, shipment updates, and service issues.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.CUSTOMER_SERVICE,
+        name: "Customer Service Agent",
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Provides first-line support and shipment follow-up.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.MARKETING,
+        name: "Marketing Manager",
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Owns campaign direction, reporting, and market coordination.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.MARKETING,
+        name: "Marketing Team Lead",
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Coordinates marketing execution and channel planning.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.MARKETING,
+        name: "Marketing Specialist",
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Runs day-to-day campaigns, content, and reporting support.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.MARKETING,
+        name: "Marketing Agent",
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Supports assigned marketing tasks and campaign operations.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.FINANCE,
+        name: "Finance Manager",
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Owns finance controls, payment approvals, and financial operations.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.FINANCE,
+        name: "Finance Team Lead",
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Coordinates invoice, refund, and credit review workflows.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.FINANCE,
+        name: "Finance Officer",
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Executes invoice, payment, and reconciliation tasks.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.FINANCE,
+        name: "Finance Agent",
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Handles assigned finance records and document follow-up.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+        name: "Account Management Manager",
+        hierarchyLevel: RoleHierarchyLevel.MANAGER,
+        description: "Owns assigned client portfolios, approvals, and account-care processes.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+        name: "Account Management Team Lead",
+        hierarchyLevel: RoleHierarchyLevel.TEAM_LEAD,
+        description: "Leads account management execution and request handling.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+        name: "Account Management Officer",
+        hierarchyLevel: RoleHierarchyLevel.SPECIALIST,
+        description: "Manages assigned client updates and portfolio workflows.",
+      },
+      {
+        departmentSlug: InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+        name: "Account Management Agent",
+        hierarchyLevel: RoleHierarchyLevel.AGENT,
+        description: "Supports assigned client follow-up and change coordination.",
+      },
+    ];
+
+    for (const config of roleConfigs) {
+      const department = departmentBySlug.get(config.departmentSlug);
+      if (!department) {
+        continue;
+      }
+
+      let role =
+        existingRoles.find((candidate) => candidate.departmentId === department.id && candidate.name === config.name) ||
+        existingRoles.find((candidate) => candidate.name === config.name) ||
+        config.legacyNames?.map((legacyName) => existingRoles.find((candidate) => candidate.name === legacyName)).find(Boolean);
+
+      const permissionIds = getSeededPermissionNames(
+        config.departmentSlug,
+        config.hierarchyLevel,
+        allPermissionNames,
+      )
+        .map((permissionName) => permissionByName.get(permissionName)?.id)
+        .filter(Boolean) as string[];
+
+      const roleUpdates = {
+        name: config.name,
+        description: config.description,
+        departmentId: department.id,
+        hierarchyLevel: config.hierarchyLevel,
+        sortOrder: HIERARCHY_LEVEL_SORT_ORDER[config.hierarchyLevel],
+        isSystem: true,
+        isActive: true,
+      };
+
+      if (!role) {
+        role = await storage.createRole(roleUpdates);
+        existingRoles.push(role);
+      } else {
+        role = (await storage.updateRole(role.id, roleUpdates)) || role;
+      }
+
+      await syncRolePermissions(role.id, permissionIds);
+    }
+  } catch (error) {
+    logError("Error bootstrapping hierarchical roles", error);
   }
 }
 
@@ -3598,7 +5136,10 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Seed default permissions on startup
   await seedDefaultPermissions();
+  await ensureUserIdentityBootstrap();
+  await ensureInternalDepartmentBootstrap();
   await ensureSuperAdminBootstrap();
+  await ensureHierarchicalRoleBootstrap();
   
   // Trust proxy for rate limiting behind reverse proxy
   app.set("trust proxy", 1);
@@ -3620,9 +5161,6 @@ export async function registerRoutes(
       crossOriginEmbedderPolicy: false, // Allow embedding for development
     })
   );
-
-  // General rate limiting
-  app.use("/api/", generalLimiter);
 
   // Session middleware - use PostgreSQL session store in production, MemoryStore in development
   if (process.env.NODE_ENV === "production" && process.env.DATABASE_URL) {
@@ -3666,6 +5204,11 @@ export async function registerRoutes(
       },
     })
   );
+
+  // General rate limiting
+  // Apply this after session middleware so authenticated users are rate-limited individually
+  // instead of multiple operators/admins sharing one IP bucket.
+  app.use("/api/", generalLimiter);
 
   // ============================================
   // HEALTH CHECK
@@ -3758,12 +5301,1074 @@ export async function registerRoutes(
   });
 
   // ============================================
+  // NOTIFICATIONS
+  // ============================================
+  app.get("/api/notifications", requireAuth, async (req, res) => {
+    try {
+      res.json(await listNotificationsForUser(req.session.userId!));
+    } catch (error) {
+      logError("Failed to fetch notifications", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", requireAuth, async (req, res) => {
+    try {
+      res.json({ count: await getUnreadNotificationCount(req.session.userId!) });
+    } catch (error) {
+      logError("Failed to fetch notification count", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/notifications/:id/read", requireAuth, async (req, res) => {
+    try {
+      await markNotificationRead(req.session.userId!, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      logError("Failed to mark notification read", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/notifications/read-all", requireAuth, async (req, res) => {
+    try {
+      await markAllNotificationsRead(req.session.userId!);
+      res.json({ success: true });
+    } catch (error) {
+      logError("Failed to mark notifications read", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // TASKS (internal-only collaboration)
+  // ============================================
+  const taskAttachmentInputSchema = z.object({
+    objectPath: z.string().min(1),
+    fileName: z.string().min(1).max(500),
+    contentType: z.string().max(255).nullish(),
+    sizeBytes: z.number().int().nonnegative().nullish(),
+  });
+
+  const taskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
+
+  const createTaskBodySchema = z.object({
+    title: z.string().trim().min(1).max(300),
+    description: z.string().max(20000).nullish(),
+    assignedToUserId: z.string().min(1),
+    deadlineAt: z.string().datetime().nullish(),
+    priority: taskPrioritySchema.optional(),
+    completionRecipientUserIds: z.array(z.string().min(1)).optional(),
+    attachments: z.array(taskAttachmentInputSchema).max(20).optional(),
+  });
+
+  const updateTaskBodySchema = z.object({
+    title: z.string().trim().min(1).max(300).optional(),
+    description: z.string().max(20000).nullish(),
+    assignedToUserId: z.string().min(1).optional(),
+    deadlineAt: z.string().datetime().nullish(),
+    priority: taskPrioritySchema.optional(),
+    completionRecipientUserIds: z.array(z.string().min(1)).optional(),
+    attachments: z.array(taskAttachmentInputSchema).max(20).optional(),
+  });
+
+  const createCommentBodySchema = z.object({
+    body: z.string().trim().min(1).max(10000),
+    parentCommentId: z.string().min(1).nullish(),
+  });
+
+  const TASK_VIEW_KEYS = new Set(["all", "my", "assigned_by_me", "completed", "overdue"]);
+
+  function handleTaskError(res: Response, error: unknown, context: string) {
+    if (error instanceof TaskPermissionError) {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error instanceof TaskStateError) {
+      return res.status(409).json({ error: error.message });
+    }
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Invalid request", details: error.flatten() });
+    }
+    logError(context, error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+
+  function parseOptionalDate(value: unknown): Date | undefined {
+    if (typeof value !== "string" || !value.trim()) {
+      return undefined;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  app.get("/api/tasks/summary", requireTaskPermission("tasks:read"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      res.json(await getTaskSummary(user));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to fetch task summary");
+    }
+  });
+
+  app.get("/api/tasks/users", requireTaskPermission("tasks:read"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      res.json(await getTaskUsers());
+    } catch (error) {
+      handleTaskError(res, error, "Failed to fetch task users");
+    }
+  });
+
+  app.get("/api/tasks", requireTaskPermission("tasks:read"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+
+      const viewParam = typeof req.query.view === "string" && TASK_VIEW_KEYS.has(req.query.view)
+        ? (req.query.view as TaskViewKey)
+        : "all";
+      const sortParam = typeof req.query.sort === "string" ? req.query.sort : undefined;
+      const deadlinePreset = typeof req.query.deadlinePreset === "string" ? req.query.deadlinePreset : undefined;
+
+      const filters: TaskListFilters = {
+        view: viewParam,
+        search: typeof req.query.search === "string" ? req.query.search : undefined,
+        assigneeId: typeof req.query.assigneeId === "string" ? req.query.assigneeId : undefined,
+        creatorId: typeof req.query.creatorId === "string" ? req.query.creatorId : undefined,
+        status:
+          req.query.status === "PENDING" || req.query.status === "COMPLETED"
+            ? (req.query.status as TaskListFilters["status"])
+            : undefined,
+        priority:
+          typeof req.query.priority === "string" && ["LOW", "MEDIUM", "HIGH", "URGENT"].includes(req.query.priority)
+            ? (req.query.priority as TaskListFilters["priority"])
+            : undefined,
+        deadlinePreset:
+          deadlinePreset === "overdue" || deadlinePreset === "today" || deadlinePreset === "week" || deadlinePreset === "none"
+            ? deadlinePreset
+            : undefined,
+        createdFrom: parseOptionalDate(req.query.createdFrom),
+        createdTo: parseOptionalDate(req.query.createdTo),
+        page: req.query.page ? Math.max(1, Number(req.query.page)) : undefined,
+        pageSize: req.query.pageSize ? Math.max(1, Math.min(100, Number(req.query.pageSize))) : undefined,
+        sort:
+          sortParam === "deadline" || sortParam === "created" || sortParam === "priority" || sortParam === "activity"
+            ? sortParam
+            : undefined,
+      };
+
+      res.json(await listTasks(user, filters));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to list tasks");
+    }
+  });
+
+  app.post("/api/tasks", requireTaskPermission("tasks:create"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const body = createTaskBodySchema.parse(req.body);
+
+      const created = await createTask(user, {
+        title: body.title,
+        description: body.description ?? null,
+        assignedToUserId: body.assignedToUserId,
+        deadlineAt: body.deadlineAt ? new Date(body.deadlineAt) : null,
+        priority: body.priority,
+        completionRecipientUserIds: body.completionRecipientUserIds,
+        attachments: body.attachments,
+      });
+
+      const detail = await getTaskDetail(created.id, user);
+      res.status(201).json(detail);
+    } catch (error) {
+      handleTaskError(res, error, "Failed to create task");
+    }
+  });
+
+  app.get("/api/tasks/:id", requireTaskPermission("tasks:read"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const detail = await getTaskDetail(req.params.id, user);
+      if (!detail) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(detail);
+    } catch (error) {
+      handleTaskError(res, error, "Failed to fetch task");
+    }
+  });
+
+  app.patch("/api/tasks/:id", requireTaskPermission("tasks:update"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const body = updateTaskBodySchema.parse(req.body);
+
+      const updated = await updateTask(user, req.params.id, {
+        title: body.title,
+        description: body.description === undefined ? undefined : body.description ?? null,
+        assignedToUserId: body.assignedToUserId,
+        deadlineAt: body.deadlineAt === undefined ? undefined : body.deadlineAt ? new Date(body.deadlineAt) : null,
+        priority: body.priority,
+        completionRecipientUserIds: body.completionRecipientUserIds,
+        attachments: body.attachments,
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(await getTaskDetail(updated.id, user));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to update task");
+    }
+  });
+
+  app.post("/api/tasks/:id/complete", requireTaskPermission("tasks:complete"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const updated = await completeTask(user, req.params.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(await getTaskDetail(updated.id, user));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to complete task");
+    }
+  });
+
+  app.post("/api/tasks/:id/reopen", requireTaskPermission("tasks:reopen"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const updated = await reopenTask(user, req.params.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json(await getTaskDetail(updated.id, user));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to reopen task");
+    }
+  });
+
+  app.post("/api/tasks/:id/comments", requireTaskPermission("task-comments:create"), async (req, res) => {
+    try {
+      const user = await ensureInternalUser(req, res);
+      if (!user) return;
+      const body = createCommentBodySchema.parse(req.body);
+      const comment = await addTaskComment(user, req.params.id, body.body, body.parentCommentId ?? null);
+      if (!comment) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.status(201).json(await getTaskDetail(req.params.id, user));
+    } catch (error) {
+      handleTaskError(res, error, "Failed to add task comment");
+    }
+  });
+
+  // ============================================
+  // OPERATIONS HUB
+  // ============================================
+  app.get("/api/operations/me/access", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const [permissionNames, roleNames, scope, canViewFinancialBreakdown] = await Promise.all([
+        getEffectiveOperationsPermissionNames(user),
+        getOperationRoleNames(user.id),
+        getOperationViewerScope(user),
+        canViewOperationFinancialBreakdown(user),
+      ]);
+
+      res.json({
+        userType: user.userType,
+        scope,
+        roleNames,
+        permissions: permissionNames,
+        canViewFinancialBreakdown,
+      });
+    } catch (error) {
+      logError("Failed to fetch operations access", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/operations/summary", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      res.json(await getOperationSummary(user));
+    } catch (error) {
+      logError("Failed to fetch operations summary", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/operations/users", requireOperationsPermission("operations", "read"), async (_req, res) => {
+    try {
+      res.json(await getOperationsUsers());
+    } catch (error) {
+      logError("Failed to fetch operations users", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/operations/shipments", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const queue = typeof req.query.queue === "string" ? req.query.queue : undefined;
+      const search = typeof req.query.search === "string" ? req.query.search : undefined;
+      const limit = req.query.limit ? Math.max(1, Math.min(200, Number(req.query.limit))) : 100;
+      res.json(await listOperationShipments({ viewer: user, queue, search, limit }));
+    } catch (error) {
+      logError("Failed to fetch operations shipments", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/operations/shipments/:id", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const detail = await getOperationShipmentDetail(req.params.id, user);
+      if (!detail) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      res.json(detail);
+    } catch (error) {
+      logError("Failed to fetch operations shipment", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/operations/shipments/:id/status", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        status: z.string().trim().min(1).max(80),
+        notifyClient: z.boolean().default(true),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      if (visibleShipment.shipmentKind === OperationShipmentKind.DDP) {
+        const transitionError = validateDdpStageTransition({
+          shipment: visibleShipment,
+          tasks: visibleShipment.operationTasks,
+          nextStatus: parsed.status,
+        });
+
+        if (transitionError) {
+          return res.status(400).json({ error: transitionError });
+        }
+      }
+
+      const updated = await updateOperationShipmentStatus({
+        shipmentId: req.params.id,
+        status: parsed.status,
+        actorUser: user,
+        notifyClient: parsed.notifyClient,
+      });
+      res.json({ shipment: updated, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update operations shipment status", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/tasks/:taskId/complete", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const parsed = z.object({
+        metadata: z.record(z.any()).optional(),
+      }).parse(req.body || {});
+
+      const task = await completeOperationTask({
+        shipmentId: req.params.id,
+        taskId: req.params.taskId,
+        actorUser: user,
+        metadata: parsed.metadata,
+      });
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      res.json({ task, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof OperationInputError) {
+        return res.status(400).json({ error: error.message });
+      }
+      logError("Failed to complete operations task", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/notes", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        body: z.string().trim().min(1).max(4000),
+        visibility: z.enum(["INTERNAL", "CLIENT"]).default("INTERNAL"),
+        mentionUserIds: z.array(z.string().min(1)).default([]),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const assignedUserIdSet = new Set((visibleShipment.assignedTeam || []).map((member) => member.userId));
+      const invalidMentionIds = parsed.mentionUserIds.filter((userId) => !assignedUserIdSet.has(userId));
+      if (invalidMentionIds.length > 0) {
+        return res.status(400).json({ error: "You can only mention team members assigned to this shipment." });
+      }
+
+      const note = await createOperationNote({
+        shipmentId: req.params.id,
+        authorUser: user,
+        body: parsed.body,
+        visibility: parsed.visibility,
+        mentionUserIds: parsed.mentionUserIds,
+      });
+      if (parsed.visibility === "CLIENT") {
+        const shipment = await storage.getShipment(req.params.id);
+        if (shipment) {
+          const clientUsers = await storage.getUsersByClientAccount(shipment.clientAccountId);
+          await Promise.all(
+            clientUsers
+              .filter((clientUser) => clientUser.isActive)
+              .map((clientUser) =>
+                notifyUser({
+                  userId: clientUser.id,
+                  title: "Shipment update from operations",
+                  body: `${shipment.trackingNumber}: ${parsed.body}`,
+                  type: "operations_client_message",
+                  entityType: "shipment",
+                  entityId: shipment.id,
+                  actionUrl: `${process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002"}/client/shipments?shipmentId=${shipment.id}`,
+                }),
+              ),
+          );
+        }
+      }
+      res.status(201).json({ note, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to create operations note", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/client-message", requireOperationsPermission("operations", "message-client"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        message: z.string().trim().min(1).max(2000),
+        template: z.string().trim().max(80).optional(),
+        channel: z.enum(["whatsapp", "sms", "in_app", "email"]).default("email"),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const note = await createOperationNote({
+        shipmentId: req.params.id,
+        authorUser: user,
+        body: parsed.message,
+        visibility: "CLIENT",
+        mentionUserIds: [],
+      });
+
+      const shipment = await storage.getShipment(req.params.id);
+      let deliveryStatus: "sent" | "not_configured" | "logged_only" = "logged_only";
+      let deliveryMessage = "The shipment timeline was updated with the client message.";
+      if (shipment) {
+        const [clientUsers, clientAccount] = await Promise.all([
+          storage.getUsersByClientAccount(shipment.clientAccountId),
+          storage.getClientAccount(shipment.clientAccountId),
+        ]);
+        const activeClientUsers = clientUsers.filter((clientUser) => clientUser.isActive);
+        const actionUrl = `${process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002"}/client/shipments?shipmentId=${shipment.id}`;
+        await Promise.all(
+          activeClientUsers
+            .map((clientUser) =>
+              notifyUser({
+                userId: clientUser.id,
+                title: "Shipment update from operations",
+                body: `${shipment.trackingNumber}: ${parsed.message}`,
+                type: `operations_${parsed.channel}_message`,
+                entityType: "shipment",
+                entityId: shipment.id,
+                actionUrl,
+                sendEmail: false,
+              }),
+            ),
+        );
+
+        if (parsed.channel === "email") {
+          const recipientEmails = Array.from(
+            new Set(
+              [
+                ...activeClientUsers.map((clientUser) => clientUser.email?.trim().toLowerCase() || ""),
+                clientAccount?.email?.trim().toLowerCase() || "",
+              ].filter(Boolean),
+            ),
+          );
+
+          if (recipientEmails.length === 0) {
+            deliveryStatus = "not_configured";
+            deliveryMessage = "Email is not configured for this client yet. The update was still saved to the shipment timeline.";
+          } else {
+            const safeMessage = sanitizeHtml(parsed.message, { allowedTags: [], allowedAttributes: {} }).replace(/\n/g, "<br />");
+            const emailResults = await Promise.all(
+              recipientEmails.map((email) =>
+                sendEmail({
+                  to: email,
+                  subject: `Shipment update for ${shipment.trackingNumber}`,
+                  html: `
+                    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+                      <p>Hello,</p>
+                      <p>${safeMessage}</p>
+                      <p><a href="${actionUrl}" style="color:#E8400C">Open shipment in Ezhalha</a></p>
+                      <p style="color:#6B7280;font-size:12px">This update was sent by Ezhalha Operations.</p>
+                    </div>
+                  `,
+                }),
+              ),
+            );
+
+            if (emailResults.some(Boolean)) {
+              deliveryStatus = "sent";
+              deliveryMessage = "The email update was sent to the client and saved to the shipment timeline.";
+            } else {
+              deliveryStatus = "not_configured";
+              deliveryMessage = "Email sending is not configured yet. The update was still saved to the shipment timeline.";
+            }
+          }
+        } else if (parsed.channel === "whatsapp") {
+          deliveryStatus = "not_configured";
+          deliveryMessage = "WhatsApp is not configured yet. The update was saved to the shipment timeline so the team can still track it.";
+        } else if (parsed.channel === "sms") {
+          deliveryStatus = "not_configured";
+          deliveryMessage = "SMS is not configured yet. The update was saved to the shipment timeline so the team can still track it.";
+        }
+      }
+
+      res.status(201).json({
+        note,
+        channel: parsed.channel,
+        template: parsed.template || null,
+        deliveryStatus,
+        deliveryMessage,
+        detail: await getOperationShipmentDetail(req.params.id, user),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to send operations client message", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/charges/extra-weight/preview", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        targetMeasuredQuantity: z.coerce.number().nonnegative("Enter a valid shipment quantity.").max(100000),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.fulfillmentType !== "ddp_manual") {
+        return res.status(400).json({ error: "Extra weight charges can only be updated on DDP shipments." });
+      }
+
+      const quote = await buildDdpExtraWeightAdjustmentQuote({
+        shipment,
+        targetMeasuredQuantity: parsed.targetMeasuredQuantity,
+      });
+
+      res.json(quote);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to preview DDP extra weight adjustment from operations", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/charges/extra-weight", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        additionalQuantity: z.coerce.number().positive("Enter a valid additional quantity.").max(100000).optional(),
+        targetMeasuredQuantity: z.coerce.number().nonnegative("Enter a valid shipment quantity.").max(100000).optional(),
+        notes: z.string().trim().max(1000).optional(),
+      }).refine(
+        (value) => value.additionalQuantity !== undefined || value.targetMeasuredQuantity !== undefined,
+        "Enter the updated shipment quantity or an additional quantity.",
+      ).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.fulfillmentType !== "ddp_manual") {
+        return res.status(400).json({ error: "Extra weight charges can only be added to DDP shipments." });
+      }
+
+      const preview = await buildDdpExtraWeightAdjustmentQuote({
+        shipment,
+        targetMeasuredQuantity:
+          parsed.targetMeasuredQuantity ??
+          roundQuantity(
+            (shipment.ddpBillingUnit === "CBM"
+              ? Number(
+                  parseJsonObject(shipment.chargeableWeightDetails)?.totalCbm ??
+                    shipment.ddpTotalCbm ??
+                    shipment.ddpBillableQuantity ??
+                    shipment.chargeableWeight,
+                ) || 0
+              : Number(
+                  parseJsonObject(shipment.chargeableWeightDetails)?.rawBillableQuantity ??
+                    shipment.ddpBillableQuantity ??
+                    shipment.chargeableWeight ??
+                    shipment.weight,
+                ) || 0) +
+              parseMoneyValue(shipment.extraFeesWeightValue) +
+              (parsed.additionalQuantity || 0),
+          ),
+      });
+
+      let nextExtraFeesType: string | null = null;
+      if (preview.targetExtraWeightAmountSar > 0 && parseMoneyValue(shipment.extraFeesCostAmountSar) > 0) {
+        nextExtraFeesType = ShipmentExtraFeeType.COMBINED;
+      } else if (preview.targetExtraWeightAmountSar > 0) {
+        nextExtraFeesType = ShipmentExtraFeeType.EXTRA_WEIGHT;
+      } else if (parseMoneyValue(shipment.extraFeesCostAmountSar) > 0) {
+        nextExtraFeesType = ShipmentExtraFeeType.EXTRA_COST;
+      }
+
+      await storage.updateShipment(shipment.id, {
+        extraFeesAmountSar:
+          preview.targetTotalExtraFeesAmountSar > 0
+            ? formatMoney(preview.targetTotalExtraFeesAmountSar)
+            : null,
+        extraFeesType: nextExtraFeesType,
+        extraFeesWeightValue:
+          preview.targetExtraWeightQuantity > 0
+            ? formatMoney(preview.targetExtraWeightQuantity)
+            : null,
+        extraFeesAddedAt: preview.targetExtraWeightAmountSar > 0 ? new Date() : null,
+        extraFeesEmailSentAt: null,
+      });
+
+      const refreshedShipment = (await storage.getShipment(shipment.id)) || shipment;
+      const syncedExtraFeeInvoices = await syncShipmentExtraFeeInvoices(refreshedShipment);
+      const weightInvoice = syncedExtraFeeInvoices[InvoiceType.EXTRA_WEIGHT];
+      const client = await storage.getClientAccount(shipment.clientAccountId);
+
+      if (refreshedShipment && client?.email && weightInvoice?.status === "pending") {
+        try {
+          const emailSent = await sendShipmentExtraFeesNotification({
+            email: client.email,
+            clientName: client.name,
+            trackingNumber: shipment.trackingNumber,
+            amountSar: formatMoney(parseMoneyValue(weightInvoice.amount)),
+            extraFeeType: InvoiceType.EXTRA_WEIGHT,
+            extraWeightValue: formatMoney(preview.targetExtraWeightQuantity),
+            weightUnit: preview.billingUnit,
+            extraCostAmountSar: null,
+            invoiceNumber: weightInvoice.invoiceNumber,
+          });
+
+          if (emailSent) {
+            await storage.updateShipment(shipment.id, {
+              extraFeesEmailSentAt: new Date(),
+            });
+          }
+        } catch (emailError) {
+          logError("Error sending DDP extra weight email", emailError, {
+            shipmentId: shipment.id,
+            clientAccountId: shipment.clientAccountId,
+          });
+        }
+      }
+
+      const appBaseUrl = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+      const assignedUserIds = (visibleShipment.assignedTeam || []).map((member) => member.userId);
+      const clientUsers = await storage.getUsersByClientAccount(shipment.clientAccountId);
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "ddp_extra_weight_charge_added",
+        title: `Adjusted shipment ${preview.billingUnit} to ${formatWeightValue(preview.targetMeasuredQuantity)} ${preview.billingUnit}`,
+        description: `Original measured ${preview.billingUnit}: ${formatWeightValue(preview.baseMeasuredQuantity)}. Current shipment ${preview.billingUnit}: ${formatWeightValue(preview.currentMeasuredQuantity)}. Extra billed ${preview.billingUnit} is now ${formatWeightValue(preview.targetExtraWeightQuantity)} with a DDP invoice target of SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.${parsed.notes ? ` ${parsed.notes}` : ""}`,
+        audience: OperationEventAudience.BOTH,
+        metadata: {
+          additionalQuantity: parsed.additionalQuantity ?? null,
+          baseMeasuredQuantity: preview.baseMeasuredQuantity,
+          currentMeasuredQuantity: preview.currentMeasuredQuantity,
+          targetMeasuredQuantity: preview.targetMeasuredQuantity,
+          targetExtraWeightQuantity: preview.targetExtraWeightQuantity,
+          billingUnit: preview.billingUnit,
+          amountSar: preview.targetExtraWeightAmountSar,
+          notes: parsed.notes || null,
+        },
+      });
+
+      if (assignedUserIds.length > 0) {
+        await notifyUsers(assignedUserIds, {
+          title: "DDP extra charge updated",
+          body: `${shipment.trackingNumber}: shipment ${preview.billingUnit} is now ${formatWeightValue(preview.targetMeasuredQuantity)}. New extra invoice target: SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.`,
+          type: "operations_charge_added",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: `${appBaseUrl}/operations?shipmentId=${shipment.id}`,
+          sendEmail: false,
+        });
+      }
+
+      const clientUserIds = clientUsers.filter((clientUser) => clientUser.isActive).map((clientUser) => clientUser.id);
+      if (clientUserIds.length > 0) {
+        await notifyUsers(clientUserIds, {
+          title: "Additional shipment charge created",
+          body: `${shipment.trackingNumber}: your shipment ${preview.billingUnit} was updated to ${formatWeightValue(preview.targetMeasuredQuantity)} and the extra invoice is now SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.`,
+          type: "invoice_created",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: weightInvoice ? `${appBaseUrl}/client/invoices?invoiceId=${weightInvoice.id}` : `${appBaseUrl}/client/invoices`,
+          sendEmail: false,
+        });
+      }
+
+      await logAudit(
+        req.session.userId,
+        "operations_add_ddp_extra_weight",
+        "shipment",
+        shipment.id,
+        `Adjusted ${preview.billingUnit} for ${shipment.trackingNumber} to ${formatWeightValue(preview.targetMeasuredQuantity)} for SAR ${formatMoney(preview.targetExtraWeightAmountSar)}`,
+        req.ip,
+      );
+
+      res.status(201).json({
+        billingUnit: preview.billingUnit,
+        additionalQuantity: parsed.additionalQuantity !== undefined ? roundQuantity(parsed.additionalQuantity) : null,
+        baseMeasuredQuantity: preview.baseMeasuredQuantity,
+        currentMeasuredQuantity: preview.currentMeasuredQuantity,
+        targetMeasuredQuantity: preview.targetMeasuredQuantity,
+        totalQuantity: preview.targetExtraWeightQuantity,
+        amountSar: preview.targetExtraWeightAmountSar,
+        deltaAmountSar: preview.deltaAmountSar,
+        rateSarPerUnit: preview.effectiveRateSarPerUnit,
+        invoice: weightInvoice || null,
+        detail: await getOperationShipmentDetail(req.params.id, user),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update DDP extra weight charge from operations", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/charges/custom", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        description: z.string().trim().min(3).max(500),
+        amount: z.coerce.number().positive().max(1_000_000),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      if (shipment.fulfillmentType !== "ddp_manual") {
+        return res.status(400).json({ error: "Extra charges can only be added to DDP shipments." });
+      }
+
+      const invoice = await storage.createInvoice({
+        clientAccountId: shipment.clientAccountId,
+        shipmentId: shipment.id,
+        invoiceType: InvoiceType.DDP_ADJUSTMENT,
+        description: `DDP adjustment for ${shipment.trackingNumber}: ${parsed.description}`,
+        amount: formatMoney(parsed.amount),
+        status: "pending",
+        dueDate: new Date(),
+      });
+      const syncedInvoice = await syncInvoiceToZoho(invoice, shipment);
+
+      const appBaseUrl = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+      const assignedUserIds = (visibleShipment.assignedTeam || []).map((member) => member.userId);
+      const clientUsers = await storage.getUsersByClientAccount(shipment.clientAccountId);
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "ddp_custom_charge_added",
+        title: "Added extra charge",
+        description: `SAR ${formatMoney(parsed.amount)} added for "${parsed.description}".`,
+        audience: OperationEventAudience.BOTH,
+        metadata: {
+          amountSar: parsed.amount,
+          description: parsed.description,
+          invoiceId: syncedInvoice.id,
+        },
+      });
+
+      if (assignedUserIds.length > 0) {
+        await notifyUsers(assignedUserIds, {
+          title: "DDP extra charge added",
+          body: `${shipment.trackingNumber}: SAR ${formatMoney(parsed.amount)} was added for ${parsed.description}.`,
+          type: "operations_charge_added",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: `${appBaseUrl}/operations?shipmentId=${shipment.id}`,
+          sendEmail: false,
+        });
+      }
+
+      const clientUserIds = clientUsers.filter((clientUser) => clientUser.isActive).map((clientUser) => clientUser.id);
+      if (clientUserIds.length > 0) {
+        await notifyUsers(clientUserIds, {
+          title: "Additional shipment charge created",
+          body: `${shipment.trackingNumber}: an extra charge of SAR ${formatMoney(parsed.amount)} was added to your shipment and is ready for payment.`,
+          type: "invoice_created",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: `${appBaseUrl}/client/invoices?invoiceId=${syncedInvoice.id}`,
+          sendEmail: true,
+        });
+      }
+
+      await logAudit(
+        req.session.userId,
+        "operations_add_ddp_custom_charge",
+        "invoice",
+        syncedInvoice.id,
+        `Added SAR ${formatMoney(parsed.amount)} extra charge to ${shipment.trackingNumber}`,
+        req.ip,
+      );
+
+      res.status(201).json({
+        invoice: syncedInvoice,
+        detail: await getOperationShipmentDetail(req.params.id, user),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to add DDP custom charge from operations", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/attention/resolve", requireOperationsPermission("operations", "attention"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        resolutionNote: z.string().trim().max(1000).optional(),
+      }).parse(req.body || {});
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const resolvedFlags = await resolveAttentionFlags({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        resolutionNote: parsed.resolutionNote,
+      });
+
+      res.json({ resolvedFlags, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to resolve operations attention flags", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/reassign", requireOperationsPermission("operations", "assign"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        assignedToUserId: z.string().min(1).optional(),
+        assignedToUserIds: z.array(z.string().min(1)).min(1).optional(),
+        reason: z.string().trim().max(1000).optional(),
+      }).superRefine((value, ctx) => {
+        if (!value.assignedToUserId && (!value.assignedToUserIds || value.assignedToUserIds.length === 0)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Select at least one team member.",
+            path: ["assignedToUserIds"],
+          });
+        }
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const assignedToUserIds = parsed.assignedToUserIds?.length
+        ? parsed.assignedToUserIds
+        : parsed.assignedToUserId
+          ? [parsed.assignedToUserId]
+          : [];
+
+      const assignments = assignedToUserIds.length === 1
+        ? [await reassignOperationShipment({
+            shipmentId: req.params.id,
+            assignedToUserId: assignedToUserIds[0],
+            actorUserId: user.id,
+            reason: parsed.reason,
+          })].filter(Boolean)
+        : await setOperationShipmentAssignments({
+            shipmentId: req.params.id,
+            assignedToUserIds,
+            actorUserId: user.id,
+            reason: parsed.reason,
+          });
+
+      res.json({ assignments, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      if (error instanceof OperationInputError) {
+        return res.status(400).json({ error: error.message });
+      }
+      logError("Failed to reassign operations shipment", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/special-handling", requireOperationsPermission("operations", "special-handling"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        priority: z.enum(["urgent", "high", "normal"]).default("normal"),
+        reason: z.string().trim().min(1).max(2000),
+        assignedToUserId: z.string().min(1).optional().nullable(),
+        notes: z.string().trim().max(2000).optional().nullable(),
+      }).parse(req.body);
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const specialHandling = await upsertSpecialHandling({
+        shipmentId: req.params.id,
+        priority: parsed.priority,
+        reason: parsed.reason,
+        assignedToUserId: parsed.assignedToUserId,
+        createdByUserId: user.id,
+        notes: parsed.notes,
+      });
+      res.json({ specialHandling, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to upsert special handling", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/special-handling/resolve", requireOperationsPermission("operations", "special-handling"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const parsed = z.object({
+        resolutionNote: z.string().trim().max(1000).optional(),
+      }).parse(req.body || {});
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+
+      const specialHandling = await resolveSpecialHandling({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        resolutionNote: parsed.resolutionNote,
+      });
+
+      res.json({ specialHandling, detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to resolve special handling", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
   // AUTH ROUTES
   // ============================================
   app.post("/api/auth/login", authLimiter, async (req, res) => {
     try {
       const data = loginSchema.parse(req.body);
-      const identifier = req.ip || data.username;
+      const loginInput = data.username.trim();
+      const normalizedLoginInput = loginInput.toLowerCase();
+      const identifier = req.ip || normalizedLoginInput;
 
       // Check brute-force protection
       const bruteForceCheck = checkBruteForce(identifier);
@@ -3775,12 +6380,14 @@ export async function registerRoutes(
         });
       }
 
-      const user = await storage.getUserByUsername(data.username);
+      const user =
+        (await storage.getUserByEmail(normalizedLoginInput)) ||
+        (await storage.getUserByUsername(loginInput));
 
       if (!user) {
         recordFailedLogin(identifier);
         await logAudit(undefined, "login_failed", "security", undefined, 
-          `Failed login attempt for username: ${data.username}`, req.ip);
+          `Failed login attempt for login: ${loginInput}`, req.ip);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
@@ -3809,6 +6416,11 @@ export async function registerRoutes(
 
       // Clear failed login attempts on successful login
       clearFailedLogins(identifier);
+
+      const updatedUser = await storage.updateUser(user.id, {
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      });
       
       req.session.userId = user.id;
       
@@ -3816,7 +6428,7 @@ export async function registerRoutes(
       await logAudit(user.id, "login", "user", user.id, `User ${user.username} logged in`, req.ip);
       
       // Don't send password to client
-      const { password, ...userWithoutPassword } = user;
+      const { password, ...userWithoutPassword } = updatedUser || user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -4730,11 +7342,14 @@ export async function registerRoutes(
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
+          const carrierDetail = isCarrierErr
+            ? (cancelError as CarrierError).carrierMessage
+            : (cancelError as Error)?.message || "Carrier cancellation failed";
 
           logError("Carrier cancel failed", cancelError);
           await storage.updateShipment(id, {
             carrierErrorCode: errCode,
-            carrierErrorMessage: `Cancel failed: ${CARRIER_CANCELLATION_FAILED_MESSAGE}`,
+            carrierErrorMessage: `Cancel failed: ${carrierDetail}`,
             carrierLastAttemptAt: new Date(),
           });
 
@@ -4742,6 +7357,7 @@ export async function registerRoutes(
             error: CARRIER_CANCELLATION_FAILED_MESSAGE,
             carrierErrorCode: errCode,
             carrierErrorMessage: CARRIER_CANCELLATION_FAILED_MESSAGE,
+            carrierErrorDetail: carrierDetail,
           });
         }
       }
@@ -6351,10 +8967,19 @@ export async function registerRoutes(
           parsedCostAmount = 0;
         }
 
-        const ratePerWeight = getExtraFeesRateSarPerWeight(shipment);
-        const extraWeightAmountSar = parsedWeightValue > 0
-          ? roundMoney(parsedWeightValue * ratePerWeight)
-          : 0;
+        let extraWeightAmountSar = 0;
+        if (parsedWeightValue > 0) {
+          if (shipment.fulfillmentType === "ddp_manual" && shipment.ddpPricingLaneId) {
+            const ddpChargeQuote = await calculateDdpExtraWeightCharge({
+              shipment,
+              targetExtraWeightQuantity: parsedWeightValue,
+            });
+            extraWeightAmountSar = ddpChargeQuote.targetExtraWeightAmountSar;
+          } else {
+            const ratePerWeight = getExtraFeesRateSarPerWeight(shipment);
+            extraWeightAmountSar = roundMoney(parsedWeightValue * ratePerWeight);
+          }
+        }
         const totalExtraFeesAmountSar = roundMoney(extraWeightAmountSar + parsedCostAmount);
 
         if (totalExtraFeesAmountSar > 0) {
@@ -7768,6 +10393,12 @@ export async function registerRoutes(
       )) {
         return res.status(400).json({ error: error.message });
       }
+      if (error instanceof Error && error.message.includes("INTEGRATION_CONFIG_SECRET")) {
+        logError("Integration account encryption misconfigured", error);
+        return res.status(500).json({
+          error: "Server is missing INTEGRATION_CONFIG_SECRET. Set this environment variable in production before saving integration credentials.",
+        });
+      }
       logError("Error creating integration account", error);
       res.status(500).json({ error: "Failed to create integration account" });
     }
@@ -7846,6 +10477,12 @@ export async function registerRoutes(
         error.message.includes("must be a valid URL")
       )) {
         return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof Error && error.message.includes("INTEGRATION_CONFIG_SECRET")) {
+        logError("Integration account encryption misconfigured", error);
+        return res.status(500).json({
+          error: "Server is missing INTEGRATION_CONFIG_SECRET. Set this environment variable in production before saving integration credentials.",
+        });
       }
       logError("Error updating integration account", error);
       res.status(500).json({ error: "Failed to update integration account" });
@@ -7960,11 +10597,160 @@ export async function registerRoutes(
   // RBAC MANAGEMENT ROUTES
   // ============================================
 
+  app.get("/api/admin/departments", requireAdminPermission("roles", "read"), async (_req, res) => {
+    try {
+      const [departments, roles, userRows, invitationRows] = await Promise.all([
+        storage.getDepartments(),
+        storage.getRoles(),
+        listInternalStaffUserRows(),
+        listInternalInvitationRows({ status: UserInvitationStatus.PENDING }),
+      ]);
+
+      const roleCountByDepartmentId = new Map<string, number>();
+      for (const role of roles) {
+        if (!role.departmentId) continue;
+        roleCountByDepartmentId.set(role.departmentId, (roleCountByDepartmentId.get(role.departmentId) || 0) + 1);
+      }
+
+      const userCountByDepartmentId = new Map<string, number>();
+      for (const row of userRows) {
+        if (!row.department?.id) continue;
+        userCountByDepartmentId.set(row.department.id, (userCountByDepartmentId.get(row.department.id) || 0) + 1);
+      }
+
+      const inviteCountByDepartmentId = new Map<string, number>();
+      for (const row of invitationRows) {
+        if (!row.department?.id || row.status !== "pending") continue;
+        inviteCountByDepartmentId.set(row.department.id, (inviteCountByDepartmentId.get(row.department.id) || 0) + 1);
+      }
+
+      res.json(
+        [...departments]
+          .sort((left, right) => (left.sortOrder || 0) - (right.sortOrder || 0) || left.name.localeCompare(right.name))
+          .map((department) => ({
+            ...department,
+            roleCount: roleCountByDepartmentId.get(department.id) || 0,
+            userCount: userCountByDepartmentId.get(department.id) || 0,
+            invitationCount: inviteCountByDepartmentId.get(department.id) || 0,
+          })),
+      );
+    } catch (error) {
+      logError("Error fetching departments", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/departments", requireAdminPermission("roles", "create"), async (req, res) => {
+    try {
+      const parsed = createDepartmentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid department data" });
+      }
+
+      if (!isCuratedDepartmentStyle(parsed.data.iconKey, parsed.data.colorKey)) {
+        return res.status(400).json({ error: "Department style must use a curated icon and color preset" });
+      }
+
+      const existingDepartments = await storage.getDepartments();
+      const existingSlugs = new Set(existingDepartments.map((department) => department.slug));
+      const baseSlug = slugifyValue(parsed.data.name);
+      let slug = baseSlug || `department-${existingDepartments.length + 1}`;
+      let suffix = 2;
+      while (existingSlugs.has(slug)) {
+        slug = `${baseSlug}-${suffix}`;
+        suffix += 1;
+      }
+
+      const maxSortOrder = existingDepartments.reduce((max, department) => Math.max(max, department.sortOrder || 0), 0);
+      const department = await storage.createDepartment({
+        name: parsed.data.name,
+        slug,
+        description: parsed.data.description || null,
+        iconKey: parsed.data.iconKey,
+        colorKey: parsed.data.colorKey,
+        sortOrder: parsed.data.sortOrder ?? maxSortOrder + 10,
+        isSystem: false,
+      });
+
+      await logAudit(
+        req.session.userId,
+        "create_department",
+        "department",
+        department.id,
+        `Created department ${department.name}`,
+        req.ip,
+      );
+
+      res.status(201).json(department);
+    } catch (error) {
+      logError("Error creating department", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/departments/:id", requireAdminPermission("roles", "update"), async (req, res) => {
+    try {
+      const parsed = updateDepartmentSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid department data" });
+      }
+
+      const currentDepartment = await storage.getDepartment(req.params.id);
+      if (!currentDepartment) {
+        return res.status(404).json({ error: "Department not found" });
+      }
+
+      const iconKey = parsed.data.iconKey ?? currentDepartment.iconKey;
+      const colorKey = parsed.data.colorKey ?? currentDepartment.colorKey;
+      if (!isCuratedDepartmentStyle(iconKey, colorKey)) {
+        return res.status(400).json({ error: "Department style must use a curated icon and color preset" });
+      }
+
+      const updatedDepartment = await storage.updateDepartment(req.params.id, {
+        name: parsed.data.name ?? currentDepartment.name,
+        description: parsed.data.description ?? currentDepartment.description,
+        iconKey,
+        colorKey,
+        sortOrder: parsed.data.sortOrder ?? currentDepartment.sortOrder,
+      });
+
+      await logAudit(
+        req.session.userId,
+        "update_department",
+        "department",
+        req.params.id,
+        `Updated department ${updatedDepartment?.name || currentDepartment.name}`,
+        req.ip,
+      );
+
+      res.json(updatedDepartment || currentDepartment);
+    } catch (error) {
+      logError("Error updating department", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Roles CRUD
   app.get("/api/admin/roles", requireAdminPermission("roles", "read"), async (_req, res) => {
     try {
-      const allRoles = await storage.getRoles();
-      res.json(mergeRolesWithSystemRoles(allRoles));
+      const [allRoles, departments, allPermissions] = await Promise.all([
+        storage.getRoles(),
+        storage.getDepartments(),
+        storage.getPermissions(),
+      ]);
+      const departmentsById = new Map(departments.map((department) => [department.id, department]));
+      const rolesWithPermissions = await Promise.all(
+        sortDepartmentRoles(mergeRolesWithSystemRoles(allRoles)).map((role) =>
+          serializeRoleWithPermissions(role, allPermissions),
+        ),
+      );
+
+      res.json(
+        rolesWithPermissions.map((role) => ({
+          ...role,
+          department: role.departmentId ? getDepartmentRef(departmentsById.get(role.departmentId) || null) : null,
+        })),
+      );
     } catch (error) {
       logError("Error fetching roles", error);
       res.status(500).json({ error: "Internal server error" });
@@ -7980,6 +10766,10 @@ export async function registerRoutes(
       
       const allPermissions = await storage.getPermissions();
       let assignedPermissions: Permission[] = [];
+      const allDepartments = await storage.getDepartments();
+      const roleDepartment = role.departmentId
+        ? allDepartments.find((department) => department.id === role.departmentId) || null
+        : null;
 
       if (isAccountManagerSystemRoleId(role.id)) {
         const fixedPermissionNames = new Set<string>(ACCOUNT_MANAGER_FIXED_PERMISSION_NAMES);
@@ -7991,7 +10781,11 @@ export async function registerRoutes(
         );
       }
       
-      res.json({ ...role, permissions: assignedPermissions });
+      res.json({
+        ...role,
+        department: getDepartmentRef(roleDepartment),
+        permissions: assignedPermissions.sort((a, b) => a.name.localeCompare(b.name)),
+      });
     } catch (error) {
       logError("Error fetching role", error);
       res.status(500).json({ error: "Internal server error" });
@@ -8000,20 +10794,54 @@ export async function registerRoutes(
 
   app.post("/api/admin/roles", requireAdminPermission("roles", "create"), async (req, res) => {
     try {
-      const { name, description } = req.body;
-      if (!name) {
-        return res.status(400).json({ error: "Role name is required" });
+      const parsed = createHierarchicalRoleSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid role data" });
       }
 
-      if (name.trim().toLowerCase() === ACCOUNT_MANAGER_SYSTEM_ROLE_NAME.toLowerCase()) {
+      if (parsed.data.name.trim().toLowerCase() === ACCOUNT_MANAGER_SYSTEM_ROLE_NAME.toLowerCase()) {
         return res.status(400).json({ error: `"${ACCOUNT_MANAGER_SYSTEM_ROLE_NAME}" is a built-in system role` });
       }
 
-      const role = await storage.createRole({ name, description });
+      const [departments, existingRoles, allPermissions] = await Promise.all([
+        storage.getDepartments(),
+        storage.getRoles(),
+        storage.getPermissions(),
+      ]);
+      const platformDepartment = departments.find((department) => department.slug === InternalDepartmentSlug.PLATFORM) || null;
+      const department =
+        (parsed.data.departmentId ? departments.find((item) => item.id === parsed.data.departmentId) || null : null) ||
+        platformDepartment;
+
+      if (!department) {
+        return res.status(400).json({ error: "Department is required" });
+      }
+
+      const hierarchyLevel = parsed.data.hierarchyLevel || getDefaultHierarchyLevelForDepartment(department);
+      const duplicateRole = existingRoles.find(
+        (role) =>
+          role.departmentId === department.id &&
+          role.name.trim().toLowerCase() === parsed.data.name.trim().toLowerCase(),
+      );
+      if (duplicateRole) {
+        return res.status(409).json({ error: "A role with this name already exists in the department" });
+      }
+
+      const role = await storage.createRole({
+        name: parsed.data.name.trim(),
+        description: parsed.data.description || null,
+        departmentId: department.id,
+        hierarchyLevel,
+        sortOrder: parsed.data.sortOrder ?? HIERARCHY_LEVEL_SORT_ORDER[hierarchyLevel],
+        isSystem: false,
+        isActive: parsed.data.isActive,
+      });
+      await syncRolePermissions(role.id, parsed.data.permissionIds);
+
       await logAudit(req.session.userId, "create_role", "role", role.id,
-        `Created role: ${name}`, req.ip);
+        `Created role: ${role.name}`, req.ip);
       
-      res.status(201).json(role);
+      res.status(201).json(await serializeRoleWithPermissions(role, allPermissions));
     } catch (error) {
       logError("Error creating role", error);
       res.status(500).json({ error: "Internal server error" });
@@ -8026,25 +10854,69 @@ export async function registerRoutes(
         return res.status(400).json({ error: "System roles cannot be edited" });
       }
 
-      const { name, description, isActive } = req.body;
-      const updates: { name?: string; description?: string; isActive?: boolean } = {};
-      if (name !== undefined) updates.name = name;
-      if (description !== undefined) updates.description = description;
-      if (isActive !== undefined) updates.isActive = isActive;
+      const parsed = updateHierarchicalRoleSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid role data" });
+      }
 
-      if (updates.name?.trim().toLowerCase() === ACCOUNT_MANAGER_SYSTEM_ROLE_NAME.toLowerCase()) {
+      const [currentRole, departments, allPermissions, allRoles] = await Promise.all([
+        storage.getRole(req.params.id),
+        storage.getDepartments(),
+        storage.getPermissions(),
+        storage.getRoles(),
+      ]);
+      if (!currentRole) {
+        return res.status(404).json({ error: "Role not found" });
+      }
+
+      const department =
+        (parsed.data.departmentId ? departments.find((item) => item.id === parsed.data.departmentId) || null : null) ||
+        (currentRole.departmentId ? departments.find((item) => item.id === currentRole.departmentId) || null : null);
+      if (!department) {
+        return res.status(400).json({ error: "Department is required" });
+      }
+
+      const hierarchyLevel =
+        parsed.data.hierarchyLevel ||
+        (currentRole.hierarchyLevel as RoleHierarchyLevelValue | null) ||
+        getDefaultHierarchyLevelForDepartment(department);
+
+      const nextName = parsed.data.name?.trim() || currentRole.name;
+      const conflictingRole = allRoles.find(
+        (role) =>
+          role.id !== currentRole.id &&
+          role.departmentId === department.id &&
+          role.name.trim().toLowerCase() === nextName.trim().toLowerCase(),
+      );
+      if (conflictingRole) {
+        return res.status(409).json({ error: "A role with this name already exists in the department" });
+      }
+
+      if (nextName.trim().toLowerCase() === ACCOUNT_MANAGER_SYSTEM_ROLE_NAME.toLowerCase()) {
         return res.status(400).json({ error: `"${ACCOUNT_MANAGER_SYSTEM_ROLE_NAME}" is reserved for the system role` });
       }
+
+      const updates: Partial<Role> = {
+        name: nextName,
+        description: parsed.data.description ?? currentRole.description,
+        departmentId: department.id,
+        hierarchyLevel,
+        sortOrder: parsed.data.sortOrder ?? currentRole.sortOrder ?? HIERARCHY_LEVEL_SORT_ORDER[hierarchyLevel],
+        isActive: parsed.data.isActive ?? currentRole.isActive,
+      };
 
       const role = await storage.updateRole(req.params.id, updates);
       if (!role) {
         return res.status(404).json({ error: "Role not found" });
       }
+      if (parsed.data.permissionIds) {
+        await syncRolePermissions(req.params.id, parsed.data.permissionIds);
+      }
 
       await logAudit(req.session.userId, "update_role", "role", role.id,
         `Updated role: ${role.name}`, req.ip);
       
-      res.json(role);
+      res.json(await serializeRoleWithPermissions(role, allPermissions));
     } catch (error) {
       logError("Error updating role", error);
       res.status(500).json({ error: "Internal server error" });
@@ -8169,20 +11041,69 @@ export async function registerRoutes(
   });
 
   // Admin Users Management
-  app.get("/api/admin/users", requireAdminPermission("users", "read"), async (_req, res) => {
+  app.get("/api/admin/users", requireAdminPermission("users", "read"), async (req, res) => {
     try {
-      const [adminUsers, allRoles] = await Promise.all([
-        storage.getUsersByUserType("admin"),
-        storage.getRoles(),
-      ]);
+      const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
+      const status = typeof req.query.status === "string" ? req.query.status.trim().toLowerCase() : "";
+      const departmentFilter = typeof req.query.department === "string" ? req.query.department.trim().toLowerCase() : "";
+      const roleFilter = typeof req.query.role === "string" ? req.query.role.trim().toLowerCase() : "";
 
-      const adminUsersWithRoles = await Promise.all(
-        adminUsers.map((adminUser) => buildAdminUserSummary(adminUser, allRoles)),
+      let rows = await listInternalStaffUserRows();
+
+      if (status && status !== "all") {
+        rows = rows.filter((row) => row.status === status);
+      }
+
+      if (departmentFilter && departmentFilter !== "all") {
+        rows = rows.filter((row) => {
+          const department = row.department;
+          if (!department) return false;
+          return (
+            department.id === departmentFilter ||
+            department.slug.toLowerCase() === departmentFilter ||
+            department.name.toLowerCase() === departmentFilter
+          );
+        });
+      }
+
+      if (roleFilter && roleFilter !== "all") {
+        rows = rows.filter((row) => {
+          const role = row.role;
+          if (!role) return false;
+          return role.id === roleFilter || role.name.toLowerCase() === roleFilter;
+        });
+      }
+
+      if (search) {
+        rows = rows.filter((row) =>
+          [row.fullName, row.email, row.username].some((value) => value.toLowerCase().includes(search)),
+        );
+      }
+
+      res.json(
+        rows.sort((left, right) => {
+          if (left.status !== right.status) {
+            return left.status === "active" ? -1 : 1;
+          }
+          return left.fullName.localeCompare(right.fullName);
+        }),
       );
-
-      res.json(adminUsersWithRoles);
     } catch (error) {
-      logError("Error fetching admin users", error);
+      logError("Error fetching internal staff users", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/users/:id/detail", requireAdminPermission("users", "read"), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user || !["admin", "operations"].includes(user.userType)) {
+        return res.status(404).json({ error: "Internal user not found" });
+      }
+
+      res.json(await buildInternalStaffUserDetail(user));
+    } catch (error) {
+      logError("Error fetching internal user detail", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -8196,7 +11117,20 @@ export async function registerRoutes(
 
       const username = parsed.data.username.trim();
       const email = parsed.data.email.trim().toLowerCase();
-      const roleIds = Array.from(new Set(parsed.data.roleIds));
+      const allRoles = await storage.getRoles();
+      const defaultOperationRoleName =
+        parsed.data.userType === "operations"
+          ? getOperationRoleNameByProfileLevel(parsed.data.operationLevel)
+          : null;
+      const defaultOperationRole = defaultOperationRoleName
+        ? allRoles.find((role) => role.name === defaultOperationRoleName)
+        : null;
+      const roleIds = Array.from(new Set([
+        ...parsed.data.roleIds,
+        ...(parsed.data.userType === "operations" && parsed.data.roleIds.length === 0 && defaultOperationRole
+          ? [defaultOperationRole.id]
+          : []),
+      ]));
       const accountManagerClientIds = Array.from(new Set(parsed.data.accountManagerClientIds));
       const wantsAccountManagerRole = roleIds.includes(ACCOUNT_MANAGER_SYSTEM_ROLE_ID);
       const standardRoleIds = roleIds.filter((roleId) => !isSystemRoleId(roleId));
@@ -8222,6 +11156,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Account Manager is a standalone built-in role and cannot be combined with other roles" });
       }
 
+      if (parsed.data.userType === "operations" && wantsAccountManagerRole) {
+        return res.status(400).json({ error: "Operations users cannot be account managers" });
+      }
+
       if (wantsAccountManagerRole) {
         const accountManagerCreator = await ensureAdminPermission(req, res, "account-managers", "create");
         if (!accountManagerCreator) {
@@ -8241,7 +11179,6 @@ export async function registerRoutes(
         }
       }
 
-      const allRoles = await storage.getRoles();
       const selectedRoles = allRoles.filter((role) => standardRoleIds.includes(role.id));
 
       if (selectedRoles.length !== standardRoleIds.length) {
@@ -8257,9 +11194,10 @@ export async function registerRoutes(
       const adminUser = await storage.createUser({
         username,
         email,
+        fullName: username,
         password: hashedPassword,
-        userType: "admin",
-        isAccountManager: wantsAccountManagerRole,
+        userType: parsed.data.userType,
+        isAccountManager: parsed.data.userType === "admin" && wantsAccountManagerRole,
         isPrimaryContact: false,
         mustChangePassword: true,
         isActive: parsed.data.isActive,
@@ -8276,6 +11214,10 @@ export async function registerRoutes(
         await storage.replaceAccountManagerAssignments(adminUser.id, accountManagerClientIds, req.session.userId);
       }
 
+      if (parsed.data.userType === "operations") {
+        await ensureOperationProfile(adminUser.id, parsed.data.operationLevel);
+      }
+
       const assignedRoleLabel = wantsAccountManagerRole
         ? ACCOUNT_MANAGER_SYSTEM_ROLE_NAME
         : selectedRoles.map((role) => role.name).join(", ");
@@ -8285,13 +11227,476 @@ export async function registerRoutes(
         "create_admin_user",
         "user",
         adminUser.id,
-        `Created admin user ${username}${assignedRoleLabel ? ` with roles: ${assignedRoleLabel}` : ""}${wantsAccountManagerRole && accountManagerClientIds.length > 0 ? ` and assigned ${accountManagerClientIds.length} client(s)` : ""}`,
+        `Created ${parsed.data.userType} user ${username}${assignedRoleLabel ? ` with roles: ${assignedRoleLabel}` : ""}${wantsAccountManagerRole && accountManagerClientIds.length > 0 ? ` and assigned ${accountManagerClientIds.length} client(s)` : ""}`,
         req.ip,
       );
 
       res.status(201).json(await buildAdminUserSummary(adminUser, allRoles));
     } catch (error) {
       logError("Error creating admin user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id", requireAdminPermission("users", "update"), async (req, res) => {
+    try {
+      const parsed = updateInternalUserSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid user update payload" });
+      }
+
+      const user = await storage.getUser(req.params.id);
+      if (!user || !["admin", "operations"].includes(user.userType)) {
+        return res.status(404).json({ error: "Internal user not found" });
+      }
+
+      const nextEmail = parsed.data.email?.trim().toLowerCase() || user.email;
+      if (nextEmail !== user.email) {
+        const existing = await storage.getUserByEmail(nextEmail);
+        if (existing && existing.id !== user.id) {
+          return res.status(409).json({ error: "Email already in use" });
+        }
+      }
+
+      let nextUserType = user.userType;
+      let nextIsAccountManager = user.isAccountManager;
+
+      if (parsed.data.roleId) {
+        const role = await storage.getRole(parsed.data.roleId);
+        if (!role || !role.departmentId) {
+          return res.status(404).json({ error: "Role not found" });
+        }
+
+        const department = await storage.getDepartment(role.departmentId);
+        if (!department) {
+          return res.status(404).json({ error: "Department not found" });
+        }
+
+        nextUserType = getDepartmentUserType(department.slug);
+        nextIsAccountManager = department.slug === InternalDepartmentSlug.ACCOUNT_MANAGEMENT;
+
+        const existingAssignments = await storage.getUserRoles(user.id);
+        for (const assignment of existingAssignments) {
+          await storage.removeUserRole(user.id, assignment.roleId);
+        }
+        await storage.assignUserRole({ userId: user.id, roleId: role.id });
+
+        if (nextUserType === "operations") {
+          await ensureOperationProfile(
+            user.id,
+            getOperationProfileLevelForHierarchy(role.hierarchyLevel),
+          );
+        }
+      }
+
+      const updatedUser = await storage.updateUser(req.params.id, {
+        fullName: parsed.data.fullName?.trim() || user.fullName,
+        email: nextEmail,
+        userType: nextUserType,
+        isAccountManager: nextIsAccountManager,
+        updatedAt: new Date(),
+      });
+
+      await logAudit(
+        req.session.userId,
+        "update_internal_user",
+        "user",
+        req.params.id,
+        `Updated internal user ${getUserDisplayName(updatedUser || user)}`,
+        req.ip,
+      );
+
+      const rows = await listInternalStaffUserRows();
+      res.json(rows.find((candidate) => candidate.id === req.params.id) || updatedUser || user);
+    } catch (error) {
+      logError("Error updating internal user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/status", requireAdminPermission("users", "update"), async (req, res) => {
+    try {
+      const parsed = z.object({ isActive: z.boolean() }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid status payload" });
+      }
+
+      const user = await storage.getUser(req.params.id);
+      if (!user || !["admin", "operations"].includes(user.userType)) {
+        return res.status(404).json({ error: "Internal user not found" });
+      }
+
+      const updatedUser = await storage.updateUser(req.params.id, {
+        isActive: parsed.data.isActive,
+        updatedAt: new Date(),
+      });
+
+      await logAudit(
+        req.session.userId,
+        parsed.data.isActive ? "activate_internal_user" : "deactivate_internal_user",
+        "user",
+        req.params.id,
+        `${parsed.data.isActive ? "Activated" : "Deactivated"} internal user ${getUserDisplayName(updatedUser || user)}`,
+        req.ip,
+      );
+
+      const rows = await listInternalStaffUserRows();
+      const row = rows.find((candidate) => candidate.id === req.params.id);
+      res.json(row || updatedUser || user);
+    } catch (error) {
+      logError("Error updating internal user status", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/invitations", requireAdminPermission("users", "read"), async (req, res) => {
+    try {
+      const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
+      const status = typeof req.query.status === "string" ? req.query.status.trim().toLowerCase() : "";
+      const departmentFilter = typeof req.query.department === "string" ? req.query.department.trim().toLowerCase() : "";
+      const roleFilter = typeof req.query.role === "string" ? req.query.role.trim().toLowerCase() : "";
+
+      let rows = await listInternalInvitationRows();
+
+      if (status && status !== "all") {
+        rows = rows.filter((row) => row.status === status);
+      }
+
+      if (departmentFilter && departmentFilter !== "all") {
+        rows = rows.filter((row) => {
+          const department = row.department;
+          if (!department) return false;
+          return (
+            department.id === departmentFilter ||
+            department.slug.toLowerCase() === departmentFilter ||
+            department.name.toLowerCase() === departmentFilter
+          );
+        });
+      }
+
+      if (roleFilter && roleFilter !== "all") {
+        rows = rows.filter((row) => {
+          const role = row.role;
+          if (!role) return false;
+          return role.id === roleFilter || role.name.toLowerCase() === roleFilter;
+        });
+      }
+
+      if (search) {
+        rows = rows.filter((row) =>
+          [row.fullName, row.email, row.department?.name || "", row.role?.name || ""]
+            .some((value) => value.toLowerCase().includes(search)),
+        );
+      }
+
+      res.json(rows.sort((left, right) => right.sentAt.getTime() - left.sentAt.getTime()));
+    } catch (error) {
+      logError("Error fetching invitations", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/invitations", requireAdminPermission("users", "create"), async (req, res) => {
+    try {
+      const parsed = createInvitationSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid invitation data" });
+      }
+
+      const email = parsed.data.email.trim().toLowerCase();
+      const [department, role, existingUser, existingInvitations, departments, roles] = await Promise.all([
+        storage.getDepartment(parsed.data.departmentId),
+        storage.getRole(parsed.data.roleId),
+        storage.getUserByEmail(email),
+        storage.getUserInvitations({ email }),
+        storage.getDepartments(),
+        storage.getRoles(),
+      ]);
+
+      if (!department) {
+        return res.status(404).json({ error: "Department not found" });
+      }
+      if (!role || role.departmentId !== department.id) {
+        return res.status(404).json({ error: "Role not found for selected department" });
+      }
+      if (existingUser) {
+        return res.status(409).json({ error: "A user with this email already exists" });
+      }
+
+      const normalizedInvitations = await Promise.all(existingInvitations.map(refreshInvitationStatus));
+      if (normalizedInvitations.some((invitation) => invitation.status === UserInvitationStatus.PENDING)) {
+        return res.status(409).json({ error: "A pending invitation already exists for this email" });
+      }
+
+      const tokenData = createInvitationToken();
+      const invitation = await storage.createUserInvitation({
+        fullName: parsed.data.fullName.trim(),
+        email,
+        departmentId: department.id,
+        roleId: role.id,
+        personalMessage: parsed.data.personalMessage || null,
+        tokenHash: tokenData.tokenHash,
+        status: UserInvitationStatus.PENDING,
+        expiresAt: tokenData.expiresAt,
+        invitedByUserId: req.session.userId || null,
+        acceptedUserId: null,
+      });
+
+      const emailSent = await sendStaffInvitationEmail({
+        invitation,
+        token: tokenData.token,
+        department,
+        role,
+      });
+
+      await logAudit(
+        req.session.userId,
+        "create_user_invitation",
+        "user_invitation",
+        invitation.id,
+        `Invited ${invitation.email} to ${department.name} as ${role.name}${emailSent ? "" : " (email not sent)"}`,
+        req.ip,
+      );
+
+      const departmentsById = new Map(departments.map((item) => [item.id, item]));
+      const rolesById = new Map(roles.map((item) => [item.id, item]));
+      res.status(201).json({
+        row: buildInternalInvitationRow(invitation, departmentsById, rolesById),
+        emailSent,
+      });
+    } catch (error) {
+      logError("Error creating user invitation", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/invitations/:id/resend", requireAdminPermission("users", "update"), async (req, res) => {
+    try {
+      const invitation = await storage.getUserInvitation(req.params.id);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+
+      const normalizedInvitation = await refreshInvitationStatus(invitation);
+      if (normalizedInvitation.status === UserInvitationStatus.ACCEPTED) {
+        return res.status(400).json({ error: "Accepted invitations cannot be resent" });
+      }
+      if (normalizedInvitation.status === UserInvitationStatus.REVOKED) {
+        return res.status(400).json({ error: "Revoked invitations cannot be resent" });
+      }
+
+      const [department, role, departments, roles] = await Promise.all([
+        storage.getDepartment(normalizedInvitation.departmentId),
+        storage.getRole(normalizedInvitation.roleId),
+        storage.getDepartments(),
+        storage.getRoles(),
+      ]);
+      if (!department || !role) {
+        return res.status(404).json({ error: "Invitation role or department is missing" });
+      }
+
+      const tokenData = createInvitationToken();
+      const updatedInvitation = await storage.updateUserInvitation(normalizedInvitation.id, {
+        status: UserInvitationStatus.PENDING,
+        tokenHash: tokenData.tokenHash,
+        sentAt: new Date(),
+        expiresAt: tokenData.expiresAt,
+      });
+      if (!updatedInvitation) {
+        return res.status(500).json({ error: "Failed to update invitation" });
+      }
+
+      const emailSent = await sendStaffInvitationEmail({
+        invitation: updatedInvitation,
+        token: tokenData.token,
+        department,
+        role,
+      });
+
+      await logAudit(
+        req.session.userId,
+        "resend_user_invitation",
+        "user_invitation",
+        updatedInvitation.id,
+        `Resent invitation to ${updatedInvitation.email}${emailSent ? "" : " (email not sent)"}`,
+        req.ip,
+      );
+
+      const departmentsById = new Map(departments.map((item) => [item.id, item]));
+      const rolesById = new Map(roles.map((item) => [item.id, item]));
+      res.json({
+        row: buildInternalInvitationRow(updatedInvitation, departmentsById, rolesById),
+        emailSent,
+      });
+    } catch (error) {
+      logError("Error resending user invitation", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/invitations/:id/revoke", requireAdminPermission("users", "update"), async (req, res) => {
+    try {
+      const invitation = await storage.getUserInvitation(req.params.id);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+      if (invitation.status === UserInvitationStatus.ACCEPTED) {
+        return res.status(400).json({ error: "Accepted invitations cannot be revoked" });
+      }
+
+      const updatedInvitation = await storage.updateUserInvitation(req.params.id, {
+        status: UserInvitationStatus.REVOKED,
+      });
+      if (!updatedInvitation) {
+        return res.status(500).json({ error: "Failed to update invitation" });
+      }
+
+      await logAudit(
+        req.session.userId,
+        "revoke_user_invitation",
+        "user_invitation",
+        updatedInvitation.id,
+        `Revoked invitation for ${updatedInvitation.email}`,
+        req.ip,
+      );
+
+      const [departments, roles] = await Promise.all([storage.getDepartments(), storage.getRoles()]);
+      const departmentsById = new Map(departments.map((item) => [item.id, item]));
+      const rolesById = new Map(roles.map((item) => [item.id, item]));
+      res.json(buildInternalInvitationRow(updatedInvitation, departmentsById, rolesById));
+    } catch (error) {
+      logError("Error revoking user invitation", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/public/invitations/:token", async (req, res) => {
+    try {
+      const invitation = await storage.getUserInvitationByTokenHash(buildInvitationTokenHash(req.params.token));
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+
+      const normalizedInvitation = await refreshInvitationStatus(invitation);
+      if (normalizedInvitation.status !== UserInvitationStatus.PENDING) {
+        return res.status(410).json({ error: "Invitation is no longer valid" });
+      }
+
+      const [department, role] = await Promise.all([
+        storage.getDepartment(normalizedInvitation.departmentId),
+        storage.getRole(normalizedInvitation.roleId),
+      ]);
+      if (!department || !role) {
+        return res.status(404).json({ error: "Invitation configuration is missing" });
+      }
+
+      res.json({
+        id: normalizedInvitation.id,
+        fullName: normalizedInvitation.fullName,
+        email: normalizedInvitation.email,
+        personalMessage: normalizedInvitation.personalMessage,
+        department: getDepartmentRef(department),
+        role: getRoleRef(role),
+        expiresAt: normalizedInvitation.expiresAt,
+      });
+    } catch (error) {
+      logError("Error fetching public invitation", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/public/invitations/:token/accept", async (req, res) => {
+    try {
+      const parsed = acceptInvitationSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid invitation acceptance payload" });
+      }
+
+      const invitation = await storage.getUserInvitationByTokenHash(buildInvitationTokenHash(req.params.token));
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+
+      const normalizedInvitation = await refreshInvitationStatus(invitation);
+      if (normalizedInvitation.status !== UserInvitationStatus.PENDING) {
+        return res.status(410).json({ error: "Invitation is no longer valid" });
+      }
+
+      const [department, role, existingUser] = await Promise.all([
+        storage.getDepartment(normalizedInvitation.departmentId),
+        storage.getRole(normalizedInvitation.roleId),
+        storage.getUserByEmail(normalizedInvitation.email.toLowerCase()),
+      ]);
+      if (!department || !role || role.departmentId !== department.id) {
+        return res.status(404).json({ error: "Invitation role or department is missing" });
+      }
+      if (existingUser && existingUser.isActive) {
+        return res.status(409).json({ error: "This email already belongs to an active account" });
+      }
+
+      const hashedPassword = await bcrypt.hash(parsed.data.password, SALT_ROUNDS);
+      const username = existingUser?.username || await generateUniqueUsername(normalizedInvitation.fullName, normalizedInvitation.email);
+      const userType = getDepartmentUserType(department.slug);
+      const isAccountManager = department.slug === InternalDepartmentSlug.ACCOUNT_MANAGEMENT;
+
+      let acceptedUser: User;
+      if (!existingUser) {
+        acceptedUser = await storage.createUser({
+          username,
+          email: normalizedInvitation.email.toLowerCase(),
+          fullName: normalizedInvitation.fullName,
+          password: hashedPassword,
+          userType,
+          isAccountManager,
+          isPrimaryContact: false,
+          mustChangePassword: false,
+          isActive: true,
+        });
+      } else {
+        acceptedUser = await storage.updateUser(existingUser.id, {
+          username,
+          email: normalizedInvitation.email.toLowerCase(),
+          fullName: normalizedInvitation.fullName,
+          password: hashedPassword,
+          userType,
+          isAccountManager,
+          mustChangePassword: false,
+          isActive: true,
+          updatedAt: new Date(),
+        }) || existingUser;
+      }
+
+      const existingAssignments = await storage.getUserRoles(acceptedUser.id);
+      for (const assignment of existingAssignments) {
+        await storage.removeUserRole(acceptedUser.id, assignment.roleId);
+      }
+      await storage.assignUserRole({ userId: acceptedUser.id, roleId: role.id });
+
+      if (userType === "operations") {
+        await ensureOperationProfile(
+          acceptedUser.id,
+          getOperationProfileLevelForHierarchy(role.hierarchyLevel),
+        );
+      }
+
+      await storage.updateUserInvitation(normalizedInvitation.id, {
+        status: UserInvitationStatus.ACCEPTED,
+        acceptedAt: new Date(),
+        acceptedUserId: acceptedUser.id,
+      });
+
+      await logAudit(
+        acceptedUser.id,
+        "accept_user_invitation",
+        "user_invitation",
+        normalizedInvitation.id,
+        `${acceptedUser.email} accepted invitation into ${department.name} as ${role.name}`,
+        req.ip,
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error accepting invitation", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -8347,6 +11752,7 @@ export async function registerRoutes(
       const accountManager = await storage.createUser({
         username,
         email,
+        fullName: username,
         password: hashedPassword,
         userType: "admin",
         isAccountManager: true,
@@ -10840,11 +14246,14 @@ export async function registerRoutes(
         } catch (cancelError) {
           const isCarrierErr = cancelError instanceof CarrierError;
           const errCode = isCarrierErr ? (cancelError as CarrierError).code : "CANCEL_FAILED";
+          const carrierDetail = isCarrierErr
+            ? (cancelError as CarrierError).carrierMessage
+            : (cancelError as Error)?.message || "Carrier cancellation failed";
 
           logError("Client carrier cancel failed", cancelError);
           await storage.updateShipment(id, {
             carrierErrorCode: errCode,
-            carrierErrorMessage: `Cancel failed: ${CARRIER_CANCELLATION_FAILED_MESSAGE}`,
+            carrierErrorMessage: `Cancel failed: ${carrierDetail}`,
             carrierLastAttemptAt: new Date(),
           });
 
@@ -10852,6 +14261,7 @@ export async function registerRoutes(
             error: CARRIER_CANCELLATION_FAILED_MESSAGE,
             carrierErrorCode: errCode,
             carrierErrorMessage: CARRIER_CANCELLATION_FAILED_MESSAGE,
+            carrierErrorDetail: carrierDetail,
           });
         }
       }
@@ -11179,6 +14589,24 @@ export async function registerRoutes(
           dueAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
           adminEmails
         );
+      }
+
+      const operationsShipment = await storage.getShipment(shipmentId);
+      if (operationsShipment) {
+        await ensureOperationAssignmentForShipment({
+          shipment: operationsShipment,
+          actorUserId: req.session.userId,
+          reason: "credit_confirmed",
+        });
+        if (operationsShipment.status !== shipment.status) {
+          await recordShipmentStatusChange({
+            shipment: operationsShipment,
+            previousStatus: shipment.status,
+            nextStatus: operationsShipment.status,
+            actorUserId: req.session.userId,
+            source: "credit_confirmation",
+          });
+        }
       }
 
       await logAudit(req.session.userId, "pay_later", "shipment", shipmentId,
@@ -12528,9 +15956,17 @@ export async function registerRoutes(
           }
           
           if (Object.keys(updates).length > 0) {
-            await storage.updateShipment(shipment.id, updates);
+            const updatedShipment = await storage.updateShipment(shipment.id, updates);
             await logAudit(undefined, "webhook_status_update", "shipment", shipment.id,
               `FedEx webhook updated: ${JSON.stringify(updates)}`, req.ip);
+            if (updatedShipment && updates.status) {
+              await recordShipmentStatusChange({
+                shipment: updatedShipment,
+                previousStatus: shipment.status,
+                nextStatus: updates.status,
+                source: "fedex_webhook",
+              });
+            }
           }
         }
         

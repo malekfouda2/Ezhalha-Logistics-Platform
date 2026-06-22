@@ -1418,7 +1418,10 @@ describe("Admin - Admin User Management", () => {
     const bootstrapAdmin = res.body.find((user: any) => user.username === "admin");
     expect(bootstrapAdmin).toBeDefined();
     expect(bootstrapAdmin.password).toBeUndefined();
-    expect(Array.isArray(bootstrapAdmin.roles)).toBe(true);
+    // User list returns a flattened summary DTO (single role + department), not a roles array.
+    expect(bootstrapAdmin.userType).toBe("admin");
+    expect("role" in bootstrapAdmin).toBe(true);
+    expect("department" in bootstrapAdmin).toBe(true);
   });
 
   it("POST /api/admin/users should create an admin user and assign roles", async () => {

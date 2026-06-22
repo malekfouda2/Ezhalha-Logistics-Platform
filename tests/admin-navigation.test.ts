@@ -7,6 +7,9 @@ describe("admin navigation permission helpers", () => {
       hasAdminPermissionAccess(["clients:read"], ADMIN_ROUTE_PERMISSIONS.clients),
     ).toBe(true);
     expect(
+      hasAdminPermissionAccess(["operations:read"], ADMIN_ROUTE_PERMISSIONS.operations),
+    ).toBe(true);
+    expect(
       hasAdminPermissionAccess(["applications:read"], ADMIN_ROUTE_PERMISSIONS.clients),
     ).toBe(false);
   });
@@ -23,6 +26,8 @@ describe("admin navigation permission helpers", () => {
   it("returns the first accessible admin path from the configured nav order", () => {
     expect(getFirstAccessibleAdminPath(["pricing-rules:read"])).toBe("/admin/pricing");
     expect(getFirstAccessibleAdminPath(["users:read"])).toBe("/admin/users");
+    expect(getFirstAccessibleAdminPath(["roles:read"])).toBe("/admin/users/roles");
+    expect(getFirstAccessibleAdminPath(["operations:read"])).toBe("/admin/operations?view=d2d");
   });
 
   it("falls back to admin settings when no nav permissions are assigned", () => {

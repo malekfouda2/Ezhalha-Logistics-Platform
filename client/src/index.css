@@ -197,6 +197,70 @@
  */
 @layer utilities {
 
+  /*
+   * Operations Hub intentionally follows a reference mockup with many explicit
+   * light palette utilities. Keep the mockup structure, but scope dark-mode
+   * palette remapping to this page so it still respects the app theme.
+   */
+  .dark .operations-hub.bg-\[\#f8fafc\],
+  .dark .operations-hub .bg-\[\#f8fafc\] {
+    background-color: hsl(var(--background));
+  }
+
+  .dark .operations-hub .bg-white {
+    background-color: hsl(var(--card));
+  }
+
+  .dark .operations-hub .bg-slate-50 {
+    background-color: hsl(var(--muted) / 0.55);
+  }
+
+  .dark .operations-hub .bg-slate-100 {
+    background-color: hsl(var(--muted));
+  }
+
+  .dark .operations-hub .bg-slate-950 {
+    background-color: hsl(var(--primary));
+  }
+
+  .dark .operations-hub .bg-\[\#fff2ed\] {
+    background-color: hsl(var(--primary) / 0.16);
+  }
+
+  .dark .operations-hub .text-\[\#b7330a\],
+  .dark .operations-hub .text-slate-950,
+  .dark .operations-hub .text-slate-900 {
+    color: hsl(var(--foreground));
+  }
+
+  .dark .operations-hub .text-slate-700,
+  .dark .operations-hub .text-slate-600,
+  .dark .operations-hub .text-slate-500,
+  .dark .operations-hub .text-slate-400,
+  .dark .operations-hub .text-slate-300 {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .dark .operations-hub .border-slate-300,
+  .dark .operations-hub .border-slate-200,
+  .dark .operations-hub .border-slate-100 {
+    border-color: hsl(var(--border));
+  }
+
+  .dark .operations-hub .hover\:border-slate-300:hover {
+    border-color: hsl(var(--border));
+  }
+
+  .dark .operations-hub .hover\:bg-slate-50:hover,
+  .dark .operations-hub .hover\:bg-slate-100:hover {
+    background-color: hsl(var(--muted));
+  }
+
+  .dark .operations-hub input::placeholder,
+  .dark .operations-hub textarea::placeholder {
+    color: hsl(var(--muted-foreground) / 0.72);
+  }
+
   /* Hide ugly search cancel button in Chrome until we can style it properly */
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;

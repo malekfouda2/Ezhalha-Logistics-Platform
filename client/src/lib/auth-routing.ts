@@ -1,11 +1,15 @@
 type AppUserType = string;
 
 export function getDefaultAuthenticatedPath(userType: AppUserType): string {
-  return userType === "admin" ? "/admin" : "/client";
+  if (userType === "admin") return "/admin";
+  if (userType === "operations") return "/operations";
+  return "/client";
 }
 
 export function getPasswordChangePath(userType: AppUserType): string {
-  return userType === "admin" ? "/admin/settings" : "/client/settings";
+  if (userType === "admin") return "/admin/settings";
+  if (userType === "operations") return "/operations/settings";
+  return "/client/settings";
 }
 
 export function getPostLoginPath(user: {

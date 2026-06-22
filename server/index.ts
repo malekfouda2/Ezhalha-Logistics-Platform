@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { storage } from "./storage";
 import { startCreditReminderScheduler } from "./services/credit-reminder";
 import { startAbandonedRecoveryScheduler } from "./services/abandoned-recovery";
+import { startExpressTrackingRefreshScheduler } from "./services/express-tracking-refresh";
 import { validateFedExEnvOnStartup } from "./integrations/fedex";
 import { validateAramexEnvOnStartup } from "./integrations/aramex";
 import { loadDefaultIntegrationAccountsIntoEnv } from "./services/integration-apps";
@@ -67,6 +68,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  if (process.env.NODE_ENV === "production" && !process.env.INTEGRATION_CONFIG_SECRET) {
+    console.warn(
+      "[startup] INTEGRATION_CONFIG_SECRET is not set. Saving integration accounts from the Apps page will fail until it is configured.",
+    );
+  }
+
   await loadDefaultIntegrationAccountsIntoEnv();
   validateFedExEnvOnStartup();
   validateAramexEnvOnStartup();
@@ -115,6 +122,7 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
       startCreditReminderScheduler();
       startAbandonedRecoveryScheduler();
+      startExpressTrackingRefreshScheduler();
       if (typeof process.send === "function") {
         process.send("ready");
       }

@@ -1,15 +1,79 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { UserInvitationStatus } from "./internal-users";
 
 // User types enum
 export const UserType = {
   ADMIN: "admin",
   CLIENT: "client",
+  OPERATIONS: "operations",
 } as const;
 
 export type UserTypeValue = typeof UserType[keyof typeof UserType];
+
+export const OperationShipmentKind = {
+  DDP: "DDP",
+  EXPRESS: "EXPRESS",
+} as const;
+
+export type OperationShipmentKindValue =
+  typeof OperationShipmentKind[keyof typeof OperationShipmentKind];
+
+export const OperationAssignmentStatus = {
+  ACTIVE: "ACTIVE",
+  REASSIGNED: "REASSIGNED",
+  COMPLETED: "COMPLETED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type OperationAssignmentStatusValue =
+  typeof OperationAssignmentStatus[keyof typeof OperationAssignmentStatus];
+
+export const OperationEventAudience = {
+  INTERNAL: "INTERNAL",
+  CLIENT: "CLIENT",
+  BOTH: "BOTH",
+} as const;
+
+export type OperationEventAudienceValue =
+  typeof OperationEventAudience[keyof typeof OperationEventAudience];
+
+export const OperationTaskStatus = {
+  PENDING: "PENDING",
+  COMPLETED: "COMPLETED",
+  SKIPPED: "SKIPPED",
+} as const;
+
+export type OperationTaskStatusValue =
+  typeof OperationTaskStatus[keyof typeof OperationTaskStatus];
+
+export const OperationSpecialHandlingStatus = {
+  OPEN: "OPEN",
+  RESOLVED: "RESOLVED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type OperationSpecialHandlingStatusValue =
+  typeof OperationSpecialHandlingStatus[keyof typeof OperationSpecialHandlingStatus];
+
+export const OperationAttentionStatus = {
+  OPEN: "OPEN",
+  RESOLVED: "RESOLVED",
+  DISMISSED: "DISMISSED",
+} as const;
+
+export type OperationAttentionStatusValue =
+  typeof OperationAttentionStatus[keyof typeof OperationAttentionStatus];
+
+export const OperationNoteVisibility = {
+  INTERNAL: "INTERNAL",
+  CLIENT: "CLIENT",
+} as const;
+
+export type OperationNoteVisibilityValue =
+  typeof OperationNoteVisibility[keyof typeof OperationNoteVisibility];
 
 export const IntegrationAccountCountryBasis = {
   SHIPPING_ACCOUNT_COUNTRY: "shipping_account_country",
@@ -208,6 +272,7 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
+  fullName: text("full_name"),
   password: text("password").notNull(),
   userType: text("user_type").notNull().default("client"),
   clientAccountId: varchar("client_account_id"),
@@ -215,6 +280,7 @@ export const users = pgTable("users", {
   isAccountManager: boolean("is_account_manager").notNull().default(false),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -821,15 +887,43 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 // RBAC TABLES (Role-Based Access Control)
 // ============================================
 
-// Roles table
-export const roles = pgTable("roles", {
+export const departments = pgTable("departments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull().unique(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
   description: text("description"),
-  isActive: boolean("is_active").notNull().default(true),
+  iconKey: text("icon_key").notNull(),
+  colorKey: text("color_key").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isSystem: boolean("is_system").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const insertDepartmentSchema = createInsertSchema(departments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
+export type Department = typeof departments.$inferSelect;
+
+// Roles table
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  departmentId: varchar("department_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  hierarchyLevel: text("hierarchy_level"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isSystem: boolean("is_system").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  departmentNameUnique: uniqueIndex("roles_department_id_name_unique").on(table.departmentId, table.name),
+}));
 
 export const insertRoleSchema = createInsertSchema(roles).omit({
   id: true,
@@ -844,6 +938,35 @@ export const ACCOUNT_MANAGER_SYSTEM_ROLE_ID = "system:account-manager";
 export const ACCOUNT_MANAGER_SYSTEM_ROLE_NAME = "Account Manager";
 export const ACCOUNT_MANAGER_SYSTEM_ROLE_DESCRIPTION =
   "Fixed scoped access for assigned clients with approval-based client changes.";
+
+export const userInvitations = pgTable("user_invitations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  departmentId: varchar("department_id").notNull(),
+  roleId: varchar("role_id").notNull(),
+  personalMessage: text("personal_message"),
+  tokenHash: text("token_hash").notNull(),
+  status: text("status").notNull().default(UserInvitationStatus.PENDING),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  acceptedAt: timestamp("accepted_at"),
+  invitedByUserId: varchar("invited_by_user_id"),
+  acceptedUserId: varchar("accepted_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUserInvitationSchema = createInsertSchema(userInvitations).omit({
+  id: true,
+  sentAt: true,
+  acceptedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUserInvitation = z.infer<typeof insertUserInvitationSchema>;
+export type UserInvitation = typeof userInvitations.$inferSelect;
 
 // Permissions table
 export const permissions = pgTable("permissions", {
@@ -1060,7 +1183,7 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 
 // Login schema for validation
 export const loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  username: z.string().min(1, "Email or username is required"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -1263,6 +1386,215 @@ export const insertCreditNotificationEventSchema = createInsertSchema(creditNoti
 
 export type InsertCreditNotificationEvent = z.infer<typeof insertCreditNotificationEventSchema>;
 export type CreditNotificationEvent = typeof creditNotificationEvents.$inferSelect;
+
+export const operationProfiles = pgTable("operation_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique(),
+  level: text("level").notNull().default("agent"),
+  supervisorUserId: varchar("supervisor_user_id"),
+  canReceiveAssignments: boolean("can_receive_assignments").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertOperationProfileSchema = createInsertSchema(operationProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertOperationProfile = z.infer<typeof insertOperationProfileSchema>;
+export type OperationProfile = typeof operationProfiles.$inferSelect;
+
+export const shipmentAssignments = pgTable("shipment_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  assignedToUserId: varchar("assigned_to_user_id").notNull(),
+  assignedByUserId: varchar("assigned_by_user_id"),
+  shipmentKind: text("shipment_kind").notNull(),
+  status: text("status").notNull().default(OperationAssignmentStatus.ACTIVE),
+  reason: text("reason"),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  releasedAt: timestamp("released_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShipmentAssignmentSchema = createInsertSchema(shipmentAssignments).omit({
+  id: true,
+  assignedAt: true,
+  createdAt: true,
+});
+
+export type InsertShipmentAssignment = z.infer<typeof insertShipmentAssignmentSchema>;
+export type ShipmentAssignment = typeof shipmentAssignments.$inferSelect;
+
+export const shipmentOperationEvents = pgTable("shipment_operation_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  actorUserId: varchar("actor_user_id"),
+  eventType: text("event_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  audience: text("audience").notNull().default(OperationEventAudience.INTERNAL),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShipmentOperationEventSchema = createInsertSchema(shipmentOperationEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentOperationEvent = z.infer<typeof insertShipmentOperationEventSchema>;
+export type ShipmentOperationEvent = typeof shipmentOperationEvents.$inferSelect;
+
+export const shipmentOperationTasks = pgTable("shipment_operation_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  taskKey: text("task_key").notNull(),
+  stageKey: text("stage_key").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default(OperationTaskStatus.PENDING),
+  assignedToUserId: varchar("assigned_to_user_id"),
+  completedByUserId: varchar("completed_by_user_id"),
+  completedAt: timestamp("completed_at"),
+  dueAt: timestamp("due_at"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  shipmentTaskUnique: uniqueIndex("shipment_operation_tasks_unique").on(table.shipmentId, table.taskKey),
+}));
+
+export const insertShipmentOperationTaskSchema = createInsertSchema(shipmentOperationTasks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertShipmentOperationTask = z.infer<typeof insertShipmentOperationTaskSchema>;
+export type ShipmentOperationTask = typeof shipmentOperationTasks.$inferSelect;
+
+export const shipmentOperationNotes = pgTable("shipment_operation_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  authorUserId: varchar("author_user_id").notNull(),
+  body: text("body").notNull(),
+  visibility: text("visibility").notNull().default(OperationNoteVisibility.INTERNAL),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+export const insertShipmentOperationNoteSchema = createInsertSchema(shipmentOperationNotes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+});
+
+export type InsertShipmentOperationNote = z.infer<typeof insertShipmentOperationNoteSchema>;
+export type ShipmentOperationNote = typeof shipmentOperationNotes.$inferSelect;
+
+export const shipmentOperationNoteMentions = pgTable("shipment_operation_note_mentions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  noteId: varchar("note_id").notNull(),
+  mentionedUserId: varchar("mentioned_user_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  noteMentionUnique: uniqueIndex("shipment_operation_note_mentions_unique").on(table.noteId, table.mentionedUserId),
+}));
+
+export const insertShipmentOperationNoteMentionSchema = createInsertSchema(shipmentOperationNoteMentions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentOperationNoteMention = z.infer<typeof insertShipmentOperationNoteMentionSchema>;
+export type ShipmentOperationNoteMention = typeof shipmentOperationNoteMentions.$inferSelect;
+
+export const shipmentSpecialHandling = pgTable("shipment_special_handling", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull().unique(),
+  priority: text("priority").notNull().default("normal"),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default(OperationSpecialHandlingStatus.OPEN),
+  assignedToUserId: varchar("assigned_to_user_id"),
+  createdByUserId: varchar("created_by_user_id"),
+  resolvedByUserId: varchar("resolved_by_user_id"),
+  resolvedAt: timestamp("resolved_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertShipmentSpecialHandlingSchema = createInsertSchema(shipmentSpecialHandling).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertShipmentSpecialHandling = z.infer<typeof insertShipmentSpecialHandlingSchema>;
+export type ShipmentSpecialHandling = typeof shipmentSpecialHandling.$inferSelect;
+
+export const shipmentAttentionFlags = pgTable("shipment_attention_flags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  issueType: text("issue_type").notNull(),
+  severity: text("severity").notNull().default("medium"),
+  status: text("status").notNull().default(OperationAttentionStatus.OPEN),
+  details: text("details"),
+  metadata: text("metadata"),
+  detectedAt: timestamp("detected_at").notNull().defaultNow(),
+  resolvedByUserId: varchar("resolved_by_user_id"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  shipmentAttentionUnique: uniqueIndex("shipment_attention_flags_unique").on(
+    table.shipmentId,
+    table.issueType,
+    table.status,
+  ),
+}));
+
+export const insertShipmentAttentionFlagSchema = createInsertSchema(shipmentAttentionFlags).omit({
+  id: true,
+  detectedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertShipmentAttentionFlag = z.infer<typeof insertShipmentAttentionFlagSchema>;
+export type ShipmentAttentionFlag = typeof shipmentAttentionFlags.$inferSelect;
+
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  type: text("type").notNull().default("info"),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  actionUrl: text("action_url"),
+  emailSentAt: timestamp("email_sent_at"),
+  emailStatus: text("email_status"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  emailSentAt: true,
+  emailStatus: true,
+  readAt: true,
+  createdAt: true,
+});
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
 
 export const emailTemplates = pgTable("email_templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1501,3 +1833,169 @@ export const insertSystemLogSchema = createInsertSchema(systemLogs).omit({
 
 export type SystemLog = typeof systemLogs.$inferSelect;
 export type InsertSystemLog = z.infer<typeof insertSystemLogSchema>;
+
+// ============================================
+// TASKS MODULE (internal-only collaboration)
+// ============================================
+
+export const TaskStatus = {
+  PENDING: "PENDING",
+  COMPLETED: "COMPLETED",
+} as const;
+
+export type TaskStatusValue = typeof TaskStatus[keyof typeof TaskStatus];
+
+export const TaskPriority = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+  URGENT: "URGENT",
+} as const;
+
+export type TaskPriorityValue = typeof TaskPriority[keyof typeof TaskPriority];
+
+export const TaskActivityEventType = {
+  TASK_CREATED: "task_created",
+  TASK_UPDATED: "task_updated",
+  ASSIGNMENT_CHANGED: "assignment_changed",
+  DEADLINE_CHANGED: "deadline_changed",
+  PRIORITY_CHANGED: "priority_changed",
+  COMMENT_ADDED: "comment_added",
+  ATTACHMENT_ADDED: "attachment_added",
+  TASK_COMPLETED: "task_completed",
+  TASK_REOPENED: "task_reopened",
+} as const;
+
+export type TaskActivityEventTypeValue =
+  typeof TaskActivityEventType[keyof typeof TaskActivityEventType];
+
+export const TASK_PERMISSION_NAMES = [
+  "tasks:read",
+  "tasks:create",
+  "tasks:update",
+  "tasks:assign",
+  "tasks:complete",
+  "tasks:reopen",
+  "task-comments:create",
+] as const;
+
+export const tasks = pgTable("tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default(TaskStatus.PENDING),
+  priority: text("priority").notNull().default(TaskPriority.MEDIUM),
+  createdByUserId: varchar("created_by_user_id").notNull(),
+  assignedToUserId: varchar("assigned_to_user_id").notNull(),
+  deadlineAt: timestamp("deadline_at"),
+  completedAt: timestamp("completed_at"),
+  completedByUserId: varchar("completed_by_user_id"),
+  reopenedAt: timestamp("reopened_at"),
+  reopenedByUserId: varchar("reopened_by_user_id"),
+  lastActivityAt: timestamp("last_activity_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("tasks_status_idx").on(table.status),
+  assigneeStatusIdx: index("tasks_assignee_status_idx").on(table.assignedToUserId, table.status),
+  creatorStatusIdx: index("tasks_creator_status_idx").on(table.createdByUserId, table.status),
+  deadlineStatusIdx: index("tasks_deadline_status_idx").on(table.deadlineAt, table.status),
+  lastActivityIdx: index("tasks_last_activity_idx").on(table.lastActivityAt),
+}));
+
+export const insertTaskSchema = createInsertSchema(tasks).omit({
+  id: true,
+  completedAt: true,
+  completedByUserId: true,
+  reopenedAt: true,
+  reopenedByUserId: true,
+  lastActivityAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+export type Task = typeof tasks.$inferSelect;
+
+export const taskCompletionRecipients = pgTable("task_completion_recipients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  taskId: varchar("task_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  taskUserUnique: uniqueIndex("task_completion_recipients_unique").on(table.taskId, table.userId),
+}));
+
+export const insertTaskCompletionRecipientSchema = createInsertSchema(taskCompletionRecipients).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTaskCompletionRecipient = z.infer<typeof insertTaskCompletionRecipientSchema>;
+export type TaskCompletionRecipient = typeof taskCompletionRecipients.$inferSelect;
+
+export const taskAttachments = pgTable("task_attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  taskId: varchar("task_id").notNull(),
+  objectPath: text("object_path").notNull(),
+  fileName: text("file_name").notNull(),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
+  uploadedByUserId: varchar("uploaded_by_user_id").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  taskSortIdx: index("task_attachments_task_sort_idx").on(table.taskId, table.sortOrder),
+}));
+
+export const insertTaskAttachmentSchema = createInsertSchema(taskAttachments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTaskAttachment = z.infer<typeof insertTaskAttachmentSchema>;
+export type TaskAttachment = typeof taskAttachments.$inferSelect;
+
+export const taskComments = pgTable("task_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  taskId: varchar("task_id").notNull(),
+  authorUserId: varchar("author_user_id").notNull(),
+  parentCommentId: varchar("parent_comment_id"),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => ({
+  taskCreatedIdx: index("task_comments_task_created_idx").on(table.taskId, table.createdAt),
+}));
+
+export const insertTaskCommentSchema = createInsertSchema(taskComments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  deletedAt: true,
+});
+
+export type InsertTaskComment = z.infer<typeof insertTaskCommentSchema>;
+export type TaskComment = typeof taskComments.$inferSelect;
+
+export const taskActivityEvents = pgTable("task_activity_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  taskId: varchar("task_id").notNull(),
+  actorUserId: varchar("actor_user_id"),
+  eventType: text("event_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  taskCreatedIdx: index("task_activity_events_task_created_idx").on(table.taskId, table.createdAt),
+}));
+
+export const insertTaskActivityEventSchema = createInsertSchema(taskActivityEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTaskActivityEvent = z.infer<typeof insertTaskActivityEventSchema>;
+export type TaskActivityEvent = typeof taskActivityEvents.$inferSelect;

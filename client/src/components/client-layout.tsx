@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "./theme-toggle";
+import { NotificationBell } from "./notification-bell";
 import { ProfileBadge } from "./profile-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -192,7 +193,10 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
           <div className="flex items-center gap-3">
             <ProfileBadge profile={clientProfile} />
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <ThemeToggle />
+          </div>
         </header>
 
         {/* Page Content */}

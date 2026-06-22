@@ -14,16 +14,19 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   dashboard: { anyOf: ["dashboard:read"] },
   users: {
     anyOf: [
-      "clients:read",
       "users:read",
       "roles:read",
-      "account-managers:read",
-      "account-manager-requests:read",
+      "permissions:read",
     ],
   },
+  allUsers: { anyOf: ["users:read"] },
+  userRoles: { anyOf: ["roles:read", "permissions:read"] },
+  userInvites: { anyOf: ["users:read", "users:create", "users:update"] },
   clients: { anyOf: ["clients:read"] },
   editClient: { allOf: ["clients:read", "clients:update"] },
   applications: { anyOf: ["applications:read"] },
+  operations: { anyOf: ["operations:read"] },
+  tasks: { anyOf: ["tasks:read"] },
   shipments: { anyOf: ["shipments:read"] },
   financialManagement: {
     anyOf: [
@@ -55,7 +58,6 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   integrations: { anyOf: ["integrations:read"] },
   apps: { anyOf: ["integrations:read"] },
   webhooks: { anyOf: ["webhooks:read"] },
-  accountManagers: { anyOf: ["account-managers:read", "account-manager-requests:read"] },
   accessControl: { anyOf: ["roles:read", "permissions:read", "users:read"] },
   emailTemplates: { anyOf: ["email-templates:read"] },
   policies: { anyOf: ["policies:read"] },
@@ -63,9 +65,30 @@ export const ADMIN_ROUTE_PERMISSIONS = {
 
 export const ADMIN_NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", permissions: ADMIN_ROUTE_PERMISSIONS.dashboard },
-  { href: "/admin/users", label: "Users", permissions: ADMIN_ROUTE_PERMISSIONS.users },
+  {
+    href: "/admin/users",
+    label: "Users",
+    permissions: ADMIN_ROUTE_PERMISSIONS.users,
+    children: [
+      { href: "/admin/users", label: "All Users", permissions: ADMIN_ROUTE_PERMISSIONS.allUsers },
+      { href: "/admin/users/roles", label: "Roles & Permissions", permissions: ADMIN_ROUTE_PERMISSIONS.userRoles },
+      { href: "/admin/users/invites", label: "Pending Invites", permissions: ADMIN_ROUTE_PERMISSIONS.userInvites },
+    ],
+  },
   { href: "/admin/clients", label: "Clients", permissions: ADMIN_ROUTE_PERMISSIONS.clients },
   { href: "/admin/applications", label: "Applications", permissions: ADMIN_ROUTE_PERMISSIONS.applications },
+  {
+    href: "/admin/operations",
+    label: "Operations Hub",
+    permissions: ADMIN_ROUTE_PERMISSIONS.operations,
+    children: [
+      { href: "/admin/operations?view=d2d", label: "Door to Door", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=express", label: "Express Shipments", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=attention", label: "Needs Attention", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=special", label: "Special Handling", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=delivered", label: "Delivered", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+    ],
+  },
   {
     href: "/admin/shipments",
     label: "Shipments",
@@ -102,6 +125,7 @@ export const ADMIN_NAV_ITEMS = [
       { href: "/admin/email-templates", label: "Email Templates", permissions: ADMIN_ROUTE_PERMISSIONS.emailTemplates },
     ],
   },
+  { href: "/admin/tasks", label: "Tasks", permissions: ADMIN_ROUTE_PERMISSIONS.tasks },
   { href: "/admin/policies", label: "Policies", permissions: ADMIN_ROUTE_PERMISSIONS.policies },
 ] satisfies AdminNavItem[];
 

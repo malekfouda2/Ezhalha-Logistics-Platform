@@ -29,8 +29,12 @@ import {
   type InsertDdpPricingLane,
   type AuditLog,
   type InsertAuditLog,
+  type Department,
+  type InsertDepartment,
   type Role,
   type InsertRole,
+  type UserInvitation,
+  type InsertUserInvitation,
   type Permission,
   type InsertPermission,
   type UserRole,
@@ -84,7 +88,9 @@ import {
   ddpPricingTiers,
   ddpPricingLanes,
   auditLogs,
+  departments,
   roles,
+  userInvitations,
   permissions,
   userRoles,
   rolePermissions,
@@ -333,11 +339,21 @@ export interface IStorage {
   updateWebhookEvent(id: string, updates: Partial<WebhookEvent>): Promise<WebhookEvent | undefined>;
 
   // RBAC - Roles
+  getDepartments(): Promise<Department[]>;
+  getDepartment(id: string): Promise<Department | undefined>;
+  getDepartmentBySlug(slug: string): Promise<Department | undefined>;
+  createDepartment(department: InsertDepartment): Promise<Department>;
+  updateDepartment(id: string, updates: Partial<Department>): Promise<Department | undefined>;
   getRoles(): Promise<Role[]>;
   getRole(id: string): Promise<Role | undefined>;
   createRole(role: InsertRole): Promise<Role>;
   updateRole(id: string, updates: Partial<Role>): Promise<Role | undefined>;
   deleteRole(id: string): Promise<void>;
+  getUserInvitations(params?: { status?: string; email?: string }): Promise<UserInvitation[]>;
+  getUserInvitation(id: string): Promise<UserInvitation | undefined>;
+  getUserInvitationByTokenHash(tokenHash: string): Promise<UserInvitation | undefined>;
+  createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation>;
+  updateUserInvitation(id: string, updates: Partial<UserInvitation>): Promise<UserInvitation | undefined>;
 
   // RBAC - Permissions
   getPermissions(): Promise<Permission[]>;
@@ -1640,6 +1656,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   // RBAC - Roles
+  async getDepartments(): Promise<Department[]> {
+    return db.select().from(departments).orderBy(departments.sortOrder, departments.name);
+  }
+
+  async getDepartment(id: string): Promise<Department | undefined> {
+    const [department] = await db.select().from(departments).where(eq(departments.id, id));
+    return department || undefined;
+  }
+
+  async getDepartmentBySlug(slug: string): Promise<Department | undefined> {
+    const [department] = await db.select().from(departments).where(eq(departments.slug, slug));
+    return department || undefined;
+  }
+
+  async createDepartment(department: InsertDepartment): Promise<Department> {
+    const [created] = await db.insert(departments).values(department).returning();
+    return created;
+  }
+
+  async updateDepartment(id: string, updates: Partial<Department>): Promise<Department | undefined> {
+    const [department] = await db
+      .update(departments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(departments.id, id))
+      .returning();
+    return department || undefined;
+  }
+
   async getRoles(): Promise<Role[]> {
     return db.select().from(roles).orderBy(desc(roles.createdAt));
   }
@@ -1661,6 +1705,50 @@ export class DatabaseStorage implements IStorage {
 
   async deleteRole(id: string): Promise<void> {
     await db.delete(roles).where(eq(roles.id, id));
+  }
+
+  async getUserInvitations(params?: { status?: string; email?: string }): Promise<UserInvitation[]> {
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(userInvitations.status, params.status));
+    }
+    if (params?.email) {
+      conditions.push(eq(userInvitations.email, params.email));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    return db
+      .select()
+      .from(userInvitations)
+      .where(whereClause)
+      .orderBy(desc(userInvitations.sentAt), desc(userInvitations.createdAt));
+  }
+
+  async getUserInvitation(id: string): Promise<UserInvitation | undefined> {
+    const [invitation] = await db.select().from(userInvitations).where(eq(userInvitations.id, id));
+    return invitation || undefined;
+  }
+
+  async getUserInvitationByTokenHash(tokenHash: string): Promise<UserInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.tokenHash, tokenHash));
+    return invitation || undefined;
+  }
+
+  async createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation> {
+    const [created] = await db.insert(userInvitations).values(invitation).returning();
+    return created;
+  }
+
+  async updateUserInvitation(id: string, updates: Partial<UserInvitation>): Promise<UserInvitation | undefined> {
+    const [invitation] = await db
+      .update(userInvitations)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(userInvitations.id, id))
+      .returning();
+    return invitation || undefined;
   }
 
   // RBAC - Permissions
@@ -2231,8 +2319,15 @@ export class DatabaseStorage implements IStorage {
     console.log("Database initialization complete!");
   }
 
+  private async createPolicySeedIfMissing(policy: InsertPolicy): Promise<void> {
+    await db
+      .insert(policies)
+      .values(policy)
+      .onConflictDoNothing({ target: policies.slug });
+  }
+
   private async seedDefaultPolicies(): Promise<void> {
-      await this.createPolicy({
+      await this.createPolicySeedIfMissing({
         slug: "privacy-policy",
         title: "Privacy Policy",
         content: `<h2>Privacy Policy</h2>
@@ -2305,7 +2400,7 @@ export class DatabaseStorage implements IStorage {
         isPublished: true,
       });
 
-      await this.createPolicy({
+      await this.createPolicySeedIfMissing({
         slug: "shipping-return-policy",
         title: "Shipping & Return Policy",
         content: `<h2>Shipping & Return Policy</h2>
@@ -2406,7 +2501,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async seedDefaultTermsAndConditionsPolicy(): Promise<void> {
-      await this.createPolicy({
+      await this.createPolicySeedIfMissing({
         slug: "terms-and-conditions",
         title: "Terms & Conditions",
         content: `<h2>Terms & Conditions</h2>

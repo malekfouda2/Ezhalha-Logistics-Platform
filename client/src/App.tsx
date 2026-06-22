@@ -11,6 +11,7 @@ import { LoadingScreen } from "@/components/loading-spinner";
 import LoginPage from "@/pages/login";
 import ApplyPage from "@/pages/apply";
 import NotFound from "@/pages/not-found";
+import AcceptInvitePage from "@/pages/accept-invite";
 
 // Admin Pages
 import AdminDashboard from "@/pages/admin/dashboard";
@@ -34,6 +35,9 @@ import AdminCreditRequests from "@/pages/admin/credit-requests";
 import AdminEmailTemplates from "@/pages/admin/email-templates";
 import AdminSystemLogs from "@/pages/admin/system-logs";
 import AdminSettings from "@/pages/admin/settings";
+import OperationsHub from "@/pages/operations/hub";
+import OperationsSettings from "@/pages/operations/settings";
+import TasksPage from "@/pages/tasks";
 
 // Client Pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -58,7 +62,7 @@ function ProtectedRoute({
   requiredAdminPermissionsAllOf,
 }: {
   component: () => JSX.Element;
-  requiredUserType?: "admin" | "client";
+  requiredUserType?: "admin" | "client" | "operations";
   allowPasswordChange?: boolean;
   requiredAdminPermissionsAnyOf?: string[];
   requiredAdminPermissionsAllOf?: string[];
@@ -120,6 +124,7 @@ function Router() {
       {/* Public routes */}
       <Route path="/" component={AuthRedirect} />
       <Route path="/apply" component={ApplyPage} />
+      <Route path="/invite/accept/:token" component={AcceptInvitePage} />
       <Route path="/policy/:slug" component={PolicyPage} />
 
       {/* Admin routes */}
@@ -140,11 +145,25 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.clients.anyOf}
         />
       </Route>
+      <Route path="/admin/users/roles">
+        <ProtectedRoute
+          component={AdminUsers}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.userRoles.anyOf}
+        />
+      </Route>
+      <Route path="/admin/users/invites">
+        <ProtectedRoute
+          component={AdminUsers}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.userInvites.anyOf}
+        />
+      </Route>
       <Route path="/admin/users">
         <ProtectedRoute
           component={AdminUsers}
           requiredUserType="admin"
-          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.users.anyOf}
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.allUsers.anyOf}
         />
       </Route>
       <Route path="/admin/clients/:id/edit">
@@ -159,6 +178,13 @@ function Router() {
           component={AdminApplications}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.applications.anyOf}
+        />
+      </Route>
+      <Route path="/admin/operations">
+        <ProtectedRoute
+          component={() => <OperationsHub layout="admin" />}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.operations.anyOf}
         />
       </Route>
       <Route path="/admin/shipments/abandoned">
@@ -278,6 +304,24 @@ function Router() {
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.emailTemplates.anyOf}
         />
+      </Route>
+      <Route path="/admin/tasks">
+        <ProtectedRoute
+          component={() => <TasksPage layout="admin" />}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.tasks.anyOf}
+        />
+      </Route>
+
+      {/* Operations routes */}
+      <Route path="/operations">
+        <ProtectedRoute component={() => <OperationsHub />} requiredUserType="operations" />
+      </Route>
+      <Route path="/operations/settings">
+        <ProtectedRoute component={OperationsSettings} requiredUserType="operations" allowPasswordChange />
+      </Route>
+      <Route path="/operations/tasks">
+        <ProtectedRoute component={() => <TasksPage layout="operations" />} requiredUserType="operations" />
       </Route>
 
       {/* Client routes */}
