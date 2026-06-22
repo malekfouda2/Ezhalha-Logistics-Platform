@@ -216,7 +216,11 @@ export class ZohoService {
     const startTime = Date.now();
     try {
       const response = await fetch(
-        `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}`,
+        // ignore_auto_number_generation=true lets Zoho accept our custom
+        // invoice_number even when auto-numbering is enabled on the org.
+        // Without it Zoho rejects with "Number entered does not match the
+        // auto-generated number."
+        `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}&ignore_auto_number_generation=true`,
         {
           method: 'POST',
           headers: {
@@ -289,7 +293,7 @@ export class ZohoService {
     const startTime = Date.now();
     try {
       const response = await fetch(
-        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}`,
+        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}&ignore_auto_number_generation=true`,
         {
           method: "PUT",
           headers: {
