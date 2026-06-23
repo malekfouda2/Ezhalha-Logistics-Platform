@@ -11,10 +11,13 @@ interface AdminAccessResponse {
 export function useAdminAccess() {
   const { user } = useAuth();
   const isAdmin = user?.userType === "admin";
+  // Internal staff (admin + operations) share the same RBAC permission set, so
+  // both load their effective admin permissions to drive nav + route access.
+  const isInternalStaff = user?.userType === "admin" || user?.userType === "operations";
 
   const { data, isLoading } = useQuery<AdminAccessResponse>({
     queryKey: ["/api/admin/me/access"],
-    enabled: isAdmin,
+    enabled: isInternalStaff,
     queryFn: async () => {
       const res = await fetch("/api/admin/me/access", {
         credentials: "include",
@@ -41,7 +44,8 @@ export function useAdminAccess() {
     permissions,
     isAdmin,
     isAccountManager,
-    isLoading: isAdmin ? isLoading : false,
+    isInternalStaff,
+    isLoading: isInternalStaff ? isLoading : false,
     managedClientIds,
     hasPermissionName,
     hasPermission,

@@ -4,25 +4,26 @@ import { getDefaultAuthenticatedPath, getPasswordChangePath, getPostLoginPath } 
 describe("auth routing helpers", () => {
   it("returns the correct default home path for each user type", () => {
     expect(getDefaultAuthenticatedPath("admin")).toBe("/admin");
-    expect(getDefaultAuthenticatedPath("operations")).toBe("/operations");
+    // Operations is internal staff and shares the permission-driven admin shell.
+    expect(getDefaultAuthenticatedPath("operations")).toBe("/admin");
     expect(getDefaultAuthenticatedPath("client")).toBe("/client");
   });
 
   it("returns the correct password change path for each user type", () => {
     expect(getPasswordChangePath("admin")).toBe("/admin/settings");
-    expect(getPasswordChangePath("operations")).toBe("/operations/settings");
+    expect(getPasswordChangePath("operations")).toBe("/admin/settings");
     expect(getPasswordChangePath("client")).toBe("/client/settings");
   });
 
   it("sends users with temporary passwords to the correct settings page", () => {
     expect(getPostLoginPath({ userType: "admin", mustChangePassword: true })).toBe("/admin/settings");
-    expect(getPostLoginPath({ userType: "operations", mustChangePassword: true })).toBe("/operations/settings");
+    expect(getPostLoginPath({ userType: "operations", mustChangePassword: true })).toBe("/admin/settings");
     expect(getPostLoginPath({ userType: "client", mustChangePassword: true })).toBe("/client/settings");
   });
 
   it("sends users without a password reset requirement to their dashboard home", () => {
     expect(getPostLoginPath({ userType: "admin", mustChangePassword: false })).toBe("/admin");
-    expect(getPostLoginPath({ userType: "operations", mustChangePassword: false })).toBe("/operations");
+    expect(getPostLoginPath({ userType: "operations", mustChangePassword: false })).toBe("/admin");
     expect(getPostLoginPath({ userType: "client", mustChangePassword: false })).toBe("/client");
   });
 });

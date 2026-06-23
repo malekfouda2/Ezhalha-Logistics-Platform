@@ -2602,13 +2602,21 @@ function normalizeBadgeGradientAngle(value: unknown): number {
   return Math.max(0, Math.min(360, Math.round(parsed)));
 }
 
+// Internal staff = admin + operations. Page/endpoint access for this group is
+// permission-driven (RBAC), not userType-driven: ensureAdminAccess only gates
+// out external users (clients), while requireAdminPermission enforces the
+// specific permission each admin route needs.
+function isInternalStaff(user: Pick<User, "userType">): boolean {
+  return user.userType === "admin" || user.userType === "operations";
+}
+
 async function ensureAdminAccess(req: Request, res: Response): Promise<User | null> {
   const user = await ensureAuthenticatedUser(req, res);
   if (!user) {
     return null;
   }
 
-  if (user.userType !== "admin") {
+  if (!isInternalStaff(user)) {
     res.status(403).json({ error: "Forbidden" });
     return null;
   }
@@ -4338,7 +4346,7 @@ function serializeClientExtraFeeNotices(
 }
 
 // Default permissions for the platform
-const DEFAULT_PERMISSIONS = [
+export const DEFAULT_PERMISSIONS = [
   // Clients
   { resource: "clients", action: "create", description: "Create new client accounts" },
   { resource: "clients", action: "read", description: "View client information" },

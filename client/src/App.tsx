@@ -78,15 +78,24 @@ function ProtectedRoute({
     return <Redirect to="/" />;
   }
 
-  if (requiredUserType && user.userType !== requiredUserType) {
-    return <Redirect to={getPostLoginPath(user)} />;
+  // Admin routes are the internal-staff surface: both admin and operations
+  // users may access them, gated by permission (not userType). Other route
+  // types (client) still require an exact userType match.
+  const isInternalStaff = user.userType === "admin" || user.userType === "operations";
+  const isInternalRoute = requiredUserType === "admin";
+
+  if (requiredUserType) {
+    const allowed = isInternalRoute ? isInternalStaff : user.userType === requiredUserType;
+    if (!allowed) {
+      return <Redirect to={getPostLoginPath(user)} />;
+    }
   }
 
   if (user.mustChangePassword && !allowPasswordChange) {
     return <Redirect to={getPostLoginPath(user)} />;
   }
 
-  if (user.userType === "admin" && (requiredAdminPermissionsAnyOf || requiredAdminPermissionsAllOf)) {
+  if (isInternalStaff && isInternalRoute && (requiredAdminPermissionsAnyOf || requiredAdminPermissionsAllOf)) {
     if (adminAccess.isLoading) {
       return <LoadingScreen message="Loading access..." />;
     }
