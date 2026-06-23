@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from "
 import { db } from "../db";
 import { storage } from "../storage";
 import { sendEmail } from "./email";
+import { getRenderedTemplate } from "./email-templates";
 import { logError, logInfo } from "./logger";
 import {
   clientAccounts,
@@ -784,10 +785,19 @@ export async function notifyUser(params: {
     try {
       const user = await storage.getUser(params.userId);
       if (user?.email) {
+        const actionBlock = params.actionUrl
+          ? `<p style="text-align: center; margin: 30px 0;"><a href="${params.actionUrl}" class="button">Open in ezhalha</a></p>`
+          : "";
+        const rendered = await getRenderedTemplate("operation_notification", {
+          title: params.title,
+          body: params.body,
+          action_block: actionBlock,
+          year: new Date().getFullYear().toString(),
+        });
         const emailSent = await sendEmail({
           to: user.email,
-          subject: params.title,
-          html: buildNotificationEmailHtml(params.title, params.body, params.actionUrl),
+          subject: rendered?.subject ?? params.title,
+          html: rendered?.html ?? buildNotificationEmailHtml(params.title, params.body, params.actionUrl),
         });
         await db
           .update(notifications)

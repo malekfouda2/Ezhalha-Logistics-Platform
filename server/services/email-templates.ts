@@ -254,11 +254,215 @@ export const DEFAULT_TEMPLATES: TemplateDefinition[] = [
 </body>
 </html>`,
   },
+  {
+    slug: "staff_invitation",
+    name: "Staff Invitation",
+    description: "Sent to internal staff (admin/operations) when invited to join the platform",
+    subject: "Invitation to join ezhalha",
+    availableVariables: ["full_name", "role_name", "department_name", "personal_message", "accept_url", "expires_date", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>You're Invited to ezhalha</h1>
+    </div>
+    <div class="content">
+      <p>Hello {{full_name}},</p>
+      <p>You were invited to join ezhalha as <strong>{{role_name}}</strong> in <strong>{{department_name}}</strong>.</p>
+      {{personal_message}}
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="{{accept_url}}" class="button">Accept Invitation</a>
+      </p>
+      <p>This invitation expires on {{expires_date}}.</p>
+      <p>Best regards,<br>The ezhalha Team</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "shipment_extra_fees",
+    name: "Shipment Extra Fees",
+    description: "Sent to clients when an extra weight/volume or extra cost fee is added to a shipment",
+    subject: "Extra fees added for shipment {{tracking_number}}",
+    availableVariables: ["client_name", "tracking_number", "fee_label", "amount_sar", "detail_line", "invoice_line", "app_url", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Shipment Extra Fees</h1>
+    </div>
+    <div class="content">
+      <p>Dear {{client_name}},</p>
+      <p>We added an extra fee to your shipment.</p>
+      <div class="details">
+        <h3>Fee Details</h3>
+        <p><strong>Shipment:</strong> {{tracking_number}}</p>
+        <p><strong>Fee Type:</strong> {{fee_label}}</p>
+        <p><strong>Amount:</strong> SAR {{amount_sar}}</p>
+        <p><strong>Details:</strong> {{detail_line}}</p>
+        {{invoice_line}}
+      </div>
+      <p>You can review and pay this invoice from your invoices page.</p>
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="{{app_url}}/client/invoices" class="button">Open Invoices Page</a>
+      </p>
+      <p>Best regards,<br>The ezhalha Team</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "operations_shipment_update",
+    name: "Operations Shipment Update",
+    description: "Sent to clients when operations posts an email update on their shipment",
+    subject: "Shipment update for {{tracking_number}}",
+    availableVariables: ["tracking_number", "message", "action_url", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Shipment Update</h1>
+    </div>
+    <div class="content">
+      <p>Hello,</p>
+      <div class="details">
+        <p>{{message}}</p>
+      </div>
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="{{action_url}}" class="button">Open Shipment</a>
+      </p>
+      <p style="color: #6B7280; font-size: 12px;">This update was sent by ezhalha Operations.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "abandoned_discount_offer",
+    name: "Abandoned Shipment - Discount Offer",
+    description: "Discount offer sent to clients who abandoned a shipment before paying",
+    subject: "Special offer for shipment {{tracking_number}}",
+    availableVariables: ["tracking_number", "message", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>A Special Offer For You</h1>
+    </div>
+    <div class="content">
+      <div class="details">
+        <p>{{message}}</p>
+      </div>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "abandoned_payment_reminder",
+    name: "Abandoned Shipment - Payment Reminder",
+    description: "Reminder sent to clients to resume payment for an abandoned shipment",
+    subject: "Reminder: complete shipment {{tracking_number}}",
+    availableVariables: ["tracking_number", "resume_url", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Complete Your Payment</h1>
+    </div>
+    <div class="content">
+      <p>Hello,</p>
+      <p>You can still complete payment for shipment <strong>{{tracking_number}}</strong>.</p>
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="{{resume_url}}" class="button">Resume Payment</a>
+      </p>
+      <p>Best regards,<br>The ezhalha Team</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "operation_notification",
+    name: "Operations Notification",
+    description: "Generic notification email sent to staff/clients for operational events (status changes, messages, assignments)",
+    subject: "{{title}}",
+    availableVariables: ["title", "body", "action_block", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{title}}</h1>
+    </div>
+    <div class="content">
+      <p>{{body}}</p>
+      {{action_block}}
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
 ];
 
 const HTML_SAFE_VARIABLES = new Set([
   "rejection_reason",
   "company_name",
+  "personal_message",
+  "invoice_line",
+  "detail_line",
+  "message",
+  "action_block",
+  "body",
 ]);
 
 function escapeHtml(str: string): string {
@@ -324,6 +528,30 @@ export async function seedEmailTemplates(): Promise<void> {
         isActive: true,
       });
       logInfo(`Seeded email template: ${template.slug}`);
+      continue;
+    }
+
+    // Refresh defaults for templates an admin has not customized yet
+    // (updatedByUserId is null), so structural/style changes to the
+    // built-in templates roll out without manual resets.
+    if (!existing.updatedByUserId) {
+      const availableVariables = JSON.stringify(template.availableVariables);
+      const needsUpdate =
+        existing.subject !== template.subject ||
+        existing.htmlBody !== template.htmlBody ||
+        existing.name !== template.name ||
+        existing.description !== template.description ||
+        existing.availableVariables !== availableVariables;
+      if (needsUpdate) {
+        await storage.updateEmailTemplate(existing.id, {
+          name: template.name,
+          description: template.description,
+          subject: template.subject,
+          htmlBody: template.htmlBody,
+          availableVariables,
+        });
+        logInfo(`Refreshed default email template: ${template.slug}`);
+      }
     }
   }
 }

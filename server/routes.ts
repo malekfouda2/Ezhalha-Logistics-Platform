@@ -59,6 +59,7 @@ import {
 } from "@shared/internal-users";
 import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
+import { getRenderedTemplate } from "./services/email-templates";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
 import type { CarrierAdapter, CreateShipmentRequest } from "./integrations/fedex";
 import { carrierService, getCarrierAdapter } from "./integrations/carriers";
@@ -3641,26 +3642,25 @@ async function sendStaffInvitationEmail(params: {
   const acceptUrl = buildInvitationAcceptUrl(params.token);
   const personalMessage = params.invitation.personalMessage?.trim();
 
+  const rendered = await getRenderedTemplate("staff_invitation", {
+    full_name: params.invitation.fullName,
+    role_name: params.role.name,
+    department_name: params.department.name,
+    personal_message: personalMessage ? `<p>${personalMessage}</p>` : "",
+    accept_url: acceptUrl,
+    expires_date: params.invitation.expiresAt.toLocaleDateString(),
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render staff_invitation template");
+    return false;
+  }
+
   return sendEmail({
     to: params.invitation.email,
-    subject: `Invitation to join ezhalha`,
-    html: `
-      <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#111827">
-        <h2 style="margin:0 0 12px">You're invited to ezhalha</h2>
-        <p style="margin:0 0 12px">Hello ${params.invitation.fullName},</p>
-        <p style="margin:0 0 12px">
-          You were invited to join ezhalha as <strong>${params.role.name}</strong>
-          in <strong>${params.department.name}</strong>.
-        </p>
-        ${personalMessage ? `<p style="margin:0 0 12px">${personalMessage}</p>` : ""}
-        <p style="margin:24px 0">
-          <a href="${acceptUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#ff5a1f;color:#ffffff;text-decoration:none;font-weight:600">
-            Accept invitation
-          </a>
-        </p>
-        <p style="margin:0;color:#6b7280">This invitation expires on ${params.invitation.expiresAt.toLocaleDateString()}.</p>
-      </div>
-    `,
+    subject: rendered.subject,
+    html: rendered.html,
   });
 }
 
@@ -5844,22 +5844,23 @@ export async function registerRoutes(
             deliveryMessage = "Email is not configured for this client yet. The update was still saved to the shipment timeline.";
           } else {
             const safeMessage = sanitizeHtml(parsed.message, { allowedTags: [], allowedAttributes: {} }).replace(/\n/g, "<br />");
-            const emailResults = await Promise.all(
-              recipientEmails.map((email) =>
-                sendEmail({
-                  to: email,
-                  subject: `Shipment update for ${shipment.trackingNumber}`,
-                  html: `
-                    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
-                      <p>Hello,</p>
-                      <p>${safeMessage}</p>
-                      <p><a href="${actionUrl}" style="color:#E8400C">Open shipment in Ezhalha</a></p>
-                      <p style="color:#6B7280;font-size:12px">This update was sent by Ezhalha Operations.</p>
-                    </div>
-                  `,
-                }),
-              ),
-            );
+            const rendered = await getRenderedTemplate("operations_shipment_update", {
+              tracking_number: shipment.trackingNumber,
+              message: safeMessage,
+              action_url: actionUrl,
+              year: new Date().getFullYear().toString(),
+            });
+            const emailResults = rendered
+              ? await Promise.all(
+                  recipientEmails.map((email) =>
+                    sendEmail({
+                      to: email,
+                      subject: rendered.subject,
+                      html: rendered.html,
+                    }),
+                  ),
+                )
+              : [];
 
             if (emailResults.some(Boolean)) {
               deliveryStatus = "sent";
@@ -7080,11 +7081,18 @@ export async function registerRoutes(
       let deliveryStatus = "queued";
 
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const sent = await sendEmail({
-          to: client.email,
-          subject: `Special offer for shipment ${shipment.trackingNumber}`,
-          html: message.replace(/\n/g, "<br>"),
+        const rendered = await getRenderedTemplate("abandoned_discount_offer", {
+          tracking_number: shipment.trackingNumber,
+          message: message.replace(/\n/g, "<br>"),
+          year: new Date().getFullYear().toString(),
         });
+        const sent = rendered
+          ? await sendEmail({
+              to: client.email,
+              subject: rendered.subject,
+              html: rendered.html,
+            })
+          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 
@@ -7160,11 +7168,18 @@ export async function registerRoutes(
       const resumeUrl = buildShipmentResumePaymentUrl(req, shipment.id);
       let deliveryStatus = "queued";
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const sent = await sendEmail({
-          to: client.email,
-          subject: `Reminder: complete shipment ${shipment.trackingNumber}`,
-          html: `You can still complete payment for shipment <strong>${shipment.trackingNumber}</strong>.<br><a href="${resumeUrl}">Resume payment</a>`,
+        const rendered = await getRenderedTemplate("abandoned_payment_reminder", {
+          tracking_number: shipment.trackingNumber,
+          resume_url: resumeUrl,
+          year: new Date().getFullYear().toString(),
         });
+        const sent = rendered
+          ? await sendEmail({
+              to: client.email,
+              subject: rendered.subject,
+              html: rendered.html,
+            })
+          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 

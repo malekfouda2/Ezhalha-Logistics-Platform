@@ -328,23 +328,26 @@ export async function sendShipmentExtraFeesNotification(params: {
     : "";
   const invoiceTextLine = params.invoiceNumber ? `Invoice: ${params.invoiceNumber}` : null;
 
+  const rendered = await getRenderedTemplate("shipment_extra_fees", {
+    client_name: params.clientName,
+    tracking_number: params.trackingNumber,
+    fee_label: feeLabel,
+    amount_sar: params.amountSar,
+    detail_line: detailLine,
+    invoice_line: invoiceLine,
+    app_url: appUrl,
+    year: new Date().getFullYear().toString(),
+  });
+
+  if (!rendered) {
+    logError("Failed to render shipment_extra_fees template");
+    return false;
+  }
+
   return sendEmail({
     to: params.email,
-    subject: `Extra fees added for shipment ${params.trackingNumber}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
-        <h2 style="margin-bottom: 12px;">Shipment Extra Fees Notice</h2>
-        <p>Dear ${params.clientName},</p>
-        <p>We added an extra fee to shipment <strong>${params.trackingNumber}</strong>.</p>
-        <p><strong>Fee Type:</strong> ${feeLabel}</p>
-        <p><strong>Amount:</strong> SAR ${params.amountSar}</p>
-        <p><strong>Details:</strong> ${detailLine}</p>
-        ${invoiceLine}
-        <p>You can review and pay this invoice from your invoices page.</p>
-        <p><a href="${appUrl}/client/invoices">Open Invoices Page</a></p>
-        <p style="margin-top: 24px;">Best regards,<br />ezhalha Logistics</p>
-      </div>
-    `,
+    subject: rendered.subject,
+    html: rendered.html,
     text: [
       `Shipment Extra Fees Notice`,
       ``,
