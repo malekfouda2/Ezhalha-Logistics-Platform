@@ -130,6 +130,9 @@ interface OperationShipmentSummary {
   specialHandling?: SpecialHandling | null;
   attentionFlags?: AttentionFlag[];
   attentionCount: number;
+  carrierStatusRepeatCount?: number;
+  duplicateStatus?: boolean;
+  statusChangedAt?: string | null;
   sender: OperationParty;
   recipient: OperationParty;
   serviceType?: string | null;
@@ -330,7 +333,7 @@ function OperationsSelect({
 
   return (
     <Select value={normalizedValue} onValueChange={(next) => onChange(next === OPS_SELECT_EMPTY_VALUE ? "" : next)}>
-      <SelectTrigger className={triggerClassName || "h-[34px] text-[12px] shadow-none"}>
+      <SelectTrigger className={triggerClassName || "!h-6 w-auto rounded-full px-2.5 py-0 text-[10px] font-semibold gap-1 shadow-none [&>svg]:h-3 [&>svg]:w-3 [&>svg]:opacity-60"}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -346,10 +349,11 @@ function OperationsSelect({
 }
 
 const operationsCss = `
-.ops-ref{--pr:#E8400C;--pr-lt:#FFF0EB;--pr-dk:#C93508;--pr-bd:#FFD5C9;--g25:#FCFCFD;--g50:#F9FAFB;--g100:#F3F4F6;--g200:#E5E7EB;--g300:#D1D5DB;--g400:#9CA3AF;--g500:#6B7280;--g700:#374151;--g800:#1F2937;--g900:#111827;--wh:#fff;--shadow:0 1px 2px rgba(15,23,42,.04);--green:#16A34A;--green-lt:#F0FDF4;--green-bd:#BBF7D0;--blue:#1D4ED8;--blue-lt:#EFF6FF;--blue-bd:#BFDBFE;--amber:#D97706;--amber-lt:#FFFBEB;--amber-bd:#FDE68A;--red:#B91C1C;--red-lt:#FEF2F2;--red-bd:#FECACA;--purple:#7C3AED;--purple-lt:#F5F3FF;--purple-bd:#DDD6FE;--r:8px;--rlg:12px;display:flex;flex-direction:column;height:100%;min-height:calc(100vh - 4rem);background:var(--g50);color:var(--g900);font-family:"DM Sans",ui-sans-serif,system-ui,sans-serif;overflow:hidden}
-.dark .ops-ref{--pr:#FF6A3D;--pr-lt:rgba(255,106,61,.14);--pr-dk:#FF5622;--pr-bd:rgba(255,106,61,.3);--g25:#121212;--g50:#18181B;--g100:#27272A;--g200:#3F3F46;--g300:#52525B;--g400:#A1A1AA;--g500:#C4C4CC;--g700:#E4E4E7;--g800:#F1F5F9;--g900:#FAFAFA;--wh:#111214;--shadow:0 1px 2px rgba(0,0,0,.24);--green:#4ADE80;--green-lt:rgba(74,222,128,.12);--green-bd:rgba(74,222,128,.28);--blue:#60A5FA;--blue-lt:rgba(96,165,250,.12);--blue-bd:rgba(96,165,250,.28);--amber:#FBBF24;--amber-lt:rgba(251,191,36,.12);--amber-bd:rgba(251,191,36,.28);--red:#F87171;--red-lt:rgba(248,113,113,.12);--red-bd:rgba(248,113,113,.28);--purple:#C084FC;--purple-lt:rgba(192,132,252,.12);--purple-bd:rgba(192,132,252,.28)}
+.ops-ref{--pr:hsl(var(--primary));--pr-lt:hsl(var(--primary) / .12);--pr-dk:color-mix(in srgb,hsl(var(--primary)) 86%,#000);--pr-bd:hsl(var(--primary) / .32);--g25:hsl(var(--background));--g50:hsl(var(--card));--g100:hsl(var(--muted));--g200:hsl(var(--border));--g300:hsl(var(--input));--g400:hsl(var(--muted-foreground) / .8);--g500:hsl(var(--muted-foreground));--g700:hsl(var(--foreground) / .8);--g800:hsl(var(--foreground) / .9);--g900:hsl(var(--foreground));--wh:hsl(var(--background));--shadow:0 1px 2px rgba(15,23,42,.04);--green:#16A34A;--green-lt:#F0FDF4;--green-bd:#BBF7D0;--blue:#1D4ED8;--blue-lt:#EFF6FF;--blue-bd:#BFDBFE;--amber:#D97706;--amber-lt:#FFFBEB;--amber-bd:#FDE68A;--red:#B91C1C;--red-lt:#FEF2F2;--red-bd:#FECACA;--purple:#7C3AED;--purple-lt:#F5F3FF;--purple-bd:#DDD6FE;--r:var(--radius);--rlg:calc(var(--radius) + 4px);display:flex;flex-direction:column;height:100%;min-height:calc(100vh - 4rem);background:var(--g50);color:var(--g900);font-family:inherit;overflow:hidden}
+.dark .ops-ref{--shadow:0 1px 2px rgba(0,0,0,.24);--green:#4ADE80;--green-lt:rgba(74,222,128,.12);--green-bd:rgba(74,222,128,.28);--blue:#60A5FA;--blue-lt:rgba(96,165,250,.12);--blue-bd:rgba(96,165,250,.28);--amber:#FBBF24;--amber-lt:rgba(251,191,36,.12);--amber-bd:rgba(251,191,36,.28);--red:#F87171;--red-lt:rgba(248,113,113,.12);--red-bd:rgba(248,113,113,.28);--purple:#C084FC;--purple-lt:rgba(192,132,252,.12);--purple-bd:rgba(192,132,252,.28)}
 .ops-ref *{box-sizing:border-box}
 .ops-ref button,.ops-ref input,.ops-ref select,.ops-ref textarea{font:inherit}
+.ops-ref button:focus-visible,.ops-ref a.btn:focus-visible{outline:2px solid hsl(var(--ring));outline-offset:1px;border-radius:var(--r)}
 .ops-topbar{background:var(--wh);border-bottom:1px solid var(--g200);padding:9px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0}
 .ops-title{font-size:15px;font-weight:800;color:var(--g900);line-height:1.2}
 .ops-sub{font-size:11px;color:var(--g400);margin-top:2px}
@@ -368,9 +372,10 @@ const operationsCss = `
 .lp-search input:focus,.field-input:focus,.field-select:focus,.field-textarea:focus,.note-input:focus,.filter-select:focus{border-color:var(--pr);box-shadow:0 0 0 2px var(--pr-lt)}
 .chip-row{display:flex;gap:6px;padding:7px 11px;border-bottom:1px solid var(--g200);overflow-x:auto}
 .chip-row::-webkit-scrollbar,.tab-bar::-webkit-scrollbar{height:0}
-.chip{padding:4px 9px;border-radius:20px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid var(--g200);color:var(--g500);background:var(--wh);transition:.15s;line-height:1.2}
+.chip{padding:3px 8px;border-radius:9999px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid var(--g200);color:var(--g500);background:var(--wh);transition:.15s;line-height:1.2}
 .chip.active,.chip:hover{background:var(--pr-lt);color:var(--pr);border-color:var(--pr)}
-.filter-bar{padding:7px 11px;border-bottom:1px solid var(--g200);display:flex;flex-wrap:wrap;gap:6px;background:var(--g50)}
+.filter-bar{padding:6px 11px;border-bottom:1px solid var(--g200);display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--g50)}
+.filter-bar .chip{height:24px;padding:0 11px;display:inline-flex;align-items:center}
 .filter-select{height:27px;border:1px solid var(--g200);border-radius:20px;padding:0 26px 0 10px;font-size:10px;font-weight:600;background:var(--wh);color:var(--g700);outline:none;max-width:135px}
 .ship-list{flex:1;overflow-y:auto}
 .si{padding:10px 11px;border-bottom:1px solid var(--g100);cursor:pointer;transition:background .15s;text-align:left;background:transparent;width:100%;min-width:0}
@@ -401,13 +406,14 @@ const operationsCss = `
 .b-gray{background:var(--g100);color:var(--g500)}
 .b-purple{background:var(--purple-lt);color:var(--purple);border:1px solid var(--purple-bd)}
 .b-pr{background:var(--pr-lt);color:var(--pr);border:1px solid var(--pr-bd)}
-.btn{border:none;border-radius:var(--r);padding:7px 12px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:.15s;text-decoration:none;line-height:1.2;min-width:0}
-.btn svg{width:13px;height:13px}
-.btn:disabled{opacity:.55;cursor:not-allowed}
-.btn-sm{padding:4px 9px;font-size:11px}
-.btn-xs{padding:3px 7px;font-size:10px}
-.btn-pr{background:var(--pr);color:#fff}.btn-pr:hover{background:var(--pr-dk)}
-.btn-gh{background:var(--wh);border:1px solid var(--g200);color:var(--g700)}.btn-gh:hover{background:var(--g50)}
+.btn{border:none;border-radius:var(--r);padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:.15s;text-decoration:none;line-height:1.2;min-width:0;box-shadow:var(--shadow)}
+.btn svg{width:14px;height:14px}
+.btn:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+.btn:active:not(:disabled){transform:translateY(.5px)}
+.btn-sm{padding:5px 10px;font-size:11px}
+.btn-xs{padding:3px 8px;font-size:10px;box-shadow:none}
+.btn-pr{background:var(--pr);color:hsl(var(--primary-foreground))}.btn-pr:hover{background:var(--pr-dk)}
+.btn-gh{background:var(--wh);border:1px solid var(--g200);color:var(--g700)}.btn-gh:hover{background:var(--g100)}
 .btn-outline{background:transparent;border:1px solid var(--g200);color:var(--g700)}.btn-outline:hover{background:var(--g50)}
 .btn-green{background:var(--green-lt);color:var(--green);border:1px solid var(--green-bd)}
 .btn-blue{background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd)}
@@ -809,6 +815,7 @@ function OperationsHubContent() {
         if (expressTab !== "all" && tab !== expressTab) return false;
         if (filters.carrier && shipment.carrierName !== filters.carrier) return false;
         if (filters.type && !getMethod(shipment).includes(filters.type)) return false;
+        if (filters.duplicate && !shipment.duplicateStatus) return false;
       }
       if (view === "attention") {
         const flag = shipment.attentionFlags?.[0];
@@ -1540,7 +1547,13 @@ function ListHeader(props: {
           <div className="filter-bar">
             <PillSelect value={props.filters.carrier || ""} onChange={(value) => props.setFilter("carrier", value)} placeholder="Carrier" options={carriers} />
             <PillSelect value={props.filters.type || ""} onChange={(value) => props.setFilter("type", value)} placeholder="Type" options={["Import", "Export"]} />
-            <button className="chip" onClick={() => ["carrier", "type"].forEach((key) => props.setFilter(key, ""))}>Clear</button>
+            <button
+              className={`chip ${props.filters.duplicate ? "active" : ""}`}
+              onClick={() => props.setFilter("duplicate", props.filters.duplicate ? "" : "1")}
+            >
+              Duplicate Status
+            </button>
+            <button className="chip" onClick={() => ["carrier", "type", "duplicate"].forEach((key) => props.setFilter(key, ""))}>Clear</button>
           </div>
         </>
       )}

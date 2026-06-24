@@ -62,6 +62,16 @@ export const OPERATION_PERMISSION_NAMES = [
 
 const TERMINAL_SHIPMENT_STATUSES = new Set(["delivered", "cancelled"]);
 const OPERATION_ACTIVE_PAYMENT_STATUSES = new Set(["paid", "unpaid"]);
+// Express shipment whose internal status has not changed for this long is
+// auto-escalated to the Needs Attention queue.
+const EXPRESS_STALE_STATUS_ISSUE_TYPE = "express_status_stale";
+const EXPRESS_STALE_STATUS_MS = 24 * 60 * 60 * 1000;
+// Express shipment is flagged "duplicate status" once the carrier has reported
+// the identical tracking status on at least this many consecutive refreshes.
+// Refresh runs every ~10 min, so 18 repeats ≈ 3 hours of an unchanging carrier
+// status — long enough to skip normal in-transit holds, short of the 24h stale
+// escalation.
+const DUPLICATE_STATUS_MIN_REPEATS = 18;
 const APP_BASE_URL = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
 const DDP_PLANNING_TASK_KEYS = ["ddp_review_order", "ddp_contact_supplier", "ddp_schedule_pickup"] as const;
 const DDP_WAREHOUSE_TASK_KEYS = ["ddp_received_warehouse", "ddp_quality_check", "ddp_photos_uploaded"] as const;
@@ -129,6 +139,9 @@ export type OperationShipmentSummary = {
   specialHandling: (ShipmentSpecialHandling & { assignedToName: string | null }) | null;
   attentionFlags: ShipmentAttentionFlag[];
   attentionCount: number;
+  carrierStatusRepeatCount: number;
+  duplicateStatus: boolean;
+  statusChangedAt: Date | null;
   sender: {
     name: string;
     city: string;
@@ -865,7 +878,10 @@ export async function ensureOperationAssignmentForShipment(params: {
     return existingAssignment;
   }
 
-  const assignee = await pickLeastLoadedOperationsUser(kind);
+  // Auto-assignment balances every new shipment (express or DDP) on each
+  // agent's active DDP-shipment load, so the agent carrying the fewest DDP
+  // shipments receives the next one regardless of its type.
+  const assignee = await pickLeastLoadedOperationsUser(OperationShipmentKind.DDP);
   if (!assignee) {
     await createAttentionFlag({
       shipmentId: shipment.id,
@@ -945,6 +961,23 @@ export async function recordShipmentStatusChange(params: {
   const shipment = params.shipment;
   const previousStatus = params.previousStatus || shipment.status;
   const nextStatus = params.nextStatus;
+
+  if (previousStatus !== nextStatus) {
+    // Stamp the status-change time (drives the 24h express stale escalation)
+    // and clear any open stale-status flag now that the shipment has moved.
+    await db
+      .update(shipments)
+      .set({ statusChangedAt: new Date() })
+      .where(eq(shipments.id, shipment.id));
+    await db
+      .update(shipmentAttentionFlags)
+      .set({ status: OperationAttentionStatus.RESOLVED, resolvedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(shipmentAttentionFlags.shipmentId, shipment.id),
+        eq(shipmentAttentionFlags.issueType, EXPRESS_STALE_STATUS_ISSUE_TYPE),
+        eq(shipmentAttentionFlags.status, OperationAttentionStatus.OPEN),
+      ));
+  }
 
   await createOperationEvent({
     shipmentId: shipment.id,
@@ -1208,6 +1241,11 @@ async function buildShipmentSummary(
       : null,
     attentionFlags: openAttention,
     attentionCount: openAttention.length,
+    carrierStatusRepeatCount: shipment.carrierStatusRepeatCount ?? 0,
+    duplicateStatus:
+      shipmentKind === OperationShipmentKind.EXPRESS &&
+      (shipment.carrierStatusRepeatCount ?? 0) >= DUPLICATE_STATUS_MIN_REPEATS,
+    statusChangedAt: shipment.statusChangedAt ?? null,
     createdAt: shipment.createdAt,
     updatedAt: shipment.updatedAt,
     sender: {
@@ -1384,6 +1422,11 @@ async function buildShipmentListSummaries(
       specialHandling,
       attentionFlags,
       attentionCount: attentionFlags.length,
+      carrierStatusRepeatCount: shipment.carrierStatusRepeatCount ?? 0,
+      duplicateStatus:
+        shipmentKind === OperationShipmentKind.EXPRESS &&
+        (shipment.carrierStatusRepeatCount ?? 0) >= DUPLICATE_STATUS_MIN_REPEATS,
+      statusChangedAt: shipment.statusChangedAt ?? null,
       sender: {
         name: shipment.senderName,
         city: shipment.senderCity,
@@ -2085,6 +2128,45 @@ export async function detectOperationAttentionFlags(): Promise<number> {
         details: "Shipment has not received a status update for more than 36 hours.",
       });
       if (flag) created++;
+    }
+
+    // Express shipments whose internal status has been frozen for >24h are
+    // escalated to Needs Attention and the admins + assigned agents are paged.
+    if (
+      getOperationShipmentKind(shipment) === OperationShipmentKind.EXPRESS &&
+      !TERMINAL_SHIPMENT_STATUSES.has(shipment.status)
+    ) {
+      const statusTime = shipment.statusChangedAt ?? shipment.updatedAt;
+      if (statusTime && Date.now() - new Date(statusTime).getTime() > EXPRESS_STALE_STATUS_MS) {
+        const flag = await createAttentionFlag({
+          shipmentId: shipment.id,
+          issueType: EXPRESS_STALE_STATUS_ISSUE_TYPE,
+          severity: "high",
+          details: `Express status "${shipment.status}" has not changed in over 24 hours.`,
+          metadata: { status: shipment.status, statusChangedAt: statusTime },
+        });
+        if (flag) {
+          created++;
+          const [assignments, admins] = await Promise.all([
+            getActiveAssignmentsForShipment(shipment.id),
+            storage.getUsersByUserType("admin"),
+          ]);
+          await notifyUsers(
+            [
+              ...assignments.map((assignment) => assignment.assignedToUserId),
+              ...admins.filter((admin) => admin.isActive).map((admin) => admin.id),
+            ],
+            {
+              title: "Express shipment stuck",
+              body: `${shipment.trackingNumber} has been "${shipment.status}" for over 24h and was moved to Needs Attention.`,
+              type: "operations_attention",
+              entityType: "shipment",
+              entityId: shipment.id,
+              actionUrl: operationShipmentUrl(shipment.id),
+            },
+          );
+        }
+      }
     }
   }
 

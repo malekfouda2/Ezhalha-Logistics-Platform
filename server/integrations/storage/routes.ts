@@ -1,9 +1,20 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { LocalStorageService } from "./localStorage";
+import { getObjectAclPolicy, ObjectPermission } from "./objectAcl";
 import { createHmac } from "crypto";
 import path from "path";
 import { getIntegrationEnv } from "../../services/integration-runtime";
+
+// Object/upload routes live outside the `/api/` prefix, so they are not covered
+// by the global API limiter — guard file serving against scraping/DoS here.
+const fileServeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function isObjectStorageAvailable(): boolean {
   return !!(getIntegrationEnv("PRIVATE_OBJECT_DIR") && getIntegrationEnv("PUBLIC_OBJECT_SEARCH_PATHS"));
@@ -87,6 +98,18 @@ function registerCloudRoutes(app: Express): void {
       }
       const { name, size, contentType } = uploadRequest;
 
+      const ext = path.extname(name).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return res.status(400).json({
+          error: `File type '${ext}' is not allowed. Allowed types: ${Array.from(ALLOWED_EXTENSIONS).join(", ")}`,
+        });
+      }
+      if (size && size > MAX_UPLOAD_BYTES) {
+        return res.status(400).json({
+          error: `File size exceeds maximum allowed size of ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB`,
+        });
+      }
+
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
       const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
@@ -104,9 +127,33 @@ function registerCloudRoutes(app: Express): void {
   app.post("/api/uploads/request-url", requireAuthenticated, handleCloudUploadUrlRequest);
   app.post("/api/public/uploads/request-url", handleCloudUploadUrlRequest);
 
-  app.get("/objects/:objectPath(*)", async (req, res) => {
+  app.get("/objects/:objectPath(*)", fileServeLimiter, async (req, res) => {
     try {
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
+
+      // Access control: public objects are served freely; everything else
+      // requires an authenticated session. When the object carries an ACL
+      // policy we enforce it, otherwise authenticated access is allowed for
+      // legacy objects uploaded before ACL metadata existed.
+      const aclPolicy = await getObjectAclPolicy(objectFile);
+      const isPublicRead = aclPolicy?.visibility === "public";
+      if (!isPublicRead) {
+        const userId = req.session?.userId;
+        if (!userId) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+        if (aclPolicy) {
+          const allowed = await objectStorageService.canAccessObjectEntity({
+            userId,
+            objectFile,
+            requestedPermission: ObjectPermission.READ,
+          });
+          if (!allowed) {
+            return res.status(403).json({ error: "Forbidden" });
+          }
+        }
+      }
+
       await objectStorageService.downloadObject(objectFile, res);
     } catch (error) {
       console.error("Error serving object:", error);
@@ -135,6 +182,10 @@ const MIME_MAP: Record<string, string> = {
 };
 
 const ALLOWED_EXTENSIONS = new Set(Object.keys(MIME_MAP));
+// Advisory cap enforced at upload-URL request time for the cloud path (the
+// actual PUT goes straight to the bucket, so this blocks oversized/typed
+// requests up front rather than guaranteeing a hard server-side limit).
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 function getMimeType(fileName: string): string {
   const ext = path.extname(fileName).toLowerCase();
@@ -236,7 +287,7 @@ function registerLocalRoutes(app: Express): void {
     }
   });
 
-  app.get("/uploads/:fileName", requireAuthenticated, async (req, res) => {
+  app.get("/uploads/:fileName", fileServeLimiter, requireAuthenticated, async (req, res) => {
     try {
       const result = await localStorageService.getFile(req.params.fileName);
       if (!result) {

@@ -5161,6 +5161,9 @@ export async function registerRoutes(
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "data:", "blob:", "https:"],
+          // NOTE: 'unsafe-inline' is retained pending CSP hardening (M3).
+          // Tightening this needs the Tap payment checkout verified against the
+          // strict policy, which requires a staging/prod browser test first.
           scriptSrc: ["'self'", "'unsafe-inline'", "https://tap-sdks.b-cdn.net"],
           connectSrc: ["'self'", "https:"],
           frameSrc: ["'self'", "https://*.tap.company", "https://tap-sdks.b-cdn.net"],
@@ -6430,9 +6433,15 @@ export async function registerRoutes(
         lastLoginAt: new Date(),
         updatedAt: new Date(),
       });
-      
+
+      // Regenerate the session on login to prevent session fixation: any
+      // pre-authentication session id the client presented is discarded and a
+      // fresh one is issued before the user is bound to it.
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
       req.session.userId = user.id;
-      
+
       // Log successful login
       await logAudit(user.id, "login", "user", user.id, `User ${user.username} logged in`, req.ip);
       

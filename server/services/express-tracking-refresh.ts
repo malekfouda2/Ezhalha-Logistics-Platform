@@ -125,22 +125,33 @@ export async function refreshExpressCarrierStatuses(): Promise<number> {
         const nextStatus = mappedStatus ?? previousStatus;
         const previousCarrierStatus = shipment.carrierStatus;
 
-        if (
-          nextStatus !== previousStatus ||
-          tracking.status !== previousCarrierStatus ||
-          (tracking.estimatedDelivery && `${tracking.estimatedDelivery}` !== `${shipment.estimatedDelivery}`) ||
-          (tracking.actualDelivery && `${tracking.actualDelivery}` !== `${shipment.actualDelivery}`)
-        ) {
+        const statusChanged = nextStatus !== previousStatus;
+        const carrierStatusChanged = tracking.status !== previousCarrierStatus;
+        const estimatedChanged = !!(tracking.estimatedDelivery && `${tracking.estimatedDelivery}` !== `${shipment.estimatedDelivery}`);
+        const actualChanged = !!(tracking.actualDelivery && `${tracking.actualDelivery}` !== `${shipment.actualDelivery}`);
+
+        // Count how many consecutive refreshes returned the identical carrier
+        // status. Reset to 0 the moment the carrier reports something new.
+        const previousRepeatCount = shipment.carrierStatusRepeatCount ?? 0;
+        const nextRepeatCount = carrierStatusChanged ? 0 : previousRepeatCount + 1;
+
+        const meaningfulChange = statusChanged || carrierStatusChanged || estimatedChanged || actualChanged;
+
+        if (meaningfulChange || nextRepeatCount !== previousRepeatCount) {
           const updated = await storage.updateShipment(shipment.id, {
-            status: nextStatus,
+            ...(statusChanged ? { status: nextStatus } : {}),
             carrierStatus: tracking.status,
+            carrierStatusRepeatCount: nextRepeatCount,
             estimatedDelivery: tracking.estimatedDelivery || shipment.estimatedDelivery,
             actualDelivery: tracking.actualDelivery || shipment.actualDelivery,
             carrierLastAttemptAt: new Date(),
             updatedAt: new Date(),
           });
 
-          if (updated) {
+          // recordShipmentStatusChange owns statusChangedAt + stale-flag
+          // resolution; only call it on a real status/carrier movement, not on
+          // a pure repeat-count bump.
+          if (updated && meaningfulChange) {
             await recordShipmentStatusChange({
               shipment: updated,
               previousStatus,

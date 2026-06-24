@@ -595,9 +595,15 @@ export const shipments = pgTable("shipments", {
   carrierPaymentNote: text("carrier_payment_note"),
   carrierPayoutBatchId: varchar("carrier_payout_batch_id"),
   carrierStatus: text("carrier_status").default("pending"),
+  // Number of consecutive carrier tracking refreshes that returned the exact
+  // same carrier status (used to flag "duplicate status" express shipments).
+  carrierStatusRepeatCount: integer("carrier_status_repeat_count").notNull().default(0),
   carrierErrorCode: text("carrier_error_code"),
   carrierErrorMessage: text("carrier_error_message"),
   carrierLastAttemptAt: timestamp("carrier_last_attempt_at"),
+  // When the internal shipment status last changed (drives the 24h express
+  // stale-status escalation; refreshed only on real status transitions).
+  statusChangedAt: timestamp("status_changed_at"),
   carrierAttempts: integer("carrier_attempts").default(0),
   carrierLabelBase64: text("carrier_label_base64"),
   carrierLabelMimeType: text("carrier_label_mime_type").default("application/pdf"),
