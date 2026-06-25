@@ -11346,6 +11346,50 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/users/:id", requireAdminPermission("users", "delete"), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user || !["admin", "operations"].includes(user.userType)) {
+        return res.status(404).json({ error: "Internal user not found" });
+      }
+
+      if (user.id === req.session.userId) {
+        return res.status(400).json({ error: "You cannot delete your own account." });
+      }
+
+      // Never allow removing the last remaining active admin (avoids lockout).
+      if (user.userType === "admin") {
+        const admins = await storage.getUsersByUserType("admin");
+        const otherActiveAdmins = admins.filter((candidate) => candidate.isActive && candidate.id !== user.id);
+        if (otherActiveAdmins.length === 0) {
+          return res.status(400).json({ error: "Cannot delete the last active admin account." });
+        }
+      }
+
+      const activeAssignments = await storage.countActiveAssignmentsForUser(user.id);
+      if (activeAssignments > 0) {
+        return res.status(409).json({
+          error: `This user has ${activeAssignments} active shipment assignment(s). Reassign them before deleting.`,
+        });
+      }
+
+      await storage.deleteUser(user.id);
+      await logAudit(
+        req.session.userId,
+        "delete_internal_user",
+        "user",
+        user.id,
+        `Deleted internal user ${getUserDisplayName(user)}`,
+        req.ip,
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Error deleting internal user", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.patch("/api/admin/users/:id/status", requireAdminPermission("users", "update"), async (req, res) => {
     try {
       const parsed = z.object({ isActive: z.boolean() }).safeParse(req.body || {});

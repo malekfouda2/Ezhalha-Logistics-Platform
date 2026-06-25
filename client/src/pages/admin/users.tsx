@@ -15,6 +15,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -512,6 +522,7 @@ export default function AdminUsers() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [editUserModalOpen, setEditUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<StaffUserRow | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [viewUser, setViewUser] = useState<StaffUserRow | null>(null);
 
   const [departmentForm, setDepartmentForm] = useState({
@@ -744,6 +755,21 @@ export default function AdminUsers() {
       toast({ title: "User updated" });
     },
     onError: (error: Error) => toast({ title: "Could not update user", description: error.message, variant: "destructive" }),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/users/${userId}`);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      invalidateUsersArea();
+      setDeleteConfirmOpen(false);
+      setEditUserModalOpen(false);
+      setEditingUser(null);
+      toast({ title: "User deleted" });
+    },
+    onError: (error: Error) => toast({ title: "Could not delete user", description: error.message, variant: "destructive" }),
   });
 
   const staffUsers = staffUsersQuery.data || [];
@@ -1837,12 +1863,43 @@ export default function AdminUsers() {
                     >
                       {userForm.status === "active" ? "Deactivate" : "Activate"}
                     </Button>
-                    <Button variant="outline" className="border-rose-200 text-rose-600 dark:border-rose-500/30 dark:text-rose-200" disabled>
+                    <Button
+                      variant="outline"
+                      className="border-rose-200 text-rose-600 dark:border-rose-500/30 dark:text-rose-200"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                      disabled={deleteUserMutation.isPending}
+                    >
                       Delete
                     </Button>
                   </div>
                 </div>
               </div>
+
+              <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this user?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes{" "}
+                      <strong>{`${userForm.firstName} ${userForm.lastName}`.trim() || userForm.email || "this user"}</strong>{" "}
+                      and their roles. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={deleteUserMutation.isPending}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-rose-600 text-white hover:bg-rose-700"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (userForm.id) deleteUserMutation.mutate(userForm.id);
+                      }}
+                      disabled={deleteUserMutation.isPending}
+                    >
+                      {deleteUserMutation.isPending ? "Deleting..." : "Delete user"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             <DialogFooter className="border-t border-border px-7 py-4">
               <Button variant="outline" onClick={() => { setEditUserModalOpen(false); setEditingUser(null); }}>Cancel</Button>

@@ -94,6 +94,9 @@ import {
   permissions,
   userRoles,
   rolePermissions,
+  operationProfiles,
+  shipmentAssignments,
+  OperationAssignmentStatus,
   accountManagerAssignments,
   accountManagerClientChangeRequests,
   integrationLogs,
@@ -140,6 +143,8 @@ export interface IStorage {
   getUsersByClientAccount(clientAccountId: string): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+  deleteUser(id: string): Promise<void>;
+  countActiveAssignmentsForUser(userId: string): Promise<number>;
 
   // Client Accounts
   getClientAccounts(): Promise<ClientAccount[]>;
@@ -538,6 +543,25 @@ export class DatabaseStorage implements IStorage {
   async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
     const [user] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
     return user || undefined;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    // Remove dependent rows that key off the user before deleting the record.
+    await db.delete(userRoles).where(eq(userRoles.userId, id));
+    await db.delete(clientUserPermissions).where(eq(clientUserPermissions.userId, id));
+    await db.delete(operationProfiles).where(eq(operationProfiles.userId, id));
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async countActiveAssignmentsForUser(userId: string): Promise<number> {
+    const rows = await db
+      .select({ id: shipmentAssignments.id })
+      .from(shipmentAssignments)
+      .where(and(
+        eq(shipmentAssignments.assignedToUserId, userId),
+        eq(shipmentAssignments.status, OperationAssignmentStatus.ACTIVE),
+      ));
+    return rows.length;
   }
 
   // Client Accounts
