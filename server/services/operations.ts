@@ -74,7 +74,12 @@ const EXPRESS_STALE_STATUS_MS = 24 * 60 * 60 * 1000;
 const DUPLICATE_STATUS_MIN_REPEATS = 18;
 const APP_BASE_URL = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
 const DDP_PLANNING_TASK_KEYS = ["ddp_review_order", "ddp_contact_supplier", "ddp_schedule_pickup"] as const;
-const DDP_WAREHOUSE_TASK_KEYS = ["ddp_received_warehouse", "ddp_quality_check", "ddp_photos_uploaded"] as const;
+const DDP_WAREHOUSE_TASK_KEYS = [
+  "ddp_received_warehouse",
+  "ddp_quality_check",
+  "ddp_photos_uploaded",
+  "ddp_manual_tracking_number",
+] as const;
 const DDP_SHIPPING_TASK_KEYS = [
   "ddp_origin_warehouse_received",
   "ddp_origin_customs_cleared",
@@ -350,6 +355,19 @@ function ensureWarehouseCheckpointPayload(task: ShipmentOperationTask, tasks: Sh
     if (photos.length === 0) {
       throw new OperationInputError("Upload at least one warehouse condition photo before completing this checkpoint.");
     }
+    return;
+  }
+
+  if (task.taskKey === "ddp_manual_tracking_number") {
+    if (!isTaskCompleted(getTaskByKey(tasks, "ddp_photos_uploaded"))) {
+      throw new OperationInputError("Complete the warehouse photo checkpoint first.");
+    }
+
+    const carrierTrackingNumber =
+      typeof metadata.carrierTrackingNumber === "string" ? metadata.carrierTrackingNumber.trim() : "";
+    if (!carrierTrackingNumber) {
+      throw new OperationInputError("Manual tracking number is required before completing this checkpoint.");
+    }
   }
 }
 
@@ -589,6 +607,7 @@ function getDefaultTasksForShipment(shipment: Shipment): Array<{
       { taskKey: "ddp_received_warehouse", stageKey: "warehouse", title: "Shipment received at warehouse", description: "Log receipt date and pieces" },
       { taskKey: "ddp_quality_check", stageKey: "warehouse", title: "QC completed", description: "Packaging, quantity, damage, documents" },
       { taskKey: "ddp_photos_uploaded", stageKey: "warehouse", title: "Photos uploaded", description: "Warehouse condition photos" },
+      { taskKey: "ddp_manual_tracking_number", stageKey: "warehouse", title: "Add manual tracking number", description: "Save the external tracking number for DDP follow-up" },
       { taskKey: "ddp_actual_weight", stageKey: "billing", title: "Enter weight & invoice", description: "Review measured quantity and generate the invoice" },
       { taskKey: "ddp_payment_followup", stageKey: "billing", title: "Confirm payment status" },
       { taskKey: "ddp_origin_warehouse_received", stageKey: "shipping", title: "Received at origin warehouse" },
@@ -1712,6 +1731,24 @@ export async function completeOperationTask(params: {
     .returning();
 
   if (task) {
+    if (task.taskKey === "ddp_manual_tracking_number") {
+      const carrierTrackingNumber =
+        typeof metadata.carrierTrackingNumber === "string" ? metadata.carrierTrackingNumber.trim() : "";
+
+      if (carrierTrackingNumber) {
+        await storage.updateShipment(params.shipmentId, { carrierTrackingNumber });
+        await createOperationEvent({
+          shipmentId: params.shipmentId,
+          actorUserId: params.actorUser.id,
+          eventType: "manual_tracking_number_saved",
+          title: "Manual tracking number saved",
+          description: carrierTrackingNumber,
+          audience: OperationEventAudience.INTERNAL,
+          metadata: { carrierTrackingNumber },
+        });
+      }
+    }
+
     await createOperationEvent({
       shipmentId: params.shipmentId,
       actorUserId: params.actorUser.id,

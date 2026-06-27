@@ -530,10 +530,12 @@ describe("Operations Hub", () => {
     const receiptTask = detailRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_received_warehouse");
     const qcTask = detailRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_quality_check");
     const photosTask = detailRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_photos_uploaded");
+    const manualTrackingTask = detailRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_manual_tracking_number");
 
     expect(receiptTask).toBeTruthy();
     expect(qcTask).toBeTruthy();
     expect(photosTask).toBeTruthy();
+    expect(manualTrackingTask).toBeTruthy();
 
     for (const task of planningTasks) {
       const response = await withCookies(
@@ -591,6 +593,16 @@ describe("Operations Hub", () => {
     );
     expect(blockedAdvanceRes.status).toBe(400);
 
+    const blockedManualTrackingRes = await withCookies(
+      request.post(`/api/operations/shipments/${shipment.id}/tasks/${manualTrackingTask.id}/complete`).send({
+        metadata: {
+          carrierTrackingNumber: "DDP-AE-SA-0001",
+        },
+      }),
+      adminCookies,
+    );
+    expect(blockedManualTrackingRes.status).toBe(400);
+
     const photosRes = await withCookies(
       request.post(`/api/operations/shipments/${shipment.id}/tasks/${photosTask.id}/complete`).send({
         metadata: {
@@ -601,6 +613,28 @@ describe("Operations Hub", () => {
       adminCookies,
     );
     expect(photosRes.status).toBe(200);
+
+    const blockedAdvanceWithoutTrackingRes = await withCookies(
+      request.patch(`/api/operations/shipments/${shipment.id}/status`).send({
+        status: "awaiting_payment",
+        notifyClient: true,
+      }),
+      adminCookies,
+    );
+    expect(blockedAdvanceWithoutTrackingRes.status).toBe(400);
+
+    const manualTrackingRes = await withCookies(
+      request.post(`/api/operations/shipments/${shipment.id}/tasks/${manualTrackingTask.id}/complete`).send({
+        metadata: {
+          carrierTrackingNumber: "DDP-AE-SA-0001",
+        },
+      }),
+      adminCookies,
+    );
+    expect(manualTrackingRes.status).toBe(200);
+
+    const trackedShipment = await storage.getShipment(shipment.id);
+    expect(trackedShipment?.carrierTrackingNumber).toBe("DDP-AE-SA-0001");
 
     const advanceRes = await withCookies(
       request.patch(`/api/operations/shipments/${shipment.id}/status`).send({
@@ -771,11 +805,13 @@ describe("Operations Hub", () => {
       receipt: afterPlanningRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_received_warehouse"),
       qc: afterPlanningRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_quality_check"),
       photos: afterPlanningRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_photos_uploaded"),
+      manualTracking: afterPlanningRes.body.operationTasks.find((task: any) => task.taskKey === "ddp_manual_tracking_number"),
     };
 
     expect(warehouseTasks.receipt).toBeTruthy();
     expect(warehouseTasks.qc).toBeTruthy();
     expect(warehouseTasks.photos).toBeTruthy();
+    expect(warehouseTasks.manualTracking).toBeTruthy();
 
     expect(
       (
@@ -822,6 +858,34 @@ describe("Operations Hub", () => {
         )
       ).status,
     ).toBe(200);
+
+    expect(
+      (
+        await withCookies(
+          request.patch(`/api/operations/shipments/${shipment.id}/status`).send({
+            status: "awaiting_payment",
+            notifyClient: true,
+          }),
+          adminCookies,
+        )
+      ).status,
+    ).toBe(400);
+
+    expect(
+      (
+        await withCookies(
+          request.post(`/api/operations/shipments/${shipment.id}/tasks/${warehouseTasks.manualTracking.id}/complete`).send({
+            metadata: {
+              carrierTrackingNumber: "DDP-STAGE-GATING-001",
+            },
+          }),
+          adminCookies,
+        )
+      ).status,
+    ).toBe(200);
+
+    const trackedShipment = await storage.getShipment(shipment.id);
+    expect(trackedShipment?.carrierTrackingNumber).toBe("DDP-STAGE-GATING-001");
 
     const afterWarehouseRes = await withCookies(request.get(`/api/operations/shipments/${shipment.id}`), adminCookies);
     expect(afterWarehouseRes.status).toBe(200);

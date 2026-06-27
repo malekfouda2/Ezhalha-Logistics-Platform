@@ -1917,6 +1917,7 @@ function D2DWarehouseStage({
   const receiptTask = findTask(shipment, "ddp_received_warehouse");
   const qcTask = findTask(shipment, "ddp_quality_check");
   const photosTask = findTask(shipment, "ddp_photos_uploaded");
+  const manualTrackingTask = findTask(shipment, "ddp_manual_tracking_number");
 
   const receiptMetadata = parseTaskMetadata<{ receiptDate?: string; receivedPieces?: number; receiptNotes?: string }>(receiptTask);
   const qcMetadata = parseTaskMetadata<{
@@ -1927,6 +1928,7 @@ function D2DWarehouseStage({
     qcNotes?: string;
   }>(qcTask);
   const photosMetadata = parseTaskMetadata<{ photos?: UploadedAsset[]; photoNotes?: string }>(photosTask);
+  const manualTrackingMetadata = parseTaskMetadata<{ carrierTrackingNumber?: string }>(manualTrackingTask);
 
   const [receiptDate, setReceiptDate] = useState(receiptMetadata.receiptDate || "");
   const [receivedPieces, setReceivedPieces] = useState(receiptMetadata.receivedPieces ? String(receiptMetadata.receivedPieces) : "");
@@ -1938,6 +1940,9 @@ function D2DWarehouseStage({
   const [qcNotes, setQcNotes] = useState(qcMetadata.qcNotes || "");
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedAsset[]>(Array.isArray(photosMetadata.photos) ? photosMetadata.photos : []);
   const [photoNotes, setPhotoNotes] = useState(photosMetadata.photoNotes || "");
+  const [manualTrackingNumber, setManualTrackingNumber] = useState(
+    manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "",
+  );
 
   useEffect(() => {
     setReceiptDate(receiptMetadata.receiptDate || "");
@@ -1957,6 +1962,10 @@ function D2DWarehouseStage({
     setUploadedPhotos(Array.isArray(photosMetadata.photos) ? photosMetadata.photos : []);
     setPhotoNotes(photosMetadata.photoNotes || "");
   }, [photosTask?.id, photosTask?.metadata]);
+
+  useEffect(() => {
+    setManualTrackingNumber(manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "");
+  }, [manualTrackingTask?.id, manualTrackingTask?.metadata, shipment.carrierTrackingNumber]);
 
   const upload = useUpload({
     onSuccess: (response) => {
@@ -1979,10 +1988,12 @@ function D2DWarehouseStage({
   const receiptDone = taskComplete(receiptTask);
   const qcDone = taskComplete(qcTask);
   const photosDone = taskComplete(photosTask);
+  const manualTrackingDone = taskComplete(manualTrackingTask);
   const canCompleteReceipt = !!receiptTask && receiptDate.trim().length > 0 && Number(receivedPieces) > 0;
   const canCompleteQc = !!qcTask && receiptDone && [packagingStatus, quantityStatus, damageStatus, documentsStatus].every((value) => value.trim().length > 0);
   const canCompletePhotos = !!photosTask && qcDone && uploadedPhotos.length > 0;
-  const canAdvance = receiptDone && qcDone && photosDone;
+  const canCompleteManualTracking = !!manualTrackingTask && photosDone && manualTrackingNumber.trim().length > 0;
+  const canAdvance = receiptDone && qcDone && photosDone && manualTrackingDone;
 
   const uploadPhoto = async (file?: File) => {
     if (!file) return;
@@ -2159,9 +2170,49 @@ function D2DWarehouseStage({
             </div>
           )}
         </div>
+
+        <div className={`checkpoint-card ${photosDone ? "" : "locked"} ${manualTrackingDone ? "done" : ""}`}>
+          <div className="checkpoint-head">
+            <div className="task-dot">{manualTrackingDone ? "✓" : ""}</div>
+            <div className="checkpoint-copy">
+              <div className="task-main">{manualTrackingTask?.title || "Add manual tracking number"}</div>
+              <div className="task-meta">{manualTrackingTask?.description || "Save the external tracking number for DDP follow-up"}</div>
+            </div>
+          </div>
+          {!photosDone && <div className="field-hint">Complete the warehouse photo checkpoint first.</div>}
+          {photosDone && !manualTrackingDone && (
+            <>
+              <div className="field-group">
+                <label className="field-label">Manual tracking number</label>
+                <input
+                  className="field-input"
+                  value={manualTrackingNumber}
+                  onChange={(event) => setManualTrackingNumber(event.target.value)}
+                  placeholder="Enter external tracking number"
+                />
+                <div className="field-hint">This number becomes shipment tracking reference across operations, client, and admin views.</div>
+              </div>
+              <button
+                className="btn btn-gh btn-sm"
+                type="button"
+                disabled={!canCompleteManualTracking || pendingTaskId === manualTrackingTask?.id}
+                onClick={() => manualTrackingTask && onCompleteTask(manualTrackingTask.id, {
+                  carrierTrackingNumber: manualTrackingNumber.trim(),
+                })}
+              >
+                {pendingTaskId === manualTrackingTask?.id ? "Saving..." : "Save tracking number"}
+              </button>
+            </>
+          )}
+          {manualTrackingDone && (
+            <div className="checkpoint-summary">
+              Tracking number saved: {manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "Not set"}
+            </div>
+          )}
+        </div>
       </div>
-      {canAdvance && <div className="alert alert-green"><CheckCircle2 /> QC passed — ready for billing.</div>}
-  <button className="btn btn-pr btn-sm" type="button" disabled={!canAdvance} onClick={() => onAdvance(3)}>QC Complete → Move to Billing</button>
+      {canAdvance && <div className="alert alert-green"><CheckCircle2 /> Warehouse checks and manual tracking are complete — ready for billing.</div>}
+      <button className="btn btn-pr btn-sm" type="button" disabled={!canAdvance} onClick={() => onAdvance(3)}>QC Complete → Move to Billing</button>
     </>
   );
 }

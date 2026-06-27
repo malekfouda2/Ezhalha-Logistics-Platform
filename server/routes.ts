@@ -15281,20 +15281,23 @@ export async function registerRoutes(
 
       // Get tracking from carrier
       if (shipment.fulfillmentType === "ddp_manual") {
+        const manualTrackingNumber = shipment.carrierTrackingNumber || shipment.trackingNumber;
         return res.json({
           shipmentId: shipment.id,
           trackingNumber: shipment.trackingNumber,
-          carrierTrackingNumber: null,
+          carrierTrackingNumber: shipment.carrierTrackingNumber,
           status: shipment.status,
           carrier: "DDP",
           estimatedDelivery: shipment.estimatedDelivery,
           actualDelivery: shipment.actualDelivery,
           tracking: {
-            trackingNumber: shipment.trackingNumber,
+            trackingNumber: manualTrackingNumber,
             status: shipment.status,
             events: [{
               status: shipment.status,
-              description: "DDP shipment status is managed by ezhalha.",
+              description: shipment.carrierTrackingNumber
+                ? "DDP shipment status is managed by ezhalha using the saved manual tracking number."
+                : "DDP shipment status is managed by ezhalha.",
               timestamp: shipment.updatedAt,
             }],
           },
