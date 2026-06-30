@@ -4053,49 +4053,11 @@ async function createCompletedPaymentRecord(params: {
     transactionId: params.transactionId,
   });
 
-  // Mirror the payment into Zoho (mark the invoice paid there) — best effort, deduped
-  // by payments.zohoPaymentId so retries don't double-record.
-  try {
-    await recordInvoicePaymentInZoho(params.invoiceId, payment.id, Number(params.amount), params.paymentMethod, params.transactionId);
-  } catch (error) {
-    logError("Failed to record Zoho payment", { invoiceId: params.invoiceId, error: error instanceof Error ? error.message : String(error) });
-  }
+  // NOTE: We deliberately do NOT record the payment in Zoho. Invoices are synced to
+  // Zoho as drafts and left for accounting to review/finalize there — our system does
+  // not mark them paid.
 
   return payment;
-}
-
-async function recordInvoicePaymentInZoho(
-  invoiceId: string,
-  paymentId: string,
-  amount: number,
-  paymentMethod: string,
-  transactionId?: string,
-) {
-  const invoice = await storage.getInvoice(invoiceId);
-  if (!invoice?.zohoInvoiceId) return;
-  const account = await storage.getClientAccount(invoice.clientAccountId);
-  if (!account?.zohoCustomerId) return;
-  const shipment = invoice.shipmentId ? await storage.getShipment(invoice.shipmentId) : undefined;
-
-  await withBoundIntegrationAccount(
-    "zoho",
-    invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
-    getClientIntegrationRoutingOptions(account, shipment?.senderCountry),
-    async () => {
-      if (!zohoService.isConfigured()) return;
-      const zohoPaymentId = await zohoService.recordPayment({
-        customerId: account.zohoCustomerId!,
-        invoiceId: invoice.zohoInvoiceId!,
-        amount,
-        date: new Date().toISOString().split("T")[0],
-        paymentMode: paymentMethod === "tap" ? "creditcard" : paymentMethod === "credit" ? "banktransfer" : "banktransfer",
-        referenceNumber: transactionId || shipment?.trackingNumber,
-      });
-      if (zohoPaymentId) {
-        await storage.updatePayment(paymentId, { zohoPaymentId });
-      }
-    },
-  );
 }
 
 async function markCreditInvoicePaid(
