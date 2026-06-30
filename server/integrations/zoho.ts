@@ -27,11 +27,49 @@ export interface ZohoInvoiceParams {
     rate: number;
   }>;
   notes?: string;
+  // Total VAT already embedded in the line totals (mirrors our computed VAT). The
+  // service splits the line items into a taxable portion (so Zoho's VAT equals this)
+  // plus a non-taxable remainder. When 0/undefined the invoice is zero-rated.
+  taxAmountSar?: number;
+  taxScenario?: string;
+  currency?: string;
+  referenceNumber?: string;
 }
 
 export interface ZohoInvoiceResult {
   zohoInvoiceId: string;
   invoiceUrl: string;
+}
+
+export interface ZohoPaymentParams {
+  customerId: string;
+  invoiceId: string;
+  amount: number;
+  date: string;
+  paymentMode?: string;
+  referenceNumber?: string;
+}
+
+export interface ZohoCreditNoteParams {
+  customerId: string;
+  invoiceId: string;
+  creditNoteNumber: string;
+  date: string;
+  reason?: string;
+  lineItems: Array<{ name: string; quantity: number; rate: number }>;
+  taxAmountSar?: number;
+  currency?: string;
+}
+
+export interface ZohoExpenseParams {
+  accountId: string;
+  paidThroughAccountId?: string;
+  amount: number;
+  date: string;
+  description?: string;
+  referenceNumber?: string;
+  customerId?: string;
+  currency?: string;
 }
 
 export interface ZohoCustomerParams {
@@ -58,6 +96,9 @@ export interface ZohoCustomerParams {
   shippingAddressLine1?: string;
   shippingAddressLine2?: string;
   shippingShortAddress?: string;
+  // Tax registration (VAT) + commercial registration — required for compliant B2B invoices
+  taxRegNo?: string;
+  crNumber?: string;
   // Arabic (Secondary Language) fields
   nameAr?: string;
   companyNameAr?: string;
@@ -73,11 +114,15 @@ export interface ZohoCustomerParams {
   shippingShortAddressAr?: string;
 }
 
+const VAT_RATE = 0.15;
+
 export class ZohoService {
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
   private tokenCredentialFingerprint: string | undefined;
   private tokenApiDomain: string | undefined;
+  // Cache of resolved tax ids per org (1h TTL).
+  private taxCache: { vatTaxId?: string; zeroTaxId?: string; expiry: number; org?: string } = { expiry: 0 };
 
   private get clientId() {
     return getIntegrationEnv("ZOHO_CLIENT_ID");
@@ -107,18 +152,118 @@ export class ZohoService {
     return `${this.clientId || ""}:${this.refreshToken || ""}:${this.organizationId || ""}:${this.accountsBaseUrl}:${getIntegrationEnv("ZOHO_API_BASE_URL") || ""}`;
   }
 
-  private buildInvoicePayload(params: ZohoInvoiceParams) {
+  private roundMoney(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  // Authed JSON request helper for the newer endpoints (token + org auto-applied).
+  private async zohoFetch(accessToken: string, path: string, init?: RequestInit & { query?: Record<string, string> }) {
+    const sep = path.includes("?") ? "&" : "?";
+    const query = init?.query ? "&" + new URLSearchParams(init.query).toString() : "";
+    const url = `${this.apiDomain}${path}${sep}organization_id=${this.organizationId}${query}`;
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    return { response, data };
+  }
+
+  // Resolve the org's 15% VAT tax id and a 0% (zero-rated) tax id, honoring env
+  // overrides ZOHO_VAT_TAX_ID / ZOHO_ZERO_TAX_ID; otherwise discover from the org.
+  private async resolveTaxIds(accessToken: string): Promise<{ vatTaxId?: string; zeroTaxId?: string }> {
+    const envVat = getIntegrationEnv("ZOHO_VAT_TAX_ID");
+    const envZero = getIntegrationEnv("ZOHO_ZERO_TAX_ID");
+    if (envVat) {
+      return { vatTaxId: envVat, zeroTaxId: envZero || undefined };
+    }
+    if (this.taxCache.org === this.organizationId && Date.now() < this.taxCache.expiry && this.taxCache.vatTaxId) {
+      return { vatTaxId: this.taxCache.vatTaxId, zeroTaxId: this.taxCache.zeroTaxId };
+    }
+    try {
+      const { data } = await this.zohoFetch(accessToken, "/books/v3/settings/taxes");
+      const taxes: Array<{ tax_id: string; tax_percentage: number; tax_name?: string }> = data?.taxes || [];
+      const vat = taxes.find((t) => Number(t.tax_percentage) === 15);
+      const zero = taxes.find((t) => Number(t.tax_percentage) === 0);
+      this.taxCache = {
+        vatTaxId: vat?.tax_id,
+        zeroTaxId: envZero || zero?.tax_id,
+        org: this.organizationId,
+        expiry: Date.now() + 60 * 60 * 1000,
+      };
+      return { vatTaxId: this.taxCache.vatTaxId, zeroTaxId: this.taxCache.zeroTaxId };
+    } catch {
+      return { vatTaxId: undefined, zeroTaxId: envZero || undefined };
+    }
+  }
+
+  // Build invoice/credit-note line items that reproduce our exact VAT: a taxable
+  // portion (inclusive 15%) sized so Zoho's VAT == taxAmountSar, plus a non-taxable
+  // remainder. taxAmountSar = 0 → fully zero-rated.
+  private buildTaxedLineItems(
+    name: string,
+    grossAmount: number,
+    taxAmountSar: number | undefined,
+    taxIds: { vatTaxId?: string; zeroTaxId?: string },
+  ) {
+    const gross = this.roundMoney(grossAmount);
+    const tax = this.roundMoney(Math.max(taxAmountSar || 0, 0));
+    const lines: Array<Record<string, unknown>> = [];
+
+    if (tax > 0 && taxIds.vatTaxId) {
+      const taxableInclusive = Math.min(this.roundMoney((tax * (1 + VAT_RATE)) / VAT_RATE), gross);
+      const remainder = this.roundMoney(gross - taxableInclusive);
+      // When the cost is split off as a non-taxable remainder (cross-border: only the
+      // margin is taxed), the taxable portion is Ezhalha's aggregation/service fee.
+      const taxableName = remainder > 0 ? `${name} — Aggregation fees` : name;
+      lines.push({
+        name: taxableName,
+        quantity: 1,
+        rate: taxableInclusive,
+        tax_id: taxIds.vatTaxId,
+        is_inclusive_tax: true,
+      });
+      if (remainder > 0) {
+        lines.push({
+          name: `${name} (non-taxable)`,
+          quantity: 1,
+          rate: remainder,
+          ...(taxIds.zeroTaxId ? { tax_id: taxIds.zeroTaxId } : {}),
+        });
+      }
+    } else {
+      // Zero-rated / no resolvable VAT tax → single non-taxable line.
+      lines.push({
+        name,
+        quantity: 1,
+        rate: gross,
+        ...(taxIds.zeroTaxId ? { tax_id: taxIds.zeroTaxId } : {}),
+      });
+    }
+    return lines;
+  }
+
+  private async buildInvoicePayload(params: ZohoInvoiceParams, accessToken: string) {
+    const taxIds = await this.resolveTaxIds(accessToken);
+    const gross = params.lineItems.reduce((sum, item) => sum + item.quantity * item.rate, 0);
+    const primaryName = params.lineItems[0]?.name || params.invoiceNumber;
+    const lineItems = this.buildTaxedLineItems(primaryName, gross, params.taxAmountSar, taxIds);
     return {
       customer_id: params.customerId,
-      invoice_number: params.invoiceNumber,
+      // Invoice number is left to Zoho's own auto-numbering sequence/frequency. Our
+      // internal number is kept in reference_number for traceability.
       date: params.date,
       due_date: params.dueDate,
-      line_items: params.lineItems.map(item => ({
-        name: item.name,
-        description: item.description,
-        quantity: item.quantity,
-        rate: item.rate,
-      })),
+      reference_number: params.referenceNumber || params.invoiceNumber,
+      // is_inclusive_tax is an invoice-level flag in Zoho (per-line is ignored): line
+      // rates already include VAT, so Zoho extracts it instead of adding on top.
+      is_inclusive_tax: true,
+      ...(params.currency ? { currency_code: params.currency } : {}),
+      line_items: lineItems,
       notes: params.notes,
     };
   }
@@ -216,24 +361,22 @@ export class ZohoService {
     const startTime = Date.now();
     try {
       const response = await fetch(
-        // ignore_auto_number_generation=true lets Zoho accept our custom
-        // invoice_number even when auto-numbering is enabled on the org.
-        // Without it Zoho rejects with "Number entered does not match the
-        // auto-generated number."
-        `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}&ignore_auto_number_generation=true`,
+        // No invoice_number is sent, so Zoho assigns the next number from its own
+        // configured sequence/frequency.
+        `${this.apiDomain}/books/v3/invoices?organization_id=${this.organizationId}`,
         {
           method: 'POST',
           headers: {
             'Authorization': `Zoho-oauthtoken ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(this.buildInvoicePayload(params)),
+          body: JSON.stringify(await this.buildInvoicePayload(params, accessToken)),
         }
       );
-      
+
       const data = await response.json();
       const duration = Date.now() - startTime;
-      
+
       if (data.code !== 0) {
         console.error("Zoho invoice creation error:", data.message);
         await storage.createIntegrationLog({
@@ -293,14 +436,14 @@ export class ZohoService {
     const startTime = Date.now();
     try {
       const response = await fetch(
-        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}&ignore_auto_number_generation=true`,
+        `${this.apiDomain}/books/v3/invoices/${encodeURIComponent(zohoInvoiceId)}?organization_id=${this.organizationId}`,
         {
           method: "PUT",
           headers: {
             Authorization: `Zoho-oauthtoken ${accessToken}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(this.buildInvoicePayload(params)),
+          body: JSON.stringify(await this.buildInvoicePayload(params, accessToken)),
         },
       );
       const data = await response.json();
@@ -433,10 +576,13 @@ export class ZohoService {
       
       // Build contact payload with Primary Language data
       const contactPayload: Record<string, any> = {
-        contact_name: params.name,
+        // Business accounts invoice under the company name; individuals under the person.
+        contact_name: (params.customerType === 'business' && params.companyName) ? params.companyName : params.name,
         contact_type: 'customer',
         customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
         company_name: params.companyName || '',
+        ...(params.taxRegNo ? { tax_reg_no: params.taxRegNo, is_taxable: true } : {}),
+        ...(params.crNumber ? { cr_no: params.crNumber } : {}),
         email: params.email,
         phone: params.phone,
         billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
@@ -557,9 +703,12 @@ export class ZohoService {
       
       // Build contact payload with Primary Language data
       const contactPayload: Record<string, any> = {
-        contact_name: params.name,
+        // Business accounts invoice under the company name; individuals under the person.
+        contact_name: (params.customerType === 'business' && params.companyName) ? params.companyName : params.name,
         customer_sub_type: params.customerType === 'individual' ? 'individual' : 'business',
         company_name: params.companyName || '',
+        ...(params.taxRegNo ? { tax_reg_no: params.taxRegNo, is_taxable: true } : {}),
+        ...(params.crNumber ? { cr_no: params.crNumber } : {}),
         email: params.email,
         phone: params.phone,
         billing_address: Object.keys(billingAddress).length > 0 ? billingAddress : undefined,
@@ -638,6 +787,193 @@ export class ZohoService {
     }
   }
 
+  // Record a customer payment against an invoice (marks it paid in Zoho).
+  async recordPayment(params: ZohoPaymentParams): Promise<string | null> {
+    if (!this.isConfigured()) return null;
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) return null;
+    const startTime = Date.now();
+    try {
+      const { response, data } = await this.zohoFetch(accessToken, "/books/v3/customerpayments", {
+        method: "POST",
+        body: JSON.stringify({
+          customer_id: params.customerId,
+          payment_mode: params.paymentMode || "banktransfer",
+          amount: this.roundMoney(params.amount),
+          date: params.date,
+          reference_number: params.referenceNumber,
+          invoices: [{ invoice_id: params.invoiceId, amount_applied: this.roundMoney(params.amount) }],
+        }),
+      });
+      const duration = Date.now() - startTime;
+      const success = data.code === 0;
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "record_payment",
+        success,
+        statusCode: response.status,
+        errorMessage: success ? undefined : data.message,
+        duration,
+        requestPayload: JSON.stringify({ invoiceId: params.invoiceId, amount: params.amount }),
+        responsePayload: success ? JSON.stringify({ paymentId: data.payment?.payment_id }) : undefined,
+      });
+      return success ? data.payment?.payment_id || null : null;
+    } catch (error) {
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "record_payment",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration: Date.now() - startTime,
+        requestPayload: JSON.stringify({ invoiceId: params.invoiceId }),
+      });
+      return null;
+    }
+  }
+
+  // Issue a credit note for an invoice (ZATCA-compliant alternative to deletion).
+  async createCreditNote(params: ZohoCreditNoteParams): Promise<string | null> {
+    if (!this.isConfigured()) return null;
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) return null;
+    const startTime = Date.now();
+    try {
+      const taxIds = await this.resolveTaxIds(accessToken);
+      const gross = params.lineItems.reduce((sum, item) => sum + item.quantity * item.rate, 0);
+      const name = params.lineItems[0]?.name || `Credit note ${params.creditNoteNumber}`;
+      const lineItems = this.buildTaxedLineItems(name, gross, params.taxAmountSar, taxIds);
+      const { response, data } = await this.zohoFetch(accessToken, "/books/v3/creditnotes", {
+        method: "POST",
+        body: JSON.stringify({
+          customer_id: params.customerId,
+          // Credit-note number left to Zoho's own sequence; our invoice id kept as reference.
+          date: params.date,
+          reference_number: params.invoiceId,
+          reason: params.reason,
+          is_inclusive_tax: true,
+          ...(params.currency ? { currency_code: params.currency } : {}),
+          line_items: lineItems,
+        }),
+      });
+      const duration = Date.now() - startTime;
+      const creditNoteId = data.creditnote?.creditnote_id as string | undefined;
+      const success = data.code === 0 && Boolean(creditNoteId);
+
+      // Apply the credit note to the original invoice.
+      if (success && creditNoteId) {
+        await this.zohoFetch(accessToken, `/books/v3/creditnotes/${encodeURIComponent(creditNoteId)}/invoices`, {
+          method: "POST",
+          body: JSON.stringify({
+            invoices: [{ invoice_id: params.invoiceId, amount_applied: this.roundMoney(gross) }],
+          }),
+        }).catch(() => undefined);
+      }
+
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_credit_note",
+        success,
+        statusCode: response.status,
+        errorMessage: success ? undefined : data.message,
+        duration,
+        requestPayload: JSON.stringify({ invoiceId: params.invoiceId, creditNoteNumber: params.creditNoteNumber }),
+        responsePayload: success ? JSON.stringify({ creditNoteId }) : undefined,
+      });
+      return success ? creditNoteId! : null;
+    } catch (error) {
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_credit_note",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration: Date.now() - startTime,
+        requestPayload: JSON.stringify({ invoiceId: params.invoiceId }),
+      });
+      return null;
+    }
+  }
+
+  // Record a cost as a Zoho expense (operational expenses, carrier payouts).
+  async createExpense(params: ZohoExpenseParams): Promise<string | null> {
+    if (!this.isConfigured()) return null;
+    if (!params.accountId) {
+      console.log("Zoho expense account not configured, skipping expense");
+      return null;
+    }
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) return null;
+    const startTime = Date.now();
+    try {
+      const { response, data } = await this.zohoFetch(accessToken, "/books/v3/expenses", {
+        method: "POST",
+        body: JSON.stringify({
+          account_id: params.accountId,
+          paid_through_account_id: params.paidThroughAccountId,
+          amount: this.roundMoney(params.amount),
+          date: params.date,
+          description: params.description,
+          reference_number: params.referenceNumber,
+          customer_id: params.customerId,
+          ...(params.currency ? { currency_code: params.currency } : {}),
+        }),
+      });
+      const duration = Date.now() - startTime;
+      const success = data.code === 0;
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_expense",
+        success,
+        statusCode: response.status,
+        errorMessage: success ? undefined : data.message,
+        duration,
+        requestPayload: JSON.stringify({ amount: params.amount, reference: params.referenceNumber }),
+        responsePayload: success ? JSON.stringify({ expenseId: data.expense?.expense_id }) : undefined,
+      });
+      return success ? data.expense?.expense_id || null : null;
+    } catch (error) {
+      await storage.createIntegrationLog({
+        serviceName: "zoho",
+        operation: "create_expense",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration: Date.now() - startTime,
+        requestPayload: JSON.stringify({ amount: params.amount }),
+      });
+      return null;
+    }
+  }
+
+  async deleteExpense(zohoExpenseId: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) return false;
+    try {
+      const { data } = await this.zohoFetch(accessToken, `/books/v3/expenses/${encodeURIComponent(zohoExpenseId)}`, {
+        method: "DELETE",
+      });
+      return data.code === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // Find an existing contact by email (for dedup before creating).
+  async findContactByEmail(email: string): Promise<string | null> {
+    if (!this.isConfigured() || !email) return null;
+    const accessToken = await this.refreshAccessToken();
+    if (!accessToken) return null;
+    try {
+      const { data } = await this.zohoFetch(accessToken, "/books/v3/contacts", {
+        method: "GET",
+        query: { email },
+      });
+      const contacts: Array<{ contact_id: string }> = data?.contacts || [];
+      return contacts[0]?.contact_id || null;
+    } catch {
+      return null;
+    }
+  }
+
   async syncInvoice(invoiceId: string, params: ZohoInvoiceParams, zohoInvoiceId?: string): Promise<ZohoInvoiceResult> {
     if (!this.isConfigured()) {
       console.log("Zoho not configured, skipping invoice sync");
@@ -657,6 +993,14 @@ export class ZohoService {
     if (!this.isConfigured()) {
       console.log("Zoho not configured, skipping customer sync");
       return "";
+    }
+
+    // Dedup: reuse an existing Zoho contact with the same email and refresh its
+    // details instead of creating a duplicate.
+    const existingId = await this.findContactByEmail(params.email);
+    if (existingId) {
+      await this.updateCustomer(existingId, params);
+      return existingId;
     }
 
     const result = await this.createCustomer(params);

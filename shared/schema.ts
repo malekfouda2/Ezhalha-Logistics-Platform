@@ -341,6 +341,7 @@ export const clientAccounts = pgTable("client_accounts", {
   profile: text("profile").notNull().default("regular"),
   isActive: boolean("is_active").notNull().default(true),
   creditEnabled: boolean("credit_enabled").notNull().default(false),
+  creditLimitSar: decimal("credit_limit_sar", { precision: 12, scale: 2 }).notNull().default("0"),
   tapCustomerId: text("tap_customer_id"),
   tapIntegrationAccountId: varchar("tap_integration_account_id"),
   zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
@@ -616,6 +617,11 @@ export const shipments = pgTable("shipments", {
   paymentStatus: text("payment_status").default("pending"),
   itemsData: text("items_data"),
   tradeDocumentsData: text("trade_documents_data"),
+  // Operations: free-form plan written in the planning stage (editable, reviewable).
+  operationPlanNotes: text("operation_plan_notes"),
+  // Operations: last-mile delivery carrier name + contact phone.
+  lastMileCarrierName: text("last_mile_carrier_name"),
+  lastMileCarrierPhone: text("last_mile_carrier_phone"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -679,6 +685,11 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull().default("pending"),
   dueDate: timestamp("due_date").notNull(),
   paidAt: timestamp("paid_at"),
+  // Tax scenario + currency + embedded VAT captured at creation so Zoho mirrors the
+  // exact VAT the platform computed (taxAmountSar is the VAT already inside `amount`).
+  taxScenario: text("tax_scenario"),
+  taxAmountSar: decimal("tax_amount_sar", { precision: 10, scale: 2 }),
+  currency: text("currency").default("SAR"),
   tapIntegrationAccountId: varchar("tap_integration_account_id"),
   zohoIntegrationAccountId: varchar("zoho_integration_account_id"),
   zohoInvoiceId: text("zoho_invoice_id"), // Zoho Books invoice ID
@@ -707,6 +718,7 @@ export const payments = pgTable("payments", {
   status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
   integrationAccountId: varchar("integration_account_id"),
+  zohoPaymentId: text("zoho_payment_id"), // Zoho Books customer payment ID (dedup)
   stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID (legacy)
   moyasarPaymentId: text("moyasar_payment_id"), // Moyasar payment ID
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -836,6 +848,7 @@ export const carrierPayoutBatches = pgTable("carrier_payout_batches", {
   createdByUserId: varchar("created_by_user_id"),
   paidByUserId: varchar("paid_by_user_id"),
   paidAt: timestamp("paid_at"),
+  zohoExpenseId: text("zoho_expense_id"), // Zoho Books expense ID for the carrier payout
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -1393,6 +1406,69 @@ export const insertCreditNotificationEventSchema = createInsertSchema(creditNoti
 export type InsertCreditNotificationEvent = z.infer<typeof insertCreditNotificationEventSchema>;
 export type CreditNotificationEvent = typeof creditNotificationEvents.$inferSelect;
 
+// Credit Transactions ledger (audit log of credit debits/credits per client).
+// Available credit is derived as creditLimitSar - SUM(UNPAID creditInvoices); this
+// table records the movement history (DEBIT on shipment, CREDIT on settlement).
+export const creditTransactions = pgTable("credit_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  shipmentId: varchar("shipment_id"),
+  creditInvoiceId: varchar("credit_invoice_id"),
+  type: text("type").notNull(), // DEBIT | CREDIT
+  amountSar: decimal("amount_sar", { precision: 12, scale: 2 }).notNull(),
+  balanceAfterSar: decimal("balance_after_sar", { precision: 12, scale: 2 }).notNull(),
+  reason: text("reason"),
+  createdByUserId: varchar("created_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCreditTransactionSchema = createInsertSchema(creditTransactions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCreditTransaction = z.infer<typeof insertCreditTransactionSchema>;
+export type CreditTransaction = typeof creditTransactions.$inferSelect;
+
+// Shipment tracking numbers — editable list, position 0 is the primary number that
+// mirrors shipments.carrierTrackingNumber.
+export const shipmentTrackingNumbers = pgTable("shipment_tracking_numbers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  value: text("value").notNull(),
+  position: integer("position").notNull().default(0),
+  createdByUserId: varchar("created_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShipmentTrackingNumberSchema = createInsertSchema(shipmentTrackingNumbers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentTrackingNumber = z.infer<typeof insertShipmentTrackingNumberSchema>;
+export type ShipmentTrackingNumber = typeof shipmentTrackingNumbers.$inferSelect;
+
+// Shipment operational expenses — internal cost only (never billed to the client),
+// recorded in the final stage and surfaced in the financial statements.
+export const shipmentExpenses = pgTable("shipment_expenses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  description: text("description").notNull(),
+  amountSar: decimal("amount_sar", { precision: 12, scale: 2 }).notNull(),
+  createdByUserId: varchar("created_by_user_id"),
+  zohoExpenseId: text("zoho_expense_id"), // Zoho Books expense ID
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShipmentExpenseSchema = createInsertSchema(shipmentExpenses).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentExpense = z.infer<typeof insertShipmentExpenseSchema>;
+export type ShipmentExpense = typeof shipmentExpenses.$inferSelect;
+
 export const operationProfiles = pgTable("operation_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique(),
@@ -1559,11 +1635,11 @@ export const shipmentAttentionFlags = pgTable("shipment_attention_flags", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
-  shipmentAttentionUnique: uniqueIndex("shipment_attention_flags_unique").on(
-    table.shipmentId,
-    table.issueType,
-    table.status,
-  ),
+  // Only one OPEN flag per shipment+issueType. Partial so historical RESOLVED rows
+  // don't collide when an OPEN flag is resolved (or the same issue recurs later).
+  shipmentAttentionOpenUnique: uniqueIndex("shipment_attention_flags_open_unique")
+    .on(table.shipmentId, table.issueType)
+    .where(sql`${table.status} = 'OPEN'`),
 }));
 
 export const insertShipmentAttentionFlagSchema = createInsertSchema(shipmentAttentionFlags).omit({

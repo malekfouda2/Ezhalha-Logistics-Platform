@@ -142,10 +142,65 @@ interface OperationShipmentSummary {
   createdAt: string;
 }
 
+interface ShipmentTrackingNumber {
+  id: string;
+  value: string;
+  position: number;
+}
+
+interface ShipmentExpense {
+  id: string;
+  description: string;
+  amountSar: string;
+  createdAt: string;
+}
+
+interface OpsActions {
+  savePlan: (notes: string) => void;
+  planPending: boolean;
+  saveLastMile: (payload: { carrierName: string; carrierPhone: string }) => void;
+  lastMilePending: boolean;
+  updateTaskMetadata: (taskId: string, metadata: Record<string, unknown>) => void;
+  metadataPending: boolean;
+  addTracking: (value: string) => void;
+  updateTracking: (id: string, value: string) => void;
+  deleteTracking: (id: string) => void;
+  trackingPending: boolean;
+  addExpense: (payload: { description: string; amountSar: number }) => void;
+  deleteExpense: (id: string) => void;
+  expensePending: boolean;
+}
+
+interface ShipmentDetails {
+  weight?: string | null;
+  weightUnit?: string | null;
+  dimensionalWeight?: string | null;
+  chargeableWeight?: string | null;
+  chargeableWeightUnit?: string | null;
+  numberOfPackages?: number | null;
+  packageType?: string | null;
+  length?: string | null;
+  width?: string | null;
+  height?: string | null;
+  dimensionUnit?: string | null;
+  packages?: unknown[] | null;
+  items?: unknown[] | null;
+  tradeDocuments?: unknown | null;
+  labelUrl?: string | null;
+  hasCarrierLabel?: boolean;
+  shipDate?: string | null;
+}
+
 interface OperationShipmentDetail extends OperationShipmentSummary {
   operationTasks: OperationTask[];
   operationEvents: OperationEvent[];
   operationNotes: OperationNote[];
+  operationPlanNotes?: string | null;
+  lastMileCarrierName?: string | null;
+  lastMileCarrierPhone?: string | null;
+  trackingNumbers?: ShipmentTrackingNumber[];
+  expenses?: ShipmentExpense[];
+  details?: ShipmentDetails;
   ddpChargeConfig?: {
     billingUnit: "KG" | "CBM";
     chargeLabel: string;
@@ -1006,6 +1061,126 @@ function OperationsHubContent() {
     onError: (error) => notify("Could not complete task", getErrorMessage(error), "destructive"),
   });
 
+  const planMutation = useMutation({
+    mutationFn: async (notes: string) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${selectedId}/plan`, { notes });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Plan saved");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not save plan", getErrorMessage(error), "destructive"),
+  });
+
+  const lastMileMutation = useMutation({
+    mutationFn: async (payload: { carrierName: string; carrierPhone: string }) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${selectedId}/last-mile`, payload);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Last-mile delivery updated");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not update last-mile delivery", getErrorMessage(error), "destructive"),
+  });
+
+  const taskMetadataMutation = useMutation({
+    mutationFn: async (payload: { taskId: string; metadata: Record<string, unknown> }) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${selectedId}/tasks/${payload.taskId}/metadata`, { metadata: payload.metadata });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Updated");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not update", getErrorMessage(error), "destructive"),
+  });
+
+  const addTrackingMutation = useMutation({
+    mutationFn: async (value: string) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("POST", `/api/operations/shipments/${selectedId}/tracking-numbers`, { value });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Tracking number added");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not add tracking number", getErrorMessage(error), "destructive"),
+  });
+
+  const updateTrackingMutation = useMutation({
+    mutationFn: async (payload: { id: string; value: string }) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${selectedId}/tracking-numbers/${payload.id}`, { value: payload.value });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Tracking number updated");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not update tracking number", getErrorMessage(error), "destructive"),
+  });
+
+  const deleteTrackingMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("DELETE", `/api/operations/shipments/${selectedId}/tracking-numbers/${id}`);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Tracking number removed");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not remove tracking number", getErrorMessage(error), "destructive"),
+  });
+
+  const addExpenseMutation = useMutation({
+    mutationFn: async (payload: { description: string; amountSar: number }) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("POST", `/api/operations/shipments/${selectedId}/expenses`, payload);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Expense recorded");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not record expense", getErrorMessage(error), "destructive"),
+  });
+
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("DELETE", `/api/operations/shipments/${selectedId}/expenses/${id}`);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Expense removed");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not remove expense", getErrorMessage(error), "destructive"),
+  });
+
+  const opsActions: OpsActions = {
+    savePlan: (notes) => planMutation.mutate(notes),
+    planPending: planMutation.isPending,
+    saveLastMile: (payload) => lastMileMutation.mutate(payload),
+    lastMilePending: lastMileMutation.isPending,
+    updateTaskMetadata: (taskId, metadata) => taskMetadataMutation.mutate({ taskId, metadata }),
+    metadataPending: taskMetadataMutation.isPending,
+    addTracking: (value) => addTrackingMutation.mutate(value),
+    updateTracking: (id, value) => updateTrackingMutation.mutate({ id, value }),
+    deleteTracking: (id) => deleteTrackingMutation.mutate(id),
+    trackingPending: addTrackingMutation.isPending || updateTrackingMutation.isPending || deleteTrackingMutation.isPending,
+    addExpense: (payload) => addExpenseMutation.mutate(payload),
+    deleteExpense: (id) => deleteExpenseMutation.mutate(id),
+    expensePending: addExpenseMutation.isPending || deleteExpenseMutation.isPending,
+  };
+
   const noteMutation = useMutation({
     mutationFn: async () => {
       if (!selectedId) return null;
@@ -1279,6 +1454,7 @@ function OperationsHubContent() {
                 {(view === "d2d" || (view === "delivered" && detail.shipmentKind === "DDP")) && (
                   <D2DDetail
                     shipment={detail}
+                    actions={opsActions}
                     onCompleteTask={(taskId, metadata) => taskMutation.mutate({ taskId, metadata })}
                     onAdvance={(stage) => statusMutation.mutate(d2dStageStatus[stage] || "processing")}
                     onMessage={openMessageModal}
@@ -1312,6 +1488,7 @@ function OperationsHubContent() {
                 {(view === "express" || (view === "delivered" && detail.shipmentKind === "EXPRESS")) && (
                   <ExpressDetail
                     shipment={detail}
+                    actions={opsActions}
                     subTab={subTab}
                     setSubTab={setSubTab}
                     onMessage={openMessageModal}
@@ -1683,8 +1860,211 @@ function DetailHeader({ shipment, onMessage, onSpecial }: {
   );
 }
 
-function D2DDetail({ shipment, onCompleteTask, onAdvance, onMessage, onSpecial, onOpenCharges, teamCard, noteCard, pendingTaskId }: {
+function ShipmentDetailsPanel({ shipment }: { shipment: OperationShipmentDetail }) {
+  const d = shipment.details;
+  if (!d) return null;
+  const rows: Array<[string, string]> = [];
+  if (d.weight) rows.push(["Weight", `${quantity(d.weight)} ${d.weightUnit || ""}`.trim()]);
+  if (d.chargeableWeight) rows.push(["Chargeable weight", `${quantity(d.chargeableWeight)} ${d.chargeableWeightUnit || ""}`.trim()]);
+  if (d.dimensionalWeight) rows.push(["Dimensional weight", quantity(d.dimensionalWeight)]);
+  if (d.numberOfPackages != null) rows.push(["Packages", String(d.numberOfPackages)]);
+  if (d.packageType) rows.push(["Package type", d.packageType]);
+  if (d.length || d.width || d.height) rows.push(["Dimensions", `${d.length || "?"} × ${d.width || "?"} × ${d.height || "?"} ${d.dimensionUnit || ""}`.trim()]);
+  if (d.shipDate) rows.push(["Ship date", d.shipDate]);
+  if (shipment.estimatedDelivery) rows.push(["Est. delivery", new Date(shipment.estimatedDelivery).toLocaleDateString()]);
+  if (shipment.actualDelivery) rows.push(["Delivered", new Date(shipment.actualDelivery).toLocaleDateString()]);
+
+  const docs: Array<{ label: string; href?: string }> = [];
+  if (d.labelUrl) docs.push({ label: "Shipping label", href: d.labelUrl });
+  if (d.hasCarrierLabel && !d.labelUrl) docs.push({ label: "Carrier label (on file)" });
+  const tradeDocs = d.tradeDocuments && typeof d.tradeDocuments === "object" ? d.tradeDocuments as Record<string, unknown> : null;
+  if (tradeDocs && Object.keys(tradeDocs).length > 0) docs.push({ label: "Commercial invoice / trade docs" });
+
+  const packages = Array.isArray(d.packages) ? d.packages : [];
+  const items = Array.isArray(d.items) ? d.items : [];
+
+  return (
+    <div className="card">
+      <div className="card-title"><Package /> Shipment details</div>
+      <div className="metric-grid">
+        {rows.map(([key, val]) => (
+          <div key={key} className="card" style={{ margin: 0 }}>
+            <div className="sc-key">{key}</div>
+            <div className="sc-val" style={{ textAlign: "left", fontSize: 15 }}>{val}</div>
+          </div>
+        ))}
+      </div>
+      {packages.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="sc-key" style={{ marginBottom: 6 }}>Packages ({packages.length})</div>
+          {packages.map((pkg, i) => (
+            <div key={i} className="field-hint" style={{ fontFamily: "monospace" }}>{JSON.stringify(pkg)}</div>
+          ))}
+        </div>
+      )}
+      {items.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="sc-key" style={{ marginBottom: 6 }}>Items ({items.length})</div>
+          {items.map((item, i) => {
+            const it = item && typeof item === "object" ? item as Record<string, unknown> : {};
+            const desc = (it.description || it.name || it.itemDescription || JSON.stringify(it)) as string;
+            const qty = it.quantity != null ? ` × ${it.quantity}` : "";
+            return <div key={i} className="field-hint">{String(desc)}{qty}</div>;
+          })}
+        </div>
+      )}
+      {docs.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="sc-key" style={{ marginBottom: 6 }}>Documents</div>
+          <div className="action-row">
+            {docs.map((doc, i) => doc.href ? (
+              <a key={i} className="btn btn-gh btn-sm" href={doc.href} target="_blank" rel="noreferrer">{doc.label}</a>
+            ) : (
+              <span key={i} className="chip">{doc.label}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanNotesEditor({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const [value, setValue] = useState(shipment.operationPlanNotes || "");
+  useEffect(() => { setValue(shipment.operationPlanNotes || ""); }, [shipment.id, shipment.operationPlanNotes]);
+  const dirty = value !== (shipment.operationPlanNotes || "");
+  return (
+    <div className="field-group" style={{ marginTop: 12 }}>
+      <label className="field-label">Operation plan</label>
+      <textarea
+        className="field-input"
+        style={{ minHeight: 110, resize: "vertical" }}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Write the plan for this shipment. Reviewable and editable any time."
+      />
+      <div className="action-row" style={{ marginTop: 8 }}>
+        <button className="btn btn-pr btn-sm" type="button" disabled={!dirty || actions.planPending} onClick={() => actions.savePlan(value)}>
+          {actions.planPending ? "Saving..." : "Save plan"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TrackingNumbersEditor({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const list = shipment.trackingNumbers || [];
+  const [newValue, setNewValue] = useState("");
+  const [editing, setEditing] = useState<Record<string, string>>({});
+  return (
+    <div className="field-group">
+      <label className="field-label">Tracking numbers</label>
+      {list.length === 0 && <div className="field-hint">No tracking numbers yet. Add one below.</div>}
+      {list.map((tn, index) => {
+        const editValue = editing[tn.id];
+        const isEditing = editValue !== undefined;
+        return (
+          <div key={tn.id} className="action-row" style={{ marginBottom: 6 }}>
+            <input
+              className="field-input"
+              style={{ flex: 1 }}
+              value={isEditing ? editValue : tn.value}
+              readOnly={!isEditing}
+              onChange={(e) => setEditing((s) => ({ ...s, [tn.id]: e.target.value }))}
+            />
+            {index === 0 && <span className="chip">Primary</span>}
+            {isEditing ? (
+              <>
+                <button className="btn btn-pr btn-sm" type="button" disabled={actions.trackingPending || !editValue.trim()} onClick={() => { actions.updateTracking(tn.id, editValue.trim()); setEditing((s) => { const n = { ...s }; delete n[tn.id]; return n; }); }}>Save</button>
+                <button className="btn btn-gh btn-sm" type="button" onClick={() => setEditing((s) => { const n = { ...s }; delete n[tn.id]; return n; })}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-gh btn-sm" type="button" onClick={() => setEditing((s) => ({ ...s, [tn.id]: tn.value }))}>Edit</button>
+                <button className="btn btn-gh btn-sm" type="button" disabled={actions.trackingPending} onClick={() => actions.deleteTracking(tn.id)}>Remove</button>
+              </>
+            )}
+          </div>
+        );
+      })}
+      <div className="action-row">
+        <input
+          className="field-input"
+          style={{ flex: 1 }}
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          placeholder="Paste or type a tracking number"
+        />
+        <button className="btn btn-pr btn-sm" type="button" disabled={actions.trackingPending || !newValue.trim()} onClick={() => { actions.addTracking(newValue.trim()); setNewValue(""); }}>Add</button>
+      </div>
+      <div className="field-hint">First entry becomes the primary tracking reference across operations, client, and admin views.</div>
+    </div>
+  );
+}
+
+function LastMileEditor({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const [name, setName] = useState(shipment.lastMileCarrierName || "");
+  const [phone, setPhone] = useState(shipment.lastMileCarrierPhone || "");
+  useEffect(() => {
+    setName(shipment.lastMileCarrierName || "");
+    setPhone(shipment.lastMileCarrierPhone || "");
+  }, [shipment.id, shipment.lastMileCarrierName, shipment.lastMileCarrierPhone]);
+  const dirty = name !== (shipment.lastMileCarrierName || "") || phone !== (shipment.lastMileCarrierPhone || "");
+  return (
+    <div className="card" style={{ margin: 0, marginTop: 12 }}>
+      <div className="sc-key" style={{ marginBottom: 6 }}>Last-mile delivery</div>
+      <div className="field-group">
+        <label className="field-label">Carrier name</label>
+        <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Local courier" />
+      </div>
+      <div className="field-group">
+        <label className="field-label">Carrier phone</label>
+        <input className="field-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Contact number" />
+      </div>
+      <button className="btn btn-pr btn-sm" type="button" disabled={!dirty || actions.lastMilePending} onClick={() => actions.saveLastMile({ carrierName: name.trim(), carrierPhone: phone.trim() })}>
+        {actions.lastMilePending ? "Saving..." : "Save last-mile delivery"}
+      </button>
+    </div>
+  );
+}
+
+function ExpensesBlock({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const expenses = shipment.expenses || [];
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const total = expenses.reduce((sum, e) => sum + Number(e.amountSar || 0), 0);
+  const canAdd = description.trim().length >= 1 && Number(amount) > 0;
+  return (
+    <div className="card" style={{ margin: 0, marginTop: 12 }}>
+      <div className="sc-key" style={{ marginBottom: 6 }}>Operational expenses (internal cost)</div>
+      {expenses.length === 0 && <div className="field-hint">No expenses recorded.</div>}
+      {expenses.map((e) => (
+        <div key={e.id} className="action-row" style={{ marginBottom: 6, alignItems: "center" }}>
+          <div style={{ flex: 1 }}>{e.description}</div>
+          <div className="sc-val" style={{ fontSize: 14 }}>{money(e.amountSar, "SAR")}</div>
+          <button className="btn btn-gh btn-sm" type="button" disabled={actions.expensePending} onClick={() => actions.deleteExpense(e.id)}>Remove</button>
+        </div>
+      ))}
+      {expenses.length > 0 && (
+        <div className="action-row" style={{ marginTop: 4, fontWeight: 600 }}>
+          <div style={{ flex: 1 }}>Total</div>
+          <div>{money(String(total), "SAR")}</div>
+        </div>
+      )}
+      <div className="field-group" style={{ marginTop: 8 }}>
+        <input className="field-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Expense description" />
+      </div>
+      <div className="action-row">
+        <input className="field-input" style={{ flex: 1 }} value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="Amount (SAR)" />
+        <button className="btn btn-pr btn-sm" type="button" disabled={!canAdd || actions.expensePending} onClick={() => { actions.addExpense({ description: description.trim(), amountSar: Number(amount) }); setDescription(""); setAmount(""); }}>Add expense</button>
+      </div>
+    </div>
+  );
+}
+
+function D2DDetail({ shipment, actions, onCompleteTask, onAdvance, onMessage, onSpecial, onOpenCharges, teamCard, noteCard, pendingTaskId }: {
   shipment: OperationShipmentDetail;
+  actions: OpsActions;
   onCompleteTask: (taskId: string, metadata?: Record<string, unknown>) => void;
   onAdvance: (stage: number) => void;
   onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
@@ -1704,6 +2084,7 @@ function D2DDetail({ shipment, onCompleteTask, onAdvance, onMessage, onSpecial, 
   return (
     <div className="dp-grid">
       <div>
+        <ShipmentDetailsPanel shipment={shipment} />
         <div className="card">
           <div className="card-title"><Package /> Operations progress</div>
           <div className="progress-rail">
@@ -1754,7 +2135,7 @@ function D2DDetail({ shipment, onCompleteTask, onAdvance, onMessage, onSpecial, 
                 </div>
                 {expanded && (
                   <div className="stage-body">
-                    <D2DStageContent shipment={shipment} stage={stage} onCompleteTask={onCompleteTask} onAdvance={onAdvance} onMessage={onMessage} onOpenCharges={onOpenCharges} pendingTaskId={pendingTaskId} />
+                    <D2DStageContent shipment={shipment} actions={actions} stage={stage} onCompleteTask={onCompleteTask} onAdvance={onAdvance} onMessage={onMessage} onOpenCharges={onOpenCharges} pendingTaskId={pendingTaskId} />
                   </div>
                 )}
               </div>
@@ -1768,8 +2149,9 @@ function D2DDetail({ shipment, onCompleteTask, onAdvance, onMessage, onSpecial, 
   );
 }
 
-function D2DStageContent({ shipment, stage, onCompleteTask, onAdvance, onMessage, onOpenCharges, pendingTaskId }: {
+function D2DStageContent({ shipment, actions, stage, onCompleteTask, onAdvance, onMessage, onOpenCharges, pendingTaskId }: {
   shipment: OperationShipmentDetail;
+  actions: OpsActions;
   stage: number;
   onCompleteTask: (taskId: string, metadata?: Record<string, unknown>) => void;
   onAdvance: (stage: number) => void;
@@ -1788,12 +2170,13 @@ function D2DStageContent({ shipment, stage, onCompleteTask, onAdvance, onMessage
     return (
       <>
         {tasks.map((task) => <TaskItem key={task.id} task={task} onComplete={onCompleteTask} pending={pendingTaskId === task.id} />)}
+        <PlanNotesEditor shipment={shipment} actions={actions} />
         <button className="btn btn-pr btn-sm" type="button" disabled={!canAdvance} onClick={() => onAdvance(2)}>Mark complete → Move to Warehouse</button>
       </>
     );
   }
   if (stage === 2) {
-    return <D2DWarehouseStage shipment={shipment} onCompleteTask={onCompleteTask} onAdvance={onAdvance} pendingTaskId={pendingTaskId} />;
+    return <D2DWarehouseStage shipment={shipment} actions={actions} onCompleteTask={onCompleteTask} onAdvance={onAdvance} pendingTaskId={pendingTaskId} />;
   }
   if (stage === 3) {
     const chargeConfig = shipment.ddpChargeConfig;
@@ -1878,6 +2261,7 @@ function D2DStageContent({ shipment, stage, onCompleteTask, onAdvance, onMessage
             );
           })}
         </div>
+        <LastMileEditor shipment={shipment} actions={actions} />
         <button
           className="btn btn-pr btn-sm"
           style={{ marginTop: 12 }}
@@ -1892,7 +2276,8 @@ function D2DStageContent({ shipment, stage, onCompleteTask, onAdvance, onMessage
   }
   return (
     <>
-      <D2DDeliveryPodStage shipment={shipment} onCompleteTask={onCompleteTask} onMarkDelivered={() => onAdvance(6)} pendingTaskId={pendingTaskId} />
+      <D2DDeliveryPodStage shipment={shipment} actions={actions} onCompleteTask={onCompleteTask} onMarkDelivered={() => onAdvance(6)} pendingTaskId={pendingTaskId} />
+      <ExpensesBlock shipment={shipment} actions={actions} />
       {shipment.status === "delivered" ? (
         <div className="alert alert-green"><CheckCircle2 /> Delivered. Proof of delivery can be attached from shipment documents.</div>
       ) : (
@@ -1904,16 +2289,19 @@ function D2DStageContent({ shipment, stage, onCompleteTask, onAdvance, onMessage
 
 function D2DWarehouseStage({
   shipment,
+  actions,
   onCompleteTask,
   onAdvance,
   pendingTaskId,
 }: {
   shipment: OperationShipmentDetail;
+  actions: OpsActions;
   onCompleteTask: (taskId: string, metadata?: Record<string, unknown>) => void;
   onAdvance: (stage: number) => void;
   pendingTaskId?: string | null;
 }) {
   const { toast } = useToast();
+  const [editReceiptDate, setEditReceiptDate] = useState<string | null>(null);
   const receiptTask = findTask(shipment, "ddp_received_warehouse");
   const qcTask = findTask(shipment, "ddp_quality_check");
   const photosTask = findTask(shipment, "ddp_photos_uploaded");
@@ -1928,7 +2316,6 @@ function D2DWarehouseStage({
     qcNotes?: string;
   }>(qcTask);
   const photosMetadata = parseTaskMetadata<{ photos?: UploadedAsset[]; photoNotes?: string }>(photosTask);
-  const manualTrackingMetadata = parseTaskMetadata<{ carrierTrackingNumber?: string }>(manualTrackingTask);
 
   const [receiptDate, setReceiptDate] = useState(receiptMetadata.receiptDate || "");
   const [receivedPieces, setReceivedPieces] = useState(receiptMetadata.receivedPieces ? String(receiptMetadata.receivedPieces) : "");
@@ -1940,9 +2327,6 @@ function D2DWarehouseStage({
   const [qcNotes, setQcNotes] = useState(qcMetadata.qcNotes || "");
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedAsset[]>(Array.isArray(photosMetadata.photos) ? photosMetadata.photos : []);
   const [photoNotes, setPhotoNotes] = useState(photosMetadata.photoNotes || "");
-  const [manualTrackingNumber, setManualTrackingNumber] = useState(
-    manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "",
-  );
 
   useEffect(() => {
     setReceiptDate(receiptMetadata.receiptDate || "");
@@ -1962,10 +2346,6 @@ function D2DWarehouseStage({
     setUploadedPhotos(Array.isArray(photosMetadata.photos) ? photosMetadata.photos : []);
     setPhotoNotes(photosMetadata.photoNotes || "");
   }, [photosTask?.id, photosTask?.metadata]);
-
-  useEffect(() => {
-    setManualTrackingNumber(manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "");
-  }, [manualTrackingTask?.id, manualTrackingTask?.metadata, shipment.carrierTrackingNumber]);
 
   const upload = useUpload({
     onSuccess: (response) => {
@@ -1992,7 +2372,7 @@ function D2DWarehouseStage({
   const canCompleteReceipt = !!receiptTask && receiptDate.trim().length > 0 && Number(receivedPieces) > 0;
   const canCompleteQc = !!qcTask && receiptDone && [packagingStatus, quantityStatus, damageStatus, documentsStatus].every((value) => value.trim().length > 0);
   const canCompletePhotos = !!photosTask && qcDone && uploadedPhotos.length > 0;
-  const canCompleteManualTracking = !!manualTrackingTask && photosDone && manualTrackingNumber.trim().length > 0;
+  const canCompleteManualTracking = !!manualTrackingTask && photosDone && (shipment.trackingNumbers?.length || 0) > 0;
   const canAdvance = receiptDone && qcDone && photosDone && manualTrackingDone;
 
   const uploadPhoto = async (file?: File) => {
@@ -2034,7 +2414,21 @@ function D2DWarehouseStage({
           )}
           {receiptDone && (
             <div className="checkpoint-summary">
-              Received on {receiptMetadata.receiptDate || "Not set"} · {receiptMetadata.receivedPieces || 0} pieces
+              {editReceiptDate === null ? (
+                <div className="action-row" style={{ alignItems: "center" }}>
+                  <div style={{ flex: 1 }}>Received on {receiptMetadata.receiptDate || "Not set"} · {receiptMetadata.receivedPieces || 0} pieces</div>
+                  <button className="btn btn-gh btn-sm" type="button" onClick={() => setEditReceiptDate(receiptMetadata.receiptDate || "")}>Edit date</button>
+                </div>
+              ) : (
+                <div className="action-row" style={{ alignItems: "flex-end" }}>
+                  <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                    <label className="field-label">Received date</label>
+                    <input className="field-input" type="date" value={editReceiptDate} onChange={(e) => setEditReceiptDate(e.target.value)} />
+                  </div>
+                  <button className="btn btn-pr btn-sm" type="button" disabled={!editReceiptDate || !receiptTask || actions.metadataPending} onClick={() => { if (receiptTask) actions.updateTaskMetadata(receiptTask.id, { receiptDate: editReceiptDate }); setEditReceiptDate(null); }}>Save</button>
+                  <button className="btn btn-gh btn-sm" type="button" onClick={() => setEditReceiptDate(null)}>Cancel</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2180,34 +2574,22 @@ function D2DWarehouseStage({
             </div>
           </div>
           {!photosDone && <div className="field-hint">Complete the warehouse photo checkpoint first.</div>}
-          {photosDone && !manualTrackingDone && (
+          {photosDone && (
             <>
-              <div className="field-group">
-                <label className="field-label">Manual tracking number</label>
-                <input
-                  className="field-input"
-                  value={manualTrackingNumber}
-                  onChange={(event) => setManualTrackingNumber(event.target.value)}
-                  placeholder="Enter external tracking number"
-                />
-                <div className="field-hint">This number becomes shipment tracking reference across operations, client, and admin views.</div>
-              </div>
-              <button
-                className="btn btn-gh btn-sm"
-                type="button"
-                disabled={!canCompleteManualTracking || pendingTaskId === manualTrackingTask?.id}
-                onClick={() => manualTrackingTask && onCompleteTask(manualTrackingTask.id, {
-                  carrierTrackingNumber: manualTrackingNumber.trim(),
-                })}
-              >
-                {pendingTaskId === manualTrackingTask?.id ? "Saving..." : "Save tracking number"}
-              </button>
+              <TrackingNumbersEditor shipment={shipment} actions={actions} />
+              {!manualTrackingDone && (
+                <button
+                  className="btn btn-gh btn-sm"
+                  type="button"
+                  disabled={!canCompleteManualTracking || pendingTaskId === manualTrackingTask?.id}
+                  onClick={() => manualTrackingTask && onCompleteTask(manualTrackingTask.id, {
+                    carrierTrackingNumber: (shipment.trackingNumbers?.[0]?.value || "").trim(),
+                  })}
+                >
+                  {pendingTaskId === manualTrackingTask?.id ? "Saving..." : "Confirm tracking & complete"}
+                </button>
+              )}
             </>
-          )}
-          {manualTrackingDone && (
-            <div className="checkpoint-summary">
-              Tracking number saved: {manualTrackingMetadata.carrierTrackingNumber || shipment.carrierTrackingNumber || "Not set"}
-            </div>
           )}
         </div>
       </div>
@@ -2224,6 +2606,7 @@ function D2DDeliveryPodStage({
   pendingTaskId,
 }: {
   shipment: OperationShipmentDetail;
+  actions: OpsActions;
   onCompleteTask: (taskId: string, metadata?: Record<string, unknown>) => void;
   onMarkDelivered: () => void;
   pendingTaskId?: string | null;
@@ -2346,8 +2729,9 @@ function TaskItem({ task, onComplete, pending = false }: { task?: OperationTask;
   );
 }
 
-function ExpressDetail({ shipment, subTab, setSubTab, onMessage, onSyncTracking, syncPending, teamCard, noteCard }: {
+function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSyncTracking, syncPending, teamCard, noteCard }: {
   shipment: OperationShipmentDetail;
+  actions: OpsActions;
   subTab: string;
   setSubTab: (value: string) => void;
   onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
@@ -2363,6 +2747,7 @@ function ExpressDetail({ shipment, subTab, setSubTab, onMessage, onSyncTracking,
         {tab === "customs" && <div className="alert alert-amber"><AlertTriangle /> Customs or carrier attention is required. Review the tracking and update the client with a friendly milestone.</div>}
         {tab === "received" && <div className="alert alert-green"><CheckCircle2 /> Received by carrier or prepared for carrier monitoring.</div>}
         {tab === "lastmile" && <div className="alert alert-purple"><MapPin /> Shipment is in the last-mile phase. Keep the recipient updated.</div>}
+        <ShipmentDetailsPanel shipment={shipment} />
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div className="tab-bar">
             {["track", "details", "notes"].map((tabKey) => (
@@ -2383,9 +2768,16 @@ function ExpressDetail({ shipment, subTab, setSubTab, onMessage, onSyncTracking,
                   </button>
                 </div>
                 <TrackingSteps shipment={shipment} variant="express" />
+                <TrackingNumbersEditor shipment={shipment} actions={actions} />
+                <LastMileEditor shipment={shipment} actions={actions} />
               </>
             )}
-            {subTab === "details" && <ShipmentInfoRows shipment={shipment} />}
+            {subTab === "details" && (
+              <>
+                <ShipmentInfoRows shipment={shipment} />
+                <ExpensesBlock shipment={shipment} actions={actions} />
+              </>
+            )}
             {subTab === "notes" && noteCard}
           </div>
         </div>
@@ -2832,32 +3224,11 @@ function ExtraWeightChargeModal(props: {
         <div className="modal-title">{billingUnit === "CBM" ? "Adjust Shipment Volume" : "Adjust Shipment Weight"}</div>
         <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "DDP shipment"}</div>
         <div className="modal-body">
-          <div className="alert alert-blue">
-            <Package />
-            This shipment is billed by <strong>{billingUnit}</strong>. Increase or decrease the measured quantity and we will recalculate the invoice using the configured lane formula for this shipment.
-          </div>
-          {chargeConfig && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Original lane quantity</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>{quantity(chargeConfig.currentRawQuantity)} {billingUnit}</div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Current shipment quantity</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>{quantity(chargeConfig.currentMeasuredQuantity)} {billingUnit}</div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Current extra invoice</div>
-                <div className="sc-val green" style={{ textAlign: "left", fontSize: 18 }}>{money(chargeConfig.extraWeightAmountSar, "SAR")}</div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Current extra billed {billingUnit}</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>{quantity(chargeConfig.extraWeightQuantity)} {billingUnit}</div>
-              </div>
-            </div>
-          )}
           <div className="field-group">
             <label className="field-label">Updated shipment quantity ({billingUnit})</label>
+            <div className="field-hint" style={{ marginBottom: 6 }}>
+              Billed by {billingUnit}.{chargeConfig ? ` Current: ${quantity(chargeConfig.currentMeasuredQuantity)} ${billingUnit}.` : ""} Enter the new total quantity.
+            </div>
             <input
               className="field-input"
               value={props.value}
@@ -2865,30 +3236,14 @@ function ExtraWeightChargeModal(props: {
               inputMode="decimal"
               placeholder={`Enter updated ${billingUnit}`}
             />
-            <div className="field-hint">Set the full shipment quantity the warehouse recorded. We will derive the extra billed amount automatically.</div>
           </div>
-          {props.previewLoading && <div className="alert alert-blue"><RefreshCw className="animate-spin" /> Recalculating lane pricing...</div>}
+          {props.previewLoading && <div className="alert alert-blue"><RefreshCw className="animate-spin" /> Recalculating...</div>}
           {props.previewError && <div className="alert alert-red"><AlertTriangle /> {props.previewError}</div>}
-          {props.preview && (
-            <div className="checkpoint-grid">
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Adjustment</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>
-                  {props.preview.deltaAmountSar >= 0 ? "+" : ""}{money(String(props.preview.deltaAmountSar), "SAR")}
-                </div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Projected extra invoice</div>
-                <div className="sc-val green" style={{ textAlign: "left", fontSize: 18 }}>{money(String(props.preview.amountSar), "SAR")}</div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">New extra billed {billingUnit}</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>{quantity(String(props.preview.targetExtraWeightQuantity))} {billingUnit}</div>
-              </div>
-              <div className="card" style={{ margin: 0 }}>
-                <div className="sc-key">Effective rate</div>
-                <div className="sc-val" style={{ textAlign: "left", fontSize: 18 }}>{money(String(props.preview.rateSarPerUnit), "SAR")} / {billingUnit}</div>
-              </div>
+          {props.preview && !props.previewLoading && !props.previewError && (
+            <div className="alert alert-green">
+              <DollarSign />
+              New extra invoice: <strong>{money(String(props.preview.amountSar), "SAR")}</strong>
+              {" "}(Δ {props.preview.deltaAmountSar >= 0 ? "+" : ""}{money(String(props.preview.deltaAmountSar), "SAR")})
             </div>
           )}
         </div>

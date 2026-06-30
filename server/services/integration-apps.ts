@@ -155,6 +155,11 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "ZOHO_ORGANIZATION_ID", label: "Organization ID", required: true },
       { key: "ZOHO_ACCOUNTS_BASE_URL", label: "OAuth Accounts Base URL", placeholder: "https://accounts.zoho.sa" },
       { key: "ZOHO_API_BASE_URL", label: "API Base URL", placeholder: "https://www.zohoapis.sa" },
+      { key: "ZOHO_VAT_TAX_ID", label: "VAT 15% Tax ID (optional)", placeholder: "auto-resolved from org if blank" },
+      { key: "ZOHO_ZERO_TAX_ID", label: "Zero-rated Tax ID (optional)", placeholder: "auto-resolved from org if blank" },
+      { key: "ZOHO_EXPENSE_ACCOUNT_ID", label: "Expense Account ID (operational expenses)" },
+      { key: "ZOHO_CARRIER_EXPENSE_ACCOUNT_ID", label: "Carrier Expense Account ID" },
+      { key: "ZOHO_PAID_THROUGH_ACCOUNT_ID", label: "Paid-Through Account ID (for expenses)" },
     ],
   },
   {

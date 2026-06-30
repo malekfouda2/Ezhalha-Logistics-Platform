@@ -69,6 +69,12 @@ import {
   type InsertCreditInvoice,
   type CreditNotificationEvent,
   type InsertCreditNotificationEvent,
+  type CreditTransaction,
+  type InsertCreditTransaction,
+  type ShipmentTrackingNumber,
+  type InsertShipmentTrackingNumber,
+  type ShipmentExpense,
+  type InsertShipmentExpense,
   type HsCodeMapping,
   type InsertHsCodeMapping,
   type SystemLog,
@@ -111,6 +117,9 @@ import {
   creditAccessRequests,
   creditInvoices,
   creditNotificationEvents,
+  creditTransactions,
+  shipmentTrackingNumbers,
+  shipmentExpenses,
   hsCodeMappings,
   systemLogs,
   InvoiceType,
@@ -468,6 +477,26 @@ export interface IStorage {
   // Credit Notification Events
   createCreditNotificationEvent(event: InsertCreditNotificationEvent): Promise<CreditNotificationEvent>;
   getCreditNotificationEvents(creditInvoiceId: string): Promise<CreditNotificationEvent[]>;
+
+  // Credit ledger
+  getClientCreditSummary(clientAccountId: string): Promise<{ limit: number; outstanding: number; available: number }>;
+  createCreditTransaction(tx: InsertCreditTransaction): Promise<CreditTransaction>;
+  getCreditTransactions(clientAccountId: string): Promise<CreditTransaction[]>;
+
+  // Shipment tracking numbers
+  listShipmentTrackingNumbers(shipmentId: string): Promise<ShipmentTrackingNumber[]>;
+  addShipmentTrackingNumber(tn: InsertShipmentTrackingNumber): Promise<ShipmentTrackingNumber>;
+  updateShipmentTrackingNumber(id: string, value: string): Promise<ShipmentTrackingNumber | undefined>;
+  deleteShipmentTrackingNumber(id: string): Promise<void>;
+  syncPrimaryTrackingNumber(shipmentId: string): Promise<void>;
+
+  // Shipment expenses
+  listShipmentExpenses(shipmentId: string): Promise<ShipmentExpense[]>;
+  getShipmentExpense(id: string): Promise<ShipmentExpense | undefined>;
+  addShipmentExpense(expense: InsertShipmentExpense): Promise<ShipmentExpense>;
+  updateShipmentExpense(id: string, updates: Partial<ShipmentExpense>): Promise<ShipmentExpense | undefined>;
+  deleteShipmentExpense(id: string): Promise<void>;
+  getExpenseTotalsByShipmentIds(shipmentIds: string[]): Promise<Map<string, number>>;
 
   // HS Code Mappings
   findHsCodeMapping(normalizedKey: string, clientAccountId?: string): Promise<HsCodeMapping | undefined>;
@@ -2725,6 +2754,116 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(creditNotificationEvents)
       .where(eq(creditNotificationEvents.creditInvoiceId, creditInvoiceId))
       .orderBy(desc(creditNotificationEvents.sentAt));
+  }
+
+  // ---- Credit ledger ----
+  async getClientCreditSummary(clientAccountId: string): Promise<{ limit: number; outstanding: number; available: number }> {
+    const account = await this.getClientAccount(clientAccountId);
+    const limit = Number(account?.creditLimitSar || 0);
+    const [row] = await db
+      .select({ total: sql<string>`COALESCE(SUM(${creditInvoices.amount}), 0)` })
+      .from(creditInvoices)
+      .where(and(eq(creditInvoices.clientAccountId, clientAccountId), eq(creditInvoices.status, "UNPAID")));
+    const outstanding = Number(row?.total || 0);
+    return { limit, outstanding, available: Math.max(0, limit - outstanding) };
+  }
+
+  async createCreditTransaction(tx: InsertCreditTransaction): Promise<CreditTransaction> {
+    const [created] = await db.insert(creditTransactions).values(tx).returning();
+    return created;
+  }
+
+  async getCreditTransactions(clientAccountId: string): Promise<CreditTransaction[]> {
+    return db.select().from(creditTransactions)
+      .where(eq(creditTransactions.clientAccountId, clientAccountId))
+      .orderBy(desc(creditTransactions.createdAt));
+  }
+
+  // ---- Shipment tracking numbers ----
+  async listShipmentTrackingNumbers(shipmentId: string): Promise<ShipmentTrackingNumber[]> {
+    return db.select().from(shipmentTrackingNumbers)
+      .where(eq(shipmentTrackingNumbers.shipmentId, shipmentId))
+      .orderBy(shipmentTrackingNumbers.position, shipmentTrackingNumbers.createdAt);
+  }
+
+  async addShipmentTrackingNumber(tn: InsertShipmentTrackingNumber): Promise<ShipmentTrackingNumber> {
+    const existing = await this.listShipmentTrackingNumbers(tn.shipmentId);
+    const nextPosition = tn.position ?? (existing.length > 0 ? Math.max(...existing.map((e) => e.position)) + 1 : 0);
+    const [created] = await db.insert(shipmentTrackingNumbers).values({ ...tn, position: nextPosition }).returning();
+    await this.syncPrimaryTrackingNumber(tn.shipmentId);
+    return created;
+  }
+
+  async updateShipmentTrackingNumber(id: string, value: string): Promise<ShipmentTrackingNumber | undefined> {
+    const [updated] = await db.update(shipmentTrackingNumbers)
+      .set({ value })
+      .where(eq(shipmentTrackingNumbers.id, id))
+      .returning();
+    if (updated) {
+      await this.syncPrimaryTrackingNumber(updated.shipmentId);
+    }
+    return updated || undefined;
+  }
+
+  async deleteShipmentTrackingNumber(id: string): Promise<void> {
+    const [existing] = await db.select().from(shipmentTrackingNumbers).where(eq(shipmentTrackingNumbers.id, id));
+    await db.delete(shipmentTrackingNumbers).where(eq(shipmentTrackingNumbers.id, id));
+    if (existing) {
+      await this.syncPrimaryTrackingNumber(existing.shipmentId);
+    }
+  }
+
+  async syncPrimaryTrackingNumber(shipmentId: string): Promise<void> {
+    const list = await this.listShipmentTrackingNumbers(shipmentId);
+    const primary = list[0]?.value || null;
+    await db.update(shipments)
+      .set({ carrierTrackingNumber: primary, updatedAt: new Date() })
+      .where(eq(shipments.id, shipmentId));
+  }
+
+  // ---- Shipment expenses ----
+  async listShipmentExpenses(shipmentId: string): Promise<ShipmentExpense[]> {
+    return db.select().from(shipmentExpenses)
+      .where(eq(shipmentExpenses.shipmentId, shipmentId))
+      .orderBy(desc(shipmentExpenses.createdAt));
+  }
+
+  async getShipmentExpense(id: string): Promise<ShipmentExpense | undefined> {
+    const [row] = await db.select().from(shipmentExpenses).where(eq(shipmentExpenses.id, id));
+    return row || undefined;
+  }
+
+  async addShipmentExpense(expense: InsertShipmentExpense): Promise<ShipmentExpense> {
+    const [created] = await db.insert(shipmentExpenses).values(expense).returning();
+    return created;
+  }
+
+  async updateShipmentExpense(id: string, updates: Partial<ShipmentExpense>): Promise<ShipmentExpense | undefined> {
+    const [updated] = await db.update(shipmentExpenses).set(updates).where(eq(shipmentExpenses.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteShipmentExpense(id: string): Promise<void> {
+    await db.delete(shipmentExpenses).where(eq(shipmentExpenses.id, id));
+  }
+
+  async getExpenseTotalsByShipmentIds(shipmentIds: string[]): Promise<Map<string, number>> {
+    const totals = new Map<string, number>();
+    if (shipmentIds.length === 0) {
+      return totals;
+    }
+    const rows = await db
+      .select({
+        shipmentId: shipmentExpenses.shipmentId,
+        total: sql<string>`COALESCE(SUM(${shipmentExpenses.amountSar}), 0)`,
+      })
+      .from(shipmentExpenses)
+      .where(inArray(shipmentExpenses.shipmentId, shipmentIds))
+      .groupBy(shipmentExpenses.shipmentId);
+    for (const row of rows) {
+      totals.set(row.shipmentId, Number(row.total || 0));
+    }
+    return totals;
   }
 
   async findHsCodeMapping(normalizedKey: string, clientAccountId?: string): Promise<HsCodeMapping | undefined> {

@@ -127,6 +127,7 @@ import {
   ensureOperationProfile,
   getOperationRoleNames,
   getOperationShipmentDetail,
+  updateOperationTaskMetadata,
   getOperationSummary,
   getOperationViewerScope,
   getOperationsUsers,
@@ -457,6 +458,8 @@ function buildZohoCustomerParams(account: ClientAccount) {
     companyName: account.companyName || undefined,
     country: account.country,
     customerType: account.accountType === "individual" ? "individual" as const : "business" as const,
+    taxRegNo: account.taxNumber || undefined,
+    crNumber: account.crNumber || undefined,
     shippingContactName: account.shippingContactName || undefined,
     shippingContactPhone: account.shippingContactPhone || undefined,
     shippingCountryCode: account.shippingCountryCode || undefined,
@@ -493,12 +496,48 @@ async function ensureZohoCustomerForClient(account: ClientAccount, shipperCountr
       return { zohoCustomerId: account.zohoCustomerId, zohoIntegrationAccountId };
     }
 
-    const zohoCustomerId = await zohoService.createCustomer(buildZohoCustomerParams(account));
+    // syncCustomer dedups by email (reuse + refresh) instead of always creating.
+    const zohoCustomerId = await zohoService.syncCustomer(buildZohoCustomerParams(account));
     if (zohoCustomerId) {
       await storage.updateClientAccount(account.id, { zohoCustomerId, zohoIntegrationAccountId });
     }
     return { zohoCustomerId, zohoIntegrationAccountId };
   });
+}
+
+// VAT embedded in an invoice's amount, mirroring the platform's own tax engine
+// (server/services/shipment-accounting.ts) so Zoho shows identical figures in every
+// scenario. The base shipment invoice uses the engine's exact `sellTaxAmountSar`:
+//   - DCE (domestic): (cost+margin) × 15%, the whole amount taxable.
+//   - IMPORT / EXPORT / DDP: margin × 0.15/1.15 only (cost passthrough non-taxable);
+//     export is NOT zero-rated — it carries margin VAT like import.
+// Extra-weight / custom-charge invoices are pure margin (additional service revenue),
+// so VAT is the inclusive 15% portion of their amount in every scenario.
+function computeInvoiceTaxAmount(invoice: Invoice, shipment?: Shipment): number {
+  if (invoice.invoiceType === InvoiceType.SHIPMENT && shipment) {
+    return roundMoney(parseMoneyValue(shipment.sellTaxAmountSar));
+  }
+  return roundMoney((parseMoneyValue(invoice.amount) * 0.15) / 1.15);
+}
+
+// Human-readable shipment context surfaced on the Zoho invoice (type, route, tracking).
+function buildShipmentZohoContext(shipment?: Shipment) {
+  if (!shipment) return { typeLabel: "", route: "", notes: "" };
+  const kind = (shipment.fulfillmentType === "ddp_manual" || shipment.isDdp || shipment.carrierCode === "DDP")
+    ? "DDP"
+    : "Express";
+  const scenario = shipment.taxScenario ? ` (${shipment.taxScenario})` : "";
+  const typeLabel = `${kind}${scenario}`;
+  const origin = [shipment.senderCity, shipment.senderCountry].filter(Boolean).join(", ");
+  const destination = [shipment.recipientCity, shipment.recipientCountry].filter(Boolean).join(", ");
+  const route = origin && destination ? `${origin} → ${destination}` : origin || destination;
+  const notes = [
+    `Tracking: ${shipment.trackingNumber}`,
+    `Type: ${typeLabel}`,
+    origin ? `Origin: ${origin}` : null,
+    destination ? `Destination: ${destination}` : null,
+  ].filter(Boolean).join("\n");
+  return { typeLabel, route, notes };
 }
 
 async function syncInvoiceToZoho(invoice: Invoice, shipment?: Shipment) {
@@ -508,6 +547,18 @@ async function syncInvoiceToZoho(invoice: Invoice, shipment?: Shipment) {
   try {
     const customer = await ensureZohoCustomerForClient(account, shipment?.senderCountry);
     if (!customer.zohoCustomerId) return invoice;
+    const taxScenario = invoice.taxScenario || shipment?.taxScenario || null;
+    const currency = invoice.currency || shipment?.currency || "SAR";
+    const taxAmountSar = computeInvoiceTaxAmount(invoice, shipment);
+    const context = buildShipmentZohoContext(shipment);
+    const baseName = shipment ? `Shipment ${shipment.trackingNumber}` : invoice.description || invoice.invoiceNumber;
+    const lineName = [
+      invoice.invoiceType && invoice.invoiceType !== InvoiceType.SHIPMENT ? (invoice.description || baseName) : baseName,
+      context.typeLabel,
+      context.route,
+    ].filter(Boolean).join(" · ");
+    const combinedNotes = [context.notes, invoice.description && invoice.invoiceType !== InvoiceType.SHIPMENT ? invoice.description : null]
+      .filter(Boolean).join("\n");
     return await withBoundIntegrationAccount("zoho", customer.zohoIntegrationAccountId, getClientIntegrationRoutingOptions(account, shipment?.senderCountry), async () => {
       if (!zohoService.isConfigured()) return invoice;
       const result = await zohoService.syncInvoice(invoice.id, {
@@ -518,17 +569,32 @@ async function syncInvoiceToZoho(invoice: Invoice, shipment?: Shipment) {
         date: invoice.createdAt.toISOString().split("T")[0],
         dueDate: invoice.dueDate.toISOString().split("T")[0],
         lineItems: [{
-          name: shipment ? `Shipment ${shipment.trackingNumber}` : invoice.description || invoice.invoiceNumber,
+          name: lineName,
           description: invoice.description || undefined,
           quantity: 1,
           rate: Number(invoice.amount),
         }],
+        taxAmountSar,
+        taxScenario: taxScenario || undefined,
+        currency,
+        referenceNumber: shipment?.trackingNumber,
+        notes: combinedNotes || undefined,
       }, invoice.zohoInvoiceId || undefined);
-      if (!result.zohoInvoiceId) return invoice;
+      if (!result.zohoInvoiceId) {
+        // Still persist the tax fields we derived so later payment/credit-note paths reuse them.
+        return (await storage.updateInvoice(invoice.id, {
+          taxScenario: taxScenario || invoice.taxScenario,
+          taxAmountSar: taxAmountSar.toFixed(2),
+          currency,
+        })) || invoice;
+      }
       return (await storage.updateInvoice(invoice.id, {
         zohoInvoiceId: result.zohoInvoiceId,
         zohoInvoiceUrl: result.invoiceUrl || invoice.zohoInvoiceUrl,
         zohoIntegrationAccountId: customer.zohoIntegrationAccountId,
+        taxScenario: taxScenario || invoice.taxScenario,
+        taxAmountSar: taxAmountSar.toFixed(2),
+        currency,
       })) || invoice;
     });
   } catch (error) {
@@ -561,6 +627,76 @@ async function deleteInvoiceFromZoho(invoice: Invoice) {
       zohoInvoiceId: invoice.zohoInvoiceId,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+// On cancellation, issue Zoho credit notes for already-synced invoices (ZATCA-compliant)
+// instead of deleting them. Drafts that were never synced are left to the delete path.
+async function creditNoteShipmentInvoicesInZoho(shipment: Shipment, reason: string) {
+  try {
+    const invoices = await storage.getInvoicesByShipmentId(shipment.id);
+    for (const invoice of invoices) {
+      if (!invoice.zohoInvoiceId || invoice.deletedAt) continue;
+      const account = await storage.getClientAccount(invoice.clientAccountId);
+      if (!account?.zohoCustomerId) continue;
+      await withBoundIntegrationAccount(
+        "zoho",
+        invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
+        getClientIntegrationRoutingOptions(account, shipment.senderCountry),
+        async () => {
+          if (!zohoService.isConfigured()) return;
+          await zohoService.createCreditNote({
+            customerId: account.zohoCustomerId!,
+            invoiceId: invoice.zohoInvoiceId!,
+            creditNoteNumber: `CN-${invoice.invoiceNumber}`,
+            date: new Date().toISOString().split("T")[0],
+            reason,
+            lineItems: [{ name: `Cancellation of ${invoice.invoiceNumber}`, quantity: 1, rate: Number(invoice.amount) }],
+            taxAmountSar: computeInvoiceTaxAmount(invoice, shipment),
+            currency: invoice.currency || shipment.currency || "SAR",
+          });
+        },
+      );
+    }
+  } catch (error) {
+    logError("Failed to issue Zoho credit note(s) for cancelled shipment", {
+      shipmentId: shipment.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+// Push a shipment operational expense to Zoho as an expense (internal cost). No-op
+// when ZOHO_EXPENSE_ACCOUNT_ID is not configured. Stores the returned id for later delete.
+async function syncShipmentExpenseToZoho(expenseId: string, shipment: Shipment, description: string, amountSar: number) {
+  const accountId = getIntegrationEnv("ZOHO_EXPENSE_ACCOUNT_ID");
+  if (!accountId) return;
+  try {
+    const account = await storage.getClientAccount(shipment.clientAccountId);
+    if (!account) return;
+    await withBoundIntegrationAccount(
+      "zoho",
+      account.zohoIntegrationAccountId,
+      getClientIntegrationRoutingOptions(account, shipment.senderCountry),
+      async () => {
+        if (!zohoService.isConfigured()) return;
+        const zohoExpenseId = await zohoService.createExpense({
+          accountId,
+          paidThroughAccountId: getIntegrationEnv("ZOHO_PAID_THROUGH_ACCOUNT_ID") || undefined,
+          amount: amountSar,
+          date: new Date().toISOString().split("T")[0],
+          description: `${description} — ${shipment.trackingNumber}`,
+          referenceNumber: shipment.trackingNumber,
+          customerId: account?.zohoCustomerId || undefined,
+          currency: "SAR",
+        });
+        if (zohoExpenseId) {
+          await storage.updateShipmentExpense(expenseId, { zohoExpenseId });
+        }
+      },
+    );
+  } catch (error) {
+    logError("Failed to sync shipment expense to Zoho", { expenseId, error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -1895,6 +2031,7 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
       acc.taxPayableAmountSar += effective.taxPayableAmountSar;
       acc.revenueExcludingTaxAmountSar += effective.revenueExcludingTaxAmountSar;
       acc.marginAmountSar += effective.marginAmountSar;
+      acc.expensesAmountSar += effective.expensesAmountSar;
       acc.netProfitAmountSar += effective.netProfitAmountSar;
 
       const scenarioKey = shipment.taxScenario || "UNKNOWN";
@@ -1912,6 +2049,7 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
       taxPayableAmountSar: 0,
       revenueExcludingTaxAmountSar: 0,
       marginAmountSar: 0,
+      expensesAmountSar: 0,
       netProfitAmountSar: 0,
       scenarioCounts: {} as Record<string, number>,
     },
@@ -2047,9 +2185,12 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
     ? 0
     : roundMoney(costAmountSar + costTaxAmountSar);
   const taxPayableAmountSar = isCancelled ? 0 : parseMoneyValue(shipment.taxPayableAmountSar);
+  // Operational expenses (internal cost only) attached by the financial-statements
+  // route; reduce net profit without affecting client-billed figures.
+  const expensesAmountSar = isCancelled ? 0 : roundMoney(parseMoneyValue(shipment.__expensesAmountSar));
   const netProfitAmountSar = isCancelled
     ? 0
-    : roundMoney(revenueExcludingTaxAmountSar - costAmountSar);
+    : roundMoney(revenueExcludingTaxAmountSar - costAmountSar - expensesAmountSar);
 
   return {
     isCancelled,
@@ -2068,6 +2209,7 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
     extraWeightAmountSar: derivedExtraFees.extraWeightAmountSar,
     extraFeesCostAmountSar: derivedExtraFees.extraFeesCostAmountSar,
     extraFeesRateSarPerWeight: derivedExtraFees.extraFeesRateSarPerWeight,
+    expensesAmountSar,
     netProfitAmountSar,
     weightValue,
   };
@@ -2134,6 +2276,7 @@ function serializeFinancialShipment(
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt,
     extraWeightInvoiceStatus,
     isExtraWeightPaid,
+    expensesAmountSar: effective.expensesAmountSar,
     netProfitAmountSar: effective.netProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
@@ -3901,7 +4044,7 @@ async function createCompletedPaymentRecord(params: {
   paymentMethod: string;
   transactionId: string;
 }) {
-  return storage.createPayment({
+  const payment = await storage.createPayment({
     invoiceId: params.invoiceId,
     clientAccountId: params.clientAccountId,
     amount: params.amount,
@@ -3909,6 +4052,50 @@ async function createCompletedPaymentRecord(params: {
     status: "completed",
     transactionId: params.transactionId,
   });
+
+  // Mirror the payment into Zoho (mark the invoice paid there) — best effort, deduped
+  // by payments.zohoPaymentId so retries don't double-record.
+  try {
+    await recordInvoicePaymentInZoho(params.invoiceId, payment.id, Number(params.amount), params.paymentMethod, params.transactionId);
+  } catch (error) {
+    logError("Failed to record Zoho payment", { invoiceId: params.invoiceId, error: error instanceof Error ? error.message : String(error) });
+  }
+
+  return payment;
+}
+
+async function recordInvoicePaymentInZoho(
+  invoiceId: string,
+  paymentId: string,
+  amount: number,
+  paymentMethod: string,
+  transactionId?: string,
+) {
+  const invoice = await storage.getInvoice(invoiceId);
+  if (!invoice?.zohoInvoiceId) return;
+  const account = await storage.getClientAccount(invoice.clientAccountId);
+  if (!account?.zohoCustomerId) return;
+  const shipment = invoice.shipmentId ? await storage.getShipment(invoice.shipmentId) : undefined;
+
+  await withBoundIntegrationAccount(
+    "zoho",
+    invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
+    getClientIntegrationRoutingOptions(account, shipment?.senderCountry),
+    async () => {
+      if (!zohoService.isConfigured()) return;
+      const zohoPaymentId = await zohoService.recordPayment({
+        customerId: account.zohoCustomerId!,
+        invoiceId: invoice.zohoInvoiceId!,
+        amount,
+        date: new Date().toISOString().split("T")[0],
+        paymentMode: paymentMethod === "tap" ? "creditcard" : paymentMethod === "credit" ? "banktransfer" : "banktransfer",
+        referenceNumber: transactionId || shipment?.trackingNumber,
+      });
+      if (zohoPaymentId) {
+        await storage.updatePayment(paymentId, { zohoPaymentId });
+      }
+    },
+  );
 }
 
 async function markCreditInvoicePaid(
@@ -3970,6 +4157,21 @@ async function markCreditInvoicePaid(
     sentAt: new Date(),
     meta: JSON.stringify({ markedBy: userId }),
   });
+
+  // Restore available credit on the ledger now that the receivable is settled.
+  if (invoice.status !== "PAID") {
+    const summaryAfter = await storage.getClientCreditSummary(invoice.clientAccountId);
+    await storage.createCreditTransaction({
+      clientAccountId: invoice.clientAccountId,
+      shipmentId: invoice.shipmentId,
+      creditInvoiceId: invoice.id,
+      type: "CREDIT",
+      amountSar: Number(invoice.amount).toFixed(2),
+      balanceAfterSar: summaryAfter.available.toFixed(2),
+      reason: "Credit invoice settled",
+      createdByUserId: userId,
+    });
+  }
 
   await logAudit(
     userId,
@@ -5732,6 +5934,239 @@ export async function registerRoutes(
     }
   });
 
+  // Planning-stage editable plan notes
+  app.patch("/api/operations/shipments/:id/plan", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({ notes: z.string().max(20000).default("") }).parse(req.body || {});
+      await storage.updateShipment(req.params.id, { operationPlanNotes: parsed.notes });
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "plan_updated",
+        title: "Plan updated",
+        description: "Planning notes were updated.",
+      });
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update operations plan notes", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Last-mile delivery carrier + phone
+  app.patch("/api/operations/shipments/:id/last-mile", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({
+        carrierName: z.string().trim().max(200).default(""),
+        carrierPhone: z.string().trim().max(60).default(""),
+      }).parse(req.body || {});
+      await storage.updateShipment(req.params.id, {
+        lastMileCarrierName: parsed.carrierName || null,
+        lastMileCarrierPhone: parsed.carrierPhone || null,
+      });
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "last_mile_updated",
+        title: "Last-mile delivery updated",
+        description: `Carrier: ${parsed.carrierName || "—"}${parsed.carrierPhone ? ` · ${parsed.carrierPhone}` : ""}`,
+      });
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update last-mile delivery", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Edit a task's metadata after completion (e.g. received date)
+  app.patch("/api/operations/shipments/:id/tasks/:taskId/metadata", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({ metadata: z.record(z.any()) }).parse(req.body || {});
+      const task = visibleShipment.operationTasks.find((t) => t.id === req.params.taskId);
+      if (!task) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      const updatedTask = await updateOperationTaskMetadata({
+        shipmentId: req.params.id,
+        taskId: req.params.taskId,
+        metadata: parsed.metadata,
+      });
+      if (!updatedTask) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "task_metadata_updated",
+        title: `Updated ${task.title}`,
+        description: "Task details were edited.",
+      });
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update task metadata", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Tracking numbers (editable list)
+  app.post("/api/operations/shipments/:id/tracking-numbers", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({ value: z.string().trim().min(1).max(200) }).parse(req.body || {});
+      await storage.addShipmentTrackingNumber({ shipmentId: req.params.id, value: parsed.value, createdByUserId: user.id });
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "tracking_number_added",
+        title: "Tracking number added",
+        description: parsed.value,
+      });
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to add tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/operations/shipments/:id/tracking-numbers/:tnId", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({ value: z.string().trim().min(1).max(200) }).parse(req.body || {});
+      const updated = await storage.updateShipmentTrackingNumber(req.params.tnId, parsed.value);
+      if (!updated) {
+        return res.status(404).json({ error: "Tracking number not found" });
+      }
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/operations/shipments/:id/tracking-numbers/:tnId", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      await storage.deleteShipmentTrackingNumber(req.params.tnId);
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      logError("Failed to delete tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Operational expenses (internal cost only)
+  app.post("/api/operations/shipments/:id/expenses", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({
+        description: z.string().trim().min(1).max(500),
+        amountSar: z.coerce.number().positive().max(10000000),
+      }).parse(req.body || {});
+      const createdExpense = await storage.addShipmentExpense({
+        shipmentId: req.params.id,
+        description: parsed.description,
+        amountSar: parsed.amountSar.toFixed(2),
+        createdByUserId: user.id,
+      });
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "expense_added",
+        title: "Expense recorded",
+        description: `${parsed.description} · SAR ${parsed.amountSar.toFixed(2)}`,
+      });
+      const shipment = await storage.getShipment(req.params.id);
+      if (shipment) {
+        await syncShipmentExpenseToZoho(createdExpense.id, shipment, parsed.description, parsed.amountSar);
+      }
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to add shipment expense", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/operations/shipments/:id/expenses/:expenseId", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const existingExpense = await storage.getShipmentExpense(req.params.expenseId);
+      await storage.deleteShipmentExpense(req.params.expenseId);
+      if (existingExpense?.zohoExpenseId) {
+        const account = await storage.getClientAccount(visibleShipment.clientAccountId);
+        if (account) {
+          await withBoundIntegrationAccount("zoho", account.zohoIntegrationAccountId, getClientIntegrationRoutingOptions(account), async () => {
+            if (zohoService.isConfigured()) await zohoService.deleteExpense(existingExpense.zohoExpenseId!);
+          }).catch((error) => logError("Failed to delete Zoho expense", { error: error instanceof Error ? error.message : String(error) }));
+        }
+      }
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      logError("Failed to delete shipment expense", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/operations/shipments/:id/notes", requireOperationsPermission("operations", "update"), async (req, res) => {
     try {
       const user = await ensureOperationsAccess(req, res);
@@ -7399,6 +7834,10 @@ export async function registerRoutes(
         carrierStatus: "cancelled",
       });
 
+      if (updated) {
+        await creditNoteShipmentInvoicesInZoho(updated, "Shipment cancelled");
+      }
+
       const refundRequest = updated
         ? await ensureShipmentRefundRequestForCancellation({
             shipment: updated,
@@ -8219,6 +8658,53 @@ export async function registerRoutes(
     }
   });
 
+  // Admin - Client credit ledger (limit, outstanding, available + transactions)
+  app.get("/api/admin/clients/:id/credit", requireAdminPermission("clients", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const client = await storage.getClientAccount(req.params.id);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      if (!(await ensureAccountManagerClientAccess(adminUser, client.id, res))) {
+        return;
+      }
+      const summary = await storage.getClientCreditSummary(client.id);
+      const transactions = await storage.getCreditTransactions(client.id);
+      res.json({ creditEnabled: client.creditEnabled, ...summary, transactions });
+    } catch (error) {
+      logError("Error fetching client credit", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/clients/:id/credit-limit", requireAdminPermission("clients", "update"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      if (adminUser.isAccountManager) {
+        return res.status(403).json({ error: "Account managers cannot change credit limits" });
+      }
+      const client = await storage.getClientAccount(req.params.id);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      const parsed = z.object({ creditLimitSar: z.coerce.number().min(0).max(100000000) }).parse(req.body || {});
+      const updated = await storage.updateClientAccount(req.params.id, {
+        creditLimitSar: parsed.creditLimitSar.toFixed(2),
+      } as any);
+      await logAudit(req.session.userId, "update_credit_limit", "client_account", req.params.id,
+        `Set credit limit to SAR ${parsed.creditLimitSar.toFixed(2)} for ${client.name}`, req.ip);
+      const summary = await storage.getClientCreditSummary(req.params.id);
+      res.json({ client: updated, ...summary });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Error updating credit limit", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Admin - All Invoices
   app.get("/api/admin/invoices", requireAdminPermission("invoices", "read"), async (req, res) => {
     try {
@@ -8427,6 +8913,15 @@ export async function registerRoutes(
 
       const accountingShipments = scopedShipments.filter(isAdminFinancialStatementEligible);
       const excludedLegacyShipmentCount = scopedShipments.length - accountingShipments.length;
+
+      // Attach per-shipment operational expense totals (internal cost) so they flow
+      // into both the row serialization and the period aggregates.
+      const expenseTotals = await storage.getExpenseTotalsByShipmentIds(
+        accountingShipments.map((shipment) => shipment.id),
+      );
+      for (const shipment of accountingShipments) {
+        (shipment as Record<string, any>).__expensesAmountSar = expenseTotals.get(shipment.id) || 0;
+      }
 
       const searchedShipments = accountingShipments.filter((shipment) => {
         if (searchTerms.length === 0) return true;
@@ -8807,6 +9302,30 @@ export async function registerRoutes(
           }),
         ),
       );
+
+      // Push the carrier payout as a Zoho expense (no-op without account config).
+      const carrierExpenseAccountId = getIntegrationEnv("ZOHO_CARRIER_EXPENSE_ACCOUNT_ID");
+      if (carrierExpenseAccountId && !updatedBatch.zohoExpenseId) {
+        try {
+          await withBoundIntegrationAccount("zoho", null, {}, async () => {
+            if (!zohoService.isConfigured()) return;
+            const zohoExpenseId = await zohoService.createExpense({
+              accountId: carrierExpenseAccountId,
+              paidThroughAccountId: getIntegrationEnv("ZOHO_PAID_THROUGH_ACCOUNT_ID") || undefined,
+              amount: parseMoneyValue(updatedBatch.totalCarrierCostWithTaxSar),
+              date: paidAt.toISOString().split("T")[0],
+              description: `Carrier payout ${updatedBatch.carrierName} ${updatedBatch.month}/${updatedBatch.year} (${batchShipments.length} shipments)`,
+              referenceNumber: paymentReference || updatedBatch.id,
+              currency: "SAR",
+            });
+            if (zohoExpenseId) {
+              await storage.updateCarrierPayoutBatch(batch.id, { zohoExpenseId });
+            }
+          });
+        } catch (error) {
+          logError("Failed to sync carrier payout to Zoho", { batchId: batch.id, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
 
       await logAudit(
         req.session.userId,
@@ -14347,13 +14866,17 @@ export async function registerRoutes(
         carrierStatus: "cancelled",
       });
 
+      if (updated) {
+        await creditNoteShipmentInvoicesInZoho(updated, "Shipment cancelled by client");
+      }
+
       const refundRequest = updated
         ? await ensureShipmentRefundRequestForCancellation({
             shipment: updated,
             user,
           })
         : null;
-      
+
       await logAudit(req.session.userId, "cancel_shipment", "shipment", id,
         `Client cancelled shipment ${shipment.trackingNumber}`, req.ip);
       
@@ -14537,6 +15060,15 @@ export async function registerRoutes(
         return res.status(400).json({ error: "A credit invoice already exists for this shipment" });
       }
 
+      // Enforce the client's available credit (limit − outstanding unpaid credit invoices).
+      const creditSummary = await storage.getClientCreditSummary(user.clientAccountId);
+      const creditAmount = Number(shipment.finalPrice || 0);
+      if (creditAmount > creditSummary.available) {
+        return res.status(403).json({
+          error: `Credit limit exceeded. Available credit is SAR ${creditSummary.available.toFixed(2)} but this shipment costs SAR ${creditAmount.toFixed(2)}.`,
+        });
+      }
+
       const now = new Date();
       const dueAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
       const firstReminderAt = new Date(dueAt.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -14556,10 +15088,26 @@ export async function registerRoutes(
         notes: null,
       });
 
+      // Record the debit on the credit ledger.
+      await storage.createCreditTransaction({
+        clientAccountId: user.clientAccountId,
+        shipmentId: shipment.id,
+        creditInvoiceId: creditInvoice.id,
+        type: "DEBIT",
+        amountSar: creditAmount.toFixed(2),
+        balanceAfterSar: (creditSummary.available - creditAmount).toFixed(2),
+        reason: "Credit shipment created",
+        createdByUserId: user.id,
+      });
+
+      const isDdpCredit = shipment.fulfillmentType === "ddp_manual";
       await storage.updateShipment(shipmentId, {
         paymentMethod: "CREDIT",
-        paymentStatus: "unpaid",
-        status: shipment.fulfillmentType === "ddp_manual" ? "awaiting_review" : "credit_pending",
+        // DDP credit is covered by the client's credit balance, so the shipment is
+        // treated as paid for the operations workflow; the creditInvoice stays UNPAID
+        // as the receivable the client settles later. Non-DDP keeps the prior flow.
+        paymentStatus: isDdpCredit ? "paid" : "unpaid",
+        status: isDdpCredit ? "awaiting_review" : "credit_pending",
       });
 
       if (shipment.fulfillmentType !== "ddp_manual") {

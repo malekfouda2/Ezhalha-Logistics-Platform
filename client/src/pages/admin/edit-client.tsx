@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -31,7 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
-import { ArrowLeft, Save, Building, User, MapPin, Globe } from "lucide-react";
+import { ArrowLeft, Save, Building, User, MapPin, Globe, Wallet } from "lucide-react";
 import { insertClientAccountSchema, type ClientAccount } from "@shared/schema";
 
 const editClientSchema = insertClientAccountSchema.partial().extend({
@@ -62,6 +62,113 @@ interface AccountManagerOption {
   id: string;
   username: string;
   email: string;
+}
+
+interface CreditSummary {
+  creditEnabled: boolean;
+  limit: number;
+  outstanding: number;
+  available: number;
+  transactions: Array<{
+    id: string;
+    type: string;
+    amountSar: string;
+    balanceAfterSar: string;
+    reason: string | null;
+    createdAt: string;
+  }>;
+}
+
+function ClientCreditCard({ clientId, disabled }: { clientId: string; disabled: boolean }) {
+  const { toast } = useToast();
+  const [limit, setLimit] = useState("");
+  const { data, isLoading } = useQuery<CreditSummary>({
+    queryKey: ["/api/admin/clients", clientId, "credit"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/admin/clients/${clientId}/credit`);
+      return readJsonResponse(res);
+    },
+    enabled: !!clientId,
+  });
+
+  useEffect(() => {
+    if (data) setLimit(String(data.limit ?? 0));
+  }, [data?.limit]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", `/api/admin/clients/${clientId}/credit-limit`, {
+        creditLimitSar: Number(limit),
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      toast({ title: "Credit limit updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/clients", clientId, "credit"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not update credit limit", description: error?.message, variant: "destructive" });
+    },
+  });
+
+  const fmt = (n: number) => `SAR ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Wallet className="w-5 h-5" />
+          Credit
+        </CardTitle>
+        <CardDescription>
+          {data?.creditEnabled ? "Credit access is enabled." : "Credit access is not enabled for this client."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-lg border p-3">
+            <p className="text-sm text-muted-foreground">Credit limit</p>
+            <p className="text-lg font-semibold">{isLoading ? "…" : fmt(data?.limit || 0)}</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-sm text-muted-foreground">Outstanding</p>
+            <p className="text-lg font-semibold">{isLoading ? "…" : fmt(data?.outstanding || 0)}</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-sm text-muted-foreground">Available</p>
+            <p className="text-lg font-semibold text-green-600 dark:text-green-400">{isLoading ? "…" : fmt(data?.available || 0)}</p>
+          </div>
+        </div>
+        {!disabled && (
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label className="text-sm font-medium">Set credit limit (SAR)</label>
+              <Input value={limit} onChange={(e) => setLimit(e.target.value)} inputMode="decimal" placeholder="0.00" />
+            </div>
+            <Button type="button" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || Number(limit) < 0 || Number.isNaN(Number(limit))}>
+              {saveMutation.isPending ? "Saving..." : "Save limit"}
+            </Button>
+          </div>
+        )}
+        {(data?.transactions?.length || 0) > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-2">Recent credit movements</p>
+            <div className="space-y-1">
+              {data!.transactions.slice(0, 8).map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between text-sm border-b py-1">
+                  <span className={tx.type === "DEBIT" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}>
+                    {tx.type === "DEBIT" ? "−" : "+"}{fmt(Number(tx.amountSar))}
+                  </span>
+                  <span className="text-muted-foreground">{tx.reason || tx.type}</span>
+                  <span className="text-muted-foreground">{new Date(tx.createdAt).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function AdminEditClient() {
@@ -416,6 +523,8 @@ export default function AdminEditClient() {
                     )}
                   </CardContent>
                 </Card>
+
+                {clientId && <ClientCreditCard clientId={clientId} disabled={isAccountManager} />}
 
                 <Card>
                   <CardHeader>

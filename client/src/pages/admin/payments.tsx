@@ -89,6 +89,7 @@ interface AccountingSummary {
   taxPayableAmountSar: number;
   revenueExcludingTaxAmountSar: number;
   marginAmountSar: number;
+  expensesAmountSar: number;
   netProfitAmountSar: number;
   scenarioCounts: Record<string, number>;
 }
@@ -127,6 +128,7 @@ type FinancialShipment = Omit<
   systemCostTotalAmountSar: number;
   taxPayableAmountSar: number;
   revenueExcludingTaxAmountSar: number;
+  expensesAmountSar: number;
   netProfitAmountSar: number;
   extraFeesAmountSar: number;
   extraFeesType: "EXTRA_WEIGHT" | "EXTRA_COST" | "COMBINED" | null;
@@ -530,6 +532,7 @@ export default function AdminPayments() {
     taxPayableAmountSar: 0,
     revenueExcludingTaxAmountSar: 0,
     marginAmountSar: 0,
+    expensesAmountSar: 0,
     netProfitAmountSar: 0,
     scenarioCounts: {},
   };
@@ -936,6 +939,7 @@ export default function AdminPayments() {
                       <TableHead>Tax</TableHead>
                       <TableHead>Gross Total</TableHead>
                       <TableHead>Net Tax</TableHead>
+                      <TableHead>Expenses</TableHead>
                       <TableHead>Net Profit</TableHead>
                       <TableHead>Extra Fees</TableHead>
                       <TableHead>Weight</TableHead>
@@ -1001,6 +1005,9 @@ export default function AdminPayments() {
                           <SarAmount amount={shipment.clientTotalAmountSar || shipment.finalPrice} />
                         </TableCell>
                         <TableCell><SarAmount amount={shipment.taxPayableAmountSar || 0} /></TableCell>
+                        <TableCell>
+                          <SarAmount amount={shipment.expensesAmountSar || 0} className={cn(shipment.expensesAmountSar > 0 && "text-red-600 dark:text-red-400")} />
+                        </TableCell>
                         <TableCell><SarAmount amount={shipment.netProfitAmountSar || 0} /></TableCell>
                         <TableCell>
                           <div className="space-y-1">

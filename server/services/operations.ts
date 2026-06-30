@@ -172,6 +172,30 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
   operationEvents: ShipmentOperationEvent[];
   operationTasks: ShipmentOperationTask[];
   operationNotes: Array<ShipmentOperationNote & { authorName: string | null }>;
+  operationPlanNotes: string | null;
+  lastMileCarrierName: string | null;
+  lastMileCarrierPhone: string | null;
+  trackingNumbers: Array<{ id: string; value: string; position: number }>;
+  expenses: Array<{ id: string; description: string; amountSar: string; createdAt: Date }>;
+  details: {
+    weight: string | null;
+    weightUnit: string | null;
+    dimensionalWeight: string | null;
+    chargeableWeight: string | null;
+    chargeableWeightUnit: string | null;
+    numberOfPackages: number | null;
+    packageType: string | null;
+    length: string | null;
+    width: string | null;
+    height: string | null;
+    dimensionUnit: string | null;
+    packages: unknown[] | null;
+    items: unknown[] | null;
+    tradeDocuments: unknown | null;
+    labelUrl: string | null;
+    hasCarrierLabel: boolean;
+    shipDate: string | null;
+  };
   ddpChargeConfig?: {
     billingUnit: "KG" | "CBM";
     chargeLabel: string;
@@ -294,6 +318,18 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonArray(value: unknown): unknown[] | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -1210,6 +1246,8 @@ async function buildShipmentSummary(
     relatedInvoices,
     specialHandling,
     openAttention,
+    trackingNumbersRows,
+    expenseRows,
   ] = await Promise.all([
     storage.getClientAccount(shipment.clientAccountId),
     getAssignedTeamMembersForShipment(shipment.id),
@@ -1223,6 +1261,8 @@ async function buildShipmentSummary(
     storage.getInvoicesByShipmentId(shipment.id),
     db.select().from(shipmentSpecialHandling).where(eq(shipmentSpecialHandling.shipmentId, shipment.id)).limit(1),
     db.select().from(shipmentAttentionFlags).where(and(eq(shipmentAttentionFlags.shipmentId, shipment.id), eq(shipmentAttentionFlags.status, OperationAttentionStatus.OPEN))),
+    storage.listShipmentTrackingNumbers(shipment.id),
+    storage.listShipmentExpenses(shipment.id),
   ]);
 
   const activeSpecialHandling = specialHandling[0] || null;
@@ -1287,6 +1327,30 @@ async function buildShipmentSummary(
     operationEvents: events,
     operationTasks: tasks,
     operationNotes: notes.map((row) => ({ ...row.note, authorName: row.author?.username || row.author?.email || null })),
+    operationPlanNotes: shipment.operationPlanNotes ?? null,
+    lastMileCarrierName: shipment.lastMileCarrierName ?? null,
+    lastMileCarrierPhone: shipment.lastMileCarrierPhone ?? null,
+    trackingNumbers: trackingNumbersRows.map((row) => ({ id: row.id, value: row.value, position: row.position })),
+    expenses: expenseRows.map((row) => ({ id: row.id, description: row.description, amountSar: row.amountSar, createdAt: row.createdAt })),
+    details: {
+      weight: shipment.weight ?? null,
+      weightUnit: shipment.weightUnit ?? null,
+      dimensionalWeight: shipment.dimensionalWeight ?? null,
+      chargeableWeight: shipment.chargeableWeight ?? null,
+      chargeableWeightUnit: shipment.chargeableWeightUnit ?? null,
+      numberOfPackages: shipment.numberOfPackages ?? null,
+      packageType: shipment.packageType ?? null,
+      length: shipment.length ?? null,
+      width: shipment.width ?? null,
+      height: shipment.height ?? null,
+      dimensionUnit: shipment.dimensionUnit ?? null,
+      packages: parseJsonArray(shipment.packagesData),
+      items: parseJsonArray(shipment.itemsData),
+      tradeDocuments: parseJsonObject(shipment.tradeDocumentsData),
+      labelUrl: shipment.labelUrl ?? null,
+      hasCarrierLabel: Boolean(shipment.carrierLabelBase64),
+      shipDate: shipment.shipDate ?? null,
+    },
   };
 
   if (shipment.fulfillmentType === "ddp_manual" && (shipment.ddpBillingUnit === "KG" || shipment.ddpBillingUnit === "CBM")) {
@@ -1689,6 +1753,29 @@ export async function updateOperationShipmentStatus(params: {
   });
 
   return updated;
+}
+
+// Merge new keys into an existing task's metadata (used to edit details such as the
+// received date after the checkpoint has already been completed).
+export async function updateOperationTaskMetadata(params: {
+  shipmentId: string;
+  taskId: string;
+  metadata: Record<string, unknown>;
+}): Promise<ShipmentOperationTask | null> {
+  const [existingTask] = await db
+    .select()
+    .from(shipmentOperationTasks)
+    .where(and(eq(shipmentOperationTasks.id, params.taskId), eq(shipmentOperationTasks.shipmentId, params.shipmentId)));
+  if (!existingTask) {
+    return null;
+  }
+  const merged = { ...getTaskMetadata(existingTask), ...params.metadata };
+  const [task] = await db
+    .update(shipmentOperationTasks)
+    .set({ metadata: JSON.stringify(merged), updatedAt: new Date() })
+    .where(and(eq(shipmentOperationTasks.id, params.taskId), eq(shipmentOperationTasks.shipmentId, params.shipmentId)))
+    .returning();
+  return task || null;
 }
 
 export async function completeOperationTask(params: {
