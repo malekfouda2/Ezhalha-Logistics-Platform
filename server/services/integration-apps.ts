@@ -358,14 +358,18 @@ export function buildEnvAccount(appKey: string) {
   const definition = getIntegrationDefinition(appKey);
   if (!definition) return null;
 
+  // Use the .env-file snapshot taken at startup (initialIntegrationEnv), NOT live
+  // process.env — otherwise credentials loaded from a default DB account at boot
+  // (loadDefaultIntegrationAccountsIntoEnv) would make the env account appear
+  // configured even after its .env keys were removed.
   const credentials: Record<string, string> = {};
   const settings: Record<string, string> = {};
   for (const field of definition.credentialFields) {
-    const value = process.env[field.key];
+    const value = initialIntegrationEnv.get(field.key);
     if (value) credentials[field.key] = value;
   }
   for (const field of definition.settingsFields || []) {
-    const value = process.env[field.key];
+    const value = initialIntegrationEnv.get(field.key);
     if (value) settings[field.key] = value;
   }
 

@@ -191,7 +191,7 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
     dimensionUnit: string | null;
     packages: unknown[] | null;
     items: unknown[] | null;
-    tradeDocuments: unknown | null;
+    tradeDocuments: unknown[] | null;
     labelUrl: string | null;
     hasCarrierLabel: boolean;
     shipDate: string | null;
@@ -1346,7 +1346,7 @@ async function buildShipmentSummary(
       dimensionUnit: shipment.dimensionUnit ?? null,
       packages: parseJsonArray(shipment.packagesData),
       items: parseJsonArray(shipment.itemsData),
-      tradeDocuments: parseJsonObject(shipment.tradeDocumentsData),
+      tradeDocuments: parseJsonArray(shipment.tradeDocumentsData),
       labelUrl: shipment.labelUrl ?? null,
       hasCarrierLabel: Boolean(shipment.carrierLabelBase64),
       shipDate: shipment.shipDate ?? null,

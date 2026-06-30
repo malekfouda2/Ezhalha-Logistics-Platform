@@ -183,9 +183,9 @@ interface ShipmentDetails {
   width?: string | null;
   height?: string | null;
   dimensionUnit?: string | null;
-  packages?: unknown[] | null;
-  items?: unknown[] | null;
-  tradeDocuments?: unknown | null;
+  packages?: Array<Record<string, unknown>> | null;
+  items?: Array<Record<string, unknown>> | null;
+  tradeDocuments?: Array<Record<string, unknown>> | null;
   labelUrl?: string | null;
   hasCarrierLabel?: boolean;
   shipDate?: string | null;
@@ -1874,14 +1874,48 @@ function ShipmentDetailsPanel({ shipment }: { shipment: OperationShipmentDetail 
   if (shipment.estimatedDelivery) rows.push(["Est. delivery", new Date(shipment.estimatedDelivery).toLocaleDateString()]);
   if (shipment.actualDelivery) rows.push(["Delivered", new Date(shipment.actualDelivery).toLocaleDateString()]);
 
-  const docs: Array<{ label: string; href?: string }> = [];
-  if (d.labelUrl) docs.push({ label: "Shipping label", href: d.labelUrl });
-  if (d.hasCarrierLabel && !d.labelUrl) docs.push({ label: "Carrier label (on file)" });
-  const tradeDocs = d.tradeDocuments && typeof d.tradeDocuments === "object" ? d.tradeDocuments as Record<string, unknown> : null;
-  if (tradeDocs && Object.keys(tradeDocs).length > 0) docs.push({ label: "Commercial invoice / trade docs" });
+  const str = (v: unknown) => (v == null ? "" : String(v));
+  const pick = (o: Record<string, unknown>, keys: string[]) => {
+    for (const k of keys) { if (o[k] != null && o[k] !== "") return o[k]; }
+    return undefined;
+  };
+  const humanizeDocType = (t: string) =>
+    t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const packages = Array.isArray(d.packages) ? d.packages : [];
-  const items = Array.isArray(d.items) ? d.items : [];
+  // Build clean, labelled package summaries (no raw JSON).
+  const packages = (Array.isArray(d.packages) ? d.packages : []).map((p) => {
+    const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+    const weight = pick(o, ["weight", "weightValue", "grossWeight"]);
+    const unit = pick(o, ["weightUnit", "unit"]) ?? d.weightUnit ?? "";
+    const l = pick(o, ["length"]); const w = pick(o, ["width"]); const h = pick(o, ["height"]);
+    const dimUnit = pick(o, ["dimensionUnit"]) ?? d.dimensionUnit ?? "";
+    const qty = pick(o, ["quantity", "count", "pieces"]);
+    const parts: string[] = [];
+    if (weight != null) parts.push(`${str(weight)} ${str(unit)}`.trim());
+    if (l || w || h) parts.push(`${str(l) || "?"}×${str(w) || "?"}×${str(h) || "?"} ${str(dimUnit)}`.trim());
+    if (qty != null) parts.push(`×${str(qty)}`);
+    return parts.join(" · ");
+  }).filter(Boolean);
+
+  // Items: show description + quantity only; skip records with no readable label.
+  const items = (Array.isArray(d.items) ? d.items : []).map((item) => {
+    const o = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const desc = pick(o, ["description", "name", "itemDescription", "productName"]);
+    if (!desc) return "";
+    const qty = pick(o, ["quantity", "qty", "count"]);
+    return `${str(desc)}${qty != null ? ` × ${str(qty)}` : ""}`;
+  }).filter(Boolean);
+
+  // Documents: shipping label + each uploaded trade document (objectPath is /objects/...).
+  const docs: Array<{ label: string; href: string }> = [];
+  if (d.labelUrl) docs.push({ label: "Shipping label", href: d.labelUrl });
+  for (const td of (Array.isArray(d.tradeDocuments) ? d.tradeDocuments : [])) {
+    const o = (td && typeof td === "object" ? td : {}) as Record<string, unknown>;
+    const href = str(pick(o, ["objectPath", "fileUrl", "url"]));
+    if (!href) continue;
+    const label = o.documentType ? humanizeDocType(str(o.documentType)) : str(pick(o, ["fileName"])) || "Document";
+    docs.push({ label, href });
+  }
 
   return (
     <div className="card">
@@ -1897,30 +1931,25 @@ function ShipmentDetailsPanel({ shipment }: { shipment: OperationShipmentDetail 
       {packages.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="sc-key" style={{ marginBottom: 6 }}>Packages ({packages.length})</div>
-          {packages.map((pkg, i) => (
-            <div key={i} className="field-hint" style={{ fontFamily: "monospace" }}>{JSON.stringify(pkg)}</div>
+          {packages.map((p, i) => (
+            <div key={i} className="sc-val" style={{ textAlign: "left", fontSize: 14 }}>{p}</div>
           ))}
         </div>
       )}
       {items.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="sc-key" style={{ marginBottom: 6 }}>Items ({items.length})</div>
-          {items.map((item, i) => {
-            const it = item && typeof item === "object" ? item as Record<string, unknown> : {};
-            const desc = (it.description || it.name || it.itemDescription || JSON.stringify(it)) as string;
-            const qty = it.quantity != null ? ` × ${it.quantity}` : "";
-            return <div key={i} className="field-hint">{String(desc)}{qty}</div>;
-          })}
+          {items.map((it, i) => (
+            <div key={i} className="sc-val" style={{ textAlign: "left", fontSize: 14 }}>{it}</div>
+          ))}
         </div>
       )}
       {docs.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="sc-key" style={{ marginBottom: 6 }}>Documents</div>
           <div className="action-row">
-            {docs.map((doc, i) => doc.href ? (
+            {docs.map((doc, i) => (
               <a key={i} className="btn btn-gh btn-sm" href={doc.href} target="_blank" rel="noreferrer">{doc.label}</a>
-            ) : (
-              <span key={i} className="chip">{doc.label}</span>
             ))}
           </div>
         </div>
