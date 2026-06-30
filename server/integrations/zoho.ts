@@ -156,6 +156,12 @@ export class ZohoService {
     return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
+  // Zoho caps reference_number at 50 characters; truncate to stay within the limit.
+  private capRef(value?: string): string | undefined {
+    if (!value) return undefined;
+    return value.length > 49 ? value.slice(0, 49) : value;
+  }
+
   // Authed JSON request helper for the newer endpoints (token + org auto-applied).
   private async zohoFetch(accessToken: string, path: string, init?: RequestInit & { query?: Record<string, string> }) {
     const sep = path.includes("?") ? "&" : "?";
@@ -258,7 +264,7 @@ export class ZohoService {
       // internal number is kept in reference_number for traceability.
       date: params.date,
       due_date: params.dueDate,
-      reference_number: params.referenceNumber || params.invoiceNumber,
+      reference_number: this.capRef(params.referenceNumber || params.invoiceNumber),
       // is_inclusive_tax is an invoice-level flag in Zoho (per-line is ignored): line
       // rates already include VAT, so Zoho extracts it instead of adding on top.
       is_inclusive_tax: true,
@@ -801,7 +807,7 @@ export class ZohoService {
           payment_mode: params.paymentMode || "banktransfer",
           amount: this.roundMoney(params.amount),
           date: params.date,
-          reference_number: params.referenceNumber,
+          reference_number: this.capRef(params.referenceNumber),
           invoices: [{ invoice_id: params.invoiceId, amount_applied: this.roundMoney(params.amount) }],
         }),
       });
@@ -848,7 +854,7 @@ export class ZohoService {
           customer_id: params.customerId,
           // Credit-note number left to Zoho's own sequence; our invoice id kept as reference.
           date: params.date,
-          reference_number: params.invoiceId,
+          reference_number: this.capRef(params.invoiceId),
           reason: params.reason,
           is_inclusive_tax: true,
           ...(params.currency ? { currency_code: params.currency } : {}),
@@ -912,7 +918,7 @@ export class ZohoService {
           amount: this.roundMoney(params.amount),
           date: params.date,
           description: params.description,
-          reference_number: params.referenceNumber,
+          reference_number: this.capRef(params.referenceNumber),
           customer_id: params.customerId,
           ...(params.currency ? { currency_code: params.currency } : {}),
         }),
