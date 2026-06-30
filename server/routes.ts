@@ -630,42 +630,6 @@ async function deleteInvoiceFromZoho(invoice: Invoice) {
   }
 }
 
-// On cancellation, issue Zoho credit notes for already-synced invoices (ZATCA-compliant)
-// instead of deleting them. Drafts that were never synced are left to the delete path.
-async function creditNoteShipmentInvoicesInZoho(shipment: Shipment, reason: string) {
-  try {
-    const invoices = await storage.getInvoicesByShipmentId(shipment.id);
-    for (const invoice of invoices) {
-      if (!invoice.zohoInvoiceId || invoice.deletedAt) continue;
-      const account = await storage.getClientAccount(invoice.clientAccountId);
-      if (!account?.zohoCustomerId) continue;
-      await withBoundIntegrationAccount(
-        "zoho",
-        invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
-        getClientIntegrationRoutingOptions(account, shipment.senderCountry),
-        async () => {
-          if (!zohoService.isConfigured()) return;
-          await zohoService.createCreditNote({
-            customerId: account.zohoCustomerId!,
-            invoiceId: invoice.zohoInvoiceId!,
-            creditNoteNumber: `CN-${invoice.invoiceNumber}`,
-            date: new Date().toISOString().split("T")[0],
-            reason,
-            lineItems: [{ name: `Cancellation of ${invoice.invoiceNumber}`, quantity: 1, rate: Number(invoice.amount) }],
-            taxAmountSar: computeInvoiceTaxAmount(invoice, shipment),
-            currency: invoice.currency || shipment.currency || "SAR",
-          });
-        },
-      );
-    }
-  } catch (error) {
-    logError("Failed to issue Zoho credit note(s) for cancelled shipment", {
-      shipmentId: shipment.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 // Push a shipment operational expense to Zoho as an expense (internal cost). No-op
 // when ZOHO_EXPENSE_ACCOUNT_ID is not configured. Stores the returned id for later delete.
 async function syncShipmentExpenseToZoho(expenseId: string, shipment: Shipment, description: string, amountSar: number) {
@@ -7796,9 +7760,8 @@ export async function registerRoutes(
         carrierStatus: "cancelled",
       });
 
-      if (updated) {
-        await creditNoteShipmentInvoicesInZoho(updated, "Shipment cancelled");
-      }
+      // Intentionally do NOT touch Zoho on cancellation (no credit note, no delete).
+      // Accounting handles the synced invoice manually.
 
       const refundRequest = updated
         ? await ensureShipmentRefundRequestForCancellation({
@@ -14828,9 +14791,8 @@ export async function registerRoutes(
         carrierStatus: "cancelled",
       });
 
-      if (updated) {
-        await creditNoteShipmentInvoicesInZoho(updated, "Shipment cancelled by client");
-      }
+      // Intentionally do NOT touch Zoho on cancellation (no credit note, no delete).
+      // Accounting handles the synced invoice manually.
 
       const refundRequest = updated
         ? await ensureShipmentRefundRequestForCancellation({
