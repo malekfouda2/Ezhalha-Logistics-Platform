@@ -753,8 +753,17 @@ export class FedExAdapter implements CarrierAdapter {
         );
 
         if (!response.ok) {
+          // Surface FedEx's own error codes/messages (e.g. RATE.LOCATION.NOSERVICE,
+          // ORIGINZIPCODE.SERVICE.ERROR) even in production — these are validation
+          // messages, not secrets, and without them failures log as an opaque status.
+          const fedexErrors = Array.isArray((responseData as any)?.errors)
+            ? (responseData as any).errors
+                .map((e: any) => [e?.code, e?.message].filter(Boolean).join(": "))
+                .filter(Boolean)
+                .join("; ")
+            : "";
           const errMsg = isProduction()
-            ? `FedEx API error: ${response.status}`
+            ? `FedEx API error: ${response.status}${fedexErrors ? ` - ${fedexErrors}` : ""}`
             : `FedEx API error: ${response.status} - ${JSON.stringify(responseData)}`;
           const err = new Error(errMsg);
           if (response.status >= 500 && attempt < retries) {
