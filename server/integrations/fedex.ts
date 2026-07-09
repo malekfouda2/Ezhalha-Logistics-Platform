@@ -309,9 +309,19 @@ export interface TrackingResponse {
   events: TrackingEvent[];
 }
 
+export interface CarrierCapabilityProfile {
+  type: "local" | "international" | "both";
+  domesticCountries?: string[]; // ISO codes this carrier delivers domestically, e.g. ["SA"]
+  domesticZones?: boolean;
+  labelFormat?: "PDF" | "ZPL";
+  trackingMode?: "push" | "poll";
+}
+
 export interface CarrierAdapter {
   name: string;
   carrierCode: string;
+  // Optional so existing international adapters remain valid; absent => international.
+  capabilities?: CarrierCapabilityProfile;
   isConfigured(): boolean;
   validateAddress(request: AddressValidationRequest): Promise<AddressValidationResponse>;
   validatePostalCode(request: PostalCodeValidationRequest): Promise<PostalCodeValidationResponse>;
@@ -942,20 +952,27 @@ export class FedExAdapter implements CarrierAdapter {
     }
 
     try {
+      // Mirror the rate path: FedEx rejects state/province values that are not
+      // valid sub-division codes (e.g. KSA region names like "Makkah") with a
+      // 400 SERVICES.AVAILABLE.INVALID. sanitizeStateCode drops them for
+      // countries that don't require a state, keeping availability in sync with
+      // the rate request built in getRates.
+      const originStateCode = sanitizeStateCode(request.origin.countryCode, request.origin.stateOrProvince);
+      const destinationStateCode = sanitizeStateCode(request.destination.countryCode, request.destination.stateOrProvince);
       const fedexRequest = {
         requestedShipment: {
           shipper: {
             address: {
               postalCode: request.origin.postalCode,
               countryCode: request.origin.countryCode,
-              stateOrProvinceCode: request.origin.stateOrProvince,
+              stateOrProvinceCode: originStateCode,
             },
           },
           recipients: [{
             address: {
               postalCode: request.destination.postalCode,
               countryCode: request.destination.countryCode,
-              stateOrProvinceCode: request.destination.stateOrProvince,
+              stateOrProvinceCode: destinationStateCode,
             },
           }],
         },
