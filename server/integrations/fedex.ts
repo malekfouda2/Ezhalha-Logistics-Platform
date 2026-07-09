@@ -1148,14 +1148,17 @@ export class FedExAdapter implements CarrierAdapter {
           const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
           serviceTypesToTry = uniqueTypes;
           const validPkgs = [...new Set(saResult.services.flatMap(s => s.validPackagingTypes || []))];
-          if (validPkgs.length > 0) {
-            if (userPackaging && validPkgs.includes(userPackaging)) {
-              packagingTypesToTry = [userPackaging, ...validPkgs.filter(p => p !== userPackaging)];
-            } else {
-              packagingTypesToTry = validPkgs;
-            }
+          if (userPackaging) {
+            packagingTypesToTry = validPkgs.includes(userPackaging)
+              ? [userPackaging, ...validPkgs.filter(p => p !== userPackaging)]
+              : [userPackaging];
           } else {
-            packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
+            // Default to the customer's OWN packaging. The FedEx-branded boxes the
+            // availability API returns (e.g. FEDEX_10KG_BOX) are priced at their box
+            // minimum (~10kg), which overcharges a light parcel by several times
+            // (1kg EG→SA: FEDEX_10KG_BOX ≈ 597 SAR vs YOUR_PACKAGING ≈ 99 SAR). Only
+            // use a branded box when the customer explicitly selected one.
+            packagingTypesToTry = ["YOUR_PACKAGING"];
           }
         } else {
           packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
