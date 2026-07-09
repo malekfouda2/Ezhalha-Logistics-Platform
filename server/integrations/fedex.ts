@@ -1114,8 +1114,30 @@ export class FedExAdapter implements CarrierAdapter {
         recipientAddress.stateOrProvinceCode = sanitizedRecipientState;
       }
 
-      const userPackaging = (request.packagingType && request.packagingType !== "YOUR_PACKAGING") 
+      const userPackaging = (request.packagingType && request.packagingType !== "YOUR_PACKAGING")
         ? request.packagingType : null;
+
+      // FedEx rejects international rate quotes without a customsClearanceDetail
+      // (RATE.CUSTOMCLEARANCEDETAIL.INVALID). RateRequest carries no declared
+      // value, so send a minimal placeholder — the customs value does not affect
+      // the transport base charge we read back (real customs data is built on the
+      // ship / commercial-invoice path).
+      const isInternational = request.shipper.countryCode !== request.recipient.countryCode;
+      const rateCustomsDetail = isInternational
+        ? {
+            dutiesPayment: { paymentType: "SENDER" },
+            commodities: [{
+              description: "General goods",
+              quantity: 1,
+              quantityUnits: "PCS",
+              weight: {
+                units: request.packages[0]?.weightUnit || "KG",
+                value: request.packages.reduce((sum, pkg) => sum + (Number(pkg.weight) || 0), 0) || 1,
+              },
+              customsValue: { amount: 100, currency: request.currency || "USD" },
+            }],
+          }
+        : null;
 
       try {
         const saResult = await this.checkServiceAvailability({
@@ -1193,6 +1215,9 @@ export class FedExAdapter implements CarrierAdapter {
           };
           if (trySvc) {
             requestedShipment.serviceType = trySvc;
+          }
+          if (rateCustomsDetail) {
+            requestedShipment.customsClearanceDetail = rateCustomsDetail;
           }
 
           const rateRequest = {
