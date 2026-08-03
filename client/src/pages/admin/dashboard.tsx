@@ -283,11 +283,17 @@ export default function AdminDashboard() {
               {stats?.shipmentsByMonth && stats.shipmentsByMonth.length > 0 ? (
                 <ChartContainer config={shipmentChartConfig} className="h-[250px] w-full">
                   <BarChart data={stats.shipmentsByMonth} accessibilityLayer>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                    <YAxis tickLine={false} axisLine={false} allowDecimals={false} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="value" fill="var(--color-value)" radius={[4, 4, 0, 0]} />
+                    <defs>
+                      <linearGradient id="adminBarGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--color-value)" stopOpacity={0.95} />
+                        <stop offset="100%" stopColor="var(--color-value)" stopOpacity={0.45} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" strokeOpacity={0.4} />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+                    <YAxis tickLine={false} axisLine={false} allowDecimals={false} width={28} />
+                    <ChartTooltip cursor={{ fill: "hsl(var(--primary) / 0.06)" }} content={<ChartTooltipContent />} />
+                    <Bar dataKey="value" fill="url(#adminBarGradient)" radius={[6, 6, 0, 0]} maxBarSize={48} />
                   </BarChart>
                 </ChartContainer>
               ) : (

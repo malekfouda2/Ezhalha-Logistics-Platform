@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import session from "express-session";
 import bcrypt from "bcrypt";
 import helmet from "helmet";
@@ -9,6 +9,7 @@ import { storage } from "./storage";
 import type {
   Department,
   ClientAccount,
+  ClientApplication,
   ClientUserPermission,
   Invoice,
   Payment,
@@ -42,9 +43,14 @@ import {
   shipmentTradeDocumentSchema,
   ShipmentExtraFeeType,
   DdpTransportMethod,
+  type DdpTransportMethodValue,
   INTEGRATION_ACCOUNT_COUNTRY_BASIS_SETTING_KEY,
   IntegrationAccountCountryBasis,
   insertDdpPricingLaneSchema,
+  insertLocalCarrierPricingTierSchema,
+  insertVirtualCarrierSchema,
+  insertSalesChannelSchema,
+  insertCarrierAssignmentRuleSchema,
   type ClientPermissionValue,
 } from "@shared/schema";
 import {
@@ -61,11 +67,12 @@ import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricin
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
-import type { CarrierAdapter, CreateShipmentRequest } from "./integrations/fedex";
+import type { CarrierAdapter, CreateShipmentRequest, ShippingAddress, PickupRequest, PackageDetails } from "./integrations/fedex";
 import { carrierService, getCarrierAdapter } from "./integrations/carriers";
 import { zohoService } from "./integrations/zoho";
 import type { TapCharge } from "./integrations/tap";
-import { tapService } from "./integrations/tap";
+import { tapService, getTapSettledSarAmount } from "./integrations/tap";
+import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
@@ -81,8 +88,12 @@ import {
 import { buildFedExShipmentRequestFromShipment } from "./services/fedex-shipment";
 import { buildDhlShipmentRequestFromShipment } from "./services/dhl-shipment";
 import { buildGenericCarrierShipmentRequestFromShipment } from "./services/generic-carrier-shipment";
+import { CARRIER_CONTACT_EMAIL } from "./services/carrier-constants";
+import { computeQuotationPricing } from "./services/admin-quotations";
 import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 import { extractPackageDetailsFromDocument } from "./services/package-extraction";
+import { extractCompanyDetailsFromDocuments, isGeminiCompanyExtractionConfigured } from "./services/gemini-company-extraction";
+import { applyCarrierTrackingToShipment } from "./services/express-tracking-refresh";
 import {
   hasCommercialInvoiceData,
   renderCommercialInvoiceHtml,
@@ -93,6 +104,7 @@ import { normalizeCountryCode } from "@shared/countries";
 import {
   INTEGRATION_APP_DEFINITIONS,
   buildEnvAccount,
+  decryptIntegrationPayload,
   encryptIntegrationPayload,
   getIntegrationDefinition,
   loadDefaultIntegrationAccountsIntoEnv,
@@ -114,6 +126,12 @@ import {
   withShipmentIntegrationAccount,
 } from "./services/integration-runtime";
 import { calculateDdpPrice } from "./services/ddp-pricing";
+import { resolveLocalRate } from "./services/local-pricing";
+import {
+  getSalesChannelAdapter,
+  getSignatureHeader,
+} from "./services/sales-channels";
+import { syncSalesChannel } from "./services/sales-channel-sync";
 import {
   OperationInputError,
   OPERATION_PERMISSION_NAMES,
@@ -396,6 +414,44 @@ function getShipmentIntegrationRoutingOptions(shipment: Shipment) {
   };
 }
 
+// Live carrier base rate for a local (KSA-domestic) lane, when the carrier's rate API is
+// configured. Returns null when unconfigured or the carrier exposes no rate API — the
+// caller then falls back to the stored rate-card tier.
+async function resolveLiveLocalBaseRate(
+  adapter: CarrierAdapter,
+  fromCity: string,
+  toCity: string,
+  weightKg: number,
+): Promise<number | null> {
+  if (!adapter.isConfigured()) return null;
+  const minimalAddress = (city: string): ShippingAddress => ({
+    name: "",
+    streetLine1: "",
+    city: city || "",
+    postalCode: "",
+    countryCode: "SA",
+    phone: "",
+  });
+  try {
+    const rates = await withShipmentIntegrationAccount(
+      getIntegrationAppKeyForCarrier(adapter.carrierCode),
+      { shipperCountryCode: "SA", recipientCountryCode: "SA" },
+      () =>
+        adapter.getRates({
+          shipper: minimalAddress(fromCity),
+          recipient: minimalAddress(toCity),
+          packages: [{ weight: weightKg, weightUnit: "KG", packageType: "PARCEL" }],
+          currency: "SAR",
+        }),
+    );
+    const base = rates?.[0]?.baseRate;
+    return Number.isFinite(base) && Number(base) > 0 ? Number(base) : null;
+  } catch (error) {
+    logError(`Live local rate lookup failed for ${adapter.carrierCode}`, error);
+    return null;
+  }
+}
+
 function buildTapCustomer(account: ClientAccount, tapIntegrationAccountId?: string | null) {
   const displayName =
     account.shippingContactName ||
@@ -505,6 +561,135 @@ async function ensureZohoCustomerForClient(account: ClientAccount, shipperCountr
   });
 }
 
+/**
+ * Approve a client application: create the client account (+ Zoho customer), create the primary
+ * user with a temporary password, mark the application approved, audit it, and email credentials.
+ * Shared by the admin review endpoint and the automatic approval of individual applicants.
+ * Returns the created client account, or throws EmailInUseError if the email already has a user.
+ */
+class EmailInUseError extends Error {
+  constructor() {
+    super("A user with this email already exists");
+    this.name = "EmailInUseError";
+  }
+}
+
+async function approveClientApplication(
+  application: ClientApplication,
+  options: { profile?: string; reviewedByUserId?: string; reviewNotes?: string; ipAddress?: string; auditAction?: string },
+): Promise<ClientAccount> {
+  const existingUser = await storage.getUserByEmail(application.email);
+  if (existingUser) {
+    throw new EmailInUseError();
+  }
+
+  const clientAccount = await storage.createClientAccount({
+    accountType: application.accountType || "company",
+    name: application.name,
+    email: application.email,
+    phone: application.phone,
+    country: application.country,
+    companyName: application.companyName,
+    crNumber: application.crNumber,
+    taxNumber: application.taxNumber,
+    nationalAddressStreet: application.nationalAddressStreet,
+    nationalAddressBuilding: application.nationalAddressBuilding,
+    nationalAddressDistrict: application.nationalAddressDistrict,
+    nationalAddressCity: application.nationalAddressCity,
+    nationalAddressPostalCode: application.nationalAddressPostalCode,
+    shippingContactName: application.shippingContactName,
+    shippingContactPhone: application.shippingContactPhone,
+    shippingCountryCode: application.shippingCountryCode,
+    shippingStateOrProvince: application.shippingStateOrProvince,
+    shippingCity: application.shippingCity,
+    shippingPostalCode: application.shippingPostalCode,
+    shippingAddressLine1: application.shippingAddressLine1,
+    shippingAddressLine2: application.shippingAddressLine2,
+    shippingShortAddress: application.shippingShortAddress,
+    documents: application.documents,
+    profile: options.profile || "regular",
+    isActive: true,
+  });
+
+  await ensureZohoCustomerForClient(clientAccount).catch((error) => {
+    logError("Failed to create Zoho customer", error);
+  });
+
+  // Unique username derived from the email local part.
+  let username = application.email.split("@")[0];
+  let existingUsername = await storage.getUserByUsername(username);
+  let counter = 1;
+  while (existingUsername) {
+    username = `${application.email.split("@")[0]}${counter}`;
+    existingUsername = await storage.getUserByUsername(username);
+    counter++;
+  }
+
+  // No temp password — the user sets their own via the welcome email link. Store a random,
+  // unusable password so the account can't be signed into until it's set.
+  const hashedPassword = await bcrypt.hash(randomUUID() + randomUUID(), SALT_ROUNDS);
+
+  const createdUser = await storage.createUser({
+    username,
+    email: application.email,
+    password: hashedPassword,
+    phone: application.phone || null,
+    userType: "client",
+    clientAccountId: clientAccount.id,
+    isPrimaryContact: true,
+    mustChangePassword: false,
+    isActive: true,
+  });
+
+  await storage.updateClientApplication(application.id, {
+    status: "approved",
+    reviewedBy: options.reviewedByUserId,
+    reviewNotes: options.reviewNotes,
+  });
+
+  await logAudit(
+    options.reviewedByUserId,
+    options.auditAction || "approve_application",
+    "client_application",
+    application.id,
+    `Approved application for ${application.email}, created client account`,
+    options.ipAddress,
+  );
+
+  await sendPasswordSetupEmail(createdUser, "onboard");
+
+  return clientAccount;
+}
+
+// Issue a one-time token and email a set/reset-password link. purpose "onboard" (7-day) for new
+// accounts to set their initial password; "reset" (1-hour) for forgot-password.
+async function sendPasswordSetupEmail(user: User, purpose: "onboard" | "reset"): Promise<void> {
+  await storage.invalidatePasswordResetTokensForUser(user.id);
+  const token = `${randomUUID()}${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const ttlMs = purpose === "onboard" ? 7 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
+  await storage.createPasswordResetToken({
+    userId: user.id,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    purpose,
+    expiresAt: new Date(Date.now() + ttlMs),
+  });
+  const url = `${APP_BASE_URL}/reset-password?token=${token}`;
+  const onboard = purpose === "onboard";
+  await sendEmail({
+    to: user.email,
+    subject: onboard ? "Welcome to ezhalha — set your password" : "Reset your ezhalha password",
+    html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
+      <h2 style="margin:0 0 8px">${onboard ? "Welcome to ezhalha" : "Reset your password"}</h2>
+      <p style="color:#555;margin:0 0 16px">${onboard
+        ? "Your account is ready. Set a password to sign in."
+        : "We received a request to reset your password. Click below to choose a new one."}</p>
+      <a href="${url}" style="display:inline-block;background:#fe5200;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px">${onboard ? "Set my password" : "Reset my password"}</a>
+      <p style="color:#888;font-size:12px;margin-top:16px">This link expires in ${onboard ? "7 days" : "1 hour"}. If you didn't request this, you can ignore this email.</p>
+    </div>`,
+    text: `${onboard ? "Welcome to ezhalha. Set your password" : "Reset your ezhalha password"}: ${url} (expires in ${onboard ? "7 days" : "1 hour"})`,
+  });
+}
+
 // VAT embedded in an invoice's amount, mirroring the platform's own tax engine
 // (server/services/shipment-accounting.ts) so Zoho shows identical figures in every
 // scenario. The base shipment invoice uses the engine's exact `sellTaxAmountSar`:
@@ -603,30 +788,6 @@ async function syncInvoiceToZoho(invoice: Invoice, shipment?: Shipment) {
       error: error instanceof Error ? error.message : String(error),
     });
     return invoice;
-  }
-}
-
-async function deleteInvoiceFromZoho(invoice: Invoice) {
-  if (!invoice.zohoInvoiceId) return;
-  const account = await storage.getClientAccount(invoice.clientAccountId);
-  if (!account) return;
-
-  try {
-    await withBoundIntegrationAccount(
-      "zoho",
-      invoice.zohoIntegrationAccountId || account.zohoIntegrationAccountId,
-      getClientIntegrationRoutingOptions(account),
-      async () => {
-        if (!zohoService.isConfigured()) return;
-        await zohoService.deleteInvoice(invoice.zohoInvoiceId!);
-      },
-    );
-  } catch (error) {
-    logError("Failed to delete invoice from Zoho", {
-      invoiceId: invoice.id,
-      zohoInvoiceId: invoice.zohoInvoiceId,
-      error: error instanceof Error ? error.message : String(error),
-    });
   }
 }
 
@@ -789,6 +950,90 @@ function resolveCarrierCode(carrier?: string | null): string {
   return carrier?.trim() ? carrier.trim().toUpperCase() : "FEDEX";
 }
 
+// Note written onto the aggregator provider's order so their ops assign the intended
+// downstream courier. Uses the configured template ({name} substituted), else a default.
+function renderVirtualCarrierNote(vc: { name: string; noteTemplate?: string | null }): string {
+  const template = (vc.noteTemplate || "").trim();
+  if (template) return template.replace(/\{name\}/gi, vc.name);
+  return `Assign to ${vc.name}`;
+}
+
+// Representative major-city { city, postalCode } per country, used to obtain LIVE express
+// carrier rates on the Quick Quote page from just origin/destination country + weight. The
+// carrier rate APIs zone on postal/city + country, so a representative pair gives a real
+// (zone-accurate) carrier quote without collecting a full address — the same idea as the
+// public FedEx/DHL quote tools. Countries absent here are simply not live-rated for express.
+const QUICK_QUOTE_RATE_LOCATIONS: Record<string, { city: string; postalCode: string }> = {
+  SA: { city: "Riyadh", postalCode: "12211" },
+  AE: { city: "Dubai", postalCode: "00000" },
+  KW: { city: "Kuwait City", postalCode: "13001" },
+  QA: { city: "Doha", postalCode: "00000" },
+  BH: { city: "Manama", postalCode: "00000" },
+  OM: { city: "Muscat", postalCode: "100" },
+  EG: { city: "Cairo", postalCode: "11511" },
+  JO: { city: "Amman", postalCode: "11118" },
+  LB: { city: "Beirut", postalCode: "10001" },
+  US: { city: "New York", postalCode: "10001" },
+  GB: { city: "London", postalCode: "SW1A 1AA" },
+  DE: { city: "Berlin", postalCode: "10115" },
+  FR: { city: "Paris", postalCode: "75001" },
+  IT: { city: "Rome", postalCode: "00184" },
+  ES: { city: "Madrid", postalCode: "28001" },
+  NL: { city: "Amsterdam", postalCode: "1011" },
+  TR: { city: "Istanbul", postalCode: "34000" },
+  IN: { city: "Mumbai", postalCode: "400001" },
+  CN: { city: "Shanghai", postalCode: "200000" },
+  HK: { city: "Hong Kong", postalCode: "999077" },
+  JP: { city: "Tokyo", postalCode: "100-0001" },
+  KR: { city: "Seoul", postalCode: "04524" },
+  CA: { city: "Toronto", postalCode: "M5H 2N2" },
+  AU: { city: "Sydney", postalCode: "2000" },
+  SG: { city: "Singapore", postalCode: "018956" },
+  PK: { city: "Karachi", postalCode: "74000" },
+  BD: { city: "Dhaka", postalCode: "1000" },
+  MA: { city: "Casablanca", postalCode: "20000" },
+};
+
+// Short-TTL in-memory cache for Quick Quote responses. Live carrier rate calls (FedEx does a
+// service-availability lookup then loops service types) are slow, and the debounced UI fires
+// many near-identical requests, so caching by normalized inputs + client profile makes repeat
+// tweaks instant and shields the carriers from spam. Zone-based estimates are stable for well
+// over the TTL, so staleness is a non-issue.
+const QUICK_QUOTE_CACHE = new Map<string, { expires: number; payload: unknown }>();
+const QUICK_QUOTE_CACHE_TTL_MS = 3 * 60 * 1000;
+
+function getQuickQuoteCache(key: string): unknown | null {
+  const hit = QUICK_QUOTE_CACHE.get(key);
+  if (hit && hit.expires > Date.now()) return hit.payload;
+  if (hit) QUICK_QUOTE_CACHE.delete(key);
+  return null;
+}
+
+function setQuickQuoteCache(key: string, payload: unknown): void {
+  QUICK_QUOTE_CACHE.set(key, { expires: Date.now() + QUICK_QUOTE_CACHE_TTL_MS, payload });
+  // Bound memory: drop the oldest entries if the map grows large.
+  if (QUICK_QUOTE_CACHE.size > 500) {
+    const oldest = QUICK_QUOTE_CACHE.keys().next().value;
+    if (oldest) QUICK_QUOTE_CACHE.delete(oldest);
+  }
+}
+
+// Minimal address for a rate quote: carriers zone on city/postal/country; name/phone/street
+// are placeholders (rate APIs ignore them — they matter only at booking). `displayCity`
+// (if the client typed one) is shown back but the representative postal drives the zone.
+function buildQuickQuoteRateAddress(countryCode: string): ShippingAddress | null {
+  const loc = QUICK_QUOTE_RATE_LOCATIONS[countryCode];
+  if (!loc) return null;
+  return {
+    name: "Quick Quote",
+    streetLine1: "NA",
+    city: loc.city,
+    postalCode: loc.postalCode,
+    countryCode,
+    phone: "0000000000",
+  };
+}
+
 function getIntegrationAppKeyForCarrier(carrierCode?: string | null): string {
   const normalized = resolveCarrierCode(carrierCode).toLowerCase();
   if (normalized === "fedex") return "fedex";
@@ -798,6 +1043,11 @@ function getIntegrationAppKeyForCarrier(carrierCode?: string | null): string {
 }
 
 function getAdapterForShipment(shipment: Shipment): CarrierAdapter {
+  // Virtual-carrier shipments carry the client-facing code on carrierCode but must book
+  // through the real aggregator provider recorded on providerCarrierCode (FIZZPA / SHIPOX).
+  if (shipment.providerCarrierCode) {
+    return getCarrierAdapter(resolveCarrierCode(shipment.providerCarrierCode));
+  }
   return getCarrierAdapter(resolveCarrierCode(shipment.carrierCode || shipment.carrierName));
 }
 
@@ -827,9 +1077,15 @@ async function ensureShipmentBillingArtifacts(params: {
   transactionId?: string | null;
   paymentMethod: string;
   invoiceStatus?: "paid" | "pending";
+  // Tap's own SAR settlement figure for a non-SAR charge. When present it is the amount
+  // actually received in SAR, so the invoice + payment (and Zoho) record it verbatim
+  // instead of our computed SAR total. Null/absent → use the computed SAR.
+  settledSarAmount?: number | null;
 }) {
   const invoiceAmount = formatMoney(
-    parseMoneyValue(params.shipment.clientTotalAmountSar ?? params.shipment.finalPrice),
+    params.settledSarAmount && params.settledSarAmount > 0
+      ? params.settledSarAmount
+      : parseMoneyValue(params.shipment.clientTotalAmountSar ?? params.shipment.finalPrice),
   );
   const shouldMarkPaid = params.invoiceStatus !== "pending";
 
@@ -903,14 +1159,222 @@ async function ensureShipmentBillingArtifacts(params: {
   return invoice;
 }
 
+// Pickup preference submitted from the create/quote flow.
+const pickupInputSchema = z.object({
+  requested: z.boolean().default(false),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pickup date must be YYYY-MM-DD").optional(),
+  readyTime: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM").optional(),
+  closeTime: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM").optional(),
+  location: z.string().max(120).optional(),
+  instructions: z.string().max(500).optional(),
+});
+
+/** Map a pickup preference to shipment insert columns. */
+function pickupInsertFields(pickup?: z.infer<typeof pickupInputSchema>) {
+  if (!pickup?.requested || !pickup.date) {
+    return { pickupRequested: false, pickupStatus: "not_requested" };
+  }
+  return {
+    pickupRequested: true,
+    pickupStatus: "requested",
+    pickupDate: pickup.date,
+    pickupReadyTime: pickup.readyTime || "09:00",
+    pickupCloseTime: pickup.closeTime || "17:00",
+    pickupLocation: pickup.location || null,
+    pickupInstructions: pickup.instructions || null,
+  };
+}
+
+// Express shipments are ALWAYS booked for a carrier pickup by default. Cutoff logic (KSA local):
+// a shipment created before the cutoff hour on a business day is picked up the same day;
+// otherwise the pickup rolls to the next business day. Keep PICKUP_CUTOFF_HOUR in sync with the
+// client-side default shown in the create-shipment flow.
+const PICKUP_TIMEZONE = "Asia/Riyadh";
+const PICKUP_CUTOFF_HOUR = Number(process.env.PICKUP_CUTOFF_HOUR || "15"); // 24h, KSA local
+const PICKUP_DEFAULT_READY_TIME = "09:00";
+const PICKUP_DEFAULT_CLOSE_TIME = "17:00";
+
+/** KSA weekend = Friday (5) & Saturday (6). `dow` is a UTC day-of-week for a date-only value. */
+function isKsaWeekend(dow: number): boolean {
+  return dow === 5 || dow === 6;
+}
+
+/** Wall-clock date/time parts in the KSA timezone for a given instant. */
+function ksaDateParts(now: Date): { y: number; m: number; d: number; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: PICKUP_TIMEZONE,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {} as Record<string, string>);
+  return {
+    y: Number(parts.year), m: Number(parts.month), d: Number(parts.day),
+    hour: Number(parts.hour === "24" ? "0" : parts.hour),
+  };
+}
+
+/**
+ * Default carrier pickup date (YYYY-MM-DD) in KSA: same business day if created before the
+ * cutoff hour, otherwise the next business day (weekends skipped).
+ */
+function computeDefaultPickupDate(now: Date = new Date()): { date: string; sameDay: boolean } {
+  const { y, m, d, hour } = ksaDateParts(now);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  const beforeCutoff = hour < PICKUP_CUTOFF_HOUR;
+  if (beforeCutoff && !isKsaWeekend(cur.getUTCDay())) {
+    return { date: cur.toISOString().slice(0, 10), sameDay: true };
+  }
+  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
+  return { date: cur.toISOString().slice(0, 10), sameDay: false };
+}
+
+/** True when a YYYY-MM-DD pickup date is today-or-later in KSA and lands on a business day. */
+function isBookablePickupDate(dateStr: string | null | undefined, now: Date = new Date()): boolean {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const { y, m, d } = ksaDateParts(now);
+  const today = Date.UTC(y, m - 1, d);
+  const [py, pm, pd] = dateStr.split("-").map(Number);
+  const target = Date.UTC(py, pm - 1, pd);
+  if (target < today) return false;
+  return !isKsaWeekend(new Date(target).getUTCDay());
+}
+
+/**
+ * Pickup columns for an EXPRESS shipment. Pickup is always requested; the client may supply a
+ * custom date/window, otherwise the cutoff-based default is used.
+ */
+function expressPickupInsertFields(pickup?: z.infer<typeof pickupInputSchema>) {
+  const custom = pickup?.date && isBookablePickupDate(pickup.date) ? pickup.date : null;
+  const date = custom || computeDefaultPickupDate().date;
+  return {
+    pickupRequested: true,
+    pickupStatus: "requested",
+    pickupDate: date,
+    pickupReadyTime: pickup?.readyTime || PICKUP_DEFAULT_READY_TIME,
+    pickupCloseTime: pickup?.closeTime || PICKUP_DEFAULT_CLOSE_TIME,
+    pickupLocation: pickup?.location || null,
+    pickupInstructions: pickup?.instructions || null,
+  };
+}
+
+/**
+ * Parse a shipment's stored packages into carrier PackageDetails.
+ */
+function shipmentPackages(shipment: Shipment): PackageDetails[] {
+  const unit = (shipment.weightUnit === "LB" ? "LB" : "KG") as "LB" | "KG";
+  const dimUnit = (shipment.dimensionUnit === "IN" ? "IN" : "CM") as "IN" | "CM";
+  let raw: any[] = [];
+  try { raw = shipment.packagesData ? JSON.parse(shipment.packagesData) : []; } catch { raw = []; }
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [{ weight: Number(shipment.weight) || 1, weightUnit: unit, packageType: "YOUR_PACKAGING" }];
+  }
+  return raw.map((p) => ({
+    weight: Number(p.weight) || 1,
+    weightUnit: unit,
+    ...(Number(p.length) > 0 && Number(p.width) > 0 && Number(p.height) > 0
+      ? { dimensions: { length: Number(p.length), width: Number(p.width), height: Number(p.height), unit: dimUnit } }
+      : {}),
+    packageType: "YOUR_PACKAGING",
+  }));
+}
+
+/**
+ * If the shipment requested a carrier pickup, book it right after the shipment is booked with
+ * the carrier. Non-fatal: a pickup failure never fails the shipment — it records
+ * pickupStatus="failed" + the error so ops can retry. Only carriers whose adapter implements
+ * requestPickup (DHL / FedEx / Aramex) attempt it.
+ */
+async function bookCarrierPickupIfRequested(
+  shipment: Shipment,
+  adapter: CarrierAdapter,
+  appKey: string,
+  actorUserId?: string,
+): Promise<void> {
+  if (!shipment.pickupRequested || shipment.pickupConfirmationNumber) return;
+  if (!adapter.supportsPickup || !adapter.requestPickup) return;
+  // Normalize the pickup date at booking time: a missing / past / weekend date (e.g. a quote
+  // created days ago, or paid after the cutoff) is bumped to the current cutoff-based default so
+  // the carrier never rejects a stale date.
+  let effectivePickupDate: string = shipment.pickupDate ?? "";
+  if (!isBookablePickupDate(effectivePickupDate)) {
+    effectivePickupDate = computeDefaultPickupDate().date;
+    await storage.updateShipment(shipment.id, { pickupDate: effectivePickupDate });
+    shipment = { ...shipment, pickupDate: effectivePickupDate };
+  }
+  let declaredValue = 0;
+  try {
+    const items: any[] = shipment.itemsData ? JSON.parse(shipment.itemsData) : [];
+    declaredValue = items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+  } catch { /* ignore */ }
+  const pickupRequest: PickupRequest = {
+    shipper: {
+      name: shipment.senderName,
+      streetLine1: shipment.senderAddress,
+      streetLine2: shipment.senderAddressLine2 || undefined,
+      city: shipment.senderCity,
+      stateOrProvince: shipment.senderStateOrProvince || undefined,
+      postalCode: shipment.senderPostalCode || "",
+      countryCode: shipment.senderCountry,
+      phone: shipment.senderPhone,
+      email: CARRIER_CONTACT_EMAIL,
+    },
+    packages: shipmentPackages(shipment),
+    pickupDate: effectivePickupDate,
+    readyTime: shipment.pickupReadyTime || "09:00",
+    closeTime: shipment.pickupCloseTime || "17:00",
+    location: shipment.pickupLocation || undefined,
+    instructions: shipment.pickupInstructions || undefined,
+    isInternational: (shipment.senderCountry || "").toUpperCase() !== (shipment.recipientCountry || "").toUpperCase(),
+    declaredValue: declaredValue > 0 ? declaredValue : undefined,
+    currency: shipment.currency || "SAR",
+    serviceType: shipment.serviceType || undefined,
+    trackingNumber: shipment.carrierTrackingNumber || undefined,
+  };
+  try {
+    const result = await withBoundIntegrationAccount(
+      appKey,
+      shipment.carrierIntegrationAccountId,
+      getShipmentIntegrationRoutingOptions(shipment),
+      () => adapter.requestPickup!(pickupRequest),
+    );
+    await storage.updateShipment(shipment.id, {
+      pickupConfirmationNumber: result.confirmationNumber,
+      pickupStatus: "confirmed",
+      pickupError: null,
+    });
+    logInfo(`Pickup booked for shipment ${shipment.trackingNumber}: ${result.confirmationNumber} (${adapter.carrierCode})`);
+    await logAudit(
+      actorUserId,
+      "pickup_booked",
+      "shipment",
+      shipment.id,
+      `Pickup booked with ${adapter.carrierCode}: ${result.confirmationNumber} for ${effectivePickupDate} (${shipment.pickupReadyTime || "09:00"}–${shipment.pickupCloseTime || "17:00"})`,
+    );
+  } catch (error) {
+    logError(`Pickup booking failed for shipment ${shipment.trackingNumber} (${adapter.carrierCode})`, error);
+    const errorMessage = error instanceof Error ? error.message : "Pickup booking failed";
+    await storage.updateShipment(shipment.id, {
+      pickupStatus: "failed",
+      pickupError: errorMessage,
+    });
+    await logAudit(
+      actorUserId,
+      "pickup_failed",
+      "shipment",
+      shipment.id,
+      `Pickup booking failed with ${adapter.carrierCode} for ${effectivePickupDate}: ${errorMessage}`,
+    );
+  }
+}
+
 async function finalizePaidShipmentAfterPayment(params: {
   shipment: Shipment;
   transactionId?: string | null;
   paymentMethod: string;
   userId?: string;
   ipAddress?: string;
+  // Tap's SAR settlement figure for a non-SAR charge (see ensureShipmentBillingArtifacts).
+  settledSarAmount?: number | null;
 }) {
-  const { shipment, transactionId, paymentMethod, userId, ipAddress } = params;
+  const { shipment, transactionId, paymentMethod, userId, ipAddress, settledSarAmount } = params;
 
   if (shipment.status === "cancelled") {
     throw new Error("Cancelled shipments cannot be finalized");
@@ -929,6 +1393,7 @@ async function finalizePaidShipmentAfterPayment(params: {
       transactionId,
       paymentMethod,
       invoiceStatus: "paid",
+      settledSarAmount,
     });
 
     await logAudit(
@@ -958,6 +1423,79 @@ async function finalizePaidShipmentAfterPayment(params: {
     return updatedShipment;
   }
 
+  // Local (domestic KSA): if the carrier is configured (credentials entered in the Apps
+  // tab), book it now to get an AWB + label; otherwise leave it for operations to book
+  // manually. A live booking failure is non-fatal — the shipment still lands in ops with
+  // the carrier error recorded.
+  if (shipment.fulfillmentType === "local") {
+    const localUpdates: Record<string, unknown> = {
+      status: "created",
+      carrierStatus: "processing",
+      paymentStatus: "paid",
+    };
+    const localAdapter = getAdapterForShipment(shipment);
+    if (localAdapter.isConfigured()) {
+      try {
+        const prepared = await buildCarrierShipmentRequestFromShipment(shipment, localAdapter);
+        const carrierResponse = await withBoundIntegrationAccount(
+          getIntegrationAppKeyForCarrier(localAdapter.carrierCode),
+          shipment.carrierIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(shipment),
+          () => localAdapter.createShipment(prepared.carrierRequest),
+        );
+        localUpdates.carrierStatus = "created";
+        localUpdates.carrierTrackingNumber = carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber;
+        localUpdates.carrierShipmentId = carrierResponse.trackingNumber;
+        if (carrierResponse.labelUrl) localUpdates.labelUrl = carrierResponse.labelUrl;
+        localUpdates.carrierErrorCode = null;
+        localUpdates.carrierErrorMessage = null;
+      } catch (bookingError) {
+        logError(`Local carrier booking failed for ${shipment.trackingNumber}`, bookingError);
+        localUpdates.carrierErrorCode = bookingError instanceof CarrierError ? bookingError.code : "BOOKING_FAILED";
+        localUpdates.carrierErrorMessage =
+          bookingError instanceof CarrierError ? bookingError.carrierMessage : (bookingError as Error).message;
+        localUpdates.carrierLastAttemptAt = new Date();
+      }
+    }
+
+    const updatedShipment = (await storage.updateShipment(shipment.id, localUpdates)) || shipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+      settledSarAmount,
+    });
+
+    await logAudit(
+      userId,
+      "confirm_local_shipment",
+      "shipment",
+      updatedShipment.id,
+      `Confirmed local shipment ${updatedShipment.trackingNumber} for operations`,
+      ipAddress,
+    );
+
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
+    });
+
+    if (shipment.status !== updatedShipment.status) {
+      await recordShipmentStatusChange({
+        shipment: updatedShipment,
+        previousStatus: shipment.status,
+        nextStatus: updatedShipment.status,
+        actorUserId: userId,
+        source: "payment_finalization",
+      });
+    }
+
+    return updatedShipment;
+  }
+
   if (shipment.status === "created" && shipment.carrierTrackingNumber) {
     const updatedShipment =
       shipment.paymentStatus !== "paid"
@@ -969,6 +1507,7 @@ async function finalizePaidShipmentAfterPayment(params: {
       transactionId,
       paymentMethod,
       invoiceStatus: "paid",
+      settledSarAmount,
     });
 
     await ensureOperationAssignmentForShipment({
@@ -1036,11 +1575,20 @@ async function finalizePaidShipmentAfterPayment(params: {
         carrierAttempts: (latestShipment.carrierAttempts || 0) + 1,
       })) || latestShipment;
 
+    // Book a carrier courier pickup if one was requested during the create/quote flow. Runs
+    // after the shipment is booked (so it links to the real waybill) and never fails the booking.
+    await bookCarrierPickupIfRequested(
+      updatedShipment,
+      carrierAdapter,
+      getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+    );
+
     await ensureShipmentBillingArtifacts({
       shipment: updatedShipment,
       transactionId,
       paymentMethod,
       invoiceStatus: "paid",
+      settledSarAmount,
     });
 
     await logAudit(
@@ -1354,12 +1902,33 @@ async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
       });
     }
 
+    // For a non-SAR charge, record Tap's own SAR settlement figure on the invoice/payment
+    // (accounting stays SAR). Log the raw charge once so the exact settlement field can be
+    // confirmed and TAP_SETTLED_SAR_FIELD tuned if the default candidates miss it.
+    let settledSarAmount: number | null = null;
+    if ((charge.currency || "SAR").toUpperCase() !== "SAR") {
+      settledSarAmount = getTapSettledSarAmount(charge);
+      logInfo("Non-SAR Tap charge settled", {
+        source: "tap",
+        event: "multicurrency_settlement",
+        shipmentId: latestShipment.id,
+        trackingNumber: latestShipment.trackingNumber,
+        chargeId: charge.id,
+        chargeAmount: charge.amount,
+        chargeCurrency: charge.currency,
+        settledSarAmount,
+        settledSarResolved: settledSarAmount != null,
+        rawCharge: JSON.stringify(charge),
+      });
+    }
+
     await finalizePaidShipmentAfterPayment({
       shipment: latestShipment,
       transactionId: charge.id,
       paymentMethod: "tap",
       userId: undefined,
       ipAddress,
+      settledSarAmount,
     });
   }
 }
@@ -1772,7 +2341,9 @@ async function calculateDdpExtraWeightCharge(params: {
   const updatedRawQuantity = roundQuantity(currentRawQuantity + targetExtraWeightQuantity);
   const transportMethod = params.shipment.ddpTransportMethod === DdpTransportMethod.SEA
     ? DdpTransportMethod.SEA
-    : DdpTransportMethod.AIR;
+    : params.shipment.ddpTransportMethod === DdpTransportMethod.DOMESTIC
+      ? DdpTransportMethod.DOMESTIC
+      : DdpTransportMethod.AIR;
   const basePricing = calculateDdpPrice({
     lane,
     transportMethod,
@@ -1997,6 +2568,10 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
       acc.marginAmountSar += effective.marginAmountSar;
       acc.expensesAmountSar += effective.expensesAmountSar;
       acc.netProfitAmountSar += effective.netProfitAmountSar;
+      acc.ddpSupplierCostSar += effective.ddpSupplierCostSar;
+      acc.realCostAmountSar += effective.realCostAmountSar;
+      acc.realMarginAmountSar += effective.realMarginAmountSar;
+      acc.realNetProfitAmountSar += effective.realNetProfitAmountSar;
 
       const scenarioKey = shipment.taxScenario || "UNKNOWN";
       acc.scenarioCounts[scenarioKey] = (acc.scenarioCounts[scenarioKey] || 0) + 1;
@@ -2015,6 +2590,10 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
       marginAmountSar: 0,
       expensesAmountSar: 0,
       netProfitAmountSar: 0,
+      ddpSupplierCostSar: 0,
+      realCostAmountSar: 0,
+      realMarginAmountSar: 0,
+      realNetProfitAmountSar: 0,
       scenarioCounts: {} as Record<string, number>,
     },
   );
@@ -2156,6 +2735,24 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
     ? 0
     : roundMoney(revenueExcludingTaxAmountSar - costAmountSar - expensesAmountSar);
 
+  // Real supplier cost for DDP: the recorded costAmountSar uses the lane sell base as a
+  // tax pass-through, so it overstates cost when the true supplier cost is lower. When a
+  // DDP supplier cost is recorded, swap it in for the base portion (keeping extra-fee
+  // cost) to report the real margin. Non-DDP or unconfigured → real == recorded.
+  const ddpSupplierCostSar = isCancelled ? 0 : parseMoneyValue(shipment.ddpSupplierCostSar);
+  const hasDdpSupplierCost = shipment.fulfillmentType === "ddp_manual" && ddpSupplierCostSar > 0;
+  const realCostAmountSar = isCancelled
+    ? 0
+    : hasDdpSupplierCost
+      ? roundMoney(ddpSupplierCostSar + derivedExtraFees.extraFeesCostAmountSar)
+      : costAmountSar;
+  const realMarginAmountSar = isCancelled
+    ? 0
+    : roundMoney(revenueExcludingTaxAmountSar - realCostAmountSar);
+  const realNetProfitAmountSar = isCancelled
+    ? 0
+    : roundMoney(revenueExcludingTaxAmountSar - realCostAmountSar - expensesAmountSar);
+
   return {
     isCancelled,
     costAmountSar,
@@ -2175,6 +2772,10 @@ function getEffectiveShipmentFinancials(shipment: Record<string, any>) {
     extraFeesRateSarPerWeight: derivedExtraFees.extraFeesRateSarPerWeight,
     expensesAmountSar,
     netProfitAmountSar,
+    ddpSupplierCostSar,
+    realCostAmountSar,
+    realMarginAmountSar,
+    realNetProfitAmountSar,
     weightValue,
   };
 }
@@ -2242,6 +2843,10 @@ function serializeFinancialShipment(
     isExtraWeightPaid,
     expensesAmountSar: effective.expensesAmountSar,
     netProfitAmountSar: effective.netProfitAmountSar,
+    ddpSupplierCostSar: effective.ddpSupplierCostSar,
+    realCostAmountSar: effective.realCostAmountSar,
+    realMarginAmountSar: effective.realMarginAmountSar,
+    realNetProfitAmountSar: effective.realNetProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
     carrierPaymentAmountSar,
@@ -2393,6 +2998,25 @@ const fedexApiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 30,
   message: { error: "Too many FedEx API requests, please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Public, AI-backed company-document extraction on the application form. Kept tight since it is
+// unauthenticated and calls Gemini.
+const companyExtractionLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: { error: "Too many extraction requests, please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Email-OTP login: throttle code requests + verifications per IP.
+const otpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 15,
+  message: { error: "Too many attempts. Please wait a few minutes and try again." },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -3349,6 +3973,7 @@ function buildClientAccountUpdates(payload: Partial<ClientAccount>): Partial<Cli
   assignIfDefined("shippingShortAddressAr");
   assignIfDefined("profile");
   assignIfDefined("isActive");
+  assignIfDefined("preferredCurrency");
 
   return updates;
 }
@@ -4371,7 +4996,8 @@ async function syncShipmentExtraFeeInvoiceForType(params: {
 
   if (outstandingAmountSar <= 0) {
     for (const pendingInvoice of pendingInvoices) {
-      await deleteInvoiceFromZoho(pendingInvoice);
+      // Soft-delete locally only. Zoho invoices are deleted manually in Zoho, never
+      // through our system.
       await storage.updateInvoice(pendingInvoice.id, { deletedAt: new Date() });
     }
     return pendingInvoices[0] ?? extraFeeInvoices[0] ?? null;
@@ -4390,7 +5016,7 @@ async function syncShipmentExtraFeeInvoiceForType(params: {
       })) || invoice;
 
     for (const duplicateInvoice of pendingInvoices.slice(1)) {
-      await deleteInvoiceFromZoho(duplicateInvoice);
+      // Soft-delete locally only; Zoho invoices are removed manually in Zoho.
       await storage.updateInvoice(duplicateInvoice.id, { deletedAt: new Date() });
     }
 
@@ -4540,6 +5166,10 @@ export const DEFAULT_PERMISSIONS = [
   { resource: "credit-requests", action: "approve", description: "Approve credit access requests" },
   { resource: "credit-requests", action: "reject", description: "Reject credit access requests" },
   { resource: "credit-requests", action: "revoke", description: "Revoke approved credit access" },
+  { resource: "sales-feature-requests", action: "read", description: "View Sales Channels feature requests" },
+  { resource: "sales-feature-requests", action: "approve", description: "Approve Sales Channels feature access" },
+  { resource: "sales-feature-requests", action: "reject", description: "Reject Sales Channels feature requests" },
+  { resource: "sales-feature-requests", action: "revoke", description: "Revoke Sales Channels feature access" },
 
   // Credit Invoices
   { resource: "credit-invoices", action: "read", description: "View credit invoices" },
@@ -4823,6 +5453,10 @@ function getBaseSeededPermissionNames(
           "credit-requests:approve",
           "credit-requests:reject",
           "credit-requests:revoke",
+          "sales-feature-requests:read",
+          "sales-feature-requests:approve",
+          "sales-feature-requests:reject",
+          "sales-feature-requests:revoke",
           "credit-invoices:read",
           "credit-invoices:update",
           "credit-invoices:cancel",
@@ -4845,6 +5479,9 @@ function getBaseSeededPermissionNames(
           "credit-requests:read",
           "credit-requests:approve",
           "credit-requests:reject",
+          "sales-feature-requests:read",
+          "sales-feature-requests:approve",
+          "sales-feature-requests:reject",
           "credit-invoices:read",
           "credit-invoices:update",
           "pricing-rules:read",
@@ -4863,6 +5500,7 @@ function getBaseSeededPermissionNames(
           "payments:read",
           "refund-requests:read",
           "credit-requests:read",
+          "sales-feature-requests:read",
           "credit-invoices:read",
           "credit-invoices:update",
         ),
@@ -5888,6 +6526,53 @@ export async function registerRoutes(
     }
   });
 
+  // Estimated delivery date (ETA). For manually-managed Door To Door shipments ops set this by
+  // hand; it lands on the same shipment.estimatedDelivery field the client portal reads for every
+  // shipment type (express ETA comes from the carrier API, D2D from here).
+  app.patch("/api/operations/shipments/:id/eta", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({
+        // YYYY-MM-DD, or null/empty to clear the ETA.
+        eta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "ETA must be YYYY-MM-DD").nullable().optional(),
+      }).parse(req.body || {});
+
+      const etaDate = parsed.eta ? new Date(`${parsed.eta}T00:00:00.000Z`) : null;
+      if (parsed.eta && Number.isNaN(etaDate!.getTime())) {
+        return res.status(400).json({ error: "Invalid ETA date" });
+      }
+
+      await storage.updateShipment(req.params.id, { estimatedDelivery: etaDate });
+      await createOperationEvent({
+        shipmentId: req.params.id,
+        actorUserId: user.id,
+        eventType: "eta_updated",
+        title: etaDate ? "ETA updated" : "ETA cleared",
+        description: etaDate ? `Estimated delivery set to ${parsed.eta}.` : "Estimated delivery was cleared.",
+      });
+      await logAudit(
+        user.id,
+        "update_shipment_eta",
+        "shipment",
+        req.params.id,
+        etaDate ? `Set ETA to ${parsed.eta}` : "Cleared ETA",
+        req.ip,
+      );
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to update shipment ETA", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Last-mile delivery carrier + phone
   app.patch("/api/operations/shipments/:id/last-mile", requireOperationsPermission("operations", "update"), async (req, res) => {
     try {
@@ -6024,6 +6709,67 @@ export async function registerRoutes(
       res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
     } catch (error) {
       logError("Failed to delete tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Schedule / re-book a carrier pickup from the operations hub. Books with the carrier
+  // immediately (non-fatal) and records the attempt in the audit trail.
+  app.post("/api/operations/shipments/:id/pickup", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) {
+        return res.status(404).json({ error: "Shipment not found" });
+      }
+      const parsed = z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pickup date must be YYYY-MM-DD"),
+        readyTime: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM").optional(),
+        closeTime: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM").optional(),
+        location: z.string().max(120).optional(),
+        instructions: z.string().max(500).optional(),
+      }).parse(req.body || {});
+
+      const adapter = getAdapterForShipment(shipment);
+      if (!adapter.supportsPickup || !adapter.requestPickup) {
+        return res.status(400).json({ error: `${shipment.carrierName || shipment.carrierCode || "This carrier"} does not support API pickup booking.` });
+      }
+
+      // Replace the pickup preference and clear any prior confirmation so re-booking runs.
+      const updated = (await storage.updateShipment(shipment.id, {
+        pickupRequested: true,
+        pickupStatus: "requested",
+        pickupDate: parsed.date,
+        pickupReadyTime: parsed.readyTime || "09:00",
+        pickupCloseTime: parsed.closeTime || "17:00",
+        pickupLocation: parsed.location ?? null,
+        pickupInstructions: parsed.instructions ?? null,
+        pickupConfirmationNumber: null,
+        pickupError: null,
+      })) || shipment;
+
+      await logAudit(
+        user.id,
+        "pickup_scheduled",
+        "shipment",
+        shipment.id,
+        `Pickup scheduled for ${parsed.date} (${parsed.readyTime || "09:00"}–${parsed.closeTime || "17:00"})${parsed.location ? ` at ${parsed.location}` : ""}`,
+        req.ip,
+      );
+
+      await bookCarrierPickupIfRequested(updated, adapter, getIntegrationAppKeyForCarrier(adapter.carrierCode), user.id);
+
+      res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      logError("Failed to schedule pickup", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -6286,7 +7032,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Shipment not found" });
       }
       if (shipment.fulfillmentType !== "ddp_manual") {
-        return res.status(400).json({ error: "Extra weight charges can only be updated on DDP shipments." });
+        return res.status(400).json({ error: "Extra weight charges can only be updated on Door To Door Freight shipments." });
       }
 
       const quote = await buildDdpExtraWeightAdjustmentQuote({
@@ -6327,7 +7073,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Shipment not found" });
       }
       if (shipment.fulfillmentType !== "ddp_manual") {
-        return res.status(400).json({ error: "Extra weight charges can only be added to DDP shipments." });
+        return res.status(400).json({ error: "Extra weight charges can only be added to Door To Door Freight shipments." });
       }
 
       const preview = await buildDdpExtraWeightAdjustmentQuote({
@@ -6417,7 +7163,7 @@ export async function registerRoutes(
         actorUserId: user.id,
         eventType: "ddp_extra_weight_charge_added",
         title: `Adjusted shipment ${preview.billingUnit} to ${formatWeightValue(preview.targetMeasuredQuantity)} ${preview.billingUnit}`,
-        description: `Original measured ${preview.billingUnit}: ${formatWeightValue(preview.baseMeasuredQuantity)}. Current shipment ${preview.billingUnit}: ${formatWeightValue(preview.currentMeasuredQuantity)}. Extra billed ${preview.billingUnit} is now ${formatWeightValue(preview.targetExtraWeightQuantity)} with a DDP invoice target of SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.${parsed.notes ? ` ${parsed.notes}` : ""}`,
+        description: `Original measured ${preview.billingUnit}: ${formatWeightValue(preview.baseMeasuredQuantity)}. Current shipment ${preview.billingUnit}: ${formatWeightValue(preview.currentMeasuredQuantity)}. Extra billed ${preview.billingUnit} is now ${formatWeightValue(preview.targetExtraWeightQuantity)} with a Door To Door Freight invoice target of SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.${parsed.notes ? ` ${parsed.notes}` : ""}`,
         audience: OperationEventAudience.BOTH,
         metadata: {
           additionalQuantity: parsed.additionalQuantity ?? null,
@@ -6433,7 +7179,7 @@ export async function registerRoutes(
 
       if (assignedUserIds.length > 0) {
         await notifyUsers(assignedUserIds, {
-          title: "DDP extra charge updated",
+          title: "Door To Door Freight extra charge updated",
           body: `${shipment.trackingNumber}: shipment ${preview.billingUnit} is now ${formatWeightValue(preview.targetMeasuredQuantity)}. New extra invoice target: SAR ${formatMoney(preview.targetExtraWeightAmountSar)}.`,
           type: "operations_charge_added",
           entityType: "shipment",
@@ -6506,14 +7252,14 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Shipment not found" });
       }
       if (shipment.fulfillmentType !== "ddp_manual") {
-        return res.status(400).json({ error: "Extra charges can only be added to DDP shipments." });
+        return res.status(400).json({ error: "Extra charges can only be added to Door To Door Freight shipments." });
       }
 
       const invoice = await storage.createInvoice({
         clientAccountId: shipment.clientAccountId,
         shipmentId: shipment.id,
         invoiceType: InvoiceType.DDP_ADJUSTMENT,
-        description: `DDP adjustment for ${shipment.trackingNumber}: ${parsed.description}`,
+        description: `Door To Door Freight adjustment for ${shipment.trackingNumber}: ${parsed.description}`,
         amount: formatMoney(parsed.amount),
         status: "pending",
         dueDate: new Date(),
@@ -6540,7 +7286,7 @@ export async function registerRoutes(
 
       if (assignedUserIds.length > 0) {
         await notifyUsers(assignedUserIds, {
-          title: "DDP extra charge added",
+          title: "Door To Door Freight extra charge added",
           body: `${shipment.trackingNumber}: SAR ${formatMoney(parsed.amount)} was added for ${parsed.description}.`,
           type: "operations_charge_added",
           entityType: "shipment",
@@ -6736,6 +7482,41 @@ export async function registerRoutes(
   // ============================================
   // AUTH ROUTES
   // ============================================
+  // Shared post-authentication step: enforce active/client-account checks, regenerate the session
+  // (prevents fixation), stamp lastLoginAt, audit, and return the sanitized user. Used by every
+  // login method (password, phone, email OTP).
+  async function establishUserSession(
+    req: Request,
+    user: User,
+    method: string,
+  ): Promise<{ user: Omit<User, "password"> } | { error: string; status: number }> {
+    if (!user.isActive) {
+      return { error: "Account is deactivated", status: 403 };
+    }
+    if (user.userType === "client") {
+      if (!user.clientAccountId) return { error: "Client account not found", status: 404 };
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      if (!clientAccount || !clientAccount.isActive) {
+        return { error: "Client account is deactivated", status: 403 };
+      }
+    }
+
+    const updatedUser = await storage.updateUser(user.id, {
+      lastLoginAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((err) => (err ? reject(err) : resolve()));
+    });
+    req.session.userId = user.id;
+
+    await logAudit(user.id, "login", "user", user.id, `User ${user.username} logged in (${method})`, req.ip);
+
+    const { password, ...userWithoutPassword } = updatedUser || user;
+    return { user: userWithoutPassword };
+  }
+
   app.post("/api/auth/login", authLimiter, async (req, res) => {
     try {
       const data = loginSchema.parse(req.body);
@@ -6753,13 +7534,16 @@ export async function registerRoutes(
         });
       }
 
+      // Resolve by email, username, or phone (any of the three identifiers).
+      const phoneDigits = loginInput.replace(/[^\d+]/g, "");
       const user =
         (await storage.getUserByEmail(normalizedLoginInput)) ||
-        (await storage.getUserByUsername(loginInput));
+        (await storage.getUserByUsername(loginInput)) ||
+        (phoneDigits.replace(/\D/g, "").length >= 7 ? await storage.getUserByPhone(phoneDigits) : undefined);
 
       if (!user) {
         recordFailedLogin(identifier);
-        await logAudit(undefined, "login_failed", "security", undefined, 
+        await logAudit(undefined, "login_failed", "security", undefined,
           `Failed login attempt for login: ${loginInput}`, req.ip);
         return res.status(401).json({ error: "Invalid credentials" });
       }
@@ -6767,48 +7551,19 @@ export async function registerRoutes(
       const passwordMatch = await bcrypt.compare(data.password, user.password);
       if (!passwordMatch) {
         recordFailedLogin(identifier);
-        await logAudit(user.id, "login_failed", "security", user.id, 
+        await logAudit(user.id, "login_failed", "security", user.id,
           `Failed login attempt for user: ${user.username}`, req.ip);
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      if (!user.isActive) {
-        return res.status(403).json({ error: "Account is deactivated" });
-      }
-
-      if (user.userType === "client") {
-        if (!user.clientAccountId) {
-          return res.status(404).json({ error: "Client account not found" });
-        }
-
-        const clientAccount = await storage.getClientAccount(user.clientAccountId);
-        if (!clientAccount || !clientAccount.isActive) {
-          return res.status(403).json({ error: "Client account is deactivated" });
-        }
-      }
-
-      // Clear failed login attempts on successful login
+      // Clear failed login attempts on successful password check.
       clearFailedLogins(identifier);
 
-      const updatedUser = await storage.updateUser(user.id, {
-        lastLoginAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      // Regenerate the session on login to prevent session fixation: any
-      // pre-authentication session id the client presented is discarded and a
-      // fresh one is issued before the user is bound to it.
-      await new Promise<void>((resolve, reject) => {
-        req.session.regenerate((err) => (err ? reject(err) : resolve()));
-      });
-      req.session.userId = user.id;
-
-      // Log successful login
-      await logAudit(user.id, "login", "user", user.id, `User ${user.username} logged in`, req.ip);
-      
-      // Don't send password to client
-      const { password, ...userWithoutPassword } = updatedUser || user;
-      res.json({ user: userWithoutPassword });
+      const result = await establishUserSession(req, user, "password");
+      if ("error" in result) {
+        return res.status(result.status).json({ error: result.error });
+      }
+      res.json({ user: result.user });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
@@ -6824,6 +7579,162 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     });
+  });
+
+  // ── Email OTP login ────────────────────────────────────────────────────────
+  const hashOtp = (code: string) => createHash("sha256").update(`${code}:${process.env.SESSION_SECRET || "ezhalha"}`).digest("hex");
+  const OTP_TTL_MS = 10 * 60 * 1000;
+  const OTP_MAX_ATTEMPTS = 5;
+
+  // Request a login code by email. Always responds success (never reveals whether the email
+  // exists). Sends a 6-digit code that expires in 10 minutes.
+  app.post("/api/auth/otp/request", otpLimiter, async (req, res) => {
+    try {
+      const parsed = z.object({ email: z.string().email("A valid email is required") }).parse(req.body || {});
+      const email = parsed.email.trim().toLowerCase();
+
+      // Per-email throttle: no more than 4 codes in 10 minutes.
+      const recent = await storage.countRecentEmailLoginOtps(email, OTP_TTL_MS);
+      if (recent >= 4) {
+        return res.json({ success: true }); // silently drop; don't leak or spam
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (user && user.isActive) {
+        const code = String(100000 + (randomBytes(4).readUInt32BE(0) % 900000));
+        await storage.createEmailLoginOtp({
+          email,
+          codeHash: hashOtp(code),
+          expiresAt: new Date(Date.now() + OTP_TTL_MS),
+        });
+        await sendEmail({
+          to: email,
+          subject: "Your ezhalha login code",
+          html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
+            <h2 style="margin:0 0 8px">Your login code</h2>
+            <p style="color:#555;margin:0 0 16px">Use this code to sign in to ezhalha. It expires in 10 minutes.</p>
+            <div style="font-size:32px;font-weight:800;letter-spacing:8px;background:#f4f4f5;border-radius:12px;padding:16px;text-align:center">${code}</div>
+            <p style="color:#888;font-size:12px;margin-top:16px">If you didn't request this, you can ignore this email.</p>
+          </div>`,
+          text: `Your ezhalha login code is ${code}. It expires in 10 minutes.`,
+        });
+        await logAudit(user.id, "otp_requested", "security", user.id, `Login code requested for ${email}`, req.ip);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("OTP request failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Verify an email login code → establish the session.
+  app.post("/api/auth/otp/verify", otpLimiter, async (req, res) => {
+    try {
+      const parsed = z.object({
+        email: z.string().email(),
+        code: z.string().regex(/^\d{6}$/, "Enter the 6-digit code"),
+      }).parse(req.body || {});
+      const email = parsed.email.trim().toLowerCase();
+      const identifier = req.ip || email;
+
+      const bf = checkBruteForce(identifier);
+      if (bf.blocked) {
+        return res.status(429).json({ error: `Too many attempts. Try again in ${bf.remainingTime} seconds.` });
+      }
+
+      const otp = await storage.getActiveEmailLoginOtp(email);
+      const invalid = () => {
+        recordFailedLogin(identifier);
+        return res.status(401).json({ error: "Invalid or expired code." });
+      };
+
+      if (!otp) return invalid();
+      if (otp.consumedAt) return invalid();
+      if (new Date(otp.expiresAt).getTime() < Date.now()) return invalid();
+      if ((otp.attempts ?? 0) >= OTP_MAX_ATTEMPTS) return invalid();
+
+      const provided = Buffer.from(hashOtp(parsed.code));
+      const stored = Buffer.from(otp.codeHash);
+      const match = provided.length === stored.length && timingSafeEqual(provided, stored);
+      if (!match) {
+        await storage.updateEmailLoginOtp(otp.id, { attempts: (otp.attempts ?? 0) + 1 });
+        return invalid();
+      }
+
+      // Consume the code (single use) before establishing the session.
+      await storage.updateEmailLoginOtp(otp.id, { consumedAt: new Date() });
+      const user = await storage.getUserByEmail(email);
+      if (!user) return invalid();
+
+      clearFailedLogins(identifier);
+      const result = await establishUserSession(req, user, "email_otp");
+      if ("error" in result) return res.status(result.status).json({ error: result.error });
+      res.json({ user: result.user });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("OTP verify failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ── Password set / reset ─────────────────────────────────────────────────────
+  app.post("/api/auth/forgot-password", otpLimiter, async (req, res) => {
+    try {
+      const parsed = z.object({ email: z.string().email("A valid email is required") }).parse(req.body || {});
+      const email = parsed.email.trim().toLowerCase();
+      const user = await storage.getUserByEmail(email);
+      if (user && user.isActive) {
+        await sendPasswordSetupEmail(user, "reset");
+        await logAudit(user.id, "password_reset_requested", "security", user.id, `Password reset requested for ${email}`, req.ip);
+      }
+      // Never reveal whether the email exists.
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Forgot-password failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Validate a token (for the reset page to show valid/expired before the user types a password).
+  app.get("/api/auth/reset-password/:token", async (req, res) => {
+    try {
+      const row = await storage.getPasswordResetTokenByHash(createHash("sha256").update(req.params.token).digest("hex"));
+      const valid = Boolean(row && !row.consumedAt && new Date(row.expiresAt).getTime() > Date.now());
+      res.json({ valid, mode: row?.purpose === "onboard" ? "onboard" : "reset" });
+    } catch (error) {
+      logError("Reset token validation failed", error);
+      res.json({ valid: false });
+    }
+  });
+
+  app.post("/api/auth/reset-password", otpLimiter, async (req, res) => {
+    try {
+      const parsed = z.object({
+        token: z.string().min(10),
+        password: z.string().min(8, "Password must be at least 8 characters"),
+      }).parse(req.body || {});
+
+      const row = await storage.getPasswordResetTokenByHash(createHash("sha256").update(parsed.token).digest("hex"));
+      if (!row || row.consumedAt || new Date(row.expiresAt).getTime() < Date.now()) {
+        return res.status(400).json({ error: "This link is invalid or has expired. Please request a new one." });
+      }
+      const user = await storage.getUser(row.userId);
+      if (!user) return res.status(400).json({ error: "This link is invalid or has expired. Please request a new one." });
+
+      const hashedPassword = await bcrypt.hash(parsed.password, SALT_ROUNDS);
+      await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false, updatedAt: new Date() });
+      await storage.consumePasswordResetToken(row.id);
+      await logAudit(user.id, "password_reset_completed", "security", user.id, `Password ${row.purpose === "onboard" ? "set" : "reset"} for ${user.email}`, req.ip);
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Reset-password failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   app.get("/api/auth/me", async (req, res) => {
@@ -6906,6 +7817,42 @@ export async function registerRoutes(
   // ============================================
   // PUBLIC ROUTES - CLIENT APPLICATIONS
   // ============================================
+
+  // AI autofill: read a company's uploaded registration documents and extract the fields needed
+  // to pre-fill the application form. Public (used before an account exists) + rate limited.
+  app.post("/api/public/applications/extract-company-details", companyExtractionLimiter, async (req, res) => {
+    try {
+      const schema = z.object({
+        documents: z.array(z.object({
+          objectPath: z.string().min(1),
+          fileName: z.string().min(1),
+          contentType: z.string().min(1),
+          label: z.string().optional(),
+        })).min(1, "Upload at least one company document.").max(6),
+      });
+      const { documents } = schema.parse(req.body || {});
+
+      if (!isGeminiCompanyExtractionConfigured()) {
+        return res.status(503).json({ error: "Document autofill is not available right now." });
+      }
+
+      const details = await withShipmentIntegrationAccount(
+        "gemini",
+        {},
+        () => extractCompanyDetailsFromDocuments(documents),
+      );
+
+      res.json({ details });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      }
+      const message = error instanceof Error ? error.message : "Failed to read company documents";
+      logError("Company document extraction failed", error);
+      res.status(422).json({ error: message });
+    }
+  });
+
   app.post("/api/applications", async (req, res) => {
     try {
       // Check idempotency
@@ -6941,32 +7888,52 @@ export async function registerRoutes(
         documents: data.documents || null,
         status: "pending",
       });
-      
-      // Send confirmation email to applicant
-      await sendApplicationReceived(data.email, data.name, application.id);
-      
-      // Notify admin of new application
-      await notifyAdminNewApplication(
-        application.id, 
-        data.name, 
-        data.email, 
-        data.companyName || undefined
-      );
-      
-      // Log the application
-      logInfo("New client application received", { 
-        applicationId: application.id, 
+
+      // Individual applicants are auto-approved — no manual review. Companies stay pending for
+      // an admin to review their documents.
+      let autoApproved = false;
+      if (data.accountType === "individual") {
+        try {
+          await approveClientApplication(application, {
+            auditAction: "auto_approve_application",
+          });
+          autoApproved = true;
+          logInfo("Individual application auto-approved", { applicationId: application.id, email: data.email });
+        } catch (error) {
+          if (!(error instanceof EmailInUseError)) {
+            throw error;
+          }
+          // Email already tied to an account — fall back to manual review.
+          logInfo("Auto-approval skipped (email already in use); leaving application pending", { applicationId: application.id });
+        }
+      }
+
+      if (!autoApproved) {
+        // Confirmation to applicant + notify an admin to review.
+        await sendApplicationReceived(data.email, data.name, application.id);
+        await notifyAdminNewApplication(
+          application.id,
+          data.name,
+          data.email,
+          data.companyName || undefined,
+        );
+      }
+
+      logInfo("New client application received", {
+        applicationId: application.id,
         email: data.email,
-        name: data.name 
+        name: data.name,
+        autoApproved,
       });
-      
-      const response = application;
-      
+
+      // Return the current application state (approved for auto-approved individuals).
+      const response = (await storage.getClientApplication(application.id)) || application;
+
       // Store idempotency record
       if (idempotencyKey) {
         await setIdempotencyRecord(idempotencyKey, response, 201);
       }
-      
+
       res.status(201).json(response);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -6994,9 +7961,12 @@ export async function registerRoutes(
     const clients = scopedClientIdSet
       ? allClients.filter((client) => scopedClientIdSet.has(client.id))
       : allClients;
-    const shipments = scopedClientIdSet
+    const scopedShipments = scopedClientIdSet
       ? allShipments.filter((shipment) => scopedClientIdSet.has(shipment.clientAccountId))
       : allShipments;
+    // Dashboard analytics reflect PAID shipments only — unpaid / abandoned / payment-pending
+    // shipments shouldn't inflate counts or revenue.
+    const shipments = scopedShipments.filter((shipment) => shipment.paymentStatus === "paid");
     const applications = scopedClientIdSet ? [] : allApplications;
 
     const now = new Date();
@@ -7430,6 +8400,57 @@ export async function registerRoutes(
     }
   });
 
+  // Admin shipment detail meta: who created it + when, the client, and the full activity
+  // timeline (derived from the audit log). Powers the enriched detail panel.
+  app.get("/api/admin/shipments/:id/details", requireAdminPermission("shipments", "read"), async (req, res) => {
+    try {
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+
+      const logs = await storage.getAuditLogsForEntity("shipment", shipment.id);
+
+      // Resolve every user referenced (creator + activity actors) in one pass.
+      const userIds = new Set<string>();
+      if (shipment.quoteCreatedByUserId) userIds.add(shipment.quoteCreatedByUserId);
+      for (const log of logs) if (log.userId) userIds.add(log.userId);
+      const userMap = new Map<string, { id: string; username: string; userType: string }>();
+      await Promise.all(
+        [...userIds].map(async (uid) => {
+          const u = await storage.getUser(uid);
+          if (u) userMap.set(uid, { id: u.id, username: u.username, userType: u.userType });
+        }),
+      );
+
+      // Creator: the admin who built a quotation, otherwise the actor on the earliest
+      // (creation) audit entry. Falls back to "System" when no user is recorded.
+      const creationLog = logs.find((l) => l.userId && /create|confirm/i.test(l.action)) || logs.find((l) => l.userId);
+      const creatorId = shipment.quoteCreatedByUserId || creationLog?.userId || null;
+      const creator = creatorId ? userMap.get(creatorId) || null : null;
+
+      const client = shipment.clientAccountId ? await storage.getClientAccount(shipment.clientAccountId) : null;
+
+      res.json({
+        createdBy: creator
+          ? { username: creator.username, userType: creator.userType }
+          : null,
+        createdVia: shipment.isQuote ? "admin_quotation" : (creator?.userType === "admin" ? "admin" : creator?.userType === "client" ? "client" : "system"),
+        createdAt: shipment.createdAt,
+        clientName: client?.name || null,
+        clientEmail: client?.email || null,
+        activity: logs.map((l) => ({
+          action: l.action,
+          at: l.createdAt,
+          by: l.userId ? userMap.get(l.userId)?.username || "Unknown" : "System",
+          byType: l.userId ? userMap.get(l.userId)?.userType || null : "system",
+          details: l.details || null,
+        })),
+      });
+    } catch (error) {
+      logError("Error fetching shipment details", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/admin/shipments/:id/abandoned-recovery/discount", requireAdminPermission("shipments", "update"), async (req, res) => {
     try {
       const parsed = abandonedDiscountSchema.parse(req.body);
@@ -7668,7 +8689,7 @@ export async function registerRoutes(
         shipment.fulfillmentType !== "ddp_manual" &&
         ["awaiting_review", "booked", "supplier_pickup", "customs_clearance", "out_for_delivery"].includes(status)
       ) {
-        return res.status(400).json({ error: "This status is only available for manual DDP shipments." });
+        return res.status(400).json({ error: "This status is only available for manual Door To Door Freight shipments." });
       }
 
       if (!(await ensureAccountManagerClientAccess(adminUser, shipment.clientAccountId, res))) {
@@ -7856,6 +8877,13 @@ export async function registerRoutes(
         carrierAttempts: (shipment.carrierAttempts || 0) + 1,
       });
 
+      // Book the courier pickup (if requested and not already booked) after a successful retry.
+      await bookCarrierPickupIfRequested(
+        updatedShipment || shipment,
+        carrierAdapter,
+        getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+      );
+
       await logAudit(req.session.userId, "retry_carrier", "shipment", id,
         `Retried carrier creation for shipment ${shipment.trackingNumber}, new carrier tracking ${carrierResponse.carrierTrackingNumber}`, req.ip);
 
@@ -7994,92 +9022,20 @@ export async function registerRoutes(
       }
 
       if (action === "approve") {
-        // Check if a user with this email already exists
-        const existingUser = await storage.getUserByEmail(application.email);
-        if (existingUser) {
-          return res.status(400).json({ error: "A user with this email already exists" });
+        try {
+          const clientAccount = await approveClientApplication(application, {
+            profile,
+            reviewedByUserId: req.session.userId,
+            reviewNotes: notes,
+            ipAddress: req.ip,
+          });
+          res.json({ success: true, clientAccount });
+        } catch (error) {
+          if (error instanceof EmailInUseError) {
+            return res.status(400).json({ error: error.message });
+          }
+          throw error;
         }
-
-        // Create client account with all company document fields and shipping address
-        const clientAccount = await storage.createClientAccount({
-          accountType: application.accountType || "company",
-          name: application.name,
-          email: application.email,
-          phone: application.phone,
-          country: application.country,
-          companyName: application.companyName,
-          crNumber: application.crNumber,
-          taxNumber: application.taxNumber,
-          nationalAddressStreet: application.nationalAddressStreet,
-          nationalAddressBuilding: application.nationalAddressBuilding,
-          nationalAddressDistrict: application.nationalAddressDistrict,
-          nationalAddressCity: application.nationalAddressCity,
-          nationalAddressPostalCode: application.nationalAddressPostalCode,
-          // Default Shipping Address
-          shippingContactName: application.shippingContactName,
-          shippingContactPhone: application.shippingContactPhone,
-          shippingCountryCode: application.shippingCountryCode,
-          shippingStateOrProvince: application.shippingStateOrProvince,
-          shippingCity: application.shippingCity,
-          shippingPostalCode: application.shippingPostalCode,
-          shippingAddressLine1: application.shippingAddressLine1,
-          shippingAddressLine2: application.shippingAddressLine2,
-          shippingShortAddress: application.shippingShortAddress,
-          documents: application.documents,
-          profile: profile || "regular",
-          isActive: true,
-        });
-
-        // Create Zoho Books customer (if configured)
-        await ensureZohoCustomerForClient(clientAccount).catch((error) => {
-          logError("Failed to create Zoho customer", error);
-        });
-
-        // Create user for client - generate unique username if needed
-        let username = application.email.split("@")[0];
-        let existingUsername = await storage.getUserByUsername(username);
-        let counter = 1;
-        while (existingUsername) {
-          username = `${application.email.split("@")[0]}${counter}`;
-          existingUsername = await storage.getUserByUsername(username);
-          counter++;
-        }
-        
-        // Hash the default password
-        const hashedPassword = await bcrypt.hash("welcome123", SALT_ROUNDS);
-        
-        await storage.createUser({
-          username,
-          email: application.email,
-          password: hashedPassword,
-          userType: "client",
-          clientAccountId: clientAccount.id,
-          isPrimaryContact: true,
-          mustChangePassword: true,
-          isActive: true,
-        });
-
-        // Update application
-        await storage.updateClientApplication(id, {
-          status: "approved",
-          reviewedBy: req.session.userId,
-          reviewNotes: notes,
-        });
-
-        // Log application approval
-        await logAudit(req.session.userId, "approve_application", "client_application", id, 
-          `Approved application for ${application.email}, created client account`, req.ip);
-        
-        // Send email with credentials
-        const temporaryPassword = "welcome123";
-        await sendAccountCredentials(
-          application.email,
-          application.name,
-          username,
-          temporaryPassword
-        );
-        
-        res.json({ success: true, clientAccount });
       } else if (action === "reject") {
         await storage.updateClientApplication(id, {
           status: "rejected",
@@ -8292,17 +9248,20 @@ export async function registerRoutes(
         counter++;
       }
       
-      const hashedPassword = await bcrypt.hash("welcome123", SALT_ROUNDS);
-      await storage.createUser({
+      // Random unusable password — the client sets their own via the welcome email link.
+      const hashedPassword = await bcrypt.hash(randomUUID() + randomUUID(), SALT_ROUNDS);
+      const createdClientUser = await storage.createUser({
         username,
         email,
         password: hashedPassword,
+        phone: (req.body?.phone as string) || null,
         userType: "client",
         clientAccountId: client.id,
         isPrimaryContact: true,
-        mustChangePassword: true,
+        mustChangePassword: false,
         isActive: true,
       });
+      await sendPasswordSetupEmail(createdClientUser, "onboard");
 
       if (assignedAccountManagerUserId !== undefined) {
         await storage.setPrimaryAccountManagerForClient(client.id, normalizedAssignedAccountManagerUserId, req.session.userId);
@@ -8441,6 +9400,7 @@ export async function registerRoutes(
       const { name, phone, country, companyName, crNumber, taxNumber, 
               nationalAddressStreet, nationalAddressBuilding, nationalAddressDistrict,
               nationalAddressCity, nationalAddressPostalCode, profile, isActive,
+              preferredCurrency,
               assignedAccountManagerUserId,
               // Shipping Address fields
               shippingContactName, shippingContactPhone, shippingCountryCode,
@@ -8476,6 +9436,7 @@ export async function registerRoutes(
         nationalAddressPostalCode,
         profile,
         isActive,
+        preferredCurrency: preferredCurrency !== undefined ? normalizeCurrency(preferredCurrency) : undefined,
         shippingContactName,
         shippingContactPhone,
         shippingCountryCode,
@@ -9572,7 +10533,7 @@ export async function registerRoutes(
       const shipment = await storage.getShipment(req.params.id);
       if (!shipment) return res.status(404).json({ error: "Shipment not found" });
       if (shipment.fulfillmentType !== "ddp_manual") {
-        return res.status(400).json({ error: "Manual DDP charges can only be added to DDP shipments." });
+        return res.status(400).json({ error: "Manual Door To Door Freight charges can only be added to Door To Door Freight shipments." });
       }
       const { description, amount } = z.object({
         description: z.string().trim().min(3).max(500),
@@ -9582,7 +10543,7 @@ export async function registerRoutes(
         clientAccountId: shipment.clientAccountId,
         shipmentId: shipment.id,
         invoiceType: InvoiceType.DDP_ADJUSTMENT,
-        description: `DDP adjustment for ${shipment.trackingNumber}: ${description}`,
+        description: `Door To Door Freight adjustment for ${shipment.trackingNumber}: ${description}`,
         amount: formatMoney(amount),
         status: "pending",
         dueDate: new Date(),
@@ -9593,7 +10554,7 @@ export async function registerRoutes(
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
       logError("Failed to add DDP shipment adjustment", error);
-      res.status(500).json({ error: "Failed to add DDP shipment adjustment" });
+      res.status(500).json({ error: "Failed to add Door To Door Freight shipment adjustment" });
     }
   });
 
@@ -9731,6 +10692,132 @@ export async function registerRoutes(
       res.json({ success: true, request });
     } catch (error: any) {
       logError("Error revoking credit request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ============================================
+  // ADMIN - SALES CHANNELS FEATURE REQUESTS
+  // ============================================
+  app.get("/api/admin/sales-feature-requests", requireAdminPermission("sales-feature-requests", "read"), async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const result = await storage.getSalesFeatureAccessRequests({ status, page, limit });
+
+      const enrichedRequests = await Promise.all(
+        result.requests.map(async (request) => {
+          const clientAccount = await storage.getClientAccount(request.clientAccountId);
+          const requestedBy = await storage.getUser(request.requestedByUserId);
+          const reviewedBy = request.reviewedByUserId ? await storage.getUser(request.reviewedByUserId) : null;
+          return {
+            ...request,
+            clientName: clientAccount?.name || "Unknown",
+            clientEmail: clientAccount?.email || "",
+            accountNumber: clientAccount?.accountNumber || "",
+            companyName: clientAccount?.companyName || "",
+            requestedByName: requestedBy?.username || "Unknown",
+            reviewedByName: reviewedBy?.username || null,
+          };
+        }),
+      );
+
+      res.json({ ...result, requests: enrichedRequests });
+    } catch (error: any) {
+      logError("Error fetching sales feature requests", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/sales-feature-requests/:id/approve", requireAdminPermission("sales-feature-requests", "approve"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateSalesFeatureAccessRequest(id, {
+        status: "approved",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await storage.updateClientAccount(request.clientAccountId, { salesFeaturesEnabled: true } as any);
+      await logAudit(req.session.userId, "approve_sales_feature", "sales_feature_access_request", id,
+        `Approved Sales Channels access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error approving sales feature request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/sales-feature-requests/:id/reject", requireAdminPermission("sales-feature-requests", "reject"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateSalesFeatureAccessRequest(id, {
+        status: "rejected",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await logAudit(req.session.userId, "reject_sales_feature", "sales_feature_access_request", id,
+        `Rejected Sales Channels access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error rejecting sales feature request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/sales-feature-requests/:id/revoke", requireAdminPermission("sales-feature-requests", "revoke"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateSalesFeatureAccessRequest(id, {
+        status: "revoked",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await storage.updateClientAccount(request.clientAccountId, { salesFeaturesEnabled: false } as any);
+      await logAudit(req.session.userId, "revoke_sales_feature", "sales_feature_access_request", id,
+        `Revoked Sales Channels access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error revoking sales feature request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Direct admin toggle (no client request required) — enable/disable the bundle on a client.
+  app.patch("/api/admin/clients/:id/sales-features", requireAdminPermission("clients", "update"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = z.object({ enabled: z.boolean() }).parse(req.body || {});
+      const client = await storage.getClientAccount(id);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      await storage.updateClientAccount(id, { salesFeaturesEnabled: parsed.enabled } as any);
+
+      // If there's an outstanding request, reflect the manual decision on it too.
+      const existing = await storage.getSalesFeatureAccessRequestByClient(id);
+      if (existing && existing.status === "pending") {
+        await storage.updateSalesFeatureAccessRequest(existing.id, {
+          status: parsed.enabled ? "approved" : "rejected",
+          adminNotes: "Set directly by admin",
+          reviewedByUserId: req.session.userId!,
+          reviewedAt: new Date(),
+        });
+      }
+
+      await logAudit(req.session.userId, parsed.enabled ? "enable_sales_feature" : "disable_sales_feature",
+        "client", id, `${parsed.enabled ? "Enabled" : "Disabled"} Sales Channels for client ${id}`, req.ip);
+      res.json({ success: true, salesFeaturesEnabled: parsed.enabled });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error toggling sales feature", { error: error.message });
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -10071,6 +11158,10 @@ export async function registerRoutes(
     currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).default("SAR"),
     airBaseRatePerKg: optionalDdpDecimal(2),
     seaBaseRatePerCbm: optionalDdpDecimal(2),
+    domesticRatePerKg: optionalDdpDecimal(2),
+    airSupplierCostPerKg: optionalDdpDecimal(2),
+    seaSupplierCostPerCbm: optionalDdpDecimal(2),
+    domesticSupplierCostPerKg: optionalDdpDecimal(2),
     minimumBillableKg: z.coerce.number().nonnegative().transform((value) => value.toFixed(3)),
     kgRoundingIncrement: z.coerce.number().positive().transform((value) => value.toFixed(3)),
     minimumBillableCbm: z.coerce.number().nonnegative().transform((value) => value.toFixed(4)),
@@ -10090,8 +11181,9 @@ export async function registerRoutes(
   app.post("/api/admin/ddp-pricing", requireAdminPermission("pricing-rules", "create"), async (req, res) => {
     try {
       const lane = ddpPricingLaneSchema.parse(req.body);
-      if (Number(lane.airBaseRatePerKg) <= 0 && Number(lane.seaBaseRatePerCbm) <= 0) {
-        return res.status(400).json({ error: "Configure at least one DDP transport rate." });
+      const createAirRate = lane.airEnabled === false ? 0 : Number(lane.airBaseRatePerKg);
+      if (createAirRate <= 0 && Number(lane.seaBaseRatePerCbm) <= 0 && Number(lane.domesticRatePerKg) <= 0) {
+        return res.status(400).json({ error: "Configure at least one Door To Door Freight transport rate." });
       }
       const transitRangeError = invalidDdpTransitRange(lane);
       if (transitRangeError) {
@@ -10105,10 +11197,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors[0].message });
       }
       if (isDuplicateDdpLaneError(error)) {
-        return res.status(409).json({ error: "A DDP lane already exists for this origin and destination." });
+        return res.status(409).json({ error: "A Door To Door Freight lane already exists for this origin and destination." });
       }
       logError("Failed to create DDP pricing lane", error);
-      res.status(500).json({ error: "Failed to create DDP pricing lane" });
+      res.status(500).json({ error: "Failed to create Door To Door Freight pricing lane" });
     }
   });
 
@@ -10116,9 +11208,11 @@ export async function registerRoutes(
     try {
       const updates = ddpPricingLaneSchema.partial().parse(req.body);
       const existingLane = await storage.getDdpPricingLane(req.params.id);
-      if (!existingLane) return res.status(404).json({ error: "DDP lane not found" });
-      if (Number(updates.airBaseRatePerKg ?? existingLane.airBaseRatePerKg) <= 0 && Number(updates.seaBaseRatePerCbm ?? existingLane.seaBaseRatePerCbm) <= 0) {
-        return res.status(400).json({ error: "Configure at least one DDP transport rate." });
+      if (!existingLane) return res.status(404).json({ error: "Door To Door Freight lane not found" });
+      const mergedAirEnabled = updates.airEnabled ?? existingLane.airEnabled;
+      const updateAirRate = mergedAirEnabled === false ? 0 : Number(updates.airBaseRatePerKg ?? existingLane.airBaseRatePerKg);
+      if (updateAirRate <= 0 && Number(updates.seaBaseRatePerCbm ?? existingLane.seaBaseRatePerCbm) <= 0 && Number(updates.domesticRatePerKg ?? existingLane.domesticRatePerKg) <= 0) {
+        return res.status(400).json({ error: "Configure at least one Door To Door Freight transport rate." });
       }
       const transitRangeError = invalidDdpTransitRange({ ...existingLane, ...updates });
       if (transitRangeError) {
@@ -10129,7 +11223,7 @@ export async function registerRoutes(
         ...updates,
         ...(shouldNormalizeLaneScope ? { originCity: "", destinationCity: "" } : {}),
       });
-      if (!lane) return res.status(404).json({ error: "DDP lane not found" });
+      if (!lane) return res.status(404).json({ error: "Door To Door Freight lane not found" });
       await logAudit(req.session.userId, "update_ddp_lane", "ddp_pricing_lane", lane.id, `Updated DDP lane ${lane.originCountryCode} to ${lane.destinationCountryCode}`, req.ip);
       res.json(lane);
     } catch (error) {
@@ -10137,10 +11231,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors[0].message });
       }
       if (isDuplicateDdpLaneError(error)) {
-        return res.status(409).json({ error: "A DDP lane already exists for this origin and destination." });
+        return res.status(409).json({ error: "A Door To Door Freight lane already exists for this origin and destination." });
       }
       logError("Failed to update DDP pricing lane", error);
-      res.status(500).json({ error: "Failed to update DDP pricing lane" });
+      res.status(500).json({ error: "Failed to update Door To Door Freight pricing lane" });
     }
   });
 
@@ -10150,9 +11244,700 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  // Local (by-carrier) pricing tiers — markup + optional rate-card base per weight band.
+  app.get("/api/admin/local-pricing", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
+    const carrierCode = typeof req.query.carrierCode === "string" ? req.query.carrierCode : undefined;
+    res.json(await storage.listLocalCarrierPricingTiers(carrierCode));
+  });
+
+  app.post("/api/admin/local-pricing", requireAdminPermission("pricing-rules", "create"), async (req, res) => {
+    try {
+      const tier = insertLocalCarrierPricingTierSchema.parse(req.body);
+      if (tier.maxWeightKg != null && Number(tier.maxWeightKg) <= Number(tier.minWeightKg)) {
+        return res.status(400).json({ error: "Max weight must be greater than min weight." });
+      }
+      const created = await storage.createLocalCarrierPricingTier(tier);
+      await logAudit(req.session.userId, "create_local_pricing_tier", "local_carrier_pricing_tier", created.id, `Created local pricing tier for ${created.carrierCode}`, req.ip);
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create local pricing tier", error);
+      res.status(500).json({ error: "Failed to create local pricing tier" });
+    }
+  });
+
+  app.patch("/api/admin/local-pricing/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const updates = insertLocalCarrierPricingTierSchema.partial().parse(req.body);
+      const tier = await storage.updateLocalCarrierPricingTier(req.params.id, updates);
+      if (!tier) return res.status(404).json({ error: "Local pricing tier not found" });
+      await logAudit(req.session.userId, "update_local_pricing_tier", "local_carrier_pricing_tier", tier.id, `Updated local pricing tier ${tier.carrierCode}`, req.ip);
+      res.json(tier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to update local pricing tier", error);
+      res.status(500).json({ error: "Failed to update local pricing tier" });
+    }
+  });
+
+  app.delete("/api/admin/local-pricing/:id", requireAdminPermission("pricing-rules", "delete"), async (req, res) => {
+    await storage.deleteLocalCarrierPricingTier(req.params.id);
+    await logAudit(req.session.userId, "delete_local_pricing_tier", "local_carrier_pricing_tier", req.params.id, "Deleted local pricing tier", req.ip);
+    res.json({ success: true });
+  });
+
+  // Virtual carriers — client-facing couriers layered on the Fizzpa/Shipox aggregators.
+  // Managed under pricing-rules (each virtual carrier gets its own local-pricing rate card).
+  app.get("/api/admin/virtual-carriers", requireAdminPermission("pricing-rules", "read"), async (_req, res) => {
+    res.json(await storage.listVirtualCarriers());
+  });
+
+  app.post("/api/admin/virtual-carriers", requireAdminPermission("pricing-rules", "create"), async (req, res) => {
+    try {
+      const payload = insertVirtualCarrierSchema.parse(req.body);
+      const existing = await storage.getVirtualCarrierByCode(payload.code);
+      if (existing) {
+        return res.status(409).json({ error: `A virtual carrier with code ${payload.code.toUpperCase()} already exists.` });
+      }
+      const created = await storage.createVirtualCarrier(payload);
+      await logAudit(req.session.userId, "create_virtual_carrier", "virtual_carrier", created.id, `Created virtual carrier ${created.code} (${created.provider})`, req.ip);
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create virtual carrier", error);
+      res.status(500).json({ error: "Failed to create virtual carrier" });
+    }
+  });
+
+  app.patch("/api/admin/virtual-carriers/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const updates = insertVirtualCarrierSchema.partial().parse(req.body);
+      if (updates.code) {
+        const existing = await storage.getVirtualCarrierByCode(updates.code);
+        if (existing && existing.id !== req.params.id) {
+          return res.status(409).json({ error: `A virtual carrier with code ${updates.code.toUpperCase()} already exists.` });
+        }
+      }
+      const carrier = await storage.updateVirtualCarrier(req.params.id, updates);
+      if (!carrier) return res.status(404).json({ error: "Virtual carrier not found" });
+      await logAudit(req.session.userId, "update_virtual_carrier", "virtual_carrier", carrier.id, `Updated virtual carrier ${carrier.code}`, req.ip);
+      res.json(carrier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to update virtual carrier", error);
+      res.status(500).json({ error: "Failed to update virtual carrier" });
+    }
+  });
+
+  app.delete("/api/admin/virtual-carriers/:id", requireAdminPermission("pricing-rules", "delete"), async (req, res) => {
+    await storage.deleteVirtualCarrier(req.params.id);
+    await logAudit(req.session.userId, "delete_virtual_carrier", "virtual_carrier", req.params.id, "Deleted virtual carrier", req.ip);
+    res.json({ success: true });
+  });
+
+  // ─── Admin quotations — build a priced shipment for a client, who is notified to modify/pay ───
+  const quotationAddressSchema = z.object({
+    name: z.string().trim().min(1, "Name is required"),
+    phone: z.string().trim().min(1, "Phone is required"),
+    email: z.string().email().optional().or(z.literal("")),
+    addressLine1: z.string().trim().min(1, "Address is required"),
+    addressLine2: z.string().trim().optional(),
+    city: z.string().trim().min(1, "City is required"),
+    stateOrProvince: z.string().trim().optional(),
+    postalCode: z.string().trim().optional().default(""),
+    countryCode: z.string().trim().length(2, "Country code must be 2 characters"),
+    shortAddress: z.string().trim().optional(),
+  });
+  const quotationPricingControls = {
+    discountSar: z.number().nonnegative().optional(),
+    extraChargeSar: z.number().nonnegative().optional(),
+    priceOverrideSar: z.number().nonnegative().optional(),
+  };
+  // Line item (international express + DDP). Mirrors shipmentItemInputSchema, declared here so
+  // the admin quotation routes can reference it (they run before that schema is defined).
+  const quotationItemSchema = z.object({
+    itemName: z.string().min(1),
+    itemDescription: z.string().optional(),
+    category: z.string().min(1),
+    material: z.string().optional(),
+    countryOfOrigin: z.string().length(2),
+    hsCode: z.string().optional(),
+    hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
+    hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
+    hsCodeCandidates: z.array(z.object({ code: z.string(), description: z.string(), confidence: z.number() })).optional(),
+    price: z.number().nonnegative(),
+    quantity: z.number().int().positive(),
+    currency: z.string().optional(),
+  });
+  const quotationCreateSchema = z.object({
+    clientAccountId: z.string().uuid("Select a client"),
+    type: z.enum(["express", "local", "ddp"]),
+    shipper: quotationAddressSchema,
+    recipient: quotationAddressSchema,
+    packages: z.array(z.object({
+      weight: z.number().positive("Weight must be positive"),
+      length: z.number().nonnegative().default(0),
+      width: z.number().nonnegative().default(0),
+      height: z.number().nonnegative().default(0),
+    })).min(1, "At least one package is required"),
+    weightUnit: z.enum(["KG", "LB"]).default("KG"),
+    dimensionUnit: z.enum(["CM", "IN"]).default("CM"),
+    carrierCode: z.string().trim().optional(),
+    serviceType: z.string().trim().optional(),
+    serviceName: z.string().trim().optional(),
+    baseRateSar: z.number().nonnegative().optional(),
+    carrierIntegrationAccountId: z.string().uuid().optional().nullable(),
+    ddpTransportMethod: z.enum([DdpTransportMethod.AIR, DdpTransportMethod.SEA, DdpTransportMethod.DOMESTIC]).optional(),
+    totalCbm: z.number().nonnegative().optional(),
+    currency: z.string().trim().default("SAR"),
+    shipDate: z.string().trim().optional(),
+    items: z.array(quotationItemSchema).optional().default([]),
+    tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional().default([]),
+    supplierName: z.string().trim().optional(),
+    supplierPhone: z.string().trim().optional(),
+    specialInstructions: z.string().max(2000).optional(),
+    note: z.string().max(2000).optional(),
+    pickup: pickupInputSchema.optional(),
+    sendNotification: z.boolean().default(true),
+    ...quotationPricingControls,
+  });
+
+  const pricingInputFromQuotation = (data: z.infer<typeof quotationCreateSchema>, clientProfile: string | null) => {
+    const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
+    const first = data.packages[0];
+    return {
+      type: data.type,
+      clientProfile,
+      originCountryCode: data.shipper.countryCode,
+      destinationCountryCode: data.recipient.countryCode,
+      destinationCity: data.recipient.city,
+      weightKg: totalWeightKg,
+      pieces: data.packages.length,
+      length: first.length,
+      width: first.width,
+      height: first.height,
+      totalCbm: data.totalCbm,
+      baseRateSar: data.baseRateSar,
+      carrierCode: data.carrierCode,
+      ddpTransportMethod: data.ddpTransportMethod,
+      discountSar: data.discountSar,
+      extraChargeSar: data.extraChargeSar,
+      priceOverrideSar: data.priceOverrideSar,
+    };
+  };
+
+  // Read-only pricing preview — reuses the exact rate engines, applies override/discount/extra.
+  app.post("/api/admin/quotations/preview", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = quotationCreateSchema.parse(req.body);
+      const account = await storage.getClientAccount(data.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      res.json(pricing);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to price quotation" });
+    }
+  });
+
+  // Rate options for the quotation pricing step — per shipment type. Express returns live
+  // carrier service levels; local returns rate-card carriers; DDP returns the lane's methods.
+  const quotationRatesSchema = z.object({
+    clientAccountId: z.string().uuid(),
+    type: z.enum(["express", "local", "ddp"]),
+    shipper: quotationAddressSchema,
+    recipient: quotationAddressSchema,
+    packages: z.array(z.object({
+      weight: z.number().positive(), length: z.number().nonnegative().default(0),
+      width: z.number().nonnegative().default(0), height: z.number().nonnegative().default(0),
+    })).min(1),
+    weightUnit: z.enum(["KG", "LB"]).default("KG"),
+    dimensionUnit: z.enum(["CM", "IN"]).default("CM"),
+  });
+
+  app.post("/api/admin/quotations/rates", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = quotationRatesSchema.parse(req.body);
+      const account = await storage.getClientAccount(data.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+      const profile = account.profile || null;
+      const origin = data.shipper.countryCode.toUpperCase();
+      const destination = data.recipient.countryCode.toUpperCase();
+      const totalWeightKg = data.packages.reduce((s, p) => s + p.weight, 0);
+      const first = data.packages[0];
+      const options: Array<Record<string, unknown>> = [];
+
+      if (data.type === "local") {
+        const localPricingRule = profile ? await storage.getPricingRuleByProfile(profile) : undefined;
+        const carriers = [
+          ...carrierService.getLocalCarriers("SA").map((a) => ({ code: a.carrierCode, name: a.name, adapter: a as CarrierAdapter })),
+          ...(await storage.listVirtualCarriers(true)).map((vc) => ({ code: vc.code, name: vc.name, adapter: undefined as CarrierAdapter | undefined })),
+        ];
+        for (const carrier of carriers) {
+          // Real local adapters with a live domestic rate API (iMile) are priced live when no
+          // rate card exists; virtual carriers and card-backed carriers keep the rate card.
+          const liveBaseRateSar = carrier.adapter
+            ? await resolveLiveLocalBaseRate(carrier.adapter, data.shipper.city, data.recipient.city, totalWeightKg)
+            : null;
+          const liveFallbackMarginPercent =
+            liveBaseRateSar != null && liveBaseRateSar > 0
+              ? localPricingRule
+                ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+                : 20
+              : null;
+          const local = await resolveLocalRate({ carrierCode: carrier.code, weightKg: totalWeightKg, clientProfile: profile, liveBaseRateSar, liveFallbackMarginPercent });
+          if (!local) continue;
+          const snap = calculateShipmentAccounting({ shipmentType: "domestic", isDdp: false, recipientCountryCode: "SA", baseRate: local.baseRate, marginAmount: local.marginAmount });
+          options.push({ carrierCode: carrier.code, carrierName: carrier.name, serviceName: `${carrier.name} Domestic`, baseRate: local.baseRate, clientTotal: snap.clientTotalAmountSar });
+        }
+      } else if (data.type === "ddp") {
+        const lane = await storage.findDdpPricingLane({ originCountryCode: origin, destinationCountryCode: destination, destinationCity: data.recipient.city });
+        if (lane && lane.isActive) {
+          const methods: DdpTransportMethodValue[] = [];
+          if (lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0) methods.push(DdpTransportMethod.AIR);
+          if (Number(lane.seaBaseRatePerCbm) > 0) methods.push(DdpTransportMethod.SEA);
+          if (Number(lane.domesticRatePerKg) > 0) methods.push(DdpTransportMethod.DOMESTIC);
+          for (const transportMethod of methods) {
+            try {
+              const pricing = await computeQuotationPricing({
+                type: "ddp", clientProfile: profile, originCountryCode: origin, destinationCountryCode: destination,
+                destinationCity: data.recipient.city, weightKg: totalWeightKg, pieces: data.packages.length,
+                length: first.length, width: first.width, height: first.height, ddpTransportMethod: transportMethod,
+              });
+              options.push({ ddpTransportMethod: transportMethod, serviceName: `Door To Door Freight ${transportMethod}`, baseRate: pricing.baseRate, clientTotal: pricing.clientTotalSar });
+            } catch { /* method not priceable */ }
+          }
+        }
+      } else {
+        // express — live carrier rates using the admin-entered real addresses.
+        const rateRequest = {
+          shipper: { name: data.shipper.name, streetLine1: data.shipper.addressLine1, city: data.shipper.city, stateOrProvince: data.shipper.stateOrProvince || undefined, postalCode: data.shipper.postalCode || "", countryCode: origin, phone: data.shipper.phone },
+          recipient: { name: data.recipient.name, streetLine1: data.recipient.addressLine1, city: data.recipient.city, stateOrProvince: data.recipient.stateOrProvince || undefined, postalCode: data.recipient.postalCode || "", countryCode: destination, phone: data.recipient.phone },
+          packages: data.packages.map((p) => ({ weight: p.weight, weightUnit: data.weightUnit, dimensions: { length: p.length, width: p.width, height: p.height, unit: data.dimensionUnit }, packageType: "YOUR_PACKAGING" })),
+          serviceType: "", packagingType: "YOUR_PACKAGING", currency: "SAR",
+        };
+        const routingOptions = { shipperCountryCode: origin, recipientCountryCode: destination, clientAccountId: data.clientAccountId };
+        const intlCarriers = carrierService.getSupportedCarriers().filter((a) => !a.capabilities || a.capabilities.type !== "local");
+        const pricingRule = profile ? await storage.getPricingRuleByProfile(profile) : undefined;
+        const expressShipmentType = origin === destination ? "domestic" : destination === "SA" ? "inbound" : "outbound";
+        await Promise.all(intlCarriers.map(async (adapter) => {
+          try {
+            const appKey = getIntegrationAppKeyForCarrier(adapter.carrierCode);
+            const accounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
+            const results: Array<{ integrationAccountId: string; carrierRates: Awaited<ReturnType<CarrierAdapter["getRates"]>> }> = [];
+            for (const acc of accounts) {
+              try { results.push({ integrationAccountId: acc.id, carrierRates: await withIntegrationAccount(acc, () => adapter.getRates(rateRequest)) }); } catch { /* skip */ }
+            }
+            if (accounts.length === 0 && (process.env.NODE_ENV !== "production" || adapter.isConfigured())) {
+              try { results.push({ integrationAccountId: `env:${appKey}`, carrierRates: await adapter.getRates(rateRequest) }); } catch { /* skip */ }
+            }
+            const rates = selectCheapestCarrierAccountPortfolio(results)?.carrierRates || [];
+            for (const rate of rates) {
+              if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
+              const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate) : 20;
+              const snap = calculateShipmentAccounting({ shipmentType: expressShipmentType, isDdp: false, recipientCountryCode: destination, baseRate: rate.baseRate, marginAmount: rate.baseRate * (marginPct / 100) });
+              options.push({ carrierCode: adapter.carrierCode, carrierName: adapter.name, serviceType: rate.serviceType, serviceName: rate.serviceName, baseRate: rate.baseRate, clientTotal: snap.clientTotalAmountSar, transitDays: rate.transitDays ?? null });
+            }
+          } catch { /* carrier skipped */ }
+        }));
+      }
+
+      options.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
+      res.json({ options });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to load quotation rate options", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to load rates" });
+    }
+  });
+
+  // Selected client's account for the reused create-shipment flow in quotation mode
+  // (mirrors GET /api/client/account, but admin-gated for an arbitrary client).
+  app.get("/api/admin/quotations/client/:clientAccountId", requireAdminPermission("shipments", "create"), async (req, res) => {
+    const account = await storage.getClientAccount(req.params.clientAccountId);
+    if (!account) return res.status(404).json({ error: "Client account not found" });
+    res.json(account);
+  });
+
+  // DDP lanes for the reused DDP flow in quotation mode (mirrors GET /api/client/ddp/lanes).
+  app.get("/api/admin/quotations/ddp-lanes", requireAdminPermission("shipments", "create"), async (_req, res) => {
+    const lanes = (await storage.getDdpPricingLanes()).filter(
+      (lane) => lane.isActive && !lane.originCity?.trim() && !lane.destinationCity?.trim(),
+    );
+    res.json(lanes.map((lane) => ({
+      id: lane.id,
+      originCountryCode: lane.originCountryCode,
+      originCity: lane.originCity,
+      destinationCountryCode: lane.destinationCountryCode,
+      destinationCity: lane.destinationCity,
+      airAvailable: lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0,
+      seaAvailable: Number(lane.seaBaseRatePerCbm) > 0,
+      domesticAvailable: Number(lane.domesticRatePerKg) > 0,
+    })));
+  });
+
+  // DDP rate for the reused DDP flow in quotation mode — mirrors POST /api/client/ddp/rates
+  // (full per-package breakdown) but returns the with-VAT total the client will actually pay.
+  const ddpQuotationRatesSchema = z.object({
+    clientAccountId: z.string().uuid(),
+    transportMethod: z.enum([DdpTransportMethod.AIR, DdpTransportMethod.SEA, DdpTransportMethod.DOMESTIC]),
+    shipper: z.object({ countryCode: z.string().length(2) }),
+    recipient: z.object({ countryCode: z.string().length(2), city: z.string().optional() }),
+    packages: z.array(z.object({
+      weight: z.number().nonnegative(), length: z.number().nonnegative().default(0),
+      width: z.number().nonnegative().default(0), height: z.number().nonnegative().default(0),
+    })).default([]),
+    totalCbm: z.number().nonnegative().optional(),
+  });
+
+  app.post("/api/admin/quotations/ddp-rates", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = ddpQuotationRatesSchema.parse(req.body);
+      const account = await storage.getClientAccount(data.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+      const lane = await storage.findDdpPricingLane({
+        originCountryCode: data.shipper.countryCode,
+        destinationCountryCode: data.recipient.countryCode,
+        destinationCity: data.recipient.city,
+      });
+      if (!lane) return res.status(404).json({ error: "Door To Door Freight pricing is not configured for this origin and destination yet." });
+      const pricingRule = account.profile ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+      const base = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage: 0 });
+      const markupPercentage = pricingRule ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity) : 0;
+      const pricing = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage });
+      // With-VAT total (margin VAT) — matches what the created quote charges the client.
+      const snapshot = calculateShipmentAccounting({ shipmentType: "inbound", isDdp: true, recipientCountryCode: lane.destinationCountryCode || "SA", baseRate: pricing.baseRateSar, marginAmount: pricing.markupAmountSar });
+      res.json({
+        quoteId: "ddp-quote",
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        pricing: { ...pricing, totalAmountSar: snapshot.clientTotalAmountSar },
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to price Door To Door Freight" });
+    }
+  });
+
+  // Admin AI document extraction for the quotation wizard — same engines as the client flow.
+  const quotationExtractSchema = z.object({
+    clientAccountId: z.string().uuid(),
+    shipperCountryCode: z.string().length(2),
+    recipientCountryCode: z.string().length(2).optional(),
+    shipmentType: z.enum(["domestic", "inbound", "outbound"]).default("inbound"),
+    fileName: z.string().min(1),
+    objectPath: z.string().min(1),
+    contentType: z.string().min(1),
+  });
+
+  app.post("/api/admin/quotations/extract-invoice-items", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = quotationExtractSchema.parse(req.body);
+      const destinationCountry = data.shipmentType === "inbound" ? data.recipientCountryCode || "SA" : data.recipientCountryCode || data.shipperCountryCode || "SA";
+      const extraction = await withShipmentIntegrationAccount("gemini", { shipperCountryCode: data.shipperCountryCode, recipientCountryCode: destinationCountry },
+        () => extractInvoiceItemsFromDocument({ fileName: data.fileName, objectPath: data.objectPath, contentType: data.contentType }, { fallbackCountryOfOrigin: data.shipperCountryCode, fallbackCurrency: "SAR" }));
+      const hsEnrichment = await withShipmentIntegrationAccount("fedex", { shipperCountryCode: data.shipperCountryCode, recipientCountryCode: destinationCountry },
+        () => enrichInvoiceItemsWithHsCodes(extraction.items, { clientAccountId: data.clientAccountId, destinationCountry }));
+      const { warnings, ...rest } = extraction;
+      res.json({ ...rest, items: hsEnrichment.items, summary: { importedItemCount: hsEnrichment.items.length, aiAssisted: extraction.extractionMethod === "gemini", hasParsingWarnings: warnings.length > 0 } });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Failed to extract invoice items" });
+    }
+  });
+
+  app.post("/api/admin/quotations/extract-package-details", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = quotationExtractSchema.parse(req.body);
+      const destinationCountry = data.shipmentType === "inbound" ? data.recipientCountryCode || "SA" : data.recipientCountryCode || data.shipperCountryCode || "SA";
+      const extraction = await withShipmentIntegrationAccount("gemini", { shipperCountryCode: data.shipperCountryCode, recipientCountryCode: destinationCountry },
+        () => extractPackageDetailsFromDocument({ fileName: data.fileName, objectPath: data.objectPath, contentType: data.contentType }));
+      res.json(extraction);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      res.status(422).json({ error: error instanceof Error ? error.message : "Failed to extract package details" });
+    }
+  });
+
+  // Create the quotation: a payment_pending shipment owned by the client, then notify them.
+  app.post("/api/admin/quotations", requireAdminPermission("shipments", "create"), async (req, res) => {
+    try {
+      const data = quotationCreateSchema.parse(req.body);
+      const account = await storage.getClientAccount(data.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      const snapshot = calculateShipmentAccounting({
+        shipmentType: pricing.shipmentType,
+        isDdp: pricing.isDdp,
+        recipientCountryCode: data.recipient.countryCode,
+        baseRate: pricing.baseRate,
+        marginAmount: pricing.marginAmount,
+      });
+
+      const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
+      const first = data.packages[0];
+      const fulfillmentType = data.type === "local" ? "local" : data.type === "ddp" ? "ddp_manual" : undefined;
+
+      // International express + DDP require line items (customs/commercial invoice) and a
+      // commercial-invoice document; HS codes are auto-enriched. DDP requires a supplier.
+      const isInternationalQuote = data.type === "ddp" || (data.type === "express" && data.shipper.countryCode !== data.recipient.countryCode);
+      let quoteItems: any[] = data.items || [];
+      if (isInternationalQuote) {
+        if (quoteItems.length === 0) {
+          return res.status(400).json({ error: "At least one line item is required for international / Door To Door Freight quotations." });
+        }
+        if (!data.tradeDocuments.some((d) => d.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)) {
+          return res.status(400).json({ error: "A commercial invoice document is required for international / Door To Door Freight quotations." });
+        }
+        if (data.type === "ddp" && (!data.supplierName?.trim() || !data.supplierPhone?.trim())) {
+          return res.status(400).json({ error: "Supplier name and phone are required for Door To Door Freight quotations." });
+        }
+        const enriched = await enrichItemsWithHsCodes(quoteItems, { clientAccountId: data.clientAccountId, destinationCountry: data.recipient.countryCode });
+        quoteItems = enriched.items;
+        if (data.carrierCode === "DHL" && quoteItems.some((it) => !it.hsCode?.trim())) {
+          return res.status(400).json({ error: "DHL requires an HS code for every item. Review the classifications and try again." });
+        }
+      }
+
+      const shipment = await storage.createShipment({
+        clientAccountId: data.clientAccountId,
+        senderName: data.shipper.name,
+        senderCompany: (data.shipper as any).company || null,
+        senderAddress: data.shipper.addressLine1,
+        senderAddressLine2: data.shipper.addressLine2 || null,
+        senderCity: data.shipper.city,
+        senderStateOrProvince: data.shipper.stateOrProvince || null,
+        senderPostalCode: data.shipper.postalCode || null,
+        senderCountry: data.shipper.countryCode,
+        senderPhone: data.shipper.phone,
+        senderEmail: data.shipper.email || null,
+        senderShortAddress: data.shipper.shortAddress || null,
+        recipientName: data.recipient.name,
+        recipientCompany: (data.recipient as any).company || null,
+        recipientAddress: data.recipient.addressLine1,
+        recipientAddressLine2: data.recipient.addressLine2 || null,
+        recipientCity: data.recipient.city,
+        recipientStateOrProvince: data.recipient.stateOrProvince || null,
+        recipientPostalCode: data.recipient.postalCode || null,
+        recipientCountry: data.recipient.countryCode,
+        recipientPhone: data.recipient.phone,
+        recipientEmail: data.recipient.email || null,
+        recipientShortAddress: data.recipient.shortAddress || null,
+        weight: totalWeightKg.toString(),
+        weightUnit: data.weightUnit,
+        length: first.length.toString(),
+        width: first.width.toString(),
+        height: first.height.toString(),
+        dimensionUnit: data.dimensionUnit,
+        packageType: "PARCEL",
+        numberOfPackages: data.packages.length,
+        packagesData: JSON.stringify(data.packages),
+        itemsData: quoteItems.length ? JSON.stringify(quoteItems) : undefined,
+        tradeDocumentsData: data.tradeDocuments?.length ? JSON.stringify(data.tradeDocuments) : undefined,
+        shipmentType: pricing.shipmentType,
+        fulfillmentType,
+        ...(data.type === "ddp" ? {
+          ddpTransportMethod: data.ddpTransportMethod || DdpTransportMethod.AIR,
+          ddpSupplierName: data.supplierName || null,
+          ddpSupplierPhone: data.supplierPhone || null,
+          ddpSpecialInstructions: data.specialInstructions || null,
+        } : {}),
+        serviceType: data.serviceType || null,
+        currency: data.currency || "SAR",
+        status: "payment_pending",
+        baseRate: pricing.baseRate.toFixed(2),
+        marginAmount: pricing.marginAmount.toFixed(2),
+        margin: pricing.marginAmount.toFixed(2),
+        finalPrice: pricing.clientTotalSar.toFixed(2),
+        ...getShipmentAccountingInsert(snapshot),
+        ...(pricing.supplierCostSar != null ? { ddpSupplierCostSar: pricing.supplierCostSar.toFixed(2) } : {}),
+        carrierCode: data.carrierCode || null,
+        carrierName: data.serviceName || data.carrierCode || null,
+        carrierIntegrationAccountId: data.carrierIntegrationAccountId || null,
+        carrierServiceType: data.serviceType || null,
+        paymentStatus: "pending",
+        isQuote: true,
+        quoteCreatedByUserId: req.session.userId,
+        quoteDiscountSar: pricing.discountSar ? pricing.discountSar.toFixed(2) : null,
+        quoteExtraChargeSar: pricing.extraChargeSar ? pricing.extraChargeSar.toFixed(2) : null,
+        quoteNote: data.note || null,
+        ...(data.type === "express" ? expressPickupInsertFields(data.pickup) : pickupInsertFields(undefined)),
+      });
+
+      await logAudit(req.session.userId, "create_quotation", "shipment", shipment.id,
+        `Created quotation ${shipment.trackingNumber} for client ${account.name} (SAR ${pricing.clientTotalSar.toFixed(2)})`, req.ip);
+
+      if (data.sendNotification !== false) {
+        const appBaseUrl = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+        const clientUsers = (await storage.getUsersByClientAccount(data.clientAccountId)).filter((u) => u.isActive);
+        const recipients = clientUsers.filter((u) => u.isPrimaryContact).length
+          ? clientUsers.filter((u) => u.isPrimaryContact)
+          : clientUsers;
+        if (recipients.length > 0) {
+          await notifyUsers(recipients.map((u) => u.id), {
+            title: "New quotation ready to pay",
+            body: `A quotation for ${data.recipient.city}, ${data.recipient.countryCode} (${shipment.trackingNumber}) is ready — total SAR ${pricing.clientTotalSar.toFixed(2)}. Review, modify if needed, and pay.`,
+            type: "quotation_created",
+            entityType: "shipment",
+            entityId: shipment.id,
+            actionUrl: `${appBaseUrl}/client/quotations/${shipment.id}`,
+            sendEmail: true,
+          });
+        }
+      }
+
+      res.status(201).json({ shipmentId: shipment.id, trackingNumber: shipment.trackingNumber, pricing });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to create quotation", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create quotation" });
+    }
+  });
+
   app.get("/api/admin/pricing", requireAdminPermission("pricing-rules", "read"), async (_req, res) => {
     const rules = await storage.getPricingRules();
     res.json(rules);
+  });
+
+  // Admin - Pricing Preview (read-only price simulator; performs NO DB writes).
+  // Reuses the exact production rate engines so admins can verify config without
+  // creating a shipment. Mirrors resolveLocalRate / getMarginForAmount / calculateDdpPrice
+  // and calculateShipmentAccounting (15% VAT per tax scenario).
+  app.post("/api/admin/pricing/preview", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const type = String(body.type || "");
+      const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+      if (type === "local") {
+        const carrierCode = String(body.carrierCode || "").trim();
+        const weightKg = Number(body.weightKg);
+        if (!carrierCode || !Number.isFinite(weightKg) || weightKg < 0) {
+          return res.status(400).json({ message: "Provide a carrier and a non-negative weight." });
+        }
+        const liveBaseRateSar =
+          body.baseRate === "" || body.baseRate == null ? null : Number(body.baseRate);
+        const local = await resolveLocalRate({
+          carrierCode,
+          weightKg,
+          clientProfile: body.profile || null,
+          liveBaseRateSar: Number.isFinite(liveBaseRateSar as number) ? liveBaseRateSar : null,
+        });
+        if (!local) {
+          return res.status(422).json({
+            message:
+              "No enabled tier covers this carrier / weight / profile (and no rate-card base to fall back on).",
+          });
+        }
+        const snapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          recipientCountryCode: "SA",
+          baseRate: local.baseRate,
+          marginAmount: local.marginAmount,
+        });
+        return res.json({
+          type,
+          baseRate: local.baseRate,
+          markup: local.marginAmount,
+          vat: snapshot.sellTaxAmountSar,
+          vatMode: "full",
+          clientTotal: snapshot.clientTotalAmountSar,
+        });
+      }
+
+      if (type === "express") {
+        const baseRate = Number(body.baseRate);
+        if (!Number.isFinite(baseRate) || baseRate < 0) {
+          return res.status(400).json({ message: "Provide a non-negative carrier base rate." });
+        }
+        const shipmentType = body.shipmentType === "outbound" ? "outbound" : "inbound";
+        const recipientCountryCode = String(body.recipientCountryCode || "SA").trim().toUpperCase() || "SA";
+        const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
+        const marginPercentage = rule
+          ? await storage.getMarginForAmount(rule.id, baseRate)
+          : 15;
+        const markup = round2(baseRate * (marginPercentage / 100));
+        const snapshot = calculateShipmentAccounting({
+          shipmentType,
+          recipientCountryCode,
+          baseRate,
+          marginAmount: markup,
+        });
+        return res.json({
+          type,
+          baseRate: round2(baseRate),
+          markup,
+          markupPercentage: marginPercentage,
+          vat: snapshot.sellTaxAmountSar,
+          vatMode: "margin",
+          clientTotal: snapshot.clientTotalAmountSar,
+        });
+      }
+
+      if (type === "ddp") {
+        const laneId = String(body.laneId || "");
+        const lane = laneId ? await storage.getDdpPricingLane(laneId) : undefined;
+        if (!lane) {
+          return res.status(404).json({ message: "Door To Door Freight lane not found." });
+        }
+        const transportMethod =
+          body.transportMethod === DdpTransportMethod.SEA
+            ? DdpTransportMethod.SEA
+            : body.transportMethod === DdpTransportMethod.DOMESTIC
+              ? DdpTransportMethod.DOMESTIC
+              : DdpTransportMethod.AIR;
+        // Air and domestic are KG-billed (need package weight); sea is CBM-billed.
+        const isKgBilled = transportMethod !== DdpTransportMethod.SEA;
+        const weightKg = Number(body.weightKg) || 0;
+        const totalCbm = Number(body.totalCbm) || 0;
+        const packages = isKgBilled
+          ? [{ weight: weightKg, length: Number(body.length) || 0, width: Number(body.width) || 0, height: Number(body.height) || 0 }]
+          : [];
+        // Pass 1: billable quantity at zero markup, to resolve the DDP tier.
+        const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
+        const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
+        const markupPercentage = rule
+          ? await storage.getDdpMarginForQuantity(rule.id, basePricing.billingUnit, basePricing.billableQuantity)
+          : 0;
+        // Pass 2: final quote with the resolved markup.
+        const quote = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
+        const snapshot = calculateShipmentAccounting({
+          shipmentType: "inbound",
+          isDdp: true,
+          recipientCountryCode: lane.destinationCountryCode || "SA",
+          baseRate: quote.baseRateSar,
+          marginAmount: quote.markupAmountSar,
+        });
+        return res.json({
+          type,
+          baseRate: quote.baseRateSar,
+          markup: quote.markupAmountSar,
+          markupPercentage: quote.markupPercentage,
+          billingUnit: quote.billingUnit,
+          billableQuantity: quote.billableQuantity,
+          ratePerUnit: quote.ratePerUnitSar,
+          supplierCostPerUnit: quote.supplierCostPerUnitSar,
+          supplierCost: quote.supplierCostSar,
+          trueMargin: quote.trueMarginSar,
+          minChargeApplied: quote.baseRateSar > quote.subtotalBeforeMinimumSar,
+          vat: snapshot.sellTaxAmountSar,
+          vatMode: "margin",
+          clientTotal: snapshot.clientTotalAmountSar,
+        });
+      }
+
+      return res.status(400).json({ message: "Unknown preview type. Expected local, express, or ddp." });
+    } catch (error) {
+      res.status(400).json({ message: error instanceof Error ? error.message : "Preview failed" });
+    }
   });
 
   app.get("/api/profile-badges", requireAuth, async (_req, res) => {
@@ -10211,7 +11996,7 @@ export async function registerRoutes(
       }
       const ddpMargin = parseFloat(ddpMarginPercentage || marginPercentage || "15");
       if (isNaN(ddpMargin) || ddpMargin < 0 || ddpMargin > 100) {
-        return res.status(400).json({ error: "Invalid DDP markup percentage" });
+        return res.status(400).json({ error: "Invalid Door To Door Freight markup percentage" });
       }
 
       const normalizedBadgeColor = normalizeBadgeColor(badgeColor);
@@ -10289,7 +12074,7 @@ export async function registerRoutes(
       if (ddpMarginPercentage !== undefined) {
         const ddpMargin = parseFloat(ddpMarginPercentage);
         if (isNaN(ddpMargin) || ddpMargin < 0 || ddpMargin > 100) {
-          return res.status(400).json({ error: "Invalid DDP markup percentage" });
+          return res.status(400).json({ error: "Invalid Door To Door Freight markup percentage" });
         }
         updates.ddpMarginPercentage = ddpMargin.toFixed(2);
       }
@@ -10553,7 +12338,7 @@ export async function registerRoutes(
 
       const tier = await storage.updateDdpPricingTier(req.params.tierId, updates);
       if (!tier) {
-        return res.status(404).json({ error: "DDP pricing tier not found" });
+        return res.status(404).json({ error: "Door To Door Freight pricing tier not found" });
       }
       await logAudit(req.session.userId, "update_ddp_pricing_tier", "ddp_pricing_tier", tier.id,
         `Updated DDP pricing tier: ${tier.minAmount}+ ${tier.billingUnit} at ${tier.marginPercentage}%`, req.ip);
@@ -10779,6 +12564,8 @@ export async function registerRoutes(
         .map((definition) => buildEnvAccount(definition.key))
         .filter((account): account is NonNullable<ReturnType<typeof buildEnvAccount>> => Boolean(account));
 
+      const appLogos = await storage.getIntegrationAppLogos();
+
       res.json({
         categories: [
           { key: "all", label: "All" },
@@ -10802,6 +12589,7 @@ export async function registerRoutes(
 
           return {
             ...definition,
+            logoUrl: appLogos[definition.key] || null,
             configured: activeAccounts.length > 0,
             accountCount: countedAccounts.length,
             activeAccountCount: activeAccounts.length,
@@ -10813,6 +12601,101 @@ export async function registerRoutes(
       logError("Error fetching apps", error);
       res.status(500).json({ error: "Failed to fetch apps" });
     }
+  });
+
+  // Carrier logos for any authenticated user (client/operations/admin). Exposes the
+  // admin-uploaded logos for shipping integrations, keyed by carrier code (upper-case,
+  // e.g. FEDEX / SMSA / JT) so every carrier surface — rates pages, shipment cards,
+  // tracking — can render the uploaded logo instead of a hard-coded brand mark.
+  app.get("/api/carrier-logos", requireAuth, async (_req, res) => {
+    try {
+      const logos = await storage.getIntegrationAppLogos();
+      const shippingKeys = new Set(
+        INTEGRATION_APP_DEFINITIONS.filter((d) => d.category === "shipping").map((d) => d.key),
+      );
+      const out: Record<string, string> = {};
+      for (const [appKey, dataUri] of Object.entries(logos)) {
+        if (dataUri && shippingKeys.has(appKey)) {
+          out[appKey.toUpperCase()] = dataUri;
+        }
+      }
+      // Virtual carriers carry their own logo, keyed by the client-facing code so the rates
+      // UI renders it exactly like an app carrier logo.
+      for (const vc of await storage.listVirtualCarriers(true)) {
+        if (vc.logo) out[vc.code.toUpperCase()] = vc.logo;
+      }
+      res.json(out);
+    } catch (error) {
+      logError("Failed to fetch carrier logos", error);
+      res.status(500).json({ error: "Failed to fetch carrier logos" });
+    }
+  });
+
+  // Per-app brand logo (Apps tab). Small image data URI, stored in the DB (no object
+  // storage). Capped under the JSON body limit.
+  const APP_LOGO_MAX_CHARS = 100_000;
+  const APP_LOGO_DATA_URI = /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+
+  app.put("/api/admin/apps/:appKey/logo", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    try {
+      const definition = getIntegrationDefinition(req.params.appKey);
+      if (!definition) return res.status(404).json({ error: "Unknown app" });
+
+      const logo = typeof req.body?.logo === "string" ? req.body.logo.trim() : "";
+      if (!APP_LOGO_DATA_URI.test(logo)) {
+        return res.status(400).json({ error: "Logo must be a base64 image data URI (png, jpg, webp, gif or svg)." });
+      }
+      if (logo.length > APP_LOGO_MAX_CHARS) {
+        return res.status(413).json({ error: "Logo is too large. Use an image under ~70 KB." });
+      }
+
+      await storage.setIntegrationAppLogo(definition.key, logo);
+      await logAudit(req.session.userId, "set_app_logo", "integration_app", definition.key,
+        `Updated ${definition.name} logo`, req.ip);
+      res.json({ ok: true, appKey: definition.key });
+    } catch (error) {
+      logError("Failed to set app logo", error);
+      res.status(500).json({ error: "Failed to set app logo" });
+    }
+  });
+
+  app.delete("/api/admin/apps/:appKey/logo", requireAdminPermission("integrations", "configure"), async (req, res) => {
+    const definition = getIntegrationDefinition(req.params.appKey);
+    if (!definition) return res.status(404).json({ error: "Unknown app" });
+    await storage.deleteIntegrationAppLogo(definition.key);
+    await logAudit(req.session.userId, "delete_app_logo", "integration_app", definition.key,
+      `Removed ${definition.name} logo`, req.ip);
+    res.status(204).end();
+  });
+
+  // Per-virtual-carrier brand logo — same data-URI contract as the Apps-tab carrier logos,
+  // stored on the virtual_carriers row and surfaced via /api/carrier-logos.
+  app.put("/api/admin/virtual-carriers/:id/logo", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    try {
+      const logo = typeof req.body?.logo === "string" ? req.body.logo.trim() : "";
+      if (!APP_LOGO_DATA_URI.test(logo)) {
+        return res.status(400).json({ error: "Logo must be a base64 image data URI (png, jpg, webp, gif or svg)." });
+      }
+      if (logo.length > APP_LOGO_MAX_CHARS) {
+        return res.status(413).json({ error: "Logo is too large. Use an image under ~70 KB." });
+      }
+      const carrier = await storage.updateVirtualCarrier(req.params.id, { logo });
+      if (!carrier) return res.status(404).json({ error: "Virtual carrier not found" });
+      await logAudit(req.session.userId, "set_virtual_carrier_logo", "virtual_carrier", carrier.id,
+        `Updated ${carrier.name} logo`, req.ip);
+      res.json({ ok: true, id: carrier.id });
+    } catch (error) {
+      logError("Failed to set virtual carrier logo", error);
+      res.status(500).json({ error: "Failed to set virtual carrier logo" });
+    }
+  });
+
+  app.delete("/api/admin/virtual-carriers/:id/logo", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
+    const carrier = await storage.updateVirtualCarrier(req.params.id, { logo: null });
+    if (!carrier) return res.status(404).json({ error: "Virtual carrier not found" });
+    await logAudit(req.session.userId, "delete_virtual_carrier_logo", "virtual_carrier", carrier.id,
+      `Removed ${carrier.name} logo`, req.ip);
+    res.status(204).end();
   });
 
   app.post("/api/admin/apps/accounts", requireAdminPermission("integrations", "configure"), async (req, res) => {
@@ -12818,6 +14701,26 @@ export async function registerRoutes(
     res.json(account);
   });
 
+  // Live FX rate for the current session's billing currency (SAR → currency multiplier).
+  // Used to preview non-SAR prices before checkout; the paid rate is snapshotted per shipment.
+  // Always 200 — non-client sessions (admin/ops) simply get SAR so the shared price component
+  // can call this everywhere without auth noise.
+  app.get("/api/client/fx-rate", async (req, res) => {
+    try {
+      const userId = req.session.userId;
+      if (!userId) return res.json({ currency: "SAR", rate: 1, base: "SAR" });
+      const user = await storage.getUser(userId);
+      if (!user?.clientAccountId) return res.json({ currency: "SAR", rate: 1, base: "SAR" });
+      const account = await storage.getClientAccount(user.clientAccountId);
+      const currency = normalizeCurrency(account?.preferredCurrency);
+      const rate = currency === "SAR" ? 1 : await getSarRate(currency);
+      res.json({ currency, rate, base: "SAR" });
+    } catch (error) {
+      logError("Failed to load client FX rate", error);
+      res.json({ currency: "SAR", rate: 1, base: "SAR" });
+    }
+  });
+
   // Client - Update Account Profile
   const clientProfileUpdateSchema = z.object({
     name: z.string().min(1).optional(),
@@ -12834,6 +14737,9 @@ export async function registerRoutes(
     shippingAddressLine1: z.string().min(5).optional(),
     shippingAddressLine2: z.string().optional(),
     shippingShortAddress: z.string().optional(),
+    // Client-selectable billing/display currency. Drives all financial figures shown in the
+    // portal and the charge currency at checkout (pricing stays SAR under the hood).
+    preferredCurrency: z.enum(["SAR", "USD"]).optional(),
   });
 
   app.patch("/api/client/account", requireClient, async (req, res) => {
@@ -12927,6 +14833,72 @@ export async function registerRoutes(
       next();
     };
   };
+
+  // Gate the bundled Sales Channels feature (Orders / Sales Channels / Assignment Rules).
+  // 403 with a machine-readable code so the client UI can show a "request access" state.
+  const requireSalesFeature = async (req: Request, res: Response, next: NextFunction) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user || !user.clientAccountId) {
+      return res.status(404).json({ error: "Client account not found" });
+    }
+    const account = await storage.getClientAccount(user.clientAccountId);
+    if (!account?.salesFeaturesEnabled) {
+      return res.status(403).json({ error: "Sales Channels feature is not enabled for your account.", code: "SALES_FEATURE_DISABLED" });
+    }
+    next();
+  };
+
+  // City <-> postal-code suggestions (bidirectional), proxied to GeoNames so the username stays
+  // server-side. Configure GEONAMES_USERNAME (free signup at geonames.org). No-ops gracefully when
+  // unset. Cached in-memory to stay within GeoNames' free rate limits.
+  const geoSuggestCache = new Map<string, { at: number; results: Array<{ city: string; postalCode: string; state: string }> }>();
+  const GEO_CACHE_TTL = 10 * 60 * 1000;
+
+  app.get("/api/geo/postal-suggest", requireAuth, async (req, res) => {
+    try {
+      const country = String(req.query.country || "").trim().toUpperCase();
+      const city = String(req.query.city || "").trim();
+      const postal = String(req.query.postal || "").trim();
+      const username = process.env.GEONAMES_USERNAME;
+
+      if (!username) return res.json({ configured: false, results: [] });
+      if (country.length !== 2 || (!city && !postal)) return res.json({ configured: true, results: [] });
+
+      const key = `${country}|${city.toLowerCase()}|${postal.toLowerCase()}`;
+      const cached = geoSuggestCache.get(key);
+      if (cached && Date.now() - cached.at < GEO_CACHE_TTL) {
+        return res.json({ configured: true, results: cached.results });
+      }
+
+      const params = new URLSearchParams({ country, maxRows: "10", username });
+      if (postal) params.set("postalcode_startsWith", postal);
+      else params.set("placename_startsWith", city);
+
+      const url = `http://api.geonames.org/postalCodeSearchJSON?${params.toString()}`;
+      const response = await fetch(url);
+      const payload: any = await response.json().catch(() => ({}));
+      const rows: any[] = Array.isArray(payload?.postalCodes) ? payload.postalCodes : [];
+
+      const seen = new Set<string>();
+      const results: Array<{ city: string; postalCode: string; state: string }> = [];
+      for (const row of rows) {
+        const c = String(row?.placeName || "").trim();
+        const pc = String(row?.postalCode || "").trim();
+        if (!c || !pc) continue;
+        const dedupe = `${c.toLowerCase()}|${pc}`;
+        if (seen.has(dedupe)) continue;
+        seen.add(dedupe);
+        results.push({ city: c, postalCode: pc, state: String(row?.adminName1 || "").trim() });
+        if (results.length >= 8) break;
+      }
+
+      geoSuggestCache.set(key, { at: Date.now(), results });
+      res.json({ configured: true, results });
+    } catch (error) {
+      logError("Geo postal suggest failed", error);
+      res.json({ configured: true, results: [] });
+    }
+  });
 
   app.get(
     "/api/client/address-book",
@@ -13471,6 +15443,7 @@ export async function registerRoutes(
 
   const addressSchema = z.object({
     name: z.string().min(1, "Name is required"),
+    company: z.string().optional(),
     phone: z.string().min(1, "Phone is required"),
     email: z.string().email("Invalid email address").optional().or(z.literal("")),
     countryCode: z.string().length(2, "Country code must be 2 characters"),
@@ -13488,6 +15461,27 @@ export async function registerRoutes(
         path: ["stateOrProvince"],
       });
     }
+  });
+
+  // Local (domestic KSA) — fully isolated from express/DDP. Only sender, recipient,
+  // pieces and total weight. No postal code, items, HS codes, customs or dimensions.
+  const localAddressSchema = z.object({
+    name: z.string().min(1, "Name is required"),
+    phone: z.string().min(1, "Phone is required"),
+    email: z.string().email("Invalid email address").optional().or(z.literal("")),
+    city: z.string().min(1, "City is required"),
+    district: z.string().optional(),
+    addressLine1: z.string().min(1, "Address is required"),
+    shortAddress: z.string().optional(),
+  });
+
+  const localShipmentInputSchema = z.object({
+    shipper: localAddressSchema,
+    recipient: localAddressSchema,
+    pieces: z.number().int().positive("Number of pieces must be at least 1").default(1),
+    weight: z.number().positive("Total weight must be positive"),
+    weightUnit: z.enum(["LB", "KG"]).default("KG"),
+    currency: z.string().default("SAR"),
   });
 
   const shipmentItemInputSchema = z.object({
@@ -13665,7 +15659,7 @@ export async function registerRoutes(
   });
 
   const ddpRateSchema = z.object({
-    transportMethod: z.enum([DdpTransportMethod.AIR, DdpTransportMethod.SEA]),
+    transportMethod: z.enum([DdpTransportMethod.AIR, DdpTransportMethod.SEA, DdpTransportMethod.DOMESTIC]),
     shipper: ddpOriginSchema,
     recipient: addressSchema,
     supplierName: z.string().trim().min(1, "Supplier name is required"),
@@ -13684,8 +15678,9 @@ export async function registerRoutes(
       originCity: lane.originCity,
       destinationCountryCode: lane.destinationCountryCode,
       destinationCity: lane.destinationCity,
-      airAvailable: Number(lane.airBaseRatePerKg) > 0,
+      airAvailable: lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0,
       seaAvailable: Number(lane.seaBaseRatePerCbm) > 0,
+      domesticAvailable: Number(lane.domesticRatePerKg) > 0,
     })));
   });
 
@@ -13702,7 +15697,7 @@ export async function registerRoutes(
         destinationCity: data.recipient.city,
       });
       if (!lane) {
-        return res.status(404).json({ error: "DDP pricing is not configured for this origin and destination yet." });
+        return res.status(404).json({ error: "Door To Door Freight pricing is not configured for this origin and destination yet." });
       }
       const account = await storage.getClientAccount(user.clientAccountId);
       const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
@@ -13728,9 +15723,9 @@ export async function registerRoutes(
         clientAccountId: user.clientAccountId,
         shipmentData: JSON.stringify({ ...data, isDdp: true, fulfillmentType: "ddp_manual", ddpPricingLaneId: lane.id, ddpPricing: pricing }),
         carrierCode: "DDP",
-        carrierName: "DDP",
+        carrierName: "Door To Door Freight",
         serviceType: data.transportMethod,
-        serviceName: `DDP ${data.transportMethod === "air" ? "Air" : "Sea"}`,
+        serviceName: `Door To Door Freight ${data.transportMethod === "air" ? "Air" : data.transportMethod === "sea" ? "Sea" : "Domestic"}`,
         actualWeight: pricing.actualWeightKg.toFixed(3),
         dimensionalWeight: pricing.dimensionalWeightKg.toFixed(3),
         chargeableWeight: pricing.billableQuantity.toFixed(3),
@@ -13749,7 +15744,552 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
-      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to calculate DDP pricing" });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to calculate Door To Door Freight pricing" });
+    }
+  });
+
+  // Quick Quote — read-only price check across the scopes we can price without addresses or
+  // live carrier calls: domestic-KSA local carriers (rate cards) and DDP door-to-door lanes.
+  // Reuses the exact production engines (resolveLocalRate / calculateDdpPrice /
+  // calculateShipmentAccounting) but writes NO shipment_rate_quotes rows — unlike the real
+  // /local/rates and /ddp/rates flows. Express/international is intentionally excluded (it
+  // needs full addresses + managed carrier accounts for a live quote).
+  const quickQuoteSchema = z.object({
+    origin: z.object({
+      countryCode: z.string().trim().length(2, "Origin country is required"),
+      city: z.string().trim().optional(),
+    }),
+    destination: z.object({
+      countryCode: z.string().trim().length(2, "Destination country is required"),
+      city: z.string().trim().optional(),
+    }),
+    weightKg: z.number().positive("Weight must be positive"),
+    length: z.number().nonnegative().optional(),
+    width: z.number().nonnegative().optional(),
+    height: z.number().nonnegative().optional(),
+    pieces: z.number().int().positive().default(1),
+  });
+
+  app.post("/api/client/quick-quote", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const data = quickQuoteSchema.parse(req.body);
+      const account = await storage.getClientAccount(user.clientAccountId);
+      const clientProfile = account?.profile || null;
+      const pricingRule = clientProfile ? await storage.getPricingRuleByProfile(clientProfile) : undefined;
+
+      const originCountry = data.origin.countryCode.toUpperCase();
+      const destinationCountry = data.destination.countryCode.toUpperCase();
+      const pieces = data.pieces || 1;
+      const L = data.length || 0;
+      const W = data.width || 0;
+      const H = data.height || 0;
+      const totalWeightKg = data.weightKg * pieces;
+      const totalCbm = (L * W * H) / 1_000_000 * pieces;
+      const chargeableAirKg = Math.max(totalWeightKg, totalCbm * 167);
+
+      // Serve an identical recent quote from cache (fast + shields carriers from debounce spam).
+      const cacheKey = JSON.stringify([originCountry, destinationCountry, data.weightKg, L, W, H, pieces, clientProfile]);
+      const cached = getQuickQuoteCache(cacheKey);
+      if (cached) return res.json(cached);
+
+      // ── Local (domestic KSA) — rate cards for real + virtual carriers ──
+      const localQuotes: Array<Record<string, unknown>> = [];
+      if (originCountry === "SA" && destinationCountry === "SA") {
+        const localCarriers = [
+          ...carrierService.getLocalCarriers("SA").map((a) => ({ code: a.carrierCode, name: a.name })),
+          ...(await storage.listVirtualCarriers(true)).map((vc) => ({ code: vc.code, name: vc.name })),
+        ];
+        for (const carrier of localCarriers) {
+          const local = await resolveLocalRate({
+            carrierCode: carrier.code,
+            weightKg: totalWeightKg,
+            clientProfile,
+            liveBaseRateSar: null,
+          });
+          if (!local) continue;
+          const snapshot = calculateShipmentAccounting({
+            shipmentType: "domestic",
+            isDdp: false,
+            recipientCountryCode: "SA",
+            baseRate: local.baseRate,
+            marginAmount: local.marginAmount,
+          });
+          localQuotes.push({
+            carrierCode: carrier.code,
+            carrierName: carrier.name,
+            baseRate: local.baseRate,
+            markup: local.marginAmount,
+            vat: snapshot.sellTaxAmountSar,
+            clientTotal: snapshot.clientTotalAmountSar,
+            transitDays: 2,
+          });
+        }
+        localQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
+      }
+
+      // ── DDP door-to-door — country-level lane, per available transport method ──
+      const ddpQuotes: Array<Record<string, unknown>> = [];
+      const lane = await storage.findDdpPricingLane({
+        originCountryCode: originCountry,
+        destinationCountryCode: destinationCountry,
+        destinationCity: data.destination.city,
+      });
+      if (lane && lane.isActive) {
+        const methods: DdpTransportMethodValue[] = [];
+        if (lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0) methods.push(DdpTransportMethod.AIR);
+        if (Number(lane.seaBaseRatePerCbm) > 0) methods.push(DdpTransportMethod.SEA);
+        if (Number(lane.domesticRatePerKg) > 0) methods.push(DdpTransportMethod.DOMESTIC);
+
+        for (const transportMethod of methods) {
+          const isKgBilled = transportMethod !== DdpTransportMethod.SEA;
+          const packages = isKgBilled
+            ? Array.from({ length: pieces }, () => ({ weight: data.weightKg, length: L, width: W, height: H }))
+            : [];
+          try {
+            const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
+            const markupPercentage = pricingRule
+              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+              : 0;
+            const pricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
+            const snapshot = calculateShipmentAccounting({
+              shipmentType: "inbound",
+              isDdp: true,
+              recipientCountryCode: lane.destinationCountryCode || "SA",
+              baseRate: pricing.baseRateSar,
+              marginAmount: pricing.markupAmountSar,
+            });
+            ddpQuotes.push({
+              transportMethod,
+              billingUnit: pricing.billingUnit,
+              billableQuantity: pricing.billableQuantity,
+              ratePerUnit: pricing.ratePerUnitSar,
+              baseRate: pricing.baseRateSar,
+              markup: pricing.markupAmountSar,
+              vat: snapshot.sellTaxAmountSar,
+              clientTotal: snapshot.clientTotalAmountSar,
+              transitDays: pricing.transitDaysMax,
+              laneId: lane.id,
+            });
+          } catch {
+            // A method that can't be priced (e.g. sea with no dimensions) is skipped, not fatal.
+          }
+        }
+      }
+
+      // ── Express — LIVE carrier rates (FedEx/DHL/Aramex) via representative postal codes ──
+      // Same rate engines + account binding as /api/client/shipments/rates, but keyed off a
+      // representative { city, postal } per country so no full address is needed. Returns every
+      // service level the carriers quote. Carriers with no working account / rate are skipped.
+      const expressQuotes: Array<Record<string, unknown>> = [];
+      const expressShipper = buildQuickQuoteRateAddress(originCountry);
+      const expressRecipient = buildQuickQuoteRateAddress(destinationCountry);
+      if (expressShipper && expressRecipient) {
+        const expressShipmentType = originCountry === destinationCountry
+          ? "domestic"
+          : destinationCountry === "SA" ? "inbound" : "outbound";
+        const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+        const rateRequest = {
+          shipper: expressShipper,
+          recipient: expressRecipient,
+          packages: Array.from({ length: pieces }, () => ({
+            weight: data.weightKg,
+            weightUnit: "KG" as const,
+            // Only send dimensions when the client provided them (all positive) — otherwise
+            // omit so carriers rate on weight (DHL rejects zero dimensions).
+            ...(L > 0 && W > 0 && H > 0
+              ? { dimensions: { length: L, width: W, height: H, unit: "CM" as const } }
+              : {}),
+            packageType: "YOUR_PACKAGING",
+          })),
+          serviceType: "",
+          packagingType: "YOUR_PACKAGING",
+          currency: "SAR",
+        };
+        // International carriers only (exclude local + aggregator provider adapters).
+        const intlCarriers = carrierService.getSupportedCarriers().filter(
+          (a) => !a.capabilities || a.capabilities.type !== "local",
+        );
+        const routingOptions = {
+          shipperCountryCode: originCountry,
+          recipientCountryCode: destinationCountry,
+          clientAccountId: user.clientAccountId,
+        };
+        // Cap each carrier so one slow API (FedEx availability + service-type loop) can't
+        // stall the whole quote — a carrier that overruns is simply dropped from this quote.
+        const CARRIER_TIMEOUT_MS = 8000;
+        await Promise.all(intlCarriers.map((carrierAdapter) => {
+          const work = (async () => {
+          try {
+            const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
+            const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
+            const accountRateResults = await Promise.all(
+              managedAccounts.map(async (integrationAccount) => {
+                try {
+                  return {
+                    integrationAccountId: integrationAccount.id,
+                    carrierRates: await withIntegrationAccount(integrationAccount, () => carrierAdapter.getRates(rateRequest)),
+                  };
+                } catch {
+                  return { integrationAccountId: integrationAccount.id, carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>> };
+                }
+              }),
+            );
+            if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
+              try {
+                accountRateResults.push({ integrationAccountId: `env:${appKey}`, carrierRates: await carrierAdapter.getRates(rateRequest) });
+              } catch { /* carrier not configured / no rate — skip */ }
+            }
+            const winning = selectCheapestCarrierAccountPortfolio(accountRateResults);
+            for (const rate of winning?.carrierRates || []) {
+              // Skip products the carrier returns with no real price (e.g. DHL ECONOMY
+              // SELECT / FREIGHT WORLDWIDE come back at 0 on unsupported lanes).
+              if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
+              const marginPercentage = pricingRule
+                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+                : defaultMarginPercentage;
+              const marginAmount = rate.baseRate * (marginPercentage / 100);
+              const snapshot = calculateShipmentAccounting({
+                shipmentType: expressShipmentType,
+                isDdp: false,
+                recipientCountryCode: destinationCountry,
+                baseRate: rate.baseRate,
+                marginAmount,
+              });
+              expressQuotes.push({
+                carrierCode: carrierAdapter.carrierCode,
+                carrierName: carrierAdapter.name,
+                serviceType: rate.serviceType,
+                serviceName: rate.serviceName,
+                clientTotal: snapshot.clientTotalAmountSar,
+                transitDays: rate.transitDays ?? null,
+              });
+            }
+          } catch (err) {
+            logError(`Quick quote express rate failed for ${carrierAdapter.carrierCode}`, err);
+          }
+          })();
+          const timeout = new Promise<void>((resolve) => setTimeout(resolve, CARRIER_TIMEOUT_MS));
+          return Promise.race([work, timeout]);
+        }));
+        // Dedupe identical service levels (same carrier + service), keeping the cheapest.
+        const seen = new Map<string, Record<string, unknown>>();
+        for (const q of expressQuotes) {
+          const key = `${q.carrierCode}|${q.serviceType || q.serviceName}`;
+          const prev = seen.get(key);
+          if (!prev || Number(q.clientTotal) < Number(prev.clientTotal)) seen.set(key, q);
+        }
+        expressQuotes.length = 0;
+        expressQuotes.push(...seen.values());
+        expressQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
+      }
+
+      const payload = {
+        chargeable: {
+          totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
+          totalCbm: Math.round(totalCbm * 10000) / 10000,
+          chargeableAirKg: Math.round(chargeableAirKg * 1000) / 1000,
+          pieces,
+        },
+        local: localQuotes,
+        ddp: ddpQuotes,
+        express: expressQuotes,
+        available: { local: localQuotes.length > 0, ddp: ddpQuotes.length > 0, express: expressQuotes.length > 0 },
+        currency: "SAR",
+      };
+      setQuickQuoteCache(cacheKey, payload);
+      res.json(payload);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to build quick quote", error);
+      res.status(500).json({ error: "Failed to build quick quote" });
+    }
+  });
+
+  // ─── Client quotation review / modify (auto re-price) — a payment_pending isQuote shipment ───
+  const quotationTypeForShipment = (s: Shipment): "express" | "local" | "ddp" =>
+    s.fulfillmentType === "local" ? "local" : (s.fulfillmentType === "ddp_manual" || s.isDdp) ? "ddp" : "express";
+
+  const parseQuotePackages = (s: Shipment): Array<{ weight: number; length: number; width: number; height: number }> => {
+    try {
+      const arr = JSON.parse(s.packagesData || "[]");
+      if (Array.isArray(arr) && arr.length) {
+        return arr.map((p: any) => ({
+          weight: Number(p.weight) || 0, length: Number(p.length) || 0, width: Number(p.width) || 0, height: Number(p.height) || 0,
+        }));
+      }
+    } catch { /* fall through */ }
+    return [{ weight: Number(s.weight) || 0, length: Number(s.length) || 0, width: Number(s.width) || 0, height: Number(s.height) || 0 }];
+  };
+
+  const serializeQuotation = (s: Shipment) => ({
+    id: s.id,
+    trackingNumber: s.trackingNumber,
+    type: quotationTypeForShipment(s),
+    status: s.status,
+    paymentStatus: s.paymentStatus,
+    isQuote: s.isQuote,
+    carrierCode: s.carrierCode,
+    carrierName: s.carrierName,
+    serviceType: s.serviceType,
+    currency: s.currency || "SAR",
+    shipper: {
+      name: s.senderName, phone: s.senderPhone, email: s.senderEmail || "",
+      addressLine1: s.senderAddress, addressLine2: s.senderAddressLine2 || "",
+      city: s.senderCity, stateOrProvince: s.senderStateOrProvince || "",
+      postalCode: s.senderPostalCode || "", countryCode: s.senderCountry, shortAddress: s.senderShortAddress || "",
+    },
+    recipient: {
+      name: s.recipientName, phone: s.recipientPhone, email: s.recipientEmail || "",
+      addressLine1: s.recipientAddress, addressLine2: s.recipientAddressLine2 || "",
+      city: s.recipientCity, stateOrProvince: s.recipientStateOrProvince || "",
+      postalCode: s.recipientPostalCode || "", countryCode: s.recipientCountry, shortAddress: s.recipientShortAddress || "",
+    },
+    packages: parseQuotePackages(s),
+    weightUnit: s.weightUnit || "KG",
+    dimensionUnit: s.dimensionUnit || "CM",
+    note: s.quoteNote || "",
+    items: (() => { try { return JSON.parse(s.itemsData || "[]"); } catch { return []; } })(),
+    tradeDocuments: (() => { try { return JSON.parse(s.tradeDocumentsData || "[]"); } catch { return []; } })(),
+    supplierName: s.ddpSupplierName || "",
+    supplierPhone: s.ddpSupplierPhone || "",
+    specialInstructions: s.ddpSpecialInstructions || "",
+    // DDP quotes need the client's customs/terms/broker consent before payment.
+    requiresConsent: Boolean(s.isDdp),
+    consentAccepted: Boolean(s.ddpTermsAcceptedAt && s.ddpBrokerAuthorizationAcceptedAt),
+    pricing: {
+      baseRate: Number(s.baseRate || 0),
+      marginAmount: Number(s.marginAmount || 0),
+      discountSar: Number(s.quoteDiscountSar || 0),
+      extraChargeSar: Number(s.quoteExtraChargeSar || 0),
+      vatAmountSar: Number(s.sellTaxAmountSar || 0),
+      clientTotalSar: Number(s.finalPrice || 0),
+    },
+    canPay: s.paymentStatus !== "paid" && ["payment_pending", "carrier_error"].includes(String(s.status || "").toLowerCase()),
+  });
+
+  // Live express base rate for a quote's carrier, using its (client-edited, real) addresses.
+  async function fetchQuoteExpressBaseRate(s: Shipment, packages: Array<{ weight: number; length: number; width: number; height: number }>): Promise<number | null> {
+    const adapter = getCarrierAdapter(resolveCarrierCode(s.carrierCode || s.carrierName));
+    const appKey = getIntegrationAppKeyForCarrier(adapter.carrierCode);
+    const rateRequest = {
+      shipper: { name: s.senderName, streetLine1: s.senderAddress, city: s.senderCity, stateOrProvince: s.senderStateOrProvince || undefined, postalCode: s.senderPostalCode || "", countryCode: s.senderCountry, phone: s.senderPhone },
+      recipient: { name: s.recipientName, streetLine1: s.recipientAddress, city: s.recipientCity, stateOrProvince: s.recipientStateOrProvince || undefined, postalCode: s.recipientPostalCode || "", countryCode: s.recipientCountry, phone: s.recipientPhone },
+      packages: packages.map((p) => ({ weight: p.weight, weightUnit: (s.weightUnit || "KG") as "KG" | "LB", dimensions: { length: p.length, width: p.width, height: p.height, unit: (s.dimensionUnit || "CM") as "CM" | "IN" }, packageType: s.packageType || "YOUR_PACKAGING" })),
+      serviceType: s.carrierServiceType || "",
+      packagingType: s.packageType || "YOUR_PACKAGING",
+      currency: "SAR",
+    };
+    const routingOptions = { shipperCountryCode: s.senderCountry, recipientCountryCode: s.recipientCountry, clientAccountId: s.clientAccountId };
+    const accounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
+    const results: Array<{ integrationAccountId: string; carrierRates: Awaited<ReturnType<CarrierAdapter["getRates"]>> }> = [];
+    for (const acc of accounts) {
+      try { results.push({ integrationAccountId: acc.id, carrierRates: await withIntegrationAccount(acc, () => adapter.getRates(rateRequest)) }); } catch { /* skip */ }
+    }
+    if (accounts.length === 0 && (process.env.NODE_ENV !== "production" || adapter.isConfigured())) {
+      try { results.push({ integrationAccountId: `env:${appKey}`, carrierRates: await adapter.getRates(rateRequest) }); } catch { /* skip */ }
+    }
+    const rates = selectCheapestCarrierAccountPortfolio(results)?.carrierRates || [];
+    if (rates.length === 0) return null;
+    const match = rates.find((r) => r.serviceType === s.carrierServiceType) || [...rates].sort((a, b) => a.baseRate - b.baseRate)[0];
+    return match ? match.baseRate : null;
+  }
+
+  // Editable fields for a pending shipment / quotation.
+  const pendingShipmentPatchSchema = z.object({
+    shipper: quotationAddressSchema.optional(),
+    recipient: quotationAddressSchema.optional(),
+    packages: z.array(z.object({
+      weight: z.number().positive("Weight must be positive"),
+      length: z.number().nonnegative().default(0),
+      width: z.number().nonnegative().default(0),
+      height: z.number().nonnegative().default(0),
+    })).min(1).optional(),
+    items: z.array(quotationItemSchema).optional(),
+  });
+
+  // Apply an edit to a payment_pending shipment (quote or regular) and re-price with the real
+  // rate engines. Preserves any admin discount/extra; drops an absolute override since the
+  // shipment changed. Throws with .httpStatus set when a live express rate can't be fetched.
+  async function repricePendingShipment(
+    shipment: Shipment,
+    body: z.infer<typeof pendingShipmentPatchSchema>,
+  ): Promise<Shipment> {
+    const shipper = body.shipper || serializeQuotation(shipment).shipper;
+    const recipient = body.recipient || serializeQuotation(shipment).recipient;
+    const packages = body.packages || parseQuotePackages(shipment);
+    const totalWeightKg = packages.reduce((sum, p) => sum + p.weight, 0);
+    const type = quotationTypeForShipment(shipment);
+    const isIntl = type === "ddp" || (type === "express" && shipper.countryCode !== recipient.countryCode);
+
+    let items: any[] | undefined = body.items;
+    if (items && isIntl) {
+      const enriched = await enrichItemsWithHsCodes(items, { clientAccountId: shipment.clientAccountId, destinationCountry: recipient.countryCode });
+      items = enriched.items;
+    }
+
+    let baseRateSar: number | undefined;
+    if (type === "express") {
+      const fetched = await fetchQuoteExpressBaseRate({ ...shipment, senderCountry: shipper.countryCode, senderCity: shipper.city, senderPostalCode: shipper.postalCode, senderAddress: shipper.addressLine1, senderName: shipper.name, senderPhone: shipper.phone, recipientCountry: recipient.countryCode, recipientCity: recipient.city, recipientPostalCode: recipient.postalCode, recipientAddress: recipient.addressLine1, recipientName: recipient.name, recipientPhone: recipient.phone } as Shipment, packages);
+      if (fetched == null) {
+        const err: any = new Error("Could not get a live carrier rate for the updated shipment. Please contact support.");
+        err.httpStatus = 502;
+        throw err;
+      }
+      baseRateSar = fetched;
+    }
+
+    const account = await storage.getClientAccount(shipment.clientAccountId);
+    const pricing = await computeQuotationPricing({
+      type,
+      clientProfile: account?.profile || null,
+      originCountryCode: shipper.countryCode,
+      destinationCountryCode: recipient.countryCode,
+      destinationCity: recipient.city,
+      weightKg: totalWeightKg,
+      pieces: packages.length,
+      length: packages[0].length,
+      width: packages[0].width,
+      height: packages[0].height,
+      baseRateSar,
+      carrierCode: shipment.carrierCode || undefined,
+      ddpTransportMethod: (shipment.ddpTransportMethod as DdpTransportMethodValue) || undefined,
+      discountSar: Number(shipment.quoteDiscountSar || 0),
+      extraChargeSar: Number(shipment.quoteExtraChargeSar || 0),
+    });
+    const snapshot = calculateShipmentAccounting({
+      shipmentType: pricing.shipmentType, isDdp: pricing.isDdp, recipientCountryCode: recipient.countryCode,
+      baseRate: pricing.baseRate, marginAmount: pricing.marginAmount,
+    });
+
+    const updated = await storage.updateShipment(shipment.id, {
+      senderName: shipper.name, senderPhone: shipper.phone, senderEmail: shipper.email || null,
+      senderAddress: shipper.addressLine1, senderAddressLine2: shipper.addressLine2 || null,
+      senderCity: shipper.city, senderStateOrProvince: shipper.stateOrProvince || null,
+      senderPostalCode: shipper.postalCode || null, senderCountry: shipper.countryCode, senderShortAddress: shipper.shortAddress || null,
+      recipientName: recipient.name, recipientPhone: recipient.phone, recipientEmail: recipient.email || null,
+      recipientAddress: recipient.addressLine1, recipientAddressLine2: recipient.addressLine2 || null,
+      recipientCity: recipient.city, recipientStateOrProvince: recipient.stateOrProvince || null,
+      recipientPostalCode: recipient.postalCode || null, recipientCountry: recipient.countryCode, recipientShortAddress: recipient.shortAddress || null,
+      weight: totalWeightKg.toString(),
+      length: packages[0].length.toString(), width: packages[0].width.toString(), height: packages[0].height.toString(),
+      numberOfPackages: packages.length,
+      packagesData: JSON.stringify(packages),
+      ...(items ? { itemsData: JSON.stringify(items) } : {}),
+      shipmentType: pricing.shipmentType,
+      baseRate: pricing.baseRate.toFixed(2),
+      marginAmount: pricing.marginAmount.toFixed(2),
+      margin: pricing.marginAmount.toFixed(2),
+      finalPrice: pricing.clientTotalSar.toFixed(2),
+      ...getShipmentAccountingInsert(snapshot),
+      ...(pricing.supplierCostSar != null ? { ddpSupplierCostSar: pricing.supplierCostSar.toFixed(2) } : {}),
+    });
+    return updated || shipment;
+  }
+
+  /** A shipment can only be edited before it is paid/booked with the carrier. */
+  const isShipmentEditable = (s: Shipment): boolean =>
+    s.status === "payment_pending" && s.paymentStatus !== "paid" && !s.carrierTrackingNumber;
+
+  app.get("/api/client/quotations/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const shipment = await storage.getShipment(req.params.id);
+    if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Quotation not found" });
+    if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
+    res.json(serializeQuotation(shipment));
+  });
+
+  app.patch("/api/client/quotations/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Quotation not found" });
+      if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
+      if (shipment.paymentStatus === "paid" || shipment.status !== "payment_pending") {
+        return res.status(400).json({ error: "This quotation can no longer be modified." });
+      }
+
+      const body = pendingShipmentPatchSchema.parse(req.body);
+      const updated = await repricePendingShipment(shipment, body);
+
+      await logAudit(req.session.userId, "modify_quotation", "shipment", shipment.id,
+        `Client modified quotation ${shipment.trackingNumber}; new total SAR ${Number(updated.finalPrice || 0).toFixed(2)}`, req.ip);
+      res.json(serializeQuotation(updated));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to modify quotation", error);
+      res.status((error as any)?.httpStatus || 400).json({ error: error instanceof Error ? error.message : "Failed to modify quotation" });
+    }
+  });
+
+  // Modify a payment_pending shipment (client-owned, any type) with auto re-price. Same engine
+  // as quotation edit; works for regular checkout shipments awaiting payment too.
+  app.patch("/api/client/shipments/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Shipment not found" });
+      if (!isShipmentEditable(shipment)) return res.status(400).json({ error: "Only shipments awaiting payment can be modified." });
+
+      const body = pendingShipmentPatchSchema.parse(req.body);
+      const updated = await repricePendingShipment(shipment, body);
+      await logAudit(req.session.userId, "modify_shipment", "shipment", shipment.id,
+        `Client modified pending shipment ${shipment.trackingNumber}; new total SAR ${Number(updated.finalPrice || 0).toFixed(2)}`, req.ip);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to modify shipment", error);
+      res.status((error as any)?.httpStatus || 400).json({ error: error instanceof Error ? error.message : "Failed to modify shipment" });
+    }
+  });
+
+  // Admin modify a payment_pending shipment for any client, with auto re-price.
+  app.patch("/api/admin/shipments/:id", requireAdminPermission("shipments", "update"), async (req, res) => {
+    try {
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (!isShipmentEditable(shipment)) return res.status(400).json({ error: "Only shipments awaiting payment can be modified." });
+
+      const body = pendingShipmentPatchSchema.parse(req.body);
+      const updated = await repricePendingShipment(shipment, body);
+      await logAudit(req.session.userId, "modify_shipment", "shipment", shipment.id,
+        `Admin modified pending shipment ${shipment.trackingNumber}; new total SAR ${Number(updated.finalPrice || 0).toFixed(2)}`, req.ip);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Admin failed to modify shipment", error);
+      res.status((error as any)?.httpStatus || 400).json({ error: error instanceof Error ? error.message : "Failed to modify shipment" });
+    }
+  });
+
+  // Client accepts the DDP customs / terms / broker-authorization declaration before paying.
+  app.post("/api/client/quotations/:id/accept-terms", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment || shipment.clientAccountId !== user.clientAccountId || !shipment.isQuote) return res.status(404).json({ error: "Quotation not found" });
+      const parsed = z.object({
+        customsComplianceAccepted: z.literal(true),
+        termsAccepted: z.literal(true),
+        brokerAuthorizationAccepted: z.literal(true),
+      }).parse(req.body);
+      void parsed;
+      const now = new Date();
+      const updated = await storage.updateShipment(shipment.id, { ddpTermsAcceptedAt: now, ddpBrokerAuthorizationAcceptedAt: now });
+      await logAudit(req.session.userId, "accept_quotation_terms", "shipment", shipment.id, `Accepted DDP declaration for ${shipment.trackingNumber}`, req.ip);
+      res.json(serializeQuotation(updated || shipment));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "All three declarations must be accepted." });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to accept terms" });
     }
   });
 
@@ -13773,12 +16313,12 @@ export async function registerRoutes(
       }
       const quote = await storage.getShipmentRateQuote(body.quoteId);
       if (!quote || quote.clientAccountId !== user.clientAccountId || quote.carrierCode !== "DDP" || quote.expiresAt < new Date()) {
-        return res.status(404).json({ error: "DDP quote not found or expired" });
+        return res.status(404).json({ error: "Door To Door Freight quote not found or expired" });
       }
       const data = JSON.parse(quote.shipmentData);
       const lane = await storage.getDdpPricingLane(data.ddpPricingLaneId);
       if (!lane?.isActive) {
-        return res.status(400).json({ error: "This DDP lane is no longer available." });
+        return res.status(400).json({ error: "This Door To Door Freight lane is no longer available." });
       }
       const account = await storage.getClientAccount(user.clientAccountId);
       const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
@@ -13800,7 +16340,7 @@ export async function registerRoutes(
         markupPercentage,
       });
       if (Math.abs(pricing.totalAmountSar - Number(quote.finalPrice)) > 0.01) {
-        return res.status(400).json({ error: "DDP price changed. Please request a fresh quote." });
+        return res.status(400).json({ error: "Door To Door Freight price changed. Please request a fresh quote." });
       }
       const hsPreparedItems = await enrichItemsWithHsCodes(body.items, {
         clientAccountId: user.clientAccountId,
@@ -13858,6 +16398,7 @@ export async function registerRoutes(
         ddpBillableQuantity: pricing.billableQuantity.toFixed(4),
         ddpBillingUnit: pricing.billingUnit,
         ddpRatePerUnitSar: pricing.ratePerUnitSar.toFixed(2),
+        ddpSupplierCostSar: pricing.supplierCostSar > 0 ? pricing.supplierCostSar.toFixed(2) : null,
         ddpSpecialInstructions: body.specialInstructions || null,
         ddpTermsAcceptedAt: acceptedAt,
         ddpBrokerAuthorizationAcceptedAt: acceptedAt,
@@ -13870,7 +16411,7 @@ export async function registerRoutes(
         finalPrice: quote.finalPrice,
         ...getShipmentAccountingInsert(accountingSnapshot),
         carrierCode: "DDP",
-        carrierName: "DDP",
+        carrierName: "Door To Door Freight",
         carrierServiceType: data.transportMethod,
         paymentStatus: "pending",
         itemsData: JSON.stringify(hsPreparedItems.items),
@@ -13889,7 +16430,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors[0].message });
       }
       logError("Failed to create DDP checkout", error);
-      res.status(500).json({ error: "Failed to create DDP checkout" });
+      res.status(500).json({ error: "Failed to create Door To Door Freight checkout" });
     }
   });
 
@@ -13905,7 +16446,7 @@ export async function registerRoutes(
 
       if (data.isDdp) {
         return res.status(400).json({
-          error: "Use the dedicated DDP flow for door-to-door shipments.",
+          error: "Use the dedicated Door To Door Freight flow for door-to-door shipments.",
         });
       }
 
@@ -14101,7 +16642,10 @@ export async function registerRoutes(
             marginPercentage: marginPercentage.toFixed(2),
             marginAmount: marginAmount.toFixed(2),
             finalPrice: accountingSnapshot.clientTotalAmountSar.toFixed(2),
-            currency: rate.currency,
+            // Client-facing price is the SAR client total (accounting, checkout, Tap and invoices
+            // are all SAR). The carrier's own rating currency (rate.currency) is not shown to the
+            // client — leaking it would tag a SAR amount as e.g. USD.
+            currency: "SAR",
             transitDays: rate.transitDays,
             estimatedDelivery: rate.deliveryDate,
             expiresAt,
@@ -14114,7 +16658,7 @@ export async function registerRoutes(
             serviceType: rate.serviceType,
             serviceName: rate.serviceName,
             finalPrice: accountingSnapshot.clientTotalAmountSar,
-            currency: rate.currency,
+            currency: "SAR",
             transitDays: rate.transitDays,
             estimatedDelivery: rate.deliveryDate,
             actualWeight: chargeableWeightDetails.actualWeight,
@@ -14145,6 +16689,742 @@ export async function registerRoutes(
     }
   });
 
+  // ── LOCAL SHIPMENTS (domestic KSA) — fully isolated flow ──────────────────────
+  // No items, no customs, no commercial invoice, no HS codes, no dimensions. Sender +
+  // recipient + pieces + total weight. Carriers are NOT chosen upfront — they surface
+  // on the rate step. Priced from local_carrier_pricing_tiers, run through the DCE
+  // accounting engine (full 15% VAT), same as a domestic shipment.
+
+  // LOCAL step 1: rates across all eligible local carriers.
+  app.post("/api/client/local/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const data = localShipmentInputSchema.parse(req.body);
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const totalWeightKg = data.weightUnit === "LB" ? data.weight * 0.453592 : data.weight;
+      const localCarriers = carrierService.getLocalCarriers("SA");
+      const localPricingRule = account.profile ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      const quotes: Array<Record<string, unknown>> = [];
+      const availableCarriers: Array<{ code: string; name: string }> = [];
+
+      for (const carrierAdapter of localCarriers) {
+        const liveBaseRateSar = await resolveLiveLocalBaseRate(
+          carrierAdapter,
+          data.shipper.city,
+          data.recipient.city,
+          totalWeightKg,
+        );
+        // No-card carriers with a live domestic rate (iMile) are priced with the client's
+        // pricing-rule margin as a fallback (20% when no rule), same as the express flow.
+        const liveFallbackMarginPercent =
+          liveBaseRateSar != null && liveBaseRateSar > 0
+            ? localPricingRule
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              : 20
+            : null;
+        const local = await resolveLocalRate({
+          carrierCode: carrierAdapter.carrierCode,
+          weightKg: totalWeightKg,
+          clientProfile: account.profile,
+          liveBaseRateSar,
+          liveFallbackMarginPercent,
+        });
+        if (!local) continue;
+
+        const accountingSnapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate: local.baseRate,
+          marginAmount: local.marginAmount,
+        });
+        const marginPercentage = Math.min(
+          local.baseRate > 0 ? (local.marginAmount / local.baseRate) * 100 : 0,
+          999.99,
+        );
+        const serviceName = `${carrierAdapter.name} Domestic`;
+
+        // Store only what the local flow needs so checkout stays isolated.
+        const quoteShipmentData = {
+          fulfillmentType: "local",
+          carrier: carrierAdapter.carrierCode,
+          shipper: data.shipper,
+          recipient: data.recipient,
+          pieces: data.pieces,
+          weight: totalWeightKg,
+          weightUnit: "KG",
+        };
+        const quote = await storage.createShipmentRateQuote({
+          clientAccountId: user.clientAccountId,
+          shipmentData: JSON.stringify(quoteShipmentData),
+          carrierCode: carrierAdapter.carrierCode,
+          carrierName: carrierAdapter.name,
+          carrierIntegrationAccountId: null,
+          serviceType: "LOCAL",
+          serviceName,
+          actualWeight: totalWeightKg.toFixed(3),
+          dimensionalWeight: "0",
+          chargeableWeight: totalWeightKg.toFixed(3),
+          chargeableWeightUnit: "KG",
+          baseRate: local.baseRate.toFixed(2),
+          marginPercentage: marginPercentage.toFixed(2),
+          marginAmount: local.marginAmount.toFixed(2),
+          finalPrice: accountingSnapshot.clientTotalAmountSar.toFixed(2),
+          currency: "SAR",
+          transitDays: 2,
+          expiresAt,
+        });
+
+        availableCarriers.push({ code: carrierAdapter.carrierCode, name: carrierAdapter.name });
+        quotes.push({
+          quoteId: quote.id,
+          carrierCode: carrierAdapter.carrierCode,
+          carrierName: carrierAdapter.name,
+          serviceType: "LOCAL",
+          serviceName,
+          finalPrice: accountingSnapshot.clientTotalAmountSar,
+          currency: "SAR",
+          transitDays: 2,
+          actualWeight: totalWeightKg,
+          chargeableWeight: totalWeightKg,
+          chargeableWeightUnit: "KG",
+          chargeableWeightSource: "system",
+        });
+      }
+
+      // Virtual carriers: client-facing couriers layered on Fizzpa/Shipox. Priced off their
+      // own rate card (keyed by the virtual code); booked through the provider adapter with
+      // the chosen courier written onto the provider order as a note. No live rate API.
+      const virtualCarrierList = await storage.listVirtualCarriers(true);
+      for (const vc of virtualCarrierList) {
+        const local = await resolveLocalRate({
+          carrierCode: vc.code,
+          weightKg: totalWeightKg,
+          clientProfile: account.profile,
+          liveBaseRateSar: null,
+        });
+        if (!local) continue;
+
+        const accountingSnapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate: local.baseRate,
+          marginAmount: local.marginAmount,
+        });
+        const marginPercentage = Math.min(
+          local.baseRate > 0 ? (local.marginAmount / local.baseRate) * 100 : 0,
+          999.99,
+        );
+        const serviceName = vc.name;
+        const assignmentNote = renderVirtualCarrierNote(vc);
+
+        const quoteShipmentData = {
+          fulfillmentType: "local",
+          carrier: vc.code,
+          provider: vc.provider,
+          providerCarrierCode: vc.provider.toUpperCase(),
+          carrierAssignmentNote: assignmentNote,
+          shipper: data.shipper,
+          recipient: data.recipient,
+          pieces: data.pieces,
+          weight: totalWeightKg,
+          weightUnit: "KG",
+        };
+        const quote = await storage.createShipmentRateQuote({
+          clientAccountId: user.clientAccountId,
+          shipmentData: JSON.stringify(quoteShipmentData),
+          carrierCode: vc.code,
+          carrierName: vc.name,
+          carrierIntegrationAccountId: null,
+          serviceType: "LOCAL",
+          serviceName,
+          actualWeight: totalWeightKg.toFixed(3),
+          dimensionalWeight: "0",
+          chargeableWeight: totalWeightKg.toFixed(3),
+          chargeableWeightUnit: "KG",
+          baseRate: local.baseRate.toFixed(2),
+          marginPercentage: marginPercentage.toFixed(2),
+          marginAmount: local.marginAmount.toFixed(2),
+          finalPrice: accountingSnapshot.clientTotalAmountSar.toFixed(2),
+          currency: "SAR",
+          transitDays: 2,
+          expiresAt,
+        });
+
+        availableCarriers.push({ code: vc.code, name: vc.name });
+        quotes.push({
+          quoteId: quote.id,
+          carrierCode: vc.code,
+          carrierName: vc.name,
+          serviceType: "LOCAL",
+          serviceName,
+          finalPrice: accountingSnapshot.clientTotalAmountSar,
+          currency: "SAR",
+          transitDays: 2,
+          actualWeight: totalWeightKg,
+          chargeableWeight: totalWeightKg,
+          chargeableWeightUnit: "KG",
+          chargeableWeightSource: "system",
+        });
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({
+          error: "No local carrier rates available. An admin needs to configure local pricing tiers for this weight.",
+        });
+      }
+
+      await logAudit(req.session.userId, "get_local_rates", "shipment", undefined, `Requested ${quotes.length} local rates`, req.ip);
+      res.json({ quotes, expiresAt, availableCarriers });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get local rates", error);
+      res.status(500).json({ error: "Failed to get local rates" });
+    }
+  });
+
+  // LOCAL step 2: checkout — create the local shipment draft (payment pending). The
+  // shared Tap/credit payment endpoints (`/api/client/shipments/:id/pay[-later]`)
+  // finalize it into operations; local shipments are never auto-booked with a carrier.
+  app.post("/api/client/local/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) {
+          return res.status(cached.statusCode).json(cached.response);
+        }
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const { quoteId } = z.object({ quoteId: z.string().uuid("Invalid quote ID") }).parse(req.body);
+      const quote = await storage.getShipmentRateQuote(quoteId);
+      if (!quote) {
+        return res.status(404).json({ error: "Quote not found or expired" });
+      }
+      if (quote.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (quote.serviceType !== "LOCAL") {
+        return res.status(400).json({ error: "This quote is not a local shipment quote." });
+      }
+
+      const stored = JSON.parse(quote.shipmentData) as {
+        shipper: any; recipient: any; pieces: number; weight: number;
+        providerCarrierCode?: string; carrierAssignmentNote?: string;
+      };
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      // Re-derive the price server-side from the current tier (never trust the quote).
+      const baseRate = Number(quote.baseRate);
+      const local = await resolveLocalRate({
+        carrierCode: quote.carrierCode,
+        weightKg: Number(quote.chargeableWeight ?? stored.weight ?? 0),
+        clientProfile: account.profile,
+        liveBaseRateSar: baseRate,
+      });
+      if (!local) {
+        return res.status(400).json({ error: "Local pricing is no longer available for this carrier. Please request a fresh quote." });
+      }
+      const accountingSnapshot = calculateShipmentAccounting({
+        shipmentType: "domestic",
+        isDdp: false,
+        recipientCountryCode: "SA",
+        baseRate,
+        marginAmount: local.marginAmount,
+      });
+      if (Math.abs(accountingSnapshot.clientTotalAmountSar - Number(quote.finalPrice)) > 0.01) {
+        return res.status(400).json({ error: "Price mismatch detected" });
+      }
+
+      const shipment = await storage.createShipment({
+        clientAccountId: user.clientAccountId,
+        senderName: stored.shipper.name,
+        senderAddress: stored.shipper.addressLine1,
+        senderCity: stored.shipper.city,
+        senderStateOrProvince: stored.shipper.district || null,
+        senderCountry: "SA",
+        senderPhone: stored.shipper.phone,
+        senderEmail: stored.shipper.email || null,
+        senderShortAddress: stored.shipper.shortAddress || null,
+        recipientName: stored.recipient.name,
+        recipientAddress: stored.recipient.addressLine1,
+        recipientCity: stored.recipient.city,
+        recipientStateOrProvince: stored.recipient.district || null,
+        recipientCountry: "SA",
+        recipientPhone: stored.recipient.phone,
+        recipientEmail: stored.recipient.email || null,
+        recipientShortAddress: stored.recipient.shortAddress || null,
+        weight: Number(quote.chargeableWeight ?? stored.weight).toString(),
+        weightUnit: "KG",
+        packageType: "PARCEL",
+        numberOfPackages: stored.pieces || 1,
+        shipmentType: "domestic",
+        fulfillmentType: "local",
+        serviceType: "LOCAL",
+        currency: "SAR",
+        status: "payment_pending",
+        baseRate: quote.baseRate,
+        marginAmount: quote.marginAmount,
+        margin: quote.marginAmount,
+        finalPrice: quote.finalPrice,
+        ...getShipmentAccountingInsert(accountingSnapshot),
+        carrierCode: quote.carrierCode,
+        carrierName: quote.carrierName,
+        // Virtual carrier: keep the client-facing code/name on carrierCode/carrierName, but
+        // record the real provider adapter + note so booking routes to Fizzpa/Shipox and
+        // writes which downstream courier to assign onto their order.
+        providerCarrierCode: stored.providerCarrierCode || null,
+        carrierAssignmentNote: stored.carrierAssignmentNote || null,
+        carrierServiceType: "LOCAL",
+        paymentStatus: "pending",
+      });
+
+      await logAudit(req.session.userId, "checkout_local_shipment", "shipment", shipment.id,
+        `Created local checkout for shipment ${shipment.trackingNumber}`, req.ip);
+
+      const response = {
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        amount: Number(quote.finalPrice),
+        currency: "SAR",
+        carrierCode: quote.carrierCode,
+        carrierName: quote.carrierName,
+        serviceType: "LOCAL",
+        serviceName: quote.serviceName,
+        pieces: stored.pieces,
+        weight: Number(quote.chargeableWeight ?? stored.weight),
+      };
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, response, 200);
+      }
+      res.json(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create local checkout", error);
+      res.status(500).json({ error: "Failed to create local checkout" });
+    }
+  });
+
+  // ==========================================================================
+  // Sales Channels (P2) — connected e-commerce stores + imported orders.
+  // WooCommerce is the reference platform: per-store REST keys, no OAuth app.
+  // ==========================================================================
+
+  const salesChannelInputSchema = insertSalesChannelSchema
+    .omit({ clientAccountId: true, credentialsEncrypted: true, syncSettings: true })
+    .extend({
+      // Raw per-store credentials (WooCommerce consumer_key/secret). Stored encrypted,
+      // never returned to the client.
+      credentials: z.record(z.string()).optional(),
+      // Accept a JSON object or a pre-serialized string; normalized before persist.
+      syncSettings: z.union([z.record(z.any()), z.string()]).optional(),
+    });
+
+  // Strip secrets before returning a channel to the client.
+  const serializeChannel = (channel: any) => {
+    const { credentialsEncrypted, webhookSecret, ...safe } = channel;
+    return {
+      ...safe,
+      syncSettings: channel.syncSettings ? JSON.parse(channel.syncSettings) : null,
+      hasCredentials: Boolean(credentialsEncrypted),
+      hasWebhookSecret: Boolean(webhookSecret),
+    };
+  };
+
+  app.get("/api/client/sales-channels", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const channels = await storage.listSalesChannels(user.clientAccountId);
+    res.json(channels.map(serializeChannel));
+  });
+
+  app.post("/api/client/sales-channels", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+
+      const data = salesChannelInputSchema.parse(req.body);
+      if (!getSalesChannelAdapter(data.platform)) {
+        return res.status(400).json({ error: `Unsupported platform: ${data.platform}` });
+      }
+
+      const { credentials, syncSettings, ...rest } = data;
+      const channel = await storage.createSalesChannel({
+        ...rest,
+        clientAccountId: user.clientAccountId,
+        status: "connected",
+        credentialsEncrypted: credentials ? encryptIntegrationPayload(credentials) : null,
+        // Per-channel webhook secret the client configures on the store's webhook.
+        webhookSecret: randomBytes(24).toString("hex"),
+        syncSettings: syncSettings ? (typeof syncSettings === "string" ? syncSettings : JSON.stringify(syncSettings)) : null,
+      });
+
+      await logAudit(req.session.userId, "create_sales_channel", "sales_channel", channel.id,
+        `Connected ${channel.platform} store ${channel.name}`, req.ip);
+
+      // Return the webhook secret exactly once so the client can paste it into the
+      // store's webhook config; it is never exposed again.
+      res.status(201).json({ ...serializeChannel(channel), webhookSecret: channel.webhookSecret });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to create sales channel", error);
+      res.status(500).json({ error: "Failed to create sales channel" });
+    }
+  });
+
+  app.patch("/api/client/sales-channels/:id", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const channel = await storage.getSalesChannel(req.params.id);
+      if (!channel || channel.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Sales channel not found" });
+      }
+
+      const data = salesChannelInputSchema.partial().parse(req.body);
+      const { credentials, syncSettings, ...rest } = data;
+      const updates: Record<string, unknown> = { ...rest };
+      if (credentials) updates.credentialsEncrypted = encryptIntegrationPayload(credentials);
+      if (syncSettings !== undefined) {
+        updates.syncSettings = syncSettings ? (typeof syncSettings === "string" ? syncSettings : JSON.stringify(syncSettings)) : null;
+      }
+
+      const updated = await storage.updateSalesChannel(req.params.id, updates as any);
+      await logAudit(req.session.userId, "update_sales_channel", "sales_channel", req.params.id,
+        `Updated sales channel ${channel.name}`, req.ip);
+      res.json(serializeChannel(updated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to update sales channel", error);
+      res.status(500).json({ error: "Failed to update sales channel" });
+    }
+  });
+
+  app.delete("/api/client/sales-channels/:id", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const channel = await storage.getSalesChannel(req.params.id);
+    if (!channel || channel.clientAccountId !== user.clientAccountId) {
+      return res.status(404).json({ error: "Sales channel not found" });
+    }
+    await storage.deleteSalesChannel(req.params.id);
+    await logAudit(req.session.userId, "delete_sales_channel", "sales_channel", req.params.id,
+      `Disconnected sales channel ${channel.name}`, req.ip);
+    res.status(204).end();
+  });
+
+  // Manual pull — poll the store's API on demand (no store-side webhook needed).
+  app.post("/api/client/sales-channels/:id/sync", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const channel = await storage.getSalesChannel(req.params.id);
+      if (!channel || channel.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Sales channel not found" });
+      }
+      const adapter = getSalesChannelAdapter(channel.platform);
+      if (!adapter?.fetchOrders) {
+        return res.status(400).json({ error: `${channel.platform} does not support order pull yet` });
+      }
+
+      const { imported } = await syncSalesChannel(channel);
+      await logAudit(req.session.userId, "sync_sales_channel", "sales_channel", channel.id,
+        `Pulled ${imported} order(s) from ${channel.name}`, req.ip);
+      res.json({ imported });
+    } catch (error) {
+      logError("Manual sales-channel sync failed", error);
+      res.status(502).json({ error: error instanceof Error ? error.message : "Sync failed" });
+    }
+  });
+
+  // Orders inbox
+  app.get("/api/client/orders", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const salesChannelId = typeof req.query.channel === "string" ? req.query.channel : undefined;
+    const orderRows = await storage.listOrders(user.clientAccountId, { status, salesChannelId });
+    res.json(orderRows);
+  });
+
+  app.get("/api/client/orders/:id", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const order = await storage.getOrder(req.params.id);
+    if (!order || order.clientAccountId !== user.clientAccountId) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    res.json(order);
+  });
+
+  // Carrier assignment rules (opt-in auto-assignment; evaluated by priority).
+  app.get("/api/client/carrier-rules", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    res.json(await storage.listCarrierAssignmentRules(user.clientAccountId));
+  });
+
+  app.post("/api/client/carrier-rules", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const data = insertCarrierAssignmentRuleSchema.omit({ clientAccountId: true }).parse(req.body);
+      const rule = await storage.createCarrierAssignmentRule({ ...data, clientAccountId: user.clientAccountId });
+      await logAudit(req.session.userId, "create_carrier_rule", "carrier_assignment_rule", rule.id,
+        `Created carrier rule ${rule.name}`, req.ip);
+      res.status(201).json(rule);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to create carrier rule", error);
+      res.status(500).json({ error: "Failed to create carrier rule" });
+    }
+  });
+
+  app.patch("/api/client/carrier-rules/:id", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const rule = await storage.getCarrierAssignmentRule(req.params.id);
+      if (!rule || rule.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Rule not found" });
+      }
+      const data = insertCarrierAssignmentRuleSchema.omit({ clientAccountId: true }).partial().parse(req.body);
+      const updated = await storage.updateCarrierAssignmentRule(req.params.id, data as any);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to update carrier rule", error);
+      res.status(500).json({ error: "Failed to update carrier rule" });
+    }
+  });
+
+  app.delete("/api/client/carrier-rules/:id", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+    const rule = await storage.getCarrierAssignmentRule(req.params.id);
+    if (!rule || rule.clientAccountId !== user.clientAccountId) {
+      return res.status(404).json({ error: "Rule not found" });
+    }
+    await storage.deleteCarrierAssignmentRule(req.params.id);
+    res.status(204).end();
+  });
+
+  // Rate-compare for an order: live local rates across eligible carriers, using the
+  // order's stored weight (override with ?weightKg=).
+  app.get("/api/client/orders/:id/rates", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const order = await storage.getOrder(req.params.id);
+      if (!order || order.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+
+      const weightKg = req.query.weightKg
+        ? Number(req.query.weightKg)
+        : order.packageWeightKg != null
+          ? Number(order.packageWeightKg)
+          : 0;
+      if (!(weightKg > 0)) {
+        return res.status(400).json({ error: "Order has no weight. Provide weightKg to price it." });
+      }
+
+      const toCity = (() => { try { return JSON.parse(order.shipTo || "{}").city || ""; } catch { return ""; } })();
+      const fromCity = account.shippingCity || "";
+      const localPricingRule = account.profile ? await storage.getPricingRuleByProfile(account.profile) : undefined;
+      const rates: Array<Record<string, unknown>> = [];
+      for (const carrierAdapter of carrierService.getLocalCarriers("SA")) {
+        const liveBaseRateSar = await resolveLiveLocalBaseRate(carrierAdapter, fromCity, toCity, weightKg);
+        const liveFallbackMarginPercent =
+          liveBaseRateSar != null && liveBaseRateSar > 0
+            ? localPricingRule
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              : 20
+            : null;
+        const local = await resolveLocalRate({
+          carrierCode: carrierAdapter.carrierCode,
+          weightKg,
+          clientProfile: account.profile,
+          liveBaseRateSar,
+          liveFallbackMarginPercent,
+        });
+        if (!local) continue;
+        const snapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate: local.baseRate,
+          marginAmount: local.marginAmount,
+        });
+        rates.push({
+          carrierCode: carrierAdapter.carrierCode,
+          carrierName: carrierAdapter.name,
+          serviceName: `${carrierAdapter.name} Domestic`,
+          weightKg,
+          totalAmountSar: snapshot.clientTotalAmountSar,
+          currency: "SAR",
+        });
+      }
+      res.json({ weightKg, rates });
+    } catch (error) {
+      logError("Failed to price order", error);
+      res.status(500).json({ error: "Failed to price order" });
+    }
+  });
+
+  // Fulfill an order → create a LOCAL shipment (payment pending). Client then pays via
+  // the shared /api/client/shipments/:id/pay[-later] endpoints, exactly like the direct
+  // local create flow. The order is linked + moved to `assigned`.
+  app.post("/api/client/orders/:id/fulfill", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+
+      const order = await storage.getOrder(req.params.id);
+      if (!order || order.clientAccountId !== user.clientAccountId) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      if (order.shipmentId) {
+        return res.status(409).json({ error: "Order already fulfilled" });
+      }
+      if (order.status === "cancelled") {
+        return res.status(400).json({ error: "Cannot fulfill a cancelled order" });
+      }
+
+      const { carrierCode, weightKg: weightOverride } = z.object({
+        carrierCode: z.string().min(1),
+        weightKg: z.number().positive().optional(),
+      }).parse(req.body);
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+
+      const weightKg = weightOverride ?? (order.packageWeightKg != null ? Number(order.packageWeightKg) : 0);
+      if (!(weightKg > 0)) {
+        return res.status(400).json({ error: "Order has no weight. Provide weightKg to fulfill it." });
+      }
+
+      const local = await resolveLocalRate({
+        carrierCode,
+        weightKg,
+        clientProfile: account.profile,
+        liveBaseRateSar: null,
+      });
+      if (!local) {
+        return res.status(400).json({ error: `No local pricing available for ${carrierCode} at ${weightKg}kg.` });
+      }
+
+      const carrierAdapter = carrierService
+        .getLocalCarriers("SA")
+        .find((c) => c.carrierCode === local.carrierCode);
+      const carrierName = carrierAdapter?.name || carrierCode;
+
+      const accountingSnapshot = calculateShipmentAccounting({
+        shipmentType: "domestic",
+        isDdp: false,
+        recipientCountryCode: "SA",
+        baseRate: local.baseRate,
+        marginAmount: local.marginAmount,
+      });
+
+      const shipTo = order.shipTo ? JSON.parse(order.shipTo) : {};
+      const customer = order.customer ? JSON.parse(order.customer) : {};
+
+      const shipment = await storage.createShipment({
+        clientAccountId: user.clientAccountId,
+        // Sender = the client's own pickup/return address on file.
+        senderName: account.shippingContactName || account.name,
+        senderAddress: account.shippingAddressLine1 || "Pickup coordination required",
+        senderCity: account.shippingCity || "Riyadh",
+        senderStateOrProvince: account.shippingStateOrProvince || null,
+        senderCountry: "SA",
+        senderPhone: account.shippingContactPhone || account.phone || "",
+        senderShortAddress: account.shippingShortAddress || null,
+        // Recipient = the store order's ship-to (already KSA-normalized at ingest).
+        recipientName: customer.name || "Customer",
+        recipientAddress: shipTo.address || "",
+        recipientCity: shipTo.city || "",
+        recipientCountry: "SA",
+        recipientPhone: customer.phone || "",
+        recipientEmail: customer.email || null,
+        recipientShortAddress: shipTo.postal || null,
+        weight: weightKg.toString(),
+        weightUnit: "KG",
+        packageType: "PARCEL",
+        numberOfPackages: order.packagePieces || 1,
+        shipmentType: "domestic",
+        fulfillmentType: "local",
+        serviceType: "LOCAL",
+        currency: "SAR",
+        status: "payment_pending",
+        baseRate: local.baseRate.toString(),
+        marginAmount: local.marginAmount.toString(),
+        margin: local.marginAmount.toString(),
+        finalPrice: accountingSnapshot.clientTotalAmountSar.toString(),
+        ...getShipmentAccountingInsert(accountingSnapshot),
+        carrierCode: local.carrierCode,
+        carrierName,
+        carrierServiceType: "LOCAL",
+        paymentStatus: "pending",
+        orderId: order.id,
+      });
+
+      const updatedOrder = await storage.updateOrder(order.id, {
+        shipmentId: shipment.id,
+        assignedCarrierCode: local.carrierCode,
+        status: "assigned",
+      });
+
+      await logAudit(req.session.userId, "fulfill_order", "order", order.id,
+        `Fulfilled order ${order.externalOrderNumber || order.externalOrderId} as local shipment ${shipment.trackingNumber}`, req.ip);
+
+      res.status(201).json({
+        order: updatedOrder,
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        amount: accountingSnapshot.clientTotalAmountSar,
+        currency: "SAR",
+        carrierCode: local.carrierCode,
+        carrierName,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to fulfill order", error);
+      res.status(500).json({ error: "Failed to fulfill order" });
+    }
+  });
+
   // STEP 2: Checkout - Create shipment draft with selected rate
   app.post("/api/client/shipments/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
@@ -14166,9 +17446,10 @@ export async function registerRoutes(
         quoteId: z.string().uuid("Invalid quote ID"),
         items: z.array(shipmentItemInputSchema).optional(),
         tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional(),
+        pickup: pickupInputSchema.optional(),
       });
 
-      const { quoteId, items, tradeDocuments } = checkoutSchema.parse(req.body);
+      const { quoteId, items, tradeDocuments, pickup } = checkoutSchema.parse(req.body);
 
       // Verify quote exists and is valid
       const quote = await storage.getShipmentRateQuote(quoteId);
@@ -14181,7 +17462,10 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
       if (quote.carrierCode === "DDP") {
-        return res.status(400).json({ error: "Use the dedicated DDP checkout flow for this quote." });
+        return res.status(400).json({ error: "Use the dedicated Door To Door Freight checkout flow for this quote." });
+      }
+      if (quote.serviceType === "LOCAL") {
+        return res.status(400).json({ error: "Use the dedicated local shipment checkout for this quote." });
       }
 
       // Recalculate price server-side to prevent tampering
@@ -14213,7 +17497,7 @@ export async function registerRoutes(
       }
       if (shipmentData.isDdp) {
         return res.status(400).json({
-          error: "Use the dedicated DDP checkout flow for door-to-door shipments.",
+          error: "Use the dedicated Door To Door Freight checkout flow for door-to-door shipments.",
         });
       }
       const account = await storage.getClientAccount(user.clientAccountId);
@@ -14224,12 +17508,14 @@ export async function registerRoutes(
       const pricingRule = await storage.getPricingRuleByProfile(account.profile || "regular");
       const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
       const baseRate = Number(quote.baseRate);
-      
-      // Use tiered margin if available (same logic as rate discovery)
-      const marginPercentage = pricingRule 
+
+      // Re-derive the margin server-side (never trust the quoted amount) using the
+      // profile margin tiers. (Local shipments use their own /local/checkout.)
+      const marginPercentage = pricingRule
         ? await storage.getMarginForAmount(pricingRule.id, baseRate)
         : defaultMarginPercentage;
       const recalculatedMargin = baseRate * (marginPercentage / 100);
+
       const accountingSnapshot = calculateShipmentAccounting({
         shipmentType: shipmentData.shipmentType,
         isDdp: shipmentData.isDdp,
@@ -14244,7 +17530,7 @@ export async function registerRoutes(
       if (Math.abs(recalculatedFinalPrice - storedFinalPrice) > 0.01) {
         logError("Price mismatch in checkout", {
           baseRate,
-          marginPercentage,
+          recalculatedMargin,
           recalculatedFinalPrice,
           storedFinalPrice,
           quoteMarginPercentage: quote.marginPercentage,
@@ -14286,6 +17572,7 @@ export async function registerRoutes(
       const shipment = await storage.createShipment({
         clientAccountId: user.clientAccountId,
         senderName: shipmentData.shipper.name,
+        senderCompany: shipmentData.shipper.company || null,
         senderAddress: shipmentData.shipper.addressLine1,
         senderAddressLine2: shipmentData.shipper.addressLine2 || null,
         senderCity: shipmentData.shipper.city,
@@ -14296,6 +17583,7 @@ export async function registerRoutes(
         senderEmail: shipmentData.shipper.email || null,
         senderShortAddress: shipmentData.shipper.shortAddress,
         recipientName: shipmentData.recipient.name,
+        recipientCompany: shipmentData.recipient.company || null,
         recipientAddress: shipmentData.recipient.addressLine1,
         recipientAddressLine2: shipmentData.recipient.addressLine2 || null,
         recipientCity: shipmentData.recipient.city,
@@ -14326,6 +17614,7 @@ export async function registerRoutes(
         serviceType: quote.serviceType,
         currency: quote.currency,
         status: "payment_pending",
+        ...expressPickupInsertFields(pickup),
         baseRate: quote.baseRate,
         marginAmount: quote.marginAmount,
         margin: quote.marginAmount,
@@ -14457,13 +17746,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Shipment is not ready for payment" });
       }
 
+      if (shipment.isQuote && shipment.isDdp && !shipment.ddpTermsAcceptedAt) {
+        return res.status(400).json({ error: "Please accept the customs, terms and broker-authorization declaration before paying." });
+      }
+
       const account = await storage.getClientAccount(user.clientAccountId);
       if (!account) {
         return res.status(404).json({ error: "Client account not found" });
       }
 
       const activeOffer = await getActiveAbandonedRecoveryOffer(shipment);
-      const payableAmount = activeOffer?.payableAmount ?? parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+      // payableAmount is always SAR (accounting source of truth). If the client account is
+      // billed in a non-SAR currency, snapshot a fresh FX rate and charge the converted amount.
+      const payableAmountSar = activeOffer?.payableAmount ?? parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+      const chargeCurrency = normalizeCurrency(account.preferredCurrency);
+      const fxRate = chargeCurrency === "SAR" ? 1 : await getSarRate(chargeCurrency);
+      const payableAmount = convertFromSar(payableAmountSar, chargeCurrency, fxRate);
 
       const appBaseUrl = buildAppBaseUrl(req);
       let tapIntegrationAccountId = shipment.tapIntegrationAccountId;
@@ -14471,7 +17769,7 @@ export async function registerRoutes(
         tapIntegrationAccountId = getCurrentIntegrationAccountId() || tapIntegrationAccountId || "env:tap";
         return tapService.createCharge({
         amount: payableAmount,
-        currency: (shipment.currency || "SAR").toUpperCase(),
+        currency: chargeCurrency,
         description: `Shipment ${shipment.trackingNumber}`,
         redirectUrl: `${appBaseUrl}/api/payments/tap/redirect`,
         postUrl: `${appBaseUrl}/api/webhooks/tap`,
@@ -14494,6 +17792,9 @@ export async function registerRoutes(
               }
             : {}),
           payableAmount: payableAmount.toFixed(2),
+          payableAmountSar: payableAmountSar.toFixed(2),
+          chargeCurrency,
+          fxRate: fxRate.toString(),
           ...(returnPath ? { returnPath } : {}),
         },
         sourceId: tapTokenId || DEFAULT_TAP_SOURCE_ID,
@@ -14504,6 +17805,8 @@ export async function registerRoutes(
       await storage.updateShipment(shipment.id, {
         paymentIntentId: chargeResult.chargeId,
         tapIntegrationAccountId,
+        currency: chargeCurrency,
+        fxRate: fxRate.toString(),
       });
 
       if (tapService.isSuccessfulStatus(chargeResult.status)) {
@@ -14516,7 +17819,9 @@ export async function registerRoutes(
         paymentId: chargeResult.chargeId,
         transactionUrl: chargeResult.transactionUrl,
         amount: payableAmount,
-        currency: shipment.currency || "SAR",
+        currency: chargeCurrency,
+        amountSar: payableAmountSar,
+        fxRate,
         paymentStatus: chargeResult.status,
         activeOffer: serializeAbandonedRecoveryOffer(activeOffer),
       });
@@ -14952,6 +18257,64 @@ export async function registerRoutes(
     }
   });
 
+  // Sales Channels feature access (Orders / Sales Channels / Assignment Rules bundle)
+  app.get("/api/client/sales-features", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      const request = await storage.getSalesFeatureAccessRequestByClient(user.clientAccountId);
+      res.json({
+        enabled: clientAccount?.salesFeaturesEnabled || false,
+        request: request || null,
+      });
+    } catch (error: any) {
+      logError("Error fetching sales feature status", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/client/sales-features/request", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (account?.salesFeaturesEnabled) {
+        return res.status(400).json({ error: "Sales Channels is already enabled for your account." });
+      }
+      const existing = await storage.getSalesFeatureAccessRequestByClient(user.clientAccountId);
+      if (existing && existing.status === "pending") {
+        return res.status(400).json({ error: "You already have a pending request." });
+      }
+
+      const { reason } = req.body;
+      const request = await storage.createSalesFeatureAccessRequest({
+        clientAccountId: user.clientAccountId,
+        requestedByUserId: user.id,
+        status: "pending",
+        reason: reason || null,
+      });
+
+      logAuditToFile({
+        userId: user.id,
+        action: "request_sales_feature",
+        resource: "sales_feature_access_request",
+        resourceId: request.id,
+        details: `Client ${user.username} requested Sales Channels access`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error creating sales feature request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.post("/api/client/shipments/:id/pay-later", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -14977,6 +18340,10 @@ export async function registerRoutes(
 
       if (shipment.status !== "payment_pending") {
         return res.status(400).json({ error: "Shipment is not in a payable state" });
+      }
+
+      if (shipment.isQuote && shipment.isDdp && !shipment.ddpTermsAcceptedAt) {
+        return res.status(400).json({ error: "Please accept the customs, terms and broker-authorization declaration before paying." });
       }
 
       const existingCredit = await storage.getCreditInvoiceByShipmentId(shipmentId);
@@ -15025,13 +18392,16 @@ export async function registerRoutes(
       });
 
       const isDdpCredit = shipment.fulfillmentType === "ddp_manual";
+      // Local shipments are operations-fulfilled (like DDP): credit covers them so ops
+      // can proceed immediately, and there is no carrier auto-booking.
+      const isManualFulfillment = isDdpCredit || shipment.fulfillmentType === "local";
       await storage.updateShipment(shipmentId, {
         paymentMethod: "CREDIT",
-        // DDP credit is covered by the client's credit balance, so the shipment is
+        // DDP/local credit is covered by the client's credit balance, so the shipment is
         // treated as paid for the operations workflow; the creditInvoice stays UNPAID
-        // as the receivable the client settles later. Non-DDP keeps the prior flow.
-        paymentStatus: isDdpCredit ? "paid" : "unpaid",
-        status: isDdpCredit ? "awaiting_review" : "credit_pending",
+        // as the receivable the client settles later. Other flows keep the prior behavior.
+        paymentStatus: isManualFulfillment ? "paid" : "unpaid",
+        status: isDdpCredit ? "awaiting_review" : shipment.fulfillmentType === "local" ? "created" : "credit_pending",
       });
 
       if (shipment.fulfillmentType !== "ddp_manual") {
@@ -15054,6 +18424,12 @@ export async function registerRoutes(
             status: "awaiting_review",
             carrierStatus: "awaiting_review",
           });
+        } else if (shipment.fulfillmentType === "local") {
+          // Operations-fulfilled: no carrier API booking.
+          await storage.updateShipment(shipmentId, {
+            status: "created",
+            carrierStatus: "processing",
+          });
         } else {
         const carrierAdapter = getAdapterForShipment(shipment);
         const preparedShipment = await buildCarrierShipmentRequestFromShipment(shipment, carrierAdapter);
@@ -15072,7 +18448,7 @@ export async function registerRoutes(
         labelUrl = carrierResponse.labelUrl || "";
         estimatedDelivery = carrierResponse.estimatedDelivery;
 
-        await storage.updateShipment(shipmentId, {
+        const bookedShipment = await storage.updateShipment(shipmentId, {
           status: "created",
           carrierStatus: "created",
           carrierTrackingNumber,
@@ -15085,6 +18461,12 @@ export async function registerRoutes(
           carrierLastAttemptAt: new Date(),
           carrierAttempts: (shipment.carrierAttempts || 0) + 1,
         });
+        // Book the courier pickup (if requested) for credit / pay-later shipments too.
+        await bookCarrierPickupIfRequested(
+          bookedShipment || shipment,
+          carrierAdapter,
+          getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+        );
         }
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
@@ -15759,7 +19141,7 @@ export async function registerRoutes(
           trackingNumber: shipment.trackingNumber,
           carrierTrackingNumber: shipment.carrierTrackingNumber,
           status: shipment.status,
-          carrier: "DDP",
+          carrier: "Door To Door Freight",
           estimatedDelivery: shipment.estimatedDelivery,
           actualDelivery: shipment.actualDelivery,
           tracking: {
@@ -15768,8 +19150,8 @@ export async function registerRoutes(
             events: [{
               status: shipment.status,
               description: shipment.carrierTrackingNumber
-                ? "DDP shipment status is managed by ezhalha using the saved manual tracking number."
-                : "DDP shipment status is managed by ezhalha.",
+                ? "Door To Door Freight shipment status is managed by ezhalha using the saved manual tracking number."
+                : "Door To Door Freight shipment status is managed by ezhalha.",
               timestamp: shipment.updatedAt,
             }],
           },
@@ -15785,14 +19167,17 @@ export async function registerRoutes(
         () => carrierAdapter.trackShipment(trackingNumber),
       );
 
+      // Persist the carrier's live status so the client's shipment list/drawer reflect it too.
+      const syncedShipment = await applyCarrierTrackingToShipment(shipment, tracking, "client_track");
+
       res.json({
-        shipmentId: shipment.id,
-        trackingNumber: shipment.trackingNumber,
-        carrierTrackingNumber: shipment.carrierTrackingNumber,
-        status: shipment.status,
-        carrier: shipment.carrierName || shipment.carrierCode || "FedEx",
-        estimatedDelivery: shipment.estimatedDelivery,
-        actualDelivery: shipment.actualDelivery,
+        shipmentId: syncedShipment.id,
+        trackingNumber: syncedShipment.trackingNumber,
+        carrierTrackingNumber: syncedShipment.carrierTrackingNumber,
+        status: syncedShipment.status,
+        carrier: syncedShipment.carrierName || syncedShipment.carrierCode || "FedEx",
+        estimatedDelivery: syncedShipment.estimatedDelivery,
+        actualDelivery: syncedShipment.actualDelivery,
         tracking,
       });
     } catch (error) {
@@ -16132,11 +19517,15 @@ export async function registerRoutes(
         },
         () => carrierAdapter.trackShipment(trackingNumber),
       );
-      
-      await logAudit(req.session.userId!, "track_shipment", "shipment", shipment.id, 
-        `Tracked shipment: ${trackingNumber}`, req.ip);
-      
-      res.json({ ...tracking, shipment });
+
+      // Persist the carrier's live status onto the shipment so the whole system (ops hub, client
+      // portal, lists) reflects it — not just this timeline. A manual sync must move the status.
+      const syncedShipment = await applyCarrierTrackingToShipment(shipment, tracking, "manual_track");
+
+      await logAudit(req.session.userId!, "track_shipment", "shipment", shipment.id,
+        `Tracked shipment: ${trackingNumber} (status: ${syncedShipment.status})`, req.ip);
+
+      res.json({ ...tracking, shipment: syncedShipment });
     } catch (error) {
       logError("Failed to track shipment", error);
       if (error instanceof CarrierError && shipmentForError) {
@@ -16414,6 +19803,89 @@ export async function registerRoutes(
     }
   });
 
+  // Sales-channel order ingest (P2). Platform posts here on order create/update.
+  // The delivery URL carries the channel id: /api/webhooks/sales-channel/:platform?channel=<id>
+  // Signature is verified against the channel's stored secret — fail-closed in prod.
+  app.post("/api/webhooks/sales-channel/:platform", async (req, res) => {
+    const platform = String(req.params.platform || "").toLowerCase();
+    const rawBody: Buffer | undefined = (req as any).rawBody;
+    const payloadText = rawBody ? rawBody.toString() : JSON.stringify(req.body);
+    const isProd = process.env.NODE_ENV === "production";
+
+    try {
+      const adapter = getSalesChannelAdapter(platform);
+      if (!adapter) {
+        return res.status(404).json({ error: `Unsupported platform: ${platform}` });
+      }
+
+      const channelId = typeof req.query.channel === "string" ? req.query.channel : undefined;
+      const channel = channelId ? await storage.getSalesChannel(channelId) : undefined;
+      if (!channel || channel.platform !== platform) {
+        await storage.createWebhookEvent({
+          source: `sales-channel:${platform}`,
+          eventType: "channel_not_found",
+          payload: payloadText,
+          signature: null,
+          processed: false,
+          retryCount: 0,
+          errorMessage: `No channel for id ${channelId}`,
+        });
+        return res.status(404).json({ error: "Sales channel not found" });
+      }
+
+      const signature = getSignatureHeader(platform, req.headers as Record<string, any>);
+      const signatureValid = channel.webhookSecret
+        ? adapter.verifySignature(rawBody ?? payloadText, signature, channel.webhookSecret)
+        : false;
+
+      // Fail-closed in production; in non-prod a missing secret is tolerated to ease
+      // local testing, but a present secret is always enforced.
+      if (!signatureValid && (isProd || channel.webhookSecret)) {
+        await storage.createWebhookEvent({
+          source: `sales-channel:${platform}`,
+          eventType: "signature_validation_failed",
+          payload: payloadText,
+          signature: signature || null,
+          processed: false,
+          retryCount: 0,
+          errorMessage: "Invalid webhook signature",
+        });
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+
+      const normalized = adapter.normalizeOrder(req.body, {
+        clientAccountId: channel.clientAccountId,
+        salesChannelId: channel.id,
+      });
+      const order = await storage.upsertOrder(normalized);
+      await storage.updateSalesChannel(channel.id, { lastSyncedAt: new Date(), status: "connected" });
+
+      await storage.createWebhookEvent({
+        source: `sales-channel:${platform}`,
+        eventType: "order_ingested",
+        payload: payloadText,
+        signature: signature || null,
+        processed: true,
+        retryCount: 0,
+        errorMessage: null,
+      });
+
+      res.status(200).json({ ok: true, orderId: order.id, status: order.status });
+    } catch (error) {
+      logError(`Failed to ingest ${platform} order`, error);
+      await storage.createWebhookEvent({
+        source: `sales-channel:${platform}`,
+        eventType: "ingest_error",
+        payload: payloadText,
+        signature: null,
+        processed: false,
+        retryCount: 0,
+        errorMessage: error instanceof Error ? error.message : "ingest error",
+      });
+      res.status(500).json({ error: "Failed to ingest order" });
+    }
+  });
+
   // FedEx Webhook Handler
   app.post("/api/webhooks/fedex", async (req, res) => {
     try {
@@ -16564,7 +20036,7 @@ export async function registerRoutes(
       const shipmentReturnPath =
         typeof charge.metadata?.returnPath === "string" && charge.metadata.returnPath.startsWith("/client/")
           ? charge.metadata.returnPath
-          : "/client/shipments/new";
+          : "/client/create-shipment";
 
       if (target === "shipment" && charge.metadata?.shipmentId) {
         const separator = shipmentReturnPath.includes("?") ? "&" : "?";

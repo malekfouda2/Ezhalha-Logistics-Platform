@@ -37,6 +37,11 @@ export interface DdpPriceQuote {
   markupPercentage: number;
   markupAmountSar: number;
   totalAmountSar: number;
+  // Supplier (procurement) cost and the resulting true margin. supplierCostSar is 0
+  // when no supplier cost is configured for the lane's transport method.
+  supplierCostPerUnitSar: number;
+  supplierCostSar: number;
+  trueMarginSar: number;
   actualWeightKg: number;
   dimensionalWeightKg: number;
   totalCbm: number;
@@ -87,21 +92,32 @@ export function calculateDdpPrice(input: DdpPriceInput): DdpPriceQuote {
   );
   const totalCbm = rounded(finitePositive(input.totalCbm) || calculatedCbm);
 
-  const isAir = input.transportMethod === "air";
-  const ratePerUnitSar = finitePositive(isAir ? input.lane.airBaseRatePerKg : input.lane.seaBaseRatePerCbm);
+  // Air and domestic both bill by KG; sea bills by CBM. Domestic is a standalone
+  // flat SAR-per-KG charge that reuses the same KG minimum/rounding knobs as air.
+  const isSea = input.transportMethod === "sea";
+  const isKgBilled = !isSea;
+  const isDomestic = input.transportMethod === "domestic";
+  const isAir = !isSea && !isDomestic;
+  if (isAir && input.lane.airEnabled === false) {
+    throw new Error("Air delivery is not available for this Door To Door Freight lane");
+  }
+  const rateLabel = isSea ? "Sea" : isDomestic ? "Domestic" : "Air";
+  const ratePerUnitSar = finitePositive(
+    isSea ? input.lane.seaBaseRatePerCbm : isDomestic ? input.lane.domesticRatePerKg : input.lane.airBaseRatePerKg,
+  );
   if (!ratePerUnitSar) {
-    throw new Error(`${isAir ? "Air" : "Sea"} pricing is not configured for this DDP lane`);
+    throw new Error(`${rateLabel} pricing is not configured for this Door To Door Freight lane`);
   }
 
-  const rawBillableQuantity = isAir
+  const rawBillableQuantity = isKgBilled
     ? rounded(packages.reduce((sum, pkg) => sum + pkg.chargeableWeightKg, 0))
     : totalCbm;
   if (!rawBillableQuantity) {
-    throw new Error(`Enter ${isAir ? "package weight and dimensions" : "the shipment CBM"} to calculate DDP pricing`);
+    throw new Error(`Enter ${isKgBilled ? "package weight and dimensions" : "the shipment CBM"} to calculate Door To Door Freight pricing`);
   }
 
-  const minimumBillableQuantity = finitePositive(isAir ? input.lane.minimumBillableKg : input.lane.minimumBillableCbm);
-  const roundingIncrement = finitePositive(isAir ? input.lane.kgRoundingIncrement : input.lane.cbmRoundingIncrement);
+  const minimumBillableQuantity = finitePositive(isKgBilled ? input.lane.minimumBillableKg : input.lane.minimumBillableCbm);
+  const roundingIncrement = finitePositive(isKgBilled ? input.lane.kgRoundingIncrement : input.lane.cbmRoundingIncrement);
   const billableQuantity = roundUpToIncrement(Math.max(rawBillableQuantity, minimumBillableQuantity), roundingIncrement);
   const subtotalBeforeMinimumSar = money(billableQuantity * ratePerUnitSar);
   const minimumShipmentChargeSar = money(finitePositive(input.lane.minimumShipmentCharge));
@@ -109,9 +125,22 @@ export function calculateDdpPrice(input: DdpPriceInput): DdpPriceQuote {
   const markupPercentage = Math.max(0, Number(input.markupPercentage) || 0);
   const markupAmountSar = money(baseRateSar * markupPercentage / 100);
 
+  // Supplier cost is billed on the same billable quantity as the sell base. It is
+  // separate from the client-facing rate and only drives margin visibility, so an
+  // unconfigured cost is treated as 0 rather than throwing.
+  const supplierCostPerUnitSar = finitePositive(
+    isSea
+      ? input.lane.seaSupplierCostPerCbm
+      : isDomestic
+        ? input.lane.domesticSupplierCostPerKg
+        : input.lane.airSupplierCostPerKg,
+  );
+  const supplierCostSar = money(billableQuantity * supplierCostPerUnitSar);
+  const trueMarginSar = money(baseRateSar + markupAmountSar - supplierCostSar);
+
   return {
     transportMethod: input.transportMethod,
-    billingUnit: isAir ? "KG" : "CBM",
+    billingUnit: isKgBilled ? "KG" : "CBM",
     rawBillableQuantity,
     minimumBillableQuantity,
     roundingIncrement,
@@ -123,11 +152,15 @@ export function calculateDdpPrice(input: DdpPriceInput): DdpPriceQuote {
     markupPercentage,
     markupAmountSar,
     totalAmountSar: money(baseRateSar + markupAmountSar),
+    supplierCostPerUnitSar,
+    supplierCostSar,
+    trueMarginSar,
     actualWeightKg,
     dimensionalWeightKg,
     totalCbm,
     packages,
-    transitDaysMin: isAir ? input.lane.airTransitDaysMin : input.lane.seaTransitDaysMin,
-    transitDaysMax: isAir ? input.lane.airTransitDaysMax : input.lane.seaTransitDaysMax,
+    // Domestic has no dedicated transit-day fields; fall back to the air lane window.
+    transitDaysMin: isSea ? input.lane.seaTransitDaysMin : input.lane.airTransitDaysMin,
+    transitDaysMax: isSea ? input.lane.seaTransitDaysMax : input.lane.airTransitDaysMax,
   };
 }

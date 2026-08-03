@@ -91,6 +91,10 @@ interface AccountingSummary {
   marginAmountSar: number;
   expensesAmountSar: number;
   netProfitAmountSar: number;
+  ddpSupplierCostSar: number;
+  realCostAmountSar: number;
+  realMarginAmountSar: number;
+  realNetProfitAmountSar: number;
   scenarioCounts: Record<string, number>;
 }
 
@@ -130,6 +134,10 @@ type FinancialShipment = Omit<
   revenueExcludingTaxAmountSar: number;
   expensesAmountSar: number;
   netProfitAmountSar: number;
+  ddpSupplierCostSar: number;
+  realCostAmountSar: number;
+  realMarginAmountSar: number;
+  realNetProfitAmountSar: number;
   extraFeesAmountSar: number;
   extraFeesType: "EXTRA_WEIGHT" | "EXTRA_COST" | "COMBINED" | null;
   extraFeesWeightValue: number;
@@ -195,7 +203,7 @@ type PaymentFilterValue = "all" | "paid" | "not_paid";
 type CarrierPaymentDialogMode = "pay" | "view";
 
 function formatScenarioLabel(value: string | null | undefined) {
-  if (value === "DDP") return "DDP Import";
+  if (value === "DDP") return "Door To Door Freight";
   if (value === "DCE") return "DCE Domestic";
   if (value === "IMPORT") return "Import";
   if (value === "EXPORT") return "Export";
@@ -534,6 +542,10 @@ export default function AdminPayments() {
     marginAmountSar: 0,
     expensesAmountSar: 0,
     netProfitAmountSar: 0,
+    ddpSupplierCostSar: 0,
+    realCostAmountSar: 0,
+    realMarginAmountSar: 0,
+    realNetProfitAmountSar: 0,
     scenarioCounts: {},
   };
   const financialShipments = financialData?.shipments || [];
@@ -695,6 +707,20 @@ export default function AdminPayments() {
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-teal-100 dark:bg-teal-950 rounded-lg">
+                  <WalletCards className="h-5 w-5 text-teal-600 dark:text-teal-300" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Real Net Profit</p>
+                  <p className="text-xl font-bold"><SarAmount amount={financialSummary.realNetProfitAmountSar} /></p>
+                  <p className="text-xs text-muted-foreground">After Door To Door Freight supplier cost</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <Card>
@@ -761,7 +787,7 @@ export default function AdminPayments() {
                       <SelectItem value="DCE">DCE Domestic</SelectItem>
                       <SelectItem value="IMPORT">Import</SelectItem>
                       <SelectItem value="EXPORT">Export</SelectItem>
-                      <SelectItem value="DDP">DDP Import</SelectItem>
+                      <SelectItem value="DDP">Door To Door Freight</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -932,6 +958,7 @@ export default function AdminPayments() {
                       <TableHead>Created</TableHead>
                       <TableHead>Shipment ID</TableHead>
                       <TableHead>Client</TableHead>
+                      <TableHead>Carrier</TableHead>
                       <TableHead>Scenario</TableHead>
                       <TableHead>Carrier Cost</TableHead>
                       <TableHead>Cost Tax</TableHead>
@@ -941,6 +968,8 @@ export default function AdminPayments() {
                       <TableHead>Net Tax</TableHead>
                       <TableHead>Expenses</TableHead>
                       <TableHead>Net Profit</TableHead>
+                      <TableHead>Supplier Cost</TableHead>
+                      <TableHead>Real Margin</TableHead>
                       <TableHead>Extra Fees</TableHead>
                       <TableHead>Weight</TableHead>
                       <TableHead>Carrier Tracking</TableHead>
@@ -979,6 +1008,18 @@ export default function AdminPayments() {
                           </div>
                         </TableCell>
                         <TableCell>
+                          {shipment.carrierName || shipment.carrierCode ? (
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-medium">{shipment.carrierName || shipment.carrierCode}</p>
+                              {shipment.carrierName && shipment.carrierCode && shipment.carrierName !== shipment.carrierCode && (
+                                <p className="text-xs text-muted-foreground">{shipment.carrierCode}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge variant="outline">{formatScenarioLabel(shipment.taxScenario)}</Badge>
                         </TableCell>
                         <TableCell
@@ -1009,6 +1050,17 @@ export default function AdminPayments() {
                           <SarAmount amount={shipment.expensesAmountSar || 0} className={cn(shipment.expensesAmountSar > 0 && "text-red-600 dark:text-red-400")} />
                         </TableCell>
                         <TableCell><SarAmount amount={shipment.netProfitAmountSar || 0} /></TableCell>
+                        <TableCell>
+                          {shipment.ddpSupplierCostSar > 0
+                            ? <SarAmount amount={shipment.ddpSupplierCostSar} />
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          <SarAmount
+                            amount={shipment.realMarginAmountSar || 0}
+                            className={cn(shipment.ddpSupplierCostSar > 0 && "font-semibold text-teal-600 dark:text-teal-300")}
+                          />
+                        </TableCell>
                         <TableCell>
                           <div className="space-y-1">
                             <p

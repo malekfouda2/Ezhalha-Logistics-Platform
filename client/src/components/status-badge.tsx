@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface StatusBadgeProps {
@@ -6,24 +5,38 @@ interface StatusBadgeProps {
   className?: string;
 }
 
-const statusStyles: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
-  payment_pending: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-  created: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
-  processing: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  in_transit: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  delivered: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  carrier_error: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
-  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  approved: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  completed: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  inactive: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
-  paid: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  unpaid: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+type StatusColor = "gray" | "purple" | "cyan" | "amber" | "blue" | "green" | "red" | "orange";
+
+// Full class strings per color (Tailwind needs literal classes, no interpolation).
+const colorStyles: Record<StatusColor, { pill: string; dot: string }> = {
+  gray: { pill: "bg-gray-500/10 text-gray-600 ring-gray-500/20 dark:text-gray-300", dot: "bg-gray-500" },
+  purple: { pill: "bg-purple-500/10 text-purple-700 ring-purple-500/20 dark:text-purple-300", dot: "bg-purple-500" },
+  cyan: { pill: "bg-cyan-500/10 text-cyan-700 ring-cyan-500/20 dark:text-cyan-300", dot: "bg-cyan-500" },
+  amber: { pill: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300", dot: "bg-amber-500" },
+  blue: { pill: "bg-blue-500/10 text-blue-700 ring-blue-500/20 dark:text-blue-300", dot: "bg-blue-500" },
+  green: { pill: "bg-green-500/10 text-green-700 ring-green-500/20 dark:text-green-300", dot: "bg-green-500" },
+  red: { pill: "bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-300", dot: "bg-red-500" },
+  orange: { pill: "bg-orange-500/10 text-orange-700 ring-orange-500/20 dark:text-orange-300", dot: "bg-orange-500" },
+};
+
+const statusColors: Record<string, StatusColor> = {
+  draft: "gray",
+  payment_pending: "purple",
+  created: "cyan",
+  processing: "amber",
+  in_transit: "blue",
+  delivered: "green",
+  cancelled: "red",
+  carrier_error: "orange",
+  pending: "amber",
+  approved: "green",
+  rejected: "red",
+  completed: "green",
+  failed: "red",
+  active: "green",
+  inactive: "gray",
+  paid: "green",
+  unpaid: "amber",
 };
 
 const statusLabels: Record<string, string> = {
@@ -46,20 +59,31 @@ const statusLabels: Record<string, string> = {
   unpaid: "Unpaid",
 };
 
+// Statuses whose dot pulses to signal ongoing activity.
+const liveStatuses = new Set(["processing", "in_transit", "payment_pending", "pending"]);
+
 export function StatusBadge({ status, className }: StatusBadgeProps) {
-  const style = statusStyles[status] || statusStyles.pending;
+  const color = statusColors[status] || "amber";
+  const { pill, dot } = colorStyles[color];
   const label = statusLabels[status] || status;
+  const isLive = liveStatuses.has(status);
 
   return (
-    <Badge
+    <span
       className={cn(
-        "px-3 py-1 text-xs font-semibold border-0",
-        style,
-        className
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset",
+        pill,
+        className,
       )}
       data-testid={`badge-status-${status}`}
     >
+      <span className="relative flex h-1.5 w-1.5">
+        {isLive && (
+          <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-60", dot)} />
+        )}
+        <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", dot)} />
+      </span>
       {label}
-    </Badge>
+    </span>
   );
 }

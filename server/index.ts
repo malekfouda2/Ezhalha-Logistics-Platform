@@ -7,6 +7,7 @@ import { storage } from "./storage";
 import { startCreditReminderScheduler } from "./services/credit-reminder";
 import { startAbandonedRecoveryScheduler } from "./services/abandoned-recovery";
 import { startExpressTrackingRefreshScheduler } from "./services/express-tracking-refresh";
+import { startSalesChannelSyncScheduler } from "./services/sales-channel-sync";
 import { validateFedExEnvOnStartup } from "./integrations/fedex";
 import { validateAramexEnvOnStartup } from "./integrations/aramex";
 import { loadDefaultIntegrationAccountsIntoEnv } from "./services/integration-apps";
@@ -123,6 +124,7 @@ app.use((req, res, next) => {
       startCreditReminderScheduler();
       startAbandonedRecoveryScheduler();
       startExpressTrackingRefreshScheduler();
+      startSalesChannelSyncScheduler();
       if (typeof process.send === "function") {
         process.send("ready");
       }

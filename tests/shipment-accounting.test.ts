@@ -76,7 +76,7 @@ describe("Shipment Accounting", () => {
   it("rejects invalid DDP combinations", () => {
     expect(() =>
       resolveShipmentTaxScenario(ShipmentType.OUTBOUND, true, "AE"),
-    ).toThrow("DDP is only available for inbound door-to-door shipments");
+    ).toThrow("Door To Door Freight is only available for inbound door-to-door shipments");
 
     expect(resolveShipmentTaxScenario(ShipmentType.INBOUND, true, "EG")).toBe(ShipmentTaxScenario.DDP);
   });

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { CheckSquare, ChevronDown, Headset, LayoutDashboard, LogOut, Settings } from "lucide-react";
+import { CheckSquare, ChevronDown, Headset, LayoutDashboard, LogOut, Menu, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notification-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,7 @@ const navItems = [
     children: [
       { href: "/operations?view=d2d", label: "Door to Door" },
       { href: "/operations?view=express", label: "Express Shipments" },
+      { href: "/operations?view=local", label: "Local Shipments" },
       { href: "/operations?view=attention", label: "Needs Attention" },
       { href: "/operations?view=special", label: "Special Handling" },
       { href: "/operations?view=delivered", label: "Delivered" },
@@ -48,6 +50,7 @@ const navItems = [
 interface OperationsNavSummary {
   ddpCount: number;
   expressCount: number;
+  localCount: number;
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
@@ -72,6 +75,7 @@ export function OperationsLayout({ children }: OperationsLayoutProps) {
     () => ({
       "/operations?view=d2d": operationsSummary?.ddpCount ?? 0,
       "/operations?view=express": operationsSummary?.expressCount ?? 0,
+      "/operations?view=local": operationsSummary?.localCount ?? 0,
       "/operations?view=attention": operationsSummary?.attentionCount ?? 0,
       "/operations?view=special": operationsSummary?.specialHandlingCount ?? 0,
       "/operations?view=delivered": operationsSummary?.deliveredCount ?? 0,
@@ -97,18 +101,21 @@ export function OperationsLayout({ children }: OperationsLayoutProps) {
     return currentPath === href || currentFullPath.startsWith(`${href}?`);
   };
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const closeMobileNav = () => setMobileNavOpen(false);
+
   const navigateSidebarHref = (href: string) => {
+    closeMobileNav();
     if (typeof window === "undefined") return;
     window.history.pushState(null, "", href);
     window.dispatchEvent(new Event("ez-location-change"));
   };
 
-  return (
-    <div className="flex h-screen w-full">
-      <aside className="flex w-64 flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="flex h-16 items-center border-b border-sidebar-border px-6">
-          <Link href="/operations" className="flex items-center gap-3">
-            <img src="/assets/branding/logo.png" alt="ezhalha" className="h-9 w-auto" />
+  const sidebarContent = (
+    <div className="flex h-full flex-col bg-sidebar">
+        <div className="flex h-16 items-center justify-center border-b border-sidebar-border px-6">
+          <Link href="/operations" className="flex items-center justify-center gap-3" onClick={closeMobileNav}>
+            <img src="/assets/branding/logo.png" alt="ezhalha" className="h-12 w-auto" />
           </Link>
         </div>
 
@@ -226,7 +233,7 @@ export function OperationsLayout({ children }: OperationsLayoutProps) {
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              <Link href="/operations/settings">
+              <Link href="/operations/settings" onClick={closeMobileNav}>
                 <DropdownMenuItem>
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
@@ -240,14 +247,41 @@ export function OperationsLayout({ children }: OperationsLayoutProps) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen w-full">
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex w-64 flex-shrink-0 flex-col border-r border-sidebar-border">
+        {sidebarContent}
       </aside>
 
+      {/* Mobile Sidebar (drawer) */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="w-72 p-0 lg:hidden">
+          {sidebarContent}
+        </SheetContent>
+      </Sheet>
+
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 items-center justify-end gap-2 border-b bg-background px-6">
+        <header className="flex h-16 items-center gap-2 border-b bg-background px-4 sm:px-6">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden flex items-center justify-center h-9 w-9 -ml-1 rounded-md hover-elevate active-elevate-2"
+            aria-label="Open navigation"
+            data-testid="button-open-nav"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <div className="flex-1" />
           <NotificationBell />
           <ThemeToggle />
         </header>
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto">
+          <div key={location} className="h-full animate-fade-in">{children}</div>
+        </main>
       </div>
     </div>
   );

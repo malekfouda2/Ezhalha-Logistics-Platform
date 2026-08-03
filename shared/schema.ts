@@ -16,6 +16,7 @@ export type UserTypeValue = typeof UserType[keyof typeof UserType];
 export const OperationShipmentKind = {
   DDP: "DDP",
   EXPRESS: "EXPRESS",
+  LOCAL: "LOCAL",
 } as const;
 
 export type OperationShipmentKindValue =
@@ -116,6 +117,7 @@ export type ShipmentTaxScenarioValue =
 export const DdpTransportMethod = {
   AIR: "air",
   SEA: "sea",
+  DOMESTIC: "domestic",
 } as const;
 
 export type DdpTransportMethodValue =
@@ -272,6 +274,8 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
+  // Optional login phone (E.164). Lets users sign in with phone + password.
+  phone: text("phone"),
   fullName: text("full_name"),
   password: text("password").notNull(),
   userType: text("user_type").notNull().default("client"),
@@ -342,6 +346,12 @@ export const clientAccounts = pgTable("client_accounts", {
   isActive: boolean("is_active").notNull().default(true),
   creditEnabled: boolean("credit_enabled").notNull().default(false),
   creditLimitSar: decimal("credit_limit_sar", { precision: 12, scale: 2 }).notNull().default("0"),
+  // Bundled "Sales Channels" feature (Orders, Sales Channels, Assignment Rules). Off by default;
+  // enabled by an admin — either directly or by approving a client's access request.
+  salesFeaturesEnabled: boolean("sales_features_enabled").notNull().default(false),
+  // Currency the client is billed/charged in. SAR is the accounting source of truth;
+  // non-SAR (e.g. USD) is FX-converted at checkout with the rate snapshotted per shipment.
+  preferredCurrency: text("preferred_currency").notNull().default("SAR"),
   tapCustomerId: text("tap_customer_id"),
   tapIntegrationAccountId: varchar("tap_integration_account_id"),
   zohoCustomerId: text("zoho_customer_id"), // Zoho Books customer ID for invoice sync
@@ -439,6 +449,15 @@ export const ddpPricingLanes = pgTable("ddp_pricing_lanes", {
   currency: text("currency").notNull().default("SAR"),
   airBaseRatePerKg: decimal("air_base_rate_per_kg", { precision: 12, scale: 2 }),
   seaBaseRatePerCbm: decimal("sea_base_rate_per_cbm", { precision: 12, scale: 2 }),
+  // Standalone domestic (last-mile within destination) rate: flat SAR per billable KG.
+  // Reuses the KG minimum/rounding/minimum-charge knobs below.
+  domesticRatePerKg: decimal("domestic_rate_per_kg", { precision: 12, scale: 2 }),
+  // Supplier (procurement) cost per unit — what the DDP supplier charges Ezhalha, kept
+  // separate from the client-facing sell base above. Feeds true margin = sell − cost.
+  // Null = cost not configured (treated as 0 in margin visibility).
+  airSupplierCostPerKg: decimal("air_supplier_cost_per_kg", { precision: 12, scale: 2 }),
+  seaSupplierCostPerCbm: decimal("sea_supplier_cost_per_cbm", { precision: 12, scale: 2 }),
+  domesticSupplierCostPerKg: decimal("domestic_supplier_cost_per_kg", { precision: 12, scale: 2 }),
   minimumBillableKg: decimal("minimum_billable_kg", { precision: 12, scale: 3 }).notNull().default("0"),
   kgRoundingIncrement: decimal("kg_rounding_increment", { precision: 12, scale: 3 }).notNull().default("0.5"),
   minimumBillableCbm: decimal("minimum_billable_cbm", { precision: 12, scale: 4 }).notNull().default("0"),
@@ -449,6 +468,9 @@ export const ddpPricingLanes = pgTable("ddp_pricing_lanes", {
   seaTransitDaysMin: integer("sea_transit_days_min"),
   seaTransitDaysMax: integer("sea_transit_days_max"),
   volumetricDivisor: integer("volumetric_divisor").notNull().default(6000),
+  // Not every lane offers air delivery. When false, air rate/cost/transit fields are
+  // hidden and air quotes are rejected. Defaults true so existing lanes keep air.
+  airEnabled: boolean("air_enabled").notNull().default(true),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -513,6 +535,7 @@ export const shipments = pgTable("shipments", {
   trackingNumber: text("tracking_number").notNull().unique(),
   clientAccountId: varchar("client_account_id").notNull(),
   senderName: text("sender_name").notNull(),
+  senderCompany: text("sender_company"),
   senderAddress: text("sender_address").notNull(),
   senderAddressLine2: text("sender_address_line2"),
   senderCity: text("sender_city").notNull(),
@@ -523,6 +546,7 @@ export const shipments = pgTable("shipments", {
   senderEmail: text("sender_email"),
   senderShortAddress: text("sender_short_address"),
   recipientName: text("recipient_name").notNull(),
+  recipientCompany: text("recipient_company"),
   recipientAddress: text("recipient_address").notNull(),
   recipientAddressLine2: text("recipient_address_line2"),
   recipientCity: text("recipient_city").notNull(),
@@ -557,11 +581,18 @@ export const shipments = pgTable("shipments", {
   ddpBillableQuantity: decimal("ddp_billable_quantity", { precision: 12, scale: 4 }),
   ddpBillingUnit: text("ddp_billing_unit"),
   ddpRatePerUnitSar: decimal("ddp_rate_per_unit_sar", { precision: 12, scale: 2 }),
+  // Real supplier (procurement) cost recorded at booking, separate from the recorded
+  // baseRate (lane sell base). Drives real-margin reporting in financial statements
+  // without affecting client price or VAT. Null = no supplier cost configured.
+  ddpSupplierCostSar: decimal("ddp_supplier_cost_sar", { precision: 12, scale: 2 }),
   ddpSpecialInstructions: text("ddp_special_instructions"),
   ddpTermsAcceptedAt: timestamp("ddp_terms_accepted_at"),
   ddpBrokerAuthorizationAcceptedAt: timestamp("ddp_broker_authorization_accepted_at"),
   serviceType: text("service_type"),
   currency: text("currency").default("SAR"),
+  // SAR → shipment.currency multiplier snapshotted at charge time. Null/1 means SAR.
+  // Stored monetary columns stay in SAR; multiply by this to render the charged currency.
+  fxRate: decimal("fx_rate", { precision: 12, scale: 6 }),
   status: text("status").notNull().default("draft"),
   baseRate: decimal("base_rate", { precision: 10, scale: 2 }).notNull(),
   marginAmount: decimal("margin_amount", { precision: 10, scale: 2 }),
@@ -585,6 +616,21 @@ export const shipments = pgTable("shipments", {
   extraFeesEmailSentAt: timestamp("extra_fees_email_sent_at"),
   carrierCode: text("carrier_code"),
   carrierName: text("carrier_name"),
+  // Virtual-carrier routing: when carrierCode is a client-facing virtual carrier (e.g. a
+  // downstream courier surfaced on top of Fizzpa/Shipox), providerCarrierCode is the real
+  // provider adapter to book with (FIZZPA | SHIPOX) and carrierAssignmentNote is the note
+  // written onto the provider's order so their ops know which courier to assign. Null for
+  // ordinary carriers, where booking resolves straight off carrierCode.
+  providerCarrierCode: text("provider_carrier_code"),
+  carrierAssignmentNote: text("carrier_assignment_note"),
+  // Admin-created quotation: an admin builds a priced shipment for a client, who is notified
+  // and can modify/pay it. isQuote marks it; quoteCreatedByUserId is the admin; the discount /
+  // extra-charge / note capture the admin's manual pricing adjustments on top of the auto rate.
+  isQuote: boolean("is_quote").notNull().default(false),
+  quoteCreatedByUserId: varchar("quote_created_by_user_id"),
+  quoteDiscountSar: decimal("quote_discount_sar", { precision: 12, scale: 2 }),
+  quoteExtraChargeSar: decimal("quote_extra_charge_sar", { precision: 12, scale: 2 }),
+  quoteNote: text("quote_note"),
   carrierIntegrationAccountId: varchar("carrier_integration_account_id"),
   carrierServiceType: text("carrier_service_type"),
   carrierShipmentId: text("carrier_shipment_id"),
@@ -622,6 +668,20 @@ export const shipments = pgTable("shipments", {
   // Operations: last-mile delivery carrier name + contact phone.
   lastMileCarrierName: text("last_mile_carrier_name"),
   lastMileCarrierPhone: text("last_mile_carrier_phone"),
+  // Sales channels: set when this shipment was created to fulfill an imported order.
+  orderId: varchar("order_id"),
+  // Carrier pickup: requested during the create/quote flow, booked with the carrier right
+  // after the shipment is booked (see requestPickup on the carrier adapters). pickupStatus:
+  // "not_requested" | "requested" | "confirmed" | "failed".
+  pickupRequested: boolean("pickup_requested").default(false),
+  pickupDate: text("pickup_date"),
+  pickupReadyTime: text("pickup_ready_time"),
+  pickupCloseTime: text("pickup_close_time"),
+  pickupLocation: text("pickup_location"),
+  pickupInstructions: text("pickup_instructions"),
+  pickupConfirmationNumber: text("pickup_confirmation_number"),
+  pickupStatus: text("pickup_status").default("not_requested"),
+  pickupError: text("pickup_error"),
   estimatedDelivery: timestamp("estimated_delivery"),
   actualDelivery: timestamp("actual_delivery"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -722,7 +782,14 @@ export const payments = pgTable("payments", {
   stripePaymentIntentId: text("stripe_payment_intent_id"), // Stripe payment intent ID (legacy)
   moyasarPaymentId: text("moyasar_payment_id"), // Moyasar payment ID
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  // One payment row per gateway transaction. Backstops the app-level dedup against the
+  // redirect/webhook race that otherwise duplicated rows. Partial: manual/credit payments
+  // may have a null transaction_id and are not constrained.
+  txnUnique: uniqueIndex("ux_payments_txn")
+    .on(table.transactionId)
+    .where(sql`${table.transactionId} IS NOT NULL`),
+}));
 
 export const insertPaymentSchema = createInsertSchema(payments).omit({
   id: true,
@@ -1202,11 +1269,40 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 
 // Login schema for validation
 export const loginSchema = z.object({
-  username: z.string().min(1, "Email or username is required"),
+  username: z.string().min(1, "Email, username or phone is required"),
   password: z.string().min(1, "Password is required"),
 });
 
 export type LoginData = z.infer<typeof loginSchema>;
+
+// One-time email login codes (passwordless sign-in via emailed OTP).
+export const emailLoginOtps = pgTable("email_login_otps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type EmailLoginOtp = typeof emailLoginOtps.$inferSelect;
+export type InsertEmailLoginOtp = typeof emailLoginOtps.$inferInsert;
+
+// Password set / reset tokens. purpose: "reset" (forgot password) or "onboard" (set initial
+// password from a welcome email).
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  purpose: text("purpose").notNull().default("reset"),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 
 // Application form schema
 export const applicationFormSchema = z.object({
@@ -1359,6 +1455,30 @@ export const insertCreditAccessRequestSchema = createInsertSchema(creditAccessRe
 export type InsertCreditAccessRequest = z.infer<typeof insertCreditAccessRequestSchema>;
 export type CreditAccessRequest = typeof creditAccessRequests.$inferSelect;
 
+// Client requests to unlock the bundled Sales Channels feature (Orders / Sales Channels /
+// Assignment Rules). Mirrors the credit-access request flow.
+export const salesFeatureAccessRequests = pgTable("sales_feature_access_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  requestedByUserId: varchar("requested_by_user_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  reason: text("reason"),
+  adminNotes: text("admin_notes"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertSalesFeatureAccessRequestSchema = createInsertSchema(salesFeatureAccessRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSalesFeatureAccessRequest = z.infer<typeof insertSalesFeatureAccessRequestSchema>;
+export type SalesFeatureAccessRequest = typeof salesFeatureAccessRequests.$inferSelect;
+
 // Credit Invoices table
 export const creditInvoices = pgTable("credit_invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1468,6 +1588,223 @@ export const insertShipmentExpenseSchema = createInsertSchema(shipmentExpenses).
 
 export type InsertShipmentExpense = z.infer<typeof insertShipmentExpenseSchema>;
 export type ShipmentExpense = typeof shipmentExpenses.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Sales Channels & Local Shipments (see docs/sales-channels-plan.md)
+// ---------------------------------------------------------------------------
+
+export const SalesChannelPlatform = {
+  WOOCOMMERCE: "woocommerce",
+  SHOPIFY: "shopify",
+  SALLA: "salla",
+  ZID: "zid",
+  MAGENTO: "magento",
+  CUSTOM: "custom",
+} as const;
+
+export type SalesChannelPlatformValue =
+  typeof SalesChannelPlatform[keyof typeof SalesChannelPlatform];
+
+export const SalesChannelStatus = {
+  CONNECTED: "connected",
+  ERROR: "error",
+  DISCONNECTED: "disconnected",
+} as const;
+
+export type SalesChannelStatusValue =
+  typeof SalesChannelStatus[keyof typeof SalesChannelStatus];
+
+export const CarrierMode = {
+  MANUAL: "manual",
+  AUTO: "auto",
+} as const;
+
+export type CarrierModeValue = typeof CarrierMode[keyof typeof CarrierMode];
+
+export const OrderStatus = {
+  NEW: "new",
+  READY_TO_SHIP: "ready_to_ship",
+  ASSIGNED: "assigned",
+  SHIPPED: "shipped",
+  DELIVERED: "delivered",
+  CANCELLED: "cancelled",
+  ON_HOLD: "on_hold",
+} as const;
+
+export type OrderStatusValue = typeof OrderStatus[keyof typeof OrderStatus];
+
+// Connected e-commerce store. credentialsEncrypted holds OAuth tokens (Salla/Shopify)
+// or per-store REST keys (WooCommerce), encrypted with INTEGRATION_CONFIG_SECRET.
+export const salesChannels = pgTable("sales_channels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  platform: text("platform").notNull(),
+  name: text("name").notNull(),
+  storeUrl: text("store_url"),
+  status: text("status").notNull().default("disconnected"),
+  credentialsEncrypted: text("credentials_encrypted"),
+  webhookSecret: text("webhook_secret"),
+  syncSettings: text("sync_settings"), // json: { autoSync, syncWindow, importPaidOnly }
+  carrierMode: text("carrier_mode").notNull().default("manual"),
+  defaultCarrierRuleId: varchar("default_carrier_rule_id"),
+  lastSyncedAt: timestamp("last_synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertSalesChannelSchema = createInsertSchema(salesChannels).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSalesChannel = z.infer<typeof insertSalesChannelSchema>;
+export type SalesChannel = typeof salesChannels.$inferSelect;
+
+// Imported store order. items are informational only (never used for customs).
+export const orders = pgTable("orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  salesChannelId: varchar("sales_channel_id").notNull(),
+  externalOrderId: text("external_order_id").notNull(),
+  externalOrderNumber: text("external_order_number"),
+  status: text("status").notNull().default("new"),
+  customer: text("customer"), // json: { name, phone, email }
+  shipTo: text("ship_to"), // json: { address, city, region, country, postal }
+  items: text("items"), // json[] informational only
+  packageWeightKg: decimal("package_weight_kg", { precision: 10, scale: 3 }),
+  packageDims: text("package_dims"), // json: { length, width, height, unit }
+  packagePieces: integer("package_pieces").notNull().default(1),
+  currency: text("currency").notNull().default("SAR"),
+  orderTotal: decimal("order_total", { precision: 12, scale: 2 }),
+  carrierMode: text("carrier_mode").notNull().default("manual"),
+  assignedCarrierCode: text("assigned_carrier_code"),
+  assignmentRuleId: varchar("assignment_rule_id"),
+  shipmentId: varchar("shipment_id"),
+  syncedAt: timestamp("synced_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  // Idempotent ingest: one row per external order per channel.
+  channelExternalUnique: uniqueIndex("orders_channel_external_unique").on(
+    table.salesChannelId,
+    table.externalOrderId,
+  ),
+}));
+
+export const insertOrderSchema = createInsertSchema(orders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
+export type Order = typeof orders.$inferSelect;
+
+// Opt-in carrier auto-assignment rule (evaluated by priority when a channel is auto).
+export const carrierAssignmentRules = pgTable("carrier_assignment_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  name: text("name").notNull(),
+  priority: integer("priority").notNull().default(0),
+  enabled: boolean("enabled").notNull().default(true),
+  conditions: text("conditions"), // json: { regionIn, cityIn, weightMin, weightMax, valueMin, valueMax, channelId }
+  strategy: text("strategy").notNull().default("specific_carrier"), // specific_carrier | cheapest | fastest
+  carrierCode: text("carrier_code"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCarrierAssignmentRuleSchema = createInsertSchema(carrierAssignmentRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCarrierAssignmentRule = z.infer<typeof insertCarrierAssignmentRuleSchema>;
+export type CarrierAssignmentRule = typeof carrierAssignmentRules.$inferSelect;
+
+// Local-shipment markup, per carrier + weight band. Client price = carrier base rate +
+// this markup, then fed to calculateShipmentAccounting as (baseRate, marginAmount).
+export const localCarrierPricingTiers = pgTable("local_carrier_pricing_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  carrierCode: text("carrier_code").notNull(),
+  minWeightKg: decimal("min_weight_kg", { precision: 10, scale: 3 }).notNull().default("0"),
+  maxWeightKg: decimal("max_weight_kg", { precision: 10, scale: 3 }), // null = no upper bound
+  // Rate-card carrier base cost for this band, used when the carrier exposes no live
+  // rate API. Ignored when a live carrier rate is available. null = live rate required.
+  baseRateSar: decimal("base_rate_sar", { precision: 12, scale: 2 }),
+  markupType: text("markup_type").notNull().default("percent"), // percent | flat
+  markupValue: decimal("markup_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  minCharge: decimal("min_charge", { precision: 12, scale: 2 }), // optional client-price floor
+  clientProfile: text("client_profile"), // regular | mid_level | vip | null (any)
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertLocalCarrierPricingTierSchema = createInsertSchema(localCarrierPricingTiers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLocalCarrierPricingTier = z.infer<typeof insertLocalCarrierPricingTierSchema>;
+export type LocalCarrierPricingTier = typeof localCarrierPricingTiers.$inferSelect;
+
+// Client-facing "virtual" carriers layered on top of an aggregator provider (Fizzpa /
+// Shipox) whose API exposes no downstream-carrier list or selection. Each row is a
+// display carrier a client can pick at shipment creation (with its own local rate card
+// keyed by `code`). On booking we route to the real `provider` adapter and write
+// `noteTemplate` onto the provider's order so their ops assign the intended courier.
+export const VIRTUAL_CARRIER_PROVIDERS = ["fizzpa", "shipox"] as const;
+export type VirtualCarrierProvider = (typeof VIRTUAL_CARRIER_PROVIDERS)[number];
+
+export const virtualCarriers = pgTable("virtual_carriers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(), // client-facing carrier code, e.g. "FIZZ_XPRESS"
+  name: text("name").notNull(), // display name shown to clients, e.g. "X Express"
+  provider: text("provider").notNull(), // fizzpa | shipox — the real booking adapter
+  // Note written onto the provider order so their dashboard shows which downstream courier
+  // to assign. Displayed name is substituted for {name} if present.
+  noteTemplate: text("note_template").notNull().default(""),
+  // Admin-uploaded brand logo (small image data URI). Surfaced in /api/carrier-logos keyed
+  // by `code` so the client rates UI shows it, exactly like Apps-tab carrier logos.
+  logo: text("logo"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertVirtualCarrierSchema = createInsertSchema(virtualCarriers, {
+  code: z
+    .string()
+    .trim()
+    .min(2, "Code must be at least 2 characters")
+    .max(40)
+    .regex(/^[A-Za-z0-9_-]+$/, "Code may only contain letters, numbers, hyphen and underscore"),
+  name: z.string().trim().min(1, "Name is required").max(120),
+  provider: z.enum(VIRTUAL_CARRIER_PROVIDERS),
+  noteTemplate: z.string().trim().max(500).optional().default(""),
+}).omit({
+  id: true,
+  logo: true, // uploaded/removed only via the dedicated logo endpoint (validated separately)
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertVirtualCarrier = z.infer<typeof insertVirtualCarrierSchema>;
+export type VirtualCarrier = typeof virtualCarriers.$inferSelect;
+
+// Admin-uploaded brand logo per integration app (Apps tab). Keyed by the app definition
+// key (fedex, smsa, …). Logo is a small image data URI so it needs no object storage.
+export const integrationAppLogos = pgTable("integration_app_logos", {
+  appKey: varchar("app_key").primaryKey(),
+  logo: text("logo").notNull(), // data:image/*;base64,...
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type IntegrationAppLogo = typeof integrationAppLogos.$inferSelect;
 
 export const operationProfiles = pgTable("operation_profiles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

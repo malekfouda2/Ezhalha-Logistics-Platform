@@ -36,7 +36,7 @@ import { useLocation, useSearch } from "wouter";
 function formatInvoiceTypeLabel(invoiceType?: string | null, description?: string | null) {
   if (invoiceType === "EXTRA_WEIGHT") return description?.startsWith("Extra Volume") ? "Extra Volume" : "Extra Weight";
   if (invoiceType === "EXTRA_COST") return "Extra Cost";
-  if (invoiceType === "DDP_ADJUSTMENT") return "DDP Adjustment";
+  if (invoiceType === "DDP_ADJUSTMENT") return "Door To Door Freight Adjustment";
   return "Shipment";
 }
 

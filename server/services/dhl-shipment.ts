@@ -1,6 +1,7 @@
 import { type Shipment } from "@shared/schema";
 import { type CreateShipmentRequest, type ShipmentItem } from "../integrations/fedex";
 import { buildCommercialInvoiceDocument } from "./commercial-invoice";
+import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
 
 function buildPackages(shipment: Shipment): CreateShipmentRequest["packages"] {
   if (shipment.packagesData) {
@@ -110,6 +111,7 @@ export async function buildDhlShipmentRequestFromShipment(
   const carrierRequest: CreateShipmentRequest = {
     shipper: {
       name: shipment.senderName,
+      companyName: shipment.senderCompany || undefined,
       streetLine1: shipment.senderAddress,
       streetLine2: shipment.senderAddressLine2 || undefined,
       streetLine3: shipment.senderShortAddress || undefined,
@@ -118,10 +120,11 @@ export async function buildDhlShipmentRequestFromShipment(
       postalCode: shipment.senderPostalCode || "",
       countryCode: shipment.senderCountry,
       phone: shipment.senderPhone,
-      email: shipment.senderEmail || undefined,
+      email: CARRIER_CONTACT_EMAIL,
     },
     recipient: {
       name: shipment.recipientName,
+      companyName: shipment.recipientCompany || undefined,
       streetLine1: shipment.recipientAddress,
       streetLine2: shipment.recipientAddressLine2 || undefined,
       streetLine3: shipment.recipientShortAddress || undefined,
@@ -130,7 +133,7 @@ export async function buildDhlShipmentRequestFromShipment(
       postalCode: shipment.recipientPostalCode || "",
       countryCode: shipment.recipientCountry,
       phone: shipment.recipientPhone,
-      email: shipment.recipientEmail || undefined,
+      email: CARRIER_CONTACT_EMAIL,
     },
     packages,
     serviceType: shipment.carrierServiceType || shipment.serviceType || defaultServiceType,

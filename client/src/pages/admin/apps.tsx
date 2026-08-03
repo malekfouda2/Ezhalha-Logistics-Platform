@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
 import { LoadingScreen } from "@/components/loading-spinner";
@@ -33,6 +33,7 @@ import {
   Sparkles,
   Truck,
   Trash2,
+  ImageUp,
   X,
   XCircle,
 } from "lucide-react";
@@ -78,6 +79,7 @@ type IntegrationApp = {
   settingsFields?: FieldDefinition[];
   capabilities: string[];
   docsSummary: string;
+  logoUrl: string | null;
   configured: boolean;
   accountCount: number;
   activeAccountCount: number;
@@ -105,6 +107,15 @@ const appAccent: Record<string, string> = {
   tap: "from-sky-500 to-blue-700",
   gemini: "from-blue-500 to-emerald-400",
   zoho: "from-red-600 to-blue-600",
+  smsa: "from-red-600 to-rose-800",
+  naqel: "from-emerald-600 to-teal-800",
+  jt: "from-red-500 to-red-800",
+  redbox: "from-red-600 to-neutral-900",
+  zajil: "from-sky-600 to-cyan-800",
+  imile: "from-amber-500 to-orange-700",
+  spl: "from-teal-600 to-emerald-800",
+  fizzpa: "from-violet-600 to-fuchsia-800",
+  shipox: "from-indigo-600 to-blue-800",
 };
 
 function formatDate(value: string | null) {
@@ -289,6 +300,48 @@ export default function AdminApps() {
     },
   });
 
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const LOGO_MAX_BYTES = 70 * 1024;
+
+  const logoMutation = useMutation({
+    mutationFn: async ({ appKey, logo }: { appKey: string; logo: string }) => {
+      const res = await apiRequest("PUT", `/api/admin/apps/${appKey}/logo`, { logo });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/apps"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/carrier-logos"] });
+      toast({ title: "Logo updated" });
+    },
+    onError: (error: Error) => toast({ title: "Failed to upload logo", description: error.message, variant: "destructive" }),
+  });
+
+  const removeLogoMutation = useMutation({
+    mutationFn: async (appKey: string) => apiRequest("DELETE", `/api/admin/apps/${appKey}/logo`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/apps"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/carrier-logos"] });
+      toast({ title: "Logo removed" });
+    },
+    onError: (error: Error) => toast({ title: "Failed to remove logo", description: error.message, variant: "destructive" }),
+  });
+
+  const handleLogoFile = (appKey: string, file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Not an image", description: "Choose a PNG, JPG, WEBP, GIF or SVG file.", variant: "destructive" });
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast({ title: "Image too large", description: "Use a logo under 70 KB.", variant: "destructive" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => logoMutation.mutate({ appKey, logo: String(reader.result) });
+    reader.onerror = () => toast({ title: "Could not read file", variant: "destructive" });
+    reader.readAsDataURL(file);
+  };
+
   const openCreateForm = (app: IntegrationApp) => {
     setSelectedAppKey(app.key);
     setEditingAccount(null);
@@ -448,8 +501,13 @@ export default function AdminApps() {
                       <div className="p-5">
                         <div className="mb-5 flex items-start justify-between gap-4">
                           <div className="flex min-w-0 items-center gap-3">
-                            <div className={cn("flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-sm", appAccent[app.key] || "from-slate-600 to-slate-900")}>
-                              <Icon className="h-5 w-5" />
+                            <div className={cn(
+                              "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-sm overflow-hidden",
+                              app.logoUrl ? "border bg-white" : cn("bg-gradient-to-br text-white", appAccent[app.key] || "from-slate-600 to-slate-900"),
+                            )}>
+                              {app.logoUrl
+                                ? <img src={app.logoUrl} alt={app.name} className="h-full w-full object-contain p-1.5" />
+                                : <Icon className="h-5 w-5" />}
                             </div>
                             <div className="min-w-0">
                               <h3 className="truncate font-semibold">{app.name}</h3>
@@ -502,11 +560,16 @@ export default function AdminApps() {
               <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-hidden rounded-3xl border bg-card shadow-sm">
                 <div className="border-b p-5">
                   <div className="flex items-start gap-4">
-                    <div className={cn("flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-sm", appAccent[selectedApp.key] || "from-slate-600 to-slate-900")}>
-                      {(() => {
-                        const Icon = categoryIcons[selectedApp.category] || Settings2;
-                        return <Icon className="h-6 w-6" />;
-                      })()}
+                    <div className={cn(
+                      "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl shadow-sm overflow-hidden",
+                      selectedApp.logoUrl ? "border bg-white" : cn("bg-gradient-to-br text-white", appAccent[selectedApp.key] || "from-slate-600 to-slate-900"),
+                    )}>
+                      {selectedApp.logoUrl
+                        ? <img src={selectedApp.logoUrl} alt={selectedApp.name} className="h-full w-full object-contain p-1.5" />
+                        : (() => {
+                            const Icon = categoryIcons[selectedApp.category] || Settings2;
+                            return <Icon className="h-6 w-6" />;
+                          })()}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
@@ -516,7 +579,47 @@ export default function AdminApps() {
                       <p className="mt-1 text-sm leading-5 text-muted-foreground">{selectedApp.docsSummary}</p>
                     </div>
                   </div>
-                  <Button className="mt-5 w-full" onClick={() => openCreateForm(selectedApp)}>
+
+                  {/* Brand logo upload */}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    className="hidden"
+                    onChange={(e) => {
+                      handleLogoFile(selectedApp.key, e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                    data-testid="input-app-logo"
+                  />
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      disabled={logoMutation.isPending}
+                      onClick={() => logoInputRef.current?.click()}
+                      data-testid="button-upload-app-logo"
+                    >
+                      <ImageUp className="mr-2 h-4 w-4" />
+                      {selectedApp.logoUrl ? "Replace logo" : "Upload logo"}
+                    </Button>
+                    {selectedApp.logoUrl && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600"
+                        disabled={removeLogoMutation.isPending}
+                        onClick={() => removeLogoMutation.mutate(selectedApp.key)}
+                        data-testid="button-remove-app-logo"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">PNG, JPG, WEBP, GIF or SVG · under 70 KB.</p>
+
+                  <Button className="mt-4 w-full" onClick={() => openCreateForm(selectedApp)}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add {selectedApp.name} Account
                   </Button>

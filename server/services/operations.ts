@@ -73,6 +73,10 @@ const EXPRESS_STALE_STATUS_MS = 24 * 60 * 60 * 1000;
 // escalation.
 const DUPLICATE_STATUS_MIN_REPEATS = 18;
 const APP_BASE_URL = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+// Carriers whose adapters implement a pickup API (server-side). Used to tell ops whether a pickup
+// can be booked automatically for a shipment.
+const PICKUP_SUPPORTED_CARRIERS = new Set(["FEDEX", "DHL", "ARAMEX"]);
+
 const DDP_PLANNING_TASK_KEYS = ["ddp_review_order", "ddp_contact_supplier", "ddp_schedule_pickup"] as const;
 const DDP_WAREHOUSE_TASK_KEYS = [
   "ddp_received_warehouse",
@@ -134,6 +138,7 @@ export type OperationShipmentSummary = {
   carrierCode: string | null;
   carrierName: string | null;
   carrierTrackingNumber: string | null;
+  pickupConfirmationNumber: string | null;
   finalPrice: string;
   currency: string | null;
   assignedToUserId: string | null;
@@ -196,6 +201,21 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
     hasCarrierLabel: boolean;
     shipDate: string | null;
   };
+  pickup: {
+    requested: boolean;
+    status: string | null;
+    confirmationNumber: string | null;
+    date: string | null;
+    readyTime: string | null;
+    closeTime: string | null;
+    location: string | null;
+    instructions: string | null;
+    error: string | null;
+    supported: boolean;
+    attempts: Array<{ at: Date; outcome: "booked" | "failed" | "scheduled"; detail: string | null }>;
+  };
+  // Carrier contact channels configured on the carrier's integration app (Apps tab).
+  carrierContact: { phone: string | null; email: string | null; whatsapp: string | null } | null;
   ddpChargeConfig?: {
     billingUnit: "KG" | "CBM";
     chargeLabel: string;
@@ -242,6 +262,12 @@ export class OperationInputError extends Error {
 export function getOperationShipmentKind(shipment: Shipment): OperationShipmentKindValue | null {
   if (shipment.fulfillmentType === "ddp_manual" || shipment.isDdp || shipment.carrierCode === "DDP") {
     return OperationShipmentKind.DDP;
+  }
+
+  // LOCAL must be checked before the EXPRESS carrierCode fallback: local shipments also
+  // carry a carrierCode (the local carrier), so the discriminator is fulfillmentType.
+  if (shipment.fulfillmentType === "local") {
+    return OperationShipmentKind.LOCAL;
   }
 
   if (shipment.carrierCode || shipment.carrierName || shipment.carrierTrackingNumber) {
@@ -654,6 +680,16 @@ function getDefaultTasksForShipment(shipment: Shipment): Array<{
       { taskKey: "ddp_destination_customs_cleared", stageKey: "shipping", title: "Customs clearance - destination" },
       { taskKey: "ddp_last_mile_delivery", stageKey: "shipping", title: "Last-mile delivery" },
       { taskKey: "ddp_delivery_confirmation", stageKey: "delivery", title: "Upload photo / POD", description: "Upload proof of delivery photos or signed POD files" },
+    ];
+  }
+
+  if (getOperationShipmentKind(shipment) === OperationShipmentKind.LOCAL) {
+    // Local (domestic KSA) — Express minus customs.
+    return [
+      { taskKey: "local_review_booking", stageKey: "received", title: "Review carrier booking", description: "Confirm recipient, address and local carrier" },
+      { taskKey: "local_monitor_pickup", stageKey: "pickup", title: "Monitor pickup" },
+      { taskKey: "local_monitor_transit", stageKey: "transit", title: "Monitor carrier transit updates" },
+      { taskKey: "local_delivery_followup", stageKey: "delivery", title: "Confirm delivery" },
     ];
   }
 
@@ -1231,6 +1267,52 @@ export async function getOperationsUsers(): Promise<Array<UserWithOperationProfi
   })));
 }
 
+// Carrier codes whose integration app carries contact-channel settings.
+const CARRIER_CONTACT_APP_KEYS = new Set(["fedex", "dhl", "aramex"]);
+
+/**
+ * Read the configured contact channels (phone / email / whatsapp) for a shipment's carrier.
+ * Contact info is carrier-level, so we read it straight from the carrier's integration-account
+ * settings (plain JSON, not credential-encrypted) rather than through environment/country routing.
+ * Preference: the shipment's bound account → default account → any account that has contact info.
+ * Returns null when nothing is configured. Non-fatal.
+ */
+async function resolveCarrierContact(shipment: Shipment): Promise<OperationShipmentDetail["carrierContact"]> {
+  const code = (shipment.carrierCode || "").trim().toUpperCase();
+  const appKey = code.toLowerCase();
+  if (!code || !CARRIER_CONTACT_APP_KEYS.has(appKey)) return null;
+  try {
+    const all = (await storage.getIntegrationAccounts()).filter((a) => a.appKey === appKey && a.isActive);
+    if (all.length === 0) return null;
+
+    // Ordered candidates, de-duplicated by id.
+    const ordered: typeof all = [];
+    const seen = new Set<string>();
+    for (const acc of [
+      ...all.filter((a) => a.id === shipment.carrierIntegrationAccountId),
+      ...all.filter((a) => a.isDefault),
+      ...all,
+    ]) {
+      if (seen.has(acc.id)) continue;
+      seen.add(acc.id);
+      ordered.push(acc);
+    }
+
+    for (const acc of ordered) {
+      let settings: Record<string, string> = {};
+      try { settings = acc.settings ? JSON.parse(acc.settings) : {}; } catch { settings = {}; }
+      const phone = (settings[`${code}_SUPPORT_PHONE`] || "").trim() || null;
+      const email = (settings[`${code}_SUPPORT_EMAIL`] || "").trim() || null;
+      const whatsapp = (settings[`${code}_SUPPORT_WHATSAPP`] || "").trim() || null;
+      if (phone || email || whatsapp) return { phone, email, whatsapp };
+    }
+    return null;
+  } catch (error) {
+    logError("Failed to resolve carrier contact", error);
+    return null;
+  }
+}
+
 async function buildShipmentSummary(
   shipment: Shipment,
   options?: { includeFinancialBreakdown?: boolean },
@@ -1248,6 +1330,7 @@ async function buildShipmentSummary(
     openAttention,
     trackingNumbersRows,
     expenseRows,
+    pickupAuditLogs,
   ] = await Promise.all([
     storage.getClientAccount(shipment.clientAccountId),
     getAssignedTeamMembersForShipment(shipment.id),
@@ -1263,7 +1346,19 @@ async function buildShipmentSummary(
     db.select().from(shipmentAttentionFlags).where(and(eq(shipmentAttentionFlags.shipmentId, shipment.id), eq(shipmentAttentionFlags.status, OperationAttentionStatus.OPEN))),
     storage.listShipmentTrackingNumbers(shipment.id),
     storage.listShipmentExpenses(shipment.id),
+    storage.getAuditLogsForEntity("shipment", shipment.id),
   ]);
+
+  // Pickup attempt history is derived from audit logs (pickup_booked / pickup_failed /
+  // pickup_scheduled) so we keep a full trail of trials + failure reasons without a new table.
+  const pickupAttempts = pickupAuditLogs
+    .filter((log) => log.action === "pickup_booked" || log.action === "pickup_failed" || log.action === "pickup_scheduled")
+    .map((log) => ({
+      at: log.createdAt,
+      outcome: (log.action === "pickup_booked" ? "booked" : log.action === "pickup_scheduled" ? "scheduled" : "failed") as "booked" | "failed" | "scheduled",
+      detail: log.details ?? null,
+    }))
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   const activeSpecialHandling = specialHandling[0] || null;
   const specialAssignee = activeSpecialHandling?.assignedToUserId
@@ -1285,6 +1380,7 @@ async function buildShipmentSummary(
     carrierCode: shipment.carrierCode,
     carrierName: shipment.carrierName,
     carrierTrackingNumber: shipment.carrierTrackingNumber,
+    pickupConfirmationNumber: shipment.pickupConfirmationNumber ?? null,
     finalPrice: shipment.clientTotalAmountSar || shipment.finalPrice,
     currency: shipment.currency,
     assignedToUserId: assignedTeam[0]?.userId || null,
@@ -1351,6 +1447,20 @@ async function buildShipmentSummary(
       hasCarrierLabel: Boolean(shipment.carrierLabelBase64),
       shipDate: shipment.shipDate ?? null,
     },
+    pickup: {
+      requested: Boolean(shipment.pickupRequested),
+      status: shipment.pickupStatus ?? null,
+      confirmationNumber: shipment.pickupConfirmationNumber ?? null,
+      date: shipment.pickupDate ?? null,
+      readyTime: shipment.pickupReadyTime ?? null,
+      closeTime: shipment.pickupCloseTime ?? null,
+      location: shipment.pickupLocation ?? null,
+      instructions: shipment.pickupInstructions ?? null,
+      error: shipment.pickupError ?? null,
+      supported: PICKUP_SUPPORTED_CARRIERS.has((shipment.carrierCode || "").trim().toUpperCase()),
+      attempts: pickupAttempts,
+    },
+    carrierContact: await resolveCarrierContact(shipment),
   };
 
   if (shipment.fulfillmentType === "ddp_manual" && (shipment.ddpBillingUnit === "KG" || shipment.ddpBillingUnit === "CBM")) {
@@ -1495,6 +1605,7 @@ async function buildShipmentListSummaries(
       carrierCode: shipment.carrierCode,
       carrierName: shipment.carrierName,
       carrierTrackingNumber: shipment.carrierTrackingNumber,
+      pickupConfirmationNumber: shipment.pickupConfirmationNumber ?? null,
       finalPrice: shipment.clientTotalAmountSar || shipment.finalPrice,
       currency: shipment.currency,
       assignedToUserId: assignedTeam[0]?.userId || null,
@@ -1555,9 +1666,16 @@ function getDdpShipmentSqlCondition() {
   return sql`(${shipments.fulfillmentType} = 'ddp_manual' or coalesce(${shipments.isDdp}, false) = true or ${shipments.carrierCode} = 'DDP')`;
 }
 
+function getLocalShipmentSqlCondition() {
+  return sql`(${shipments.fulfillmentType} = 'local')`;
+}
+
 function getExpressShipmentSqlCondition() {
+  // Express = has a carrier identity but is neither DDP nor LOCAL (both of which also
+  // set a carrierCode). Mirrors getOperationShipmentKind precedence.
   return sql`((${shipments.carrierCode} is not null or ${shipments.carrierName} is not null or ${shipments.carrierTrackingNumber} is not null)
-    and not (${shipments.fulfillmentType} = 'ddp_manual' or coalesce(${shipments.isDdp}, false) = true or ${shipments.carrierCode} = 'DDP'))`;
+    and not (${shipments.fulfillmentType} = 'ddp_manual' or coalesce(${shipments.isDdp}, false) = true or ${shipments.carrierCode} = 'DDP')
+    and ${shipments.fulfillmentType} is distinct from 'local')`;
 }
 
 async function queryOperationsEligibleShipments(params: {
@@ -1586,6 +1704,7 @@ async function queryOperationsEligibleShipments(params: {
 
   const ddpCondition = getDdpShipmentSqlCondition();
   const expressCondition = getExpressShipmentSqlCondition();
+  const localCondition = getLocalShipmentSqlCondition();
   const conditions = [
     isNull(shipments.deletedAt),
     ne(shipments.status, "cancelled"),
@@ -1594,7 +1713,9 @@ async function queryOperationsEligibleShipments(params: {
       ? ddpCondition
       : params.queue === "express"
         ? expressCondition
-        : sql`(${ddpCondition} or ${expressCondition})`,
+        : params.queue === "local"
+          ? localCondition
+          : sql`(${ddpCondition} or ${expressCondition} or ${localCondition})`,
   ];
 
   if (isDeliveredQueue) {
@@ -1634,11 +1755,13 @@ async function queryOperationsEligibleShipments(params: {
     );
   }
 
+  // Fetch newest-first so a capped page always contains the most recent shipments; the list
+  // endpoint reverses the page to present it oldest→newest (FIFO) for the operators.
   const baseQuery = db
     .select()
     .from(shipments)
     .where(and(...conditions))
-    .orderBy(desc(shipments.updatedAt));
+    .orderBy(desc(shipments.createdAt));
 
   return typeof params.limit === "number"
     ? baseQuery.limit(params.limit)
@@ -1651,8 +1774,9 @@ export async function listOperationShipments(params: {
   search?: string;
   limit?: number;
 }): Promise<OperationShipmentSummary[]> {
+  // Query returns newest-first (so the cap keeps recent shipments); present oldest→newest.
   const shipmentsList = await queryOperationsEligibleShipments(params);
-  return buildShipmentListSummaries(shipmentsList);
+  return buildShipmentListSummaries([...shipmentsList].reverse());
 }
 
 export async function getOperationShipmentDetail(
@@ -1688,6 +1812,7 @@ export async function getOperationSummary(viewer: User) {
 
   let ddpCount = 0;
   let expressCount = 0;
+  let localCount = 0;
   let attentionCount = 0;
   let specialHandlingCount = 0;
   let deliveredCount = 0;
@@ -1700,6 +1825,8 @@ export async function getOperationSummary(viewer: User) {
       ddpCount += 1;
     } else if (kind === OperationShipmentKind.EXPRESS) {
       expressCount += 1;
+    } else if (kind === OperationShipmentKind.LOCAL) {
+      localCount += 1;
     }
 
     if (shipment.status === "carrier_error" || attentionShipmentIds.has(shipment.id)) {
@@ -1720,6 +1847,7 @@ export async function getOperationSummary(viewer: User) {
   return {
     ddpCount,
     expressCount,
+    localCount,
     attentionCount,
     specialHandlingCount,
     deliveredCount,

@@ -1,5 +1,6 @@
 import path from "path";
 import { z } from "zod";
+import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
 import {
   FedExTradeDocumentType,
   FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES,
@@ -272,6 +273,7 @@ export async function buildFedExShipmentRequestFromShipment(
   const carrierRequest: CreateShipmentRequest = {
     shipper: {
       name: shipment.senderName,
+      companyName: shipment.senderCompany || undefined,
       streetLine1: shipment.senderAddress,
       streetLine2: shipment.senderAddressLine2 || undefined,
       city: shipment.senderCity,
@@ -279,10 +281,11 @@ export async function buildFedExShipmentRequestFromShipment(
       postalCode: shipment.senderPostalCode || "",
       countryCode: shipment.senderCountry,
       phone: shipment.senderPhone,
-      email: shipment.senderEmail || undefined,
+      email: CARRIER_CONTACT_EMAIL,
     },
     recipient: {
       name: shipment.recipientName,
+      companyName: shipment.recipientCompany || undefined,
       streetLine1: shipment.recipientAddress,
       streetLine2: shipment.recipientAddressLine2 || undefined,
       city: shipment.recipientCity,
@@ -290,7 +293,7 @@ export async function buildFedExShipmentRequestFromShipment(
       postalCode: shipment.recipientPostalCode || "",
       countryCode: shipment.recipientCountry,
       phone: shipment.recipientPhone,
-      email: shipment.recipientEmail || undefined,
+      email: CARRIER_CONTACT_EMAIL,
     },
     packages,
     serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_INTERNATIONAL_PRIORITY",

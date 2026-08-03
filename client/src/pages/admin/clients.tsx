@@ -11,6 +11,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/phone-input";
 import { Separator } from "@/components/ui/separator";
 import {
   Table,
@@ -769,7 +770,7 @@ export default function AdminClients() {
             </div>
             <div className="space-y-2">
               <Label>Phone *</Label>
-              <Input value={newClient.phone} onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })} placeholder="+966 50 123 4567" data-testid="input-client-phone" />
+              <PhoneInput value={newClient.phone} onChange={(v) => setNewClient({ ...newClient, phone: v })} data-testid="input-client-phone" />
             </div>
             <div className="space-y-2">
               <Label>Country *</Label>

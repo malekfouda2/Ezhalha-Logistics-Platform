@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Sparkles,
   Smartphone,
+  Phone,
   Truck,
   Users,
 } from "lucide-react";
@@ -28,8 +29,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
+import { PhoneInput } from "@/components/phone-input";
+import { getCarrierContact } from "@/lib/carrier-contacts";
 
-type ViewKey = "d2d" | "express" | "attention" | "special" | "delivered";
+type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered";
 type NoteVisibility = "INTERNAL" | "CLIENT";
 type CommunicationChannel = "whatsapp" | "sms" | "email";
 type OpsSelectOption = {
@@ -40,6 +43,7 @@ type OpsSelectOption = {
 interface OperationSummary {
   ddpCount: number;
   expressCount: number;
+  localCount: number;
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
@@ -113,7 +117,7 @@ interface OperationShipmentSummary {
   id: string;
   trackingNumber: string;
   clientName: string;
-  shipmentKind: "DDP" | "EXPRESS";
+  shipmentKind: "DDP" | "EXPRESS" | "LOCAL";
   ddpCurrentStage?: number | null;
   status: string;
   carrierStatus?: string | null;
@@ -169,6 +173,10 @@ interface OpsActions {
   addExpense: (payload: { description: string; amountSar: number }) => void;
   deleteExpense: (id: string) => void;
   expensePending: boolean;
+  schedulePickup: (payload: { date: string; readyTime?: string; closeTime?: string; location?: string; instructions?: string }) => void;
+  pickupPending: boolean;
+  setEta: (eta: string | null) => void;
+  etaPending: boolean;
 }
 
 interface ShipmentDetails {
@@ -215,6 +223,20 @@ interface OperationShipmentDetail extends OperationShipmentSummary {
     totalAdjustmentsAmountSar: string;
   };
   financialBreakdown?: Record<string, string | null>;
+  carrierContact?: { phone: string | null; email: string | null; whatsapp: string | null } | null;
+  pickup?: {
+    requested: boolean;
+    status: string | null;
+    confirmationNumber: string | null;
+    date: string | null;
+    readyTime: string | null;
+    closeTime: string | null;
+    location: string | null;
+    instructions: string | null;
+    error: string | null;
+    supported: boolean;
+    attempts: Array<{ at: string; outcome: "booked" | "failed" | "scheduled"; detail: string | null }>;
+  };
 }
 
 interface OperationUser {
@@ -273,6 +295,14 @@ const views: Record<ViewKey, {
     countKey: "expressCount",
     icon: Truck,
   },
+  local: {
+    title: "Local Shipment Operations",
+    sub: "Domestic KSA delivery via local carriers - Received, Pickup, Transit, Delivery",
+    short: "Local shipments",
+    queue: "local",
+    countKey: "localCount",
+    icon: Truck,
+  },
   attention: {
     title: "Operations - Needs Attention",
     sub: "Shipments with stale updates, repeated statuses, carrier errors, or stage delays",
@@ -291,7 +321,7 @@ const views: Record<ViewKey, {
   },
   delivered: {
     title: "Operations - Delivered Shipments",
-    sub: "Completed DDP and Express shipments kept visible for follow-up, proof, and record keeping",
+    sub: "Completed Door To Door Freight and Express shipments kept visible for follow-up, proof, and record keeping",
     short: "Delivered",
     queue: "delivered",
     countKey: "deliveredCount",
@@ -522,6 +552,9 @@ const operationsCss = `
 .alert-green{background:var(--green-lt);border:1px solid var(--green-bd);color:var(--green)}
 .alert-blue{background:var(--blue-lt);border:1px solid var(--blue-bd);color:var(--blue)}
 .alert-purple{background:var(--purple-lt);border:1px solid var(--purple-bd);color:var(--purple)}
+.alert-track{padding:14px 20px;align-items:center;gap:12px;font-size:12px}
+.alert-track .btn{margin-right:2px}
+.alert-track svg{margin-top:0}
 .sc-row{display:grid;grid-template-columns:minmax(72px,90px) minmax(0,1fr);align-items:flex-start;gap:10px;padding:6px 9px;border-bottom:1px solid var(--g100);font-size:11px;min-width:0}
 .sc-row:last-child{border-bottom:none}
 .sc-key{color:var(--g400);line-height:1.45;overflow-wrap:anywhere}
@@ -549,7 +582,7 @@ const operationsCss = `
 .tab-bar{display:flex;border-bottom:1px solid var(--g200);margin-bottom:14px;overflow-x:auto}
 .tab-btn{padding:9px 12px;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;white-space:nowrap;display:flex;align-items:center;gap:6px;background:none}
 .tab-btn.active{color:var(--pr);border-bottom-color:var(--pr);font-weight:700}
-.tab-content{display:block}
+.tab-content{display:block;padding:0 16px 16px}
 .note-box{background:var(--g50);border:1px solid var(--g200);border-radius:var(--r);padding:9px 11px;margin-bottom:8px}
 .note-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;flex-wrap:wrap}
 .note-author{font-size:11px;font-weight:700;color:var(--g700)}
@@ -575,9 +608,11 @@ const operationsCss = `
 .field-input,.field-select{width:100%;height:34px;border:1px solid var(--g200);border-radius:var(--r);padding:0 10px;font-size:12px;font-family:inherit;color:var(--g900);background:var(--wh);outline:none}
 .field-group{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .field-label{font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.04em}
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;padding:20px}
-.modal-overlay.open{display:flex}
-.modal{background:var(--wh);border-radius:var(--rlg);padding:18px;width:100%;max-width:460px;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex;animation:ez-ops-fade .18s ease-out}
+.modal{background:hsl(var(--card));border:1px solid hsl(var(--card-border));border-radius:16px;padding:20px;width:100%;max-width:460px;max-height:90vh;overflow:auto;box-shadow:0 24px 60px -12px rgba(0,0,0,.35),0 0 0 1px rgba(0,0,0,.03);animation:ez-ops-modal .2s cubic-bezier(.16,1,.3,1)}
+@keyframes ez-ops-fade{from{opacity:0}to{opacity:1}}
+@keyframes ez-ops-modal{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 .modal-title{font-size:15px;font-weight:800;margin-bottom:4px;color:var(--g900)}
 .modal-sub{font-size:11px;color:var(--g500);margin-bottom:16px}
 .modal-body{color:var(--g900)}
@@ -591,10 +626,92 @@ const operationsCss = `
 @media(max-width:1100px){.ops-ref{overflow:auto}.ops-topbar{padding:12px 14px;align-items:flex-start;flex-direction:column}.ops-split{flex-direction:column;overflow:visible}.list-col{width:100%;min-width:0;border-right:0;border-bottom:1px solid var(--g200);max-height:420px}.detail-col{overflow:visible}.dp-grid{grid-template-columns:1fr}.dp-header{position:static}.dp-actions{width:100%}}
 @media(max-width:760px){.metric-grid,.checkpoint-grid{grid-template-columns:1fr}.sc-row{grid-template-columns:1fr}.sc-val{text-align:left}.team-member,.team-toggle,.upload-chip{grid-template-columns:1fr}.team-member .badge,.team-toggle-meta{justify-self:flex-start}.tab-btn{padding:9px 11px}}
 @media(max-width:640px){.dp-body{padding:12px}.dp-header{padding:12px 14px}.dp-name{font-size:16px}.ops-topbar{padding:14px}.dp-grid{gap:12px}.dp-actions .btn{flex:1}}
+
+/* --- Sleekness pass: smoother motion, hover lift, refined surfaces --- */
+.ops-ref *{transition-property:background-color,border-color,box-shadow,color,transform;transition-duration:.16s;transition-timing-function:cubic-bezier(.4,0,.2,1)}
+.ops-ref .card{border-color:hsl(var(--card-border));box-shadow:0 1px 2px hsl(0 0% 0% / .05),0 1px 3px hsl(0 0% 0% / .04)}
+.ops-ref .stage-card{box-shadow:0 1px 2px hsl(0 0% 0% / .05)}
+.si{position:relative}
+.si:hover{background:var(--g50);transform:translateX(1px)}
+.si.active{box-shadow:inset 0 0 0 9999px hsl(var(--primary) / .04)}
+.btn{will-change:transform}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 2px 6px hsl(0 0% 0% / .10)}
+.btn:active:not(:disabled){transform:translateY(0);box-shadow:0 1px 2px hsl(0 0% 0% / .08)}
+.btn-xs:hover:not(:disabled){transform:translateY(-.5px);box-shadow:0 1px 3px hsl(0 0% 0% / .10)}
+.chip{transition:.16s cubic-bezier(.4,0,.2,1)}
+.chip:hover{transform:translateY(-1px)}
+.tab-btn{transition:.18s ease}
+.progress-step-dot{transition:.25s cubic-bezier(.4,0,.2,1)}
+.task-item{transition:.16s ease}
+.task-item:hover{border-color:hsl(var(--primary) / .35)}
+.ops-ref ::-webkit-scrollbar{width:9px;height:9px}
+.ops-ref ::-webkit-scrollbar-thumb{background-color:hsl(var(--muted-foreground) / .28);border-radius:9999px;border:2px solid transparent;background-clip:content-box}
+@media (prefers-reduced-motion: reduce){.ops-ref *{transition-duration:.001ms!important}.si:hover,.btn:hover:not(:disabled),.chip:hover{transform:none}}
+
+/* --- Consistency pass: match the app's artistic language --- */
+/* Primary buttons = gradient + brand glow (mirrors the app Button). */
+.ops-ref .btn-pr{background:linear-gradient(to bottom,hsl(var(--primary)),hsl(14 100% 46%));box-shadow:0 1px 2px hsl(var(--primary) / .25)}
+.ops-ref .btn-pr:hover:not(:disabled){background:linear-gradient(to bottom,hsl(14 100% 52%),hsl(14 100% 44%));box-shadow:0 3px 10px hsl(var(--primary) / .30)}
+.ops-ref .btn-blue:hover:not(:disabled){box-shadow:0 2px 8px hsl(var(--blue) / .18)}
+/* Cards get a top hairline highlight for depth. */
+.ops-ref .card,.ops-ref .stage-card{position:relative;border-radius:var(--rlg)}
+.ops-ref .card::before{content:"";position:absolute;inset-inline:0;top:0;height:1px;background:linear-gradient(90deg,transparent,hsl(var(--primary) / .28),transparent);pointer-events:none}
+.ops-ref .card:hover{box-shadow:0 2px 10px -2px hsl(0 0% 0% / .10),0 1px 2px hsl(0 0% 0% / .05)}
+/* Active list item = gradient rail + tint, matching the sidebar active pill. */
+.ops-ref .si.active{background:hsl(var(--primary) / .06);border-right:0}
+.ops-ref .si.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(to bottom,hsl(var(--primary)),hsl(14 100% 46%));box-shadow:0 0 8px hsl(var(--primary) / .5)}
+.ops-ref .si.active .si-id{color:hsl(var(--primary))}
+/* Chips: active = brand gradient tint. */
+.ops-ref .chip.active{background:hsl(var(--primary) / .12);border-color:hsl(var(--primary) / .5);color:hsl(var(--primary));font-weight:700}
+/* Sticky headers: solid surfaces (no backdrop-filter — it would create a containing
+   block that clips the fixed-position modals). */
+.ops-ref .dp-header{background:hsl(var(--card))}
+.ops-ref .ops-topbar{background:hsl(var(--card))}
+/* Active progress dot: brand glow ring. */
+.ops-ref .progress-step.active .progress-step-dot{background:linear-gradient(to bottom,hsl(var(--primary)),hsl(14 100% 46%));border-color:hsl(var(--primary));box-shadow:0 0 0 4px hsl(var(--primary) / .16),0 2px 6px hsl(var(--primary) / .3)}
+/* Active stage header tint. */
+.ops-ref .stage-card.active .stage-head{background:hsl(var(--primary) / .07)}
+.ops-ref .stage-card.active .stage-num{background:linear-gradient(to bottom,hsl(var(--primary)),hsl(14 100% 46%));box-shadow:0 1px 4px hsl(var(--primary) / .35)}
+/* Inputs: softer modern focus like the app Input. */
+.ops-ref .field-input:focus,.ops-ref .field-select:focus,.ops-ref .field-textarea:focus,.ops-ref .lp-search input:focus,.ops-ref .note-input:focus{border-color:hsl(var(--ring));box-shadow:0 0 0 3px hsl(var(--ring) / .18)}
+
+/* --- Compact density pass: smaller text (side-panel scale) + smaller buttons --- */
+.ops-ref{font-size:12px}
+.ops-ref .ops-title{font-size:12.5px}
+.ops-ref .ops-sub,.ops-ref .lp-sub,.ops-ref .stage-sub,.ops-ref .track-sub,.ops-ref .si-meta{font-size:10px}
+.ops-ref .dp-name{font-size:14px}
+.ops-ref .dp-id,.ops-ref .si-id{font-size:10px}
+.ops-ref .si-name{font-size:11px}
+.ops-ref .card-title{font-size:11px}
+.ops-ref .card-title svg{width:13px;height:13px}
+.ops-ref .stage-title{font-size:11px}
+.ops-ref .track-title{font-size:11px}
+.ops-ref .task-main{font-size:11px}
+.ops-ref .sc-key,.ops-ref .sc-val{font-size:11px}
+.ops-ref .lp-title,.ops-ref .lp-search input,.ops-ref .field-input,.ops-ref .field-select,.ops-ref .field-textarea,.ops-ref .note-input{font-size:11px}
+/* Buttons: noticeably smaller across the hub */
+.ops-ref .btn{padding:4px 9px;font-size:11px}
+.ops-ref .btn svg{width:12px;height:12px}
+.ops-ref .btn-sm{padding:3px 8px;font-size:10px}
+.ops-ref .btn-xs{padding:2px 7px;font-size:10px}
+.ops-ref .btn-sm svg,.ops-ref .btn-xs svg{width:11px;height:11px}
+.ops-ref .chip{font-size:10px;padding:2px 8px}
+.ops-ref .badge{font-size:9.5px;padding:2px 6px}
+
+/* --- Tasks-page style ticks (express tracking + DDP progress) --- */
+/* Express timeline: bordered circle, green check when done, empty ring otherwise. */
+.ops-ref .track-check{width:20px;height:20px;border-radius:9999px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1.5px solid var(--g300);background:transparent}
+.ops-ref .track-check svg{width:16px;height:16px}
+.ops-ref .track-check.done{border-color:var(--green-bd);background:var(--green-lt);color:var(--green)}
+.ops-ref .track-check.active-step{border-color:var(--pr);color:var(--pr)}
+.ops-ref .track-step:not(:last-child)::after{left:9px;top:26px}
+/* DDP progress rail: green filled check for completed steps. */
+.ops-ref .progress-step.done .progress-step-dot{background:var(--green-lt);border-color:var(--green-bd);color:var(--green)}
+.ops-ref .progress-step-dot svg{width:18px;height:18px}
 `;
 
 function isViewKey(value: string | null): value is ViewKey {
-  return value === "d2d" || value === "express" || value === "attention" || value === "special" || value === "delivered";
+  return value === "d2d" || value === "express" || value === "local" || value === "attention" || value === "special" || value === "delivered";
 }
 
 function listPath(queue: string) {
@@ -611,7 +728,9 @@ function getShipmentView(shipment: OperationShipmentSummary | OperationShipmentD
   if (shipment.status === "carrier_error" || (shipment.attentionCount || 0) > 0) {
     return "attention";
   }
-  return shipment.shipmentKind === "DDP" ? "d2d" : "express";
+  if (shipment.shipmentKind === "DDP") return "d2d";
+  if (shipment.shipmentKind === "LOCAL") return "local";
+  return "express";
 }
 
 function invalidateOperations() {
@@ -759,6 +878,7 @@ function OperationsHubContent() {
   const [selectedIds, setSelectedIds] = useState<Record<ViewKey, string | null>>({
     d2d: requestedShipmentId || null,
     express: requestedShipmentId || null,
+    local: requestedShipmentId || null,
     attention: requestedShipmentId || null,
     special: requestedShipmentId || null,
     delivered: requestedShipmentId || null,
@@ -824,6 +944,7 @@ function OperationsHubContent() {
     () => ({
       d2d: view === "d2d" ? activeListQuery.data || [] : [],
       express: view === "express" ? activeListQuery.data || [] : [],
+      local: view === "local" ? activeListQuery.data || [] : [],
       attention: view === "attention" ? activeListQuery.data || [] : [],
       special: view === "special" ? activeListQuery.data || [] : [],
       delivered: view === "delivered" ? activeListQuery.data || [] : [],
@@ -871,6 +992,9 @@ function OperationsHubContent() {
         if (filters.carrier && shipment.carrierName !== filters.carrier) return false;
         if (filters.type && !getMethod(shipment).includes(filters.type)) return false;
         if (filters.duplicate && !shipment.duplicateStatus) return false;
+      }
+      if (view === "local") {
+        if (filters.carrier && shipment.carrierName !== filters.carrier) return false;
       }
       if (view === "attention") {
         const flag = shipment.attentionFlags?.[0];
@@ -1165,6 +1289,32 @@ function OperationsHubContent() {
     onError: (error) => notify("Could not remove expense", getErrorMessage(error), "destructive"),
   });
 
+  const schedulePickupMutation = useMutation({
+    mutationFn: async (payload: { date: string; readyTime?: string; closeTime?: string; location?: string; instructions?: string }) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("POST", `/api/operations/shipments/${selectedId}/pickup`, payload);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("Pickup scheduled", "The carrier pickup booking was requested.");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not schedule pickup", getErrorMessage(error), "destructive"),
+  });
+
+  const etaMutation = useMutation({
+    mutationFn: async (eta: string | null) => {
+      if (!selectedId) return null;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${selectedId}/eta`, { eta });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      notify("ETA updated", "The estimated delivery date is now visible to the client.");
+      invalidateOperations();
+    },
+    onError: (error) => notify("Could not update ETA", getErrorMessage(error), "destructive"),
+  });
+
   const opsActions: OpsActions = {
     savePlan: (notes) => planMutation.mutate(notes),
     planPending: planMutation.isPending,
@@ -1179,6 +1329,10 @@ function OperationsHubContent() {
     addExpense: (payload) => addExpenseMutation.mutate(payload),
     deleteExpense: (id) => deleteExpenseMutation.mutate(id),
     expensePending: addExpenseMutation.isPending || deleteExpenseMutation.isPending,
+    schedulePickup: (payload) => schedulePickupMutation.mutate(payload),
+    pickupPending: schedulePickupMutation.isPending,
+    setEta: (eta) => etaMutation.mutate(eta),
+    etaPending: etaMutation.isPending,
   };
 
   const noteMutation = useMutation({
@@ -1315,7 +1469,7 @@ function OperationsHubContent() {
       return readJsonResponse(res);
     },
     onSuccess: () => {
-      notify("Extra charge added", "A separate DDP adjustment invoice was created and the client was notified.");
+      notify("Extra charge added", "A separate Door To Door Freight adjustment invoice was created and the client was notified.");
       setChargesModal(false);
       setCustomChargeModal(false);
       setCustomChargeDescription("");
@@ -1485,7 +1639,7 @@ function OperationsHubContent() {
                     />}
                   />
                 )}
-                {(view === "express" || (view === "delivered" && detail.shipmentKind === "EXPRESS")) && (
+                {(view === "express" || view === "local" || (view === "delivered" && (detail.shipmentKind === "EXPRESS" || detail.shipmentKind === "LOCAL"))) && (
                   <ExpressDetail
                     shipment={detail}
                     actions={opsActions}
@@ -1685,7 +1839,7 @@ function ListHeader(props: {
   return (
     <div className="lp-head">
       <div className="lp-title">
-        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : "Delivered Shipments"}{" "}
+        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "local" ? "Local Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : "Delivered Shipments"}{" "}
         <span className="view-count">({props.count})</span>
       </div>
       <div className="lp-search">
@@ -1798,6 +1952,8 @@ function ShipmentListItem({ shipment, view, active, onClick }: {
     ? <span className="badge b-pr">Stage {stage}: {d2dStages[stage - 1]}</span>
     : view === "express"
       ? <span className={`badge ${expressTab === "customs" ? "b-amber" : expressTab === "lastmile" ? "b-purple" : expressTab === "transit" ? "b-blue" : "b-green"}`}>{formatStatus(expressTab)}</span>
+      : view === "local"
+      ? <span className="badge b-blue">{formatStatus(shipment.status || "created")}</span>
       : view === "attention"
         ? <span className={`badge ${issueClass(flag?.issueType)}`}>{issueLabels[flag?.issueType || ""] || "Needs attention"}</span>
         : <span className={`badge ${priorityClass(shipment.specialHandlingPriority)}`}>{formatStatus(shipment.specialHandlingPriority || "normal")}</span>;
@@ -2048,7 +2204,7 @@ function LastMileEditor({ shipment, actions }: { shipment: OperationShipmentDeta
       </div>
       <div className="field-group">
         <label className="field-label">Carrier phone</label>
-        <input className="field-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Contact number" />
+        <PhoneInput value={phone} onChange={setPhone} placeholder="Contact number" />
       </div>
       <button className="btn btn-pr btn-sm" type="button" disabled={!dirty || actions.lastMilePending} onClick={() => actions.saveLastMile({ carrierName: name.trim(), carrierPhone: phone.trim() })}>
         {actions.lastMilePending ? "Saving..." : "Save last-mile delivery"}
@@ -2091,6 +2247,51 @@ function ExpensesBlock({ shipment, actions }: { shipment: OperationShipmentDetai
   );
 }
 
+function toDateInputValue(value?: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function EtaEditor({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const stored = toDateInputValue(shipment.estimatedDelivery);
+  const [eta, setEta] = useState(stored);
+
+  useEffect(() => {
+    setEta(toDateInputValue(shipment.estimatedDelivery));
+  }, [shipment.estimatedDelivery, shipment.id]);
+
+  const dirty = eta !== stored;
+  return (
+    <div className="card">
+      <div className="card-title"><Clock3 /> Estimated delivery (ETA)</div>
+      <div className="sc-row" style={{ marginBottom: 8 }}>
+        <span className="sc-key">Client sees</span>
+        <span className="sc-val green">{stored ? formatDate(shipment.estimatedDelivery) : "Not set"}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input className="field-input" type="date" value={eta} onChange={(event) => setEta(event.target.value)} data-testid="input-d2d-eta" />
+        <button
+          className="btn btn-pr btn-sm"
+          type="button"
+          disabled={!dirty || actions.etaPending}
+          onClick={() => actions.setEta(eta || null)}
+          data-testid="button-save-d2d-eta"
+        >
+          {actions.etaPending ? "Saving..." : "Save ETA"}
+        </button>
+        {stored && (
+          <button className="btn btn-gh btn-sm" type="button" disabled={actions.etaPending} onClick={() => { setEta(""); actions.setEta(null); }}>
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="stage-sub" style={{ marginTop: 6 }}>Shown to the client in their portal for this shipment.</div>
+    </div>
+  );
+}
+
 function D2DDetail({ shipment, actions, onCompleteTask, onAdvance, onMessage, onSpecial, onOpenCharges, teamCard, noteCard, pendingTaskId }: {
   shipment: OperationShipmentDetail;
   actions: OpsActions;
@@ -2114,6 +2315,7 @@ function D2DDetail({ shipment, actions, onCompleteTask, onAdvance, onMessage, on
     <div className="dp-grid">
       <div>
         <ShipmentDetailsPanel shipment={shipment} />
+        <EtaEditor shipment={shipment} actions={actions} />
         <div className="card">
           <div className="card-title"><Package /> Operations progress</div>
           <div className="progress-rail">
@@ -2123,7 +2325,7 @@ function D2DDetail({ shipment, actions, onCompleteTask, onAdvance, onMessage, on
               const state = stage < activeStage ? "done" : stage === activeStage ? "active" : "pending";
               return (
                 <div key={`progress-${label}`} className={`progress-step ${state}`}>
-                  <div className="progress-step-dot">{state === "done" ? "✓" : stage}</div>
+                  <div className="progress-step-dot">{state === "done" ? <CheckCircle2 /> : stage}</div>
                   <div className="progress-step-label">{label}</div>
                 </div>
               );
@@ -2599,7 +2801,7 @@ function D2DWarehouseStage({
             <div className="task-dot">{manualTrackingDone ? "✓" : ""}</div>
             <div className="checkpoint-copy">
               <div className="task-main">{manualTrackingTask?.title || "Add manual tracking number"}</div>
-              <div className="task-meta">{manualTrackingTask?.description || "Save the external tracking number for DDP follow-up"}</div>
+              <div className="task-meta">{manualTrackingTask?.description || "Save the external tracking number for Door To Door Freight follow-up"}</div>
             </div>
           </div>
           {!photosDone && <div className="field-hint">Complete the warehouse photo checkpoint first.</div>}
@@ -2758,6 +2960,87 @@ function TaskItem({ task, onComplete, pending = false }: { task?: OperationTask;
   );
 }
 
+function PickupPanel({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
+  const pickup = shipment.pickup;
+  const [date, setDate] = useState(pickup?.date || "");
+  const [readyTime, setReadyTime] = useState(pickup?.readyTime || "09:00");
+  const [closeTime, setCloseTime] = useState(pickup?.closeTime || "17:00");
+  const [location, setLocation] = useState(pickup?.location || "");
+  const [instructions, setInstructions] = useState(pickup?.instructions || "");
+
+  if (!pickup) {
+    return <div className="alert"><AlertTriangle /> No pickup data for this shipment.</div>;
+  }
+
+  const statusTone = pickup.confirmationNumber ? "green" : pickup.status === "failed" ? "red" : pickup.status === "requested" ? "amber" : "";
+  const statusLabel = pickup.confirmationNumber ? "Confirmed" : pickup.status ? formatStatus(pickup.status) : "Not requested";
+  const carrierLabel = shipment.carrierName || shipment.carrierCode || "This carrier";
+
+  const submit = () => {
+    if (!date) return;
+    actions.schedulePickup({
+      date,
+      readyTime,
+      closeTime,
+      location: location.trim() || undefined,
+      instructions: instructions.trim() || undefined,
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card">
+        <div className="card-title"><Truck /> Pickup status</div>
+        <div className="sc-row"><span className="sc-key">Status</span><span className={`sc-val ${statusTone}`}>{statusLabel}</span></div>
+        {pickup.confirmationNumber && <div className="sc-row"><span className="sc-key">Pickup number</span><span className="sc-val">{pickup.confirmationNumber}</span></div>}
+        <div className="sc-row"><span className="sc-key">Date</span><span className="sc-val">{pickup.date || "Not set"}</span></div>
+        <div className="sc-row"><span className="sc-key">Window</span><span className="sc-val">{(pickup.readyTime || "—")} – {(pickup.closeTime || "—")}</span></div>
+        {pickup.location && <div className="sc-row"><span className="sc-key">Location</span><span className="sc-val">{pickup.location}</span></div>}
+        {pickup.instructions && <div className="sc-row"><span className="sc-key">Instructions</span><span className="sc-val">{pickup.instructions}</span></div>}
+        {pickup.error && !pickup.confirmationNumber && <div className="alert alert-amber" style={{ marginTop: 8 }}><AlertTriangle /> {pickup.error}</div>}
+        {!pickup.supported && <div className="alert" style={{ marginTop: 8 }}><AlertTriangle /> {carrierLabel} does not support API pickup booking. Book it manually with the carrier.</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title"><RefreshCw /> Pickup trials</div>
+        {pickup.attempts.length === 0 ? (
+          <div className="sc-row"><span className="sc-val" style={{ opacity: 0.7 }}>No pickup attempts yet.</span></div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {pickup.attempts.map((attempt, index) => (
+              <div key={index} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span className={`badge ${attempt.outcome === "booked" ? "b-green" : attempt.outcome === "failed" ? "b-red" : "b-pr"}`}>{attempt.outcome}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>{formatDate(attempt.at)}</div>
+                  {attempt.detail && <div style={{ fontSize: 13, wordBreak: "break-word" }}>{attempt.detail}</div>}
+                </div>
+                {attempt.outcome === "booked" ? <CheckCircle2 style={{ color: "var(--green-fg, #16a34a)" }} /> : attempt.outcome === "failed" ? <AlertTriangle style={{ color: "var(--red-fg, #dc2626)" }} /> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {pickup.supported && (
+        <div className="card">
+          <div className="card-title"><Clock3 /> {pickup.confirmationNumber ? "Reschedule pickup" : "Schedule pickup"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><label className="field-label">Pickup date</label><input className="field-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></div>
+            <div><label className="field-label">Location</label><input className="field-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Reception / dock" /></div>
+            <div><label className="field-label">Ready time</label><input className="field-input" type="time" value={readyTime} onChange={(event) => setReadyTime(event.target.value)} /></div>
+            <div><label className="field-label">Close time</label><input className="field-input" type="time" value={closeTime} onChange={(event) => setCloseTime(event.target.value)} /></div>
+            <div style={{ gridColumn: "1 / -1" }}><label className="field-label">Instructions</label><input className="field-input" value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="e.g. call on arrival" /></div>
+          </div>
+          <button className="btn btn-blue btn-sm" style={{ marginTop: 10 }} type="button" disabled={!date || actions.pickupPending} onClick={submit}>
+            {actions.pickupPending ? "Booking..." : pickup.confirmationNumber ? "Rebook pickup" : "Book pickup"}
+          </button>
+          {pickup.confirmationNumber && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Rebooking requests a new pickup and clears the current confirmation number.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSyncTracking, syncPending, teamCard, noteCard }: {
   shipment: OperationShipmentDetail;
   actions: OpsActions;
@@ -2779,16 +3062,16 @@ function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSync
         <ShipmentDetailsPanel shipment={shipment} />
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div className="tab-bar">
-            {["track", "details", "notes"].map((tabKey) => (
+            {["track", "details", "pickup", "notes"].map((tabKey) => (
               <button key={tabKey} className={`tab-btn ${subTab === tabKey ? "active" : ""}`} type="button" onClick={() => setSubTab(tabKey)}>
-                {tabKey === "track" ? <MapPin /> : tabKey === "details" ? <FileText /> : <MessageSquare />} {tabKey === "track" ? "Tracking" : tabKey === "details" ? "Details" : "Notes & mentions"}
+                {tabKey === "track" ? <MapPin /> : tabKey === "details" ? <FileText /> : tabKey === "pickup" ? <Truck /> : <MessageSquare />} {tabKey === "track" ? "Tracking" : tabKey === "details" ? "Details" : tabKey === "pickup" ? "Pickup" : "Notes & mentions"}
               </button>
             ))}
           </div>
           <div className="tab-content">
             {subTab === "track" && (
               <>
-                <div className="alert alert-blue">
+                <div className="alert alert-blue alert-track">
                   <MapPin />
                   <span>{shipment.carrierTrackingNumber || shipment.trackingNumber} via {shipment.carrierName || "carrier"}</span>
                   <button className="btn btn-blue btn-xs" style={{ marginLeft: "auto" }} type="button" onClick={onSyncTracking} disabled={syncPending}>
@@ -2807,6 +3090,7 @@ function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSync
                 <ExpensesBlock shipment={shipment} actions={actions} />
               </>
             )}
+            {subTab === "pickup" && <PickupPanel shipment={shipment} actions={actions} />}
             {subTab === "notes" && noteCard}
           </div>
         </div>
@@ -2826,7 +3110,16 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
 }) {
   const flag = shipment.attentionFlags?.[0];
   const hoursStale = Math.max(0, Math.round((Date.now() - new Date(shipment.updatedAt).getTime()) / 36e5));
+  const [contactOpen, setContactOpen] = useState(false);
+  // Carrier contact channels — configured per carrier in the Apps tab, with a built-in fallback.
+  const fallback = getCarrierContact(shipment.carrierCode);
+  const carrierName = shipment.carrierName || fallback?.name || shipment.carrierCode || "carrier";
+  const contactPhone = shipment.carrierContact?.phone || fallback?.phone || null;
+  const contactEmail = shipment.carrierContact?.email || null;
+  const contactWhatsapp = shipment.carrierContact?.whatsapp || null;
+  const hasContact = Boolean(contactPhone || contactEmail || contactWhatsapp);
   return (
+    <>
     <div className="dp-grid">
       <div>
         <div className="card" style={{ borderColor: "var(--amber-bd)", background: "var(--amber-lt)" }}>
@@ -2843,7 +3136,15 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
           <div className="card-title"><ShieldCheck /> Quick actions</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <button className="btn btn-amber btn-sm" type="button" onClick={() => onMessage({ template: "delay" })}>Contact client - explain delay</button>
-            <button className="btn btn-blue btn-sm" type="button">Call carrier for update</button>
+            <button
+              className="btn btn-blue btn-sm"
+              type="button"
+              onClick={() => setContactOpen(true)}
+              disabled={!hasContact}
+              title={hasContact ? undefined : "No contact channels configured for this carrier. Add them in the Apps tab."}
+            >
+              <Phone /> Contact {carrierName}
+            </button>
             <button className="btn btn-purple btn-sm" type="button" onClick={onSpecial}>Escalate to Special Handling</button>
             <button className="btn btn-green btn-sm" type="button" onClick={onResolve}>Mark as resolved</button>
           </div>
@@ -2852,6 +3153,35 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
         {teamCard}
       </div>
     </div>
+
+    <div className={`modal-overlay ${contactOpen ? "open" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && setContactOpen(false)}>
+      <div className="modal" style={{ maxWidth: 380 }}>
+        <div className="modal-title">Contact {carrierName}</div>
+        <div className="modal-sub">Choose a channel to reach the carrier</div>
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {contactPhone && (
+            <a className="btn btn-blue btn-sm" href={`tel:${contactPhone}`} style={{ justifyContent: "flex-start", gap: 10 }}>
+              <Phone /> Call — {contactPhone}
+            </a>
+          )}
+          {contactWhatsapp && (
+            <a className="btn btn-green btn-sm" href={`https://wa.me/${contactWhatsapp.replace(/[^\d]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ justifyContent: "flex-start", gap: 10 }}>
+              <Smartphone /> WhatsApp — {contactWhatsapp}
+            </a>
+          )}
+          {contactEmail && (
+            <a className="btn btn-gh btn-sm" href={`mailto:${contactEmail}`} style={{ justifyContent: "flex-start", gap: 10 }}>
+              <Mail /> Email — {contactEmail}
+            </a>
+          )}
+          {!hasContact && <div className="empty">No contact channels configured. Add them on the carrier's account in the Apps tab.</div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-gh btn-sm" type="button" onClick={() => setContactOpen(false)}>Close</button>
+        </div>
+      </div>
+    </div>
+    </>
   );
 }
 
@@ -2936,6 +3266,9 @@ function ShipmentInfoRows({ shipment }: { shipment: OperationShipmentDetail }) {
       <div className="sc-row"><span className="sc-key">Destination</span><span className="sc-val">{shipment.recipient.city || shipment.recipient.country}</span></div>
       <div className="sc-row"><span className="sc-key">Carrier</span><span className="sc-val">{shipment.carrierName || "Manual"}</span></div>
       <div className="sc-row"><span className="sc-key">Tracking no.</span><span className="sc-val">{shipment.carrierTrackingNumber || shipment.trackingNumber}</span></div>
+      {(shipment as any).pickupConfirmationNumber && (
+        <div className="sc-row"><span className="sc-key">Pickup no.</span><span className="sc-val">{(shipment as any).pickupConfirmationNumber}</span></div>
+      )}
       <div className="sc-row"><span className="sc-key">Status</span><span className="sc-val">{formatStatus(shipment.status)}</span></div>
       <div className="sc-row"><span className="sc-key">ETA</span><span className="sc-val green">{formatDate(shipment.estimatedDelivery)}</span></div>
     </>
@@ -3109,7 +3442,9 @@ function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetai
         const state = shipment.status === "delivered" || index < active - 1 ? "done" : index === active - 1 ? "active-step" : "pending";
         return (
           <div className="track-step" key={label}>
-            <div className={`track-dot ${state}`}>{state === "done" ? "✓" : state === "active-step" ? "●" : "○"}</div>
+            <div className={`track-check ${state}`}>
+              {state === "done" ? <CheckCircle2 /> : null}
+            </div>
             <div className="track-info">
               <div className="track-title">{label}</div>
               <div className="track-sub">{state === "done" ? "Completed" : state === "active-step" ? "In progress" : "Pending"}</div>
@@ -3206,11 +3541,11 @@ function ChargeTypeModal(props: {
     <div className={`modal-overlay ${props.open ? "open" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Add shipment charges">
         <div className="modal-title">Add Charges</div>
-        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "DDP shipment"}</div>
+        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "Door To Door Freight shipment"}</div>
         <div className="modal-body">
           <div className="alert alert-blue">
             <DollarSign />
-            This DDP lane is currently billed by <strong>{billingUnit}</strong>. Choose the charge type you want to add.
+            This Door To Door Freight lane is currently billed by <strong>{billingUnit}</strong>. Choose the charge type you want to add.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <button className="btn btn-pr" type="button" style={{ minHeight: 120, justifyContent: "flex-start", alignItems: "flex-start", textAlign: "left", flexDirection: "column", gap: 8 }} onClick={props.onSelectExtraWeight}>
@@ -3219,7 +3554,7 @@ function ChargeTypeModal(props: {
             </button>
             <button className="btn btn-amber" type="button" style={{ minHeight: 120, justifyContent: "flex-start", alignItems: "flex-start", textAlign: "left", flexDirection: "column", gap: 8 }} onClick={props.onSelectCustomCharge}>
               <strong>Extra Charges</strong>
-              <span style={{ fontWeight: 500, opacity: 0.85 }}>Create a separate DDP adjustment invoice for any manual charge you need to add.</span>
+              <span style={{ fontWeight: 500, opacity: 0.85 }}>Create a separate Door To Door Freight adjustment invoice for any manual charge you need to add.</span>
             </button>
           </div>
         </div>
@@ -3251,7 +3586,7 @@ function ExtraWeightChargeModal(props: {
     <div className={`modal-overlay ${props.open ? "open" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Adjust shipment weight">
         <div className="modal-title">{billingUnit === "CBM" ? "Adjust Shipment Volume" : "Adjust Shipment Weight"}</div>
-        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "DDP shipment"}</div>
+        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "Door To Door Freight shipment"}</div>
         <div className="modal-body">
           <div className="field-group">
             <label className="field-label">Updated shipment quantity ({billingUnit})</label>
@@ -3304,11 +3639,11 @@ function CustomChargeModal(props: {
     <div className={`modal-overlay ${props.open ? "open" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Add extra charge">
         <div className="modal-title">Add Extra Charges</div>
-        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "DDP shipment"}</div>
+        <div className="modal-sub">{props.shipment ? `${props.shipment.clientName} · ${shortId(props.shipment)}` : "Door To Door Freight shipment"}</div>
         <div className="modal-body">
           <div className="alert alert-amber">
             <DollarSign />
-            This will create a separate DDP adjustment invoice for the client.
+            This will create a separate Door To Door Freight adjustment invoice for the client.
           </div>
           <div className="field-group">
             <label className="field-label">Charge description</label>

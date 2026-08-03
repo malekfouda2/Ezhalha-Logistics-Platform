@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/phone-input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +18,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { humanizeError } from "@/lib/friendly-error";
+import { GeoSuggestInput } from "@/components/geo-suggest-input";
+import { useQuotationMode } from "@/lib/quotation-mode";
 import {
   ArrowLeft,
   ArrowRight,
@@ -138,13 +142,25 @@ function countryName(code: string): string {
   }
 }
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+  return humanizeError(error, fallback);
+}
+
+// Module-level so its identity stays stable across renders (an inline component would remount
+// the whole form on every keystroke and drop input focus).
+function QuoteShell({ quoteMode, profile, children }: { quoteMode: boolean; profile?: string | null; children: React.ReactNode }) {
+  return quoteMode ? <>{children}</> : <ClientLayout clientProfile={profile ?? undefined}>{children}</ClientLayout>;
 }
 
 export default function ClientDdp() {
   const [, navigate] = useLocation();
   const search = useSearch();
+  const returnToParam = new URLSearchParams(search).get("returnTo");
+  const backHref = returnToParam && returnToParam.startsWith("/client/") ? returnToParam : "/client/shipments";
+  const backLabel = backHref.includes("/quick-quote") ? "Back to Quick Quote" : "Back to Shipments";
   const { toast } = useToast();
+  const quotation = useQuotationMode();
+  const quoteMode = Boolean(quotation);
+  const [quotationSent, setQuotationSent] = useState<{ trackingNumber: string } | null>(null);
   const [step, setStep] = useState(1);
   const [transportMethod, setTransportMethod] = useState<"air" | "sea">("air");
   const [shipper, setShipper] = useState<Address>(emptyAddress);
@@ -163,9 +179,9 @@ export default function ClientDdp() {
   const [isExtractingPackingList, setIsExtractingPackingList] = useState(false);
   const hasPrefilledRecipient = useRef(false);
   const upload = useUpload({ onError: (error) => toast({ title: "Upload failed", description: error.message, variant: "destructive" }) });
-  const { data: account } = useQuery<ClientAccount>({ queryKey: ["/api/client/account"] });
+  const { data: account } = useQuery<ClientAccount>({ queryKey: [quoteMode ? `/api/admin/quotations/client/${quotation!.clientAccountId}` : "/api/client/account"] });
   const { data: lanes = [] } = useQuery<Array<{ originCountryCode: string; originCity?: string | null; destinationCountryCode: string; destinationCity?: string | null; airAvailable: boolean; seaAvailable: boolean }>>({
-    queryKey: ["/api/client/ddp/lanes"],
+    queryKey: [quoteMode ? "/api/admin/quotations/ddp-lanes" : "/api/client/ddp/lanes"],
   });
   const { data: creditAccess } = useQuery<{ creditEnabled: boolean; request?: { status?: string } }>({ queryKey: ["/api/client/credit-access"] });
 
@@ -191,7 +207,7 @@ export default function ClientDdp() {
     if (!paymentStatus) return;
     if (paymentStatus === "success") {
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
-      toast({ title: "Payment completed", description: "Your DDP shipment was submitted successfully." });
+      toast({ title: "Payment completed", description: "Your Door To Door Freight shipment was submitted successfully." });
       setStep(10);
     } else if (paymentStatus === "failed") {
       toast({ title: "Payment failed", description: params.get("message") || "Your payment could not be completed.", variant: "destructive" });
@@ -205,16 +221,50 @@ export default function ClientDdp() {
     navigate("/client/ddp", { replace: true });
   }, [navigate, search, toast]);
 
+  // In quotation mode, price via the admin preview and shape it into the DDP Quote the UI expects.
+  const quotationAddress = (a: Address) => ({ name: a.name || "NA", phone: a.phone || "0000000000", addressLine1: a.addressLine1 || "NA", city: a.city || "NA", postalCode: a.postalCode || "", countryCode: a.countryCode, stateOrProvince: a.stateOrProvince || "", email: a.email || "" });
+  const quotationBody = () => ({
+    clientAccountId: quotation!.clientAccountId,
+    type: "ddp" as const,
+    ddpTransportMethod: transportMethod,
+    shipper: quotationAddress({ ...shipper, name: supplierName, phone: supplierPhone }),
+    recipient: quotationAddress(recipient),
+    packages: packages.map((p) => ({ weight: Number(p.weight) || 0, length: Number(p.length) || 0, width: Number(p.width) || 0, height: Number(p.height) || 0 })),
+    totalCbm: totalCbm || undefined,
+    weightUnit: "KG", dimensionUnit: "CM",
+  });
   const rates = useMutation({
     mutationFn: async () => {
+      if (quoteMode) {
+        // Full DDP breakdown (per-package actual/dimensional) + the with-VAT total the client pays.
+        const res = await apiRequest("POST", "/api/admin/quotations/ddp-rates", {
+          clientAccountId: quotation!.clientAccountId,
+          transportMethod,
+          shipper: { countryCode: shipper.countryCode },
+          recipient: { countryCode: recipient.countryCode, city: recipient.city },
+          packages: packages.map((p) => ({ weight: Number(p.weight) || 0, length: Number(p.length) || 0, width: Number(p.width) || 0, height: Number(p.height) || 0 })),
+          totalCbm: totalCbm || undefined,
+        });
+        return await res.json() as Quote;
+      }
       const res = await apiRequest("POST", "/api/client/ddp/rates", { transportMethod, shipper: { countryCode: shipper.countryCode }, recipient, supplierName, supplierPhone, packages, totalCbm });
       return res.json() as Promise<Quote>;
     },
     onSuccess: (data) => { setQuote(data); setStep(6); window.scrollTo({ top: 0, behavior: "smooth" }); },
-    onError: (error) => toast({ title: "Could not calculate DDP pricing", description: errorMessage(error, "Please review the route and package details."), variant: "destructive" }),
+    onError: (error) => toast({ title: "Could not calculate Door To Door Freight pricing", description: errorMessage(error, "Please review the route and package details."), variant: "destructive" }),
   });
   const checkoutMutation = useMutation({
     mutationFn: async () => {
+      if (quoteMode) {
+        const res = await apiRequest("POST", "/api/admin/quotations", {
+          ...quotationBody(),
+          supplierName, supplierPhone, specialInstructions,
+          items: items.filter((item) => item.itemName.trim()),
+          tradeDocuments: documents,
+          sendNotification: true,
+        });
+        return res.json() as Promise<Checkout>;
+      }
       const res = await apiRequest("POST", "/api/client/ddp/checkout", {
         quoteId: quote?.quoteId,
         items: items.filter((item) => item.itemName.trim()),
@@ -226,7 +276,10 @@ export default function ClientDdp() {
       });
       return res.json() as Promise<Checkout>;
     },
-    onSuccess: (data) => { setCheckout(data); setStep(9); window.scrollTo({ top: 0, behavior: "smooth" }); },
+    onSuccess: (data) => {
+      if (quoteMode) { setQuotationSent({ trackingNumber: (data as any).trackingNumber || "" }); setStep(10); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+      setCheckout(data); setStep(9); window.scrollTo({ top: 0, behavior: "smooth" });
+    },
     onError: (error) => toast({ title: "Could not prepare checkout", description: errorMessage(error, "Please review your shipment details."), variant: "destructive" }),
   });
   const confirm = useMutation({
@@ -278,6 +331,30 @@ export default function ClientDdp() {
   const setPackageValue = (index: number, key: keyof DdpPackage, value: number) => setPackages((current) => current.map((pkg, pkgIndex) => pkgIndex === index ? { ...pkg, [key]: value } : pkg));
   const goTo = (nextStep: number) => { setStep(nextStep); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const warn = (description: string) => { toast({ title: "Complete the required details", description, variant: "destructive" }); return false; };
+
+  // Prevent duplicate shipments when the user steps back and forward: reuse the existing quote /
+  // checkout when the inputs are unchanged instead of re-fetching (new quote id) or re-creating.
+  const lastDdpRatesSignatureRef = useRef<string | null>(null);
+  const lastDdpCheckoutSignatureRef = useRef<string | null>(null);
+  const ddpRatesSignature = () => JSON.stringify({ shipper, recipient, packages, totalCbm, transportMethod });
+  const submitDdpRates = () => {
+    if (rates.isPending) return;
+    if (quote && ddpRatesSignature() === lastDdpRatesSignatureRef.current) { goTo(6); return; }
+    lastDdpRatesSignatureRef.current = ddpRatesSignature();
+    rates.mutate();
+  };
+  const submitDdpCheckout = () => {
+    if (checkoutMutation.isPending) return;
+    const signature = JSON.stringify({ quoteId: quote?.quoteId, shipper, recipient, packages, totalCbm, transportMethod, supplierName, supplierPhone, specialInstructions, items, documents, accepted });
+    if (signature === lastDdpCheckoutSignatureRef.current && (checkout || quotationSent)) {
+      setStep(quoteMode ? 10 : 9);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    lastDdpCheckoutSignatureRef.current = signature;
+    checkoutMutation.mutate();
+  };
+
   const next = () => {
     if (step === 1) return goTo(2);
     if (step === 2) {
@@ -296,18 +373,20 @@ export default function ClientDdp() {
       if (!packages.length) return warn("Add at least one package.");
       if (transportMethod === "air" && packages.some((pkg) => !pkg.weight || !pkg.length || !pkg.width || !pkg.height)) return warn("Enter weight and dimensions for every air-freight package.");
       if (transportMethod === "sea" && !(totalCbm || calculatedCbm)) return warn("Enter shipment volume in CBM.");
-      return rates.mutate();
+      return submitDdpRates();
     }
     if (step === 6) return goTo(7);
     if (step === 7) {
       if (!commercialInvoice) return warn("Upload a commercial invoice before continuing.");
       if (!items.some((item) => item.itemName.trim())) return warn("Review the imported items or add at least one item.");
       if (items.some((item) => item.itemName.trim() && (!item.category || item.countryOfOrigin.length !== 2))) return warn("Complete the category and two-letter origin country code for every item.");
+      // Quotation mode skips the client's payment consent — the client accepts it later when paying.
+      if (quoteMode) return submitDdpCheckout();
       return goTo(8);
     }
     if (step === 8) {
       if (!accepted.customs || !accepted.terms || !accepted.broker) return warn("Accept all required confirmations before payment.");
-      return checkoutMutation.mutate();
+      return submitDdpCheckout();
     }
   };
 
@@ -319,7 +398,7 @@ export default function ClientDdp() {
     setDocuments((current) => [...current.filter((entry) => entry.documentType !== "OTHER"), { fileName: result.metadata.name, objectPath: result.objectPath, contentType: result.metadata.contentType, size: result.metadata.size, documentType: "OTHER" }]);
     setIsExtractingPackingList(true);
     try {
-      const res = await apiRequest("POST", "/api/client/shipments/extract-package-details", { fileName: result.metadata.name, objectPath: result.objectPath, contentType: result.metadata.contentType });
+      const res = await apiRequest("POST", quoteMode ? "/api/admin/quotations/extract-package-details" : "/api/client/shipments/extract-package-details", { ...(quoteMode ? { clientAccountId: quotation!.clientAccountId, shipperCountryCode: shipper.countryCode, recipientCountryCode: recipient.countryCode, shipmentType: "inbound" } : {}), fileName: result.metadata.name, objectPath: result.objectPath, contentType: result.metadata.contentType });
       const extraction = await res.json();
       if (extraction.packages?.length) setPackages(extraction.packages.map((pkg: any) => ({ weight: Number(pkg.weight || 0), length: Number(pkg.length || 0), width: Number(pkg.width || 0), height: Number(pkg.height || 0) })));
       toast({ title: "Packing list processed", description: "Package details were imported for your review." });
@@ -338,7 +417,7 @@ export default function ClientDdp() {
     setDocuments((current) => [document, ...current.filter((entry) => entry.documentType !== "COMMERCIAL_INVOICE")]);
     setIsExtractingInvoice(true);
     try {
-      const res = await apiRequest("POST", "/api/client/shipments/extract-invoice-items", { shipmentType: "inbound", shipperCountryCode: shipper.countryCode, recipientCountryCode: recipient.countryCode, fileName: document.fileName, objectPath: document.objectPath, contentType: document.contentType });
+      const res = await apiRequest("POST", quoteMode ? "/api/admin/quotations/extract-invoice-items" : "/api/client/shipments/extract-invoice-items", { ...(quoteMode ? { clientAccountId: quotation!.clientAccountId } : {}), shipmentType: "inbound", shipperCountryCode: shipper.countryCode, recipientCountryCode: recipient.countryCode, fileName: document.fileName, objectPath: document.objectPath, contentType: document.contentType });
       const extraction = await res.json();
       if (extraction.items?.length) setItems(extraction.items);
       toast({ title: "Invoice processed", description: "Items and HS codes were imported for your review." });
@@ -354,11 +433,11 @@ export default function ClientDdp() {
       <div className="space-y-1 md:col-span-2"><Label>Full name *</Label><Input value={value.name} onChange={(e) => updateAddress(setter, value, "name", e.target.value)} /></div>
       <div className="space-y-1"><Label>Address line 1 *</Label><Input value={value.addressLine1} onChange={(e) => updateAddress(setter, value, "addressLine1", e.target.value)} /></div>
       <div className="space-y-1"><Label>Address line 2 <span className="text-xs text-muted-foreground">(optional)</span></Label><Input value={value.addressLine2} onChange={(e) => updateAddress(setter, value, "addressLine2", e.target.value)} /></div>
-      <div className="space-y-1"><Label>City *</Label><Input value={value.city} onChange={(e) => updateAddress(setter, value, "city", e.target.value)} /></div>
+      <div className="space-y-1"><Label>City *</Label><GeoSuggestInput mode="city" country={value.countryCode} value={value.city} onChange={(v) => updateAddress(setter, value, "city", v)} onPick={(s) => setter({ ...value, city: s.city, postalCode: s.postalCode, stateOrProvince: value.stateOrProvince || s.state || "" })} /></div>
       <div className="space-y-1"><Label>State / Province</Label><Input value={value.stateOrProvince} onChange={(e) => updateAddress(setter, value, "stateOrProvince", e.target.value)} /></div>
-      <div className="space-y-1"><Label>Postal code *</Label><Input value={value.postalCode} onChange={(e) => updateAddress(setter, value, "postalCode", e.target.value)} /></div>
+      <div className="space-y-1"><Label>Postal code *</Label><GeoSuggestInput mode="postal" country={value.countryCode} value={value.postalCode} onChange={(v) => updateAddress(setter, value, "postalCode", v)} onPick={(s) => setter({ ...value, city: s.city, postalCode: s.postalCode, stateOrProvince: value.stateOrProvince || s.state || "" })} /></div>
       <div className="space-y-1"><Label>Destination country *</Label><Select value={value.countryCode} onValueChange={(countryCode) => updateAddress(setter, value, "countryCode", countryCode)}><SelectTrigger><SelectValue placeholder="Select an available destination" /></SelectTrigger><SelectContent>{destinationOptions.map((code) => <SelectItem value={code} key={code}>{countryName(code)}</SelectItem>)}</SelectContent></Select></div>
-      <div className="space-y-1"><Label>Phone *</Label><Input value={value.phone} onChange={(e) => updateAddress(setter, value, "phone", e.target.value)} /></div>
+      <div className="space-y-1"><Label>Phone *</Label><PhoneInput value={value.phone} onChange={(v) => updateAddress(setter, value, "phone", v)} defaultCountry={(value as any).countryCode || "SA"} /></div>
       <div className="space-y-1"><Label>Email <span className="text-xs text-muted-foreground">(optional)</span></Label><Input type="email" value={value.email} onChange={(e) => updateAddress(setter, value, "email", e.target.value)} /></div>
     </div>
   );
@@ -385,9 +464,9 @@ export default function ClientDdp() {
     </div>
   );
 
-  return <ClientLayout clientProfile={account?.profile}><div className="mx-auto max-w-3xl p-6">
+  return <QuoteShell quoteMode={quoteMode} profile={account?.profile}><div className="mx-auto max-w-3xl p-6">
     <div className="mb-6 flex items-center justify-between">
-      <Link href="/client/shipments"><Button variant="ghost"><ArrowLeft className="mr-2 h-4 w-4" />Back to Shipments</Button></Link>
+      <Link href={backHref}><Button variant="ghost"><ArrowLeft className="mr-2 h-4 w-4" />{backLabel}</Button></Link>
       <Badge variant="secondary">Step {step} of {stepTitles.length}</Badge>
     </div>
     <div className="mb-8">
@@ -403,13 +482,13 @@ export default function ClientDdp() {
     </RadioGroup></CardContent>{footer("Next: Origin Country")}</Card>}
 
     {step === 2 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><Globe2 className="h-5 w-5" />Origin country</CardTitle><CardDescription>Select the country you are importing from</CardDescription></CardHeader><CardContent><RadioGroup value={shipper.countryCode} onValueChange={(countryCode) => setShipper({ ...shipper, countryCode })} className="space-y-3">
-      {originOptions.map((code) => <Label key={code} className={`flex cursor-pointer gap-3 rounded-lg border p-4 ${shipper.countryCode === code ? "border-primary bg-primary/5" : ""}`}><RadioGroupItem value={code} /><div><p className="font-semibold">{countryName(code)}</p><p className="mt-1 text-xs text-muted-foreground">Fixed all-inclusive DDP lane pricing available</p></div></Label>)}
-      {!originOptions.length && <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No active {transportMethod} DDP lanes are available yet. Please contact support.</div>}
+      {originOptions.map((code) => <Label key={code} className={`flex cursor-pointer gap-3 rounded-lg border p-4 ${shipper.countryCode === code ? "border-primary bg-primary/5" : ""}`}><RadioGroupItem value={code} /><div><p className="font-semibold">{countryName(code)}</p><p className="mt-1 text-xs text-muted-foreground">Fixed all-inclusive Door To Door Freight lane pricing available</p></div></Label>)}
+      {!originOptions.length && <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No active {transportMethod} Door To Door Freight lanes are available yet. Please contact support.</div>}
     </RadioGroup></CardContent>{footer("Next: Recipient Details", !shipper.countryCode)}</Card>}
 
     {step === 3 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><MapPin className="h-5 w-5" />Recipient details</CardTitle><CardDescription>Enter the delivery address and contact information</CardDescription></CardHeader><CardContent className="space-y-4"><div className="flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300"><Info className="mt-0.5 h-4 w-4 shrink-0" />Pre-filled with your default shipping address. Edit if needed.</div>{addressFields(recipient, setRecipient)}</CardContent>{footer("Next: Supplier Details")}</Card>}
 
-    {step === 4 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><Warehouse className="h-5 w-5" />Supplier details</CardTitle><CardDescription>Enter the supplier contact details. Our team will coordinate pickup manually.</CardDescription></CardHeader><CardContent><div className="grid gap-4 md:grid-cols-2"><div className="space-y-1"><Label>Supplier name *</Label><Input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></div><div className="space-y-1"><Label>Phone number *</Label><Input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} /></div></div></CardContent>{footer("Next: Package Details")}</Card>}
+    {step === 4 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><Warehouse className="h-5 w-5" />Supplier details</CardTitle><CardDescription>Enter the supplier contact details. Our team will coordinate pickup manually.</CardDescription></CardHeader><CardContent><div className="grid gap-4 md:grid-cols-2"><div className="space-y-1"><Label>Supplier name *</Label><Input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></div><div className="space-y-1"><Label>Phone number *</Label><PhoneInput value={supplierPhone} onChange={setSupplierPhone} /></div></div></CardContent>{footer("Next: Package Details")}</Card>}
 
     {step === 5 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><Package className="h-5 w-5" />Package details</CardTitle><CardDescription>Describe your shipment to get an accurate all-inclusive rate</CardDescription></CardHeader><CardContent className="space-y-6">
       <div><p className="mb-3 text-sm font-semibold">Packing list <span className="font-normal text-muted-foreground">(auto-calculates dimensions)</span></p>{uploadZone("packing", packingList)}{isExtractingPackingList && <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LoadingSpinner size="sm" />Processing packing list...</div>}</div>
@@ -422,12 +501,13 @@ export default function ClientDdp() {
 
     {step === 6 && quote && <Card><CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />Select rate</CardTitle><CardDescription>Your all-inclusive rate. Shipping, customs, and door delivery included.</CardDescription></CardHeader><CardContent><div className="rounded-xl border border-primary bg-primary/5 p-5"><div className="flex items-start justify-between gap-4"><div><p className="flex items-center gap-2 font-semibold">{transportMethod === "air" ? <Plane className="h-5 w-5 text-primary" /> : <Ship className="h-5 w-5 text-primary" />}{transportMethod === "air" ? "Air freight" : "Sea freight"} · {routeLabel}</p><p className="mt-2 text-sm text-muted-foreground">{quote.pricing.billableQuantity} {quote.pricing.billingUnit} · Estimated transit: {quote.pricing.transitDaysMin || "TBD"}-{quote.pricing.transitDaysMax || "TBD"} days</p>{transportMethod === "air" && <p className="mt-2 text-xs text-muted-foreground">{actualWeightPackageCount} package{actualWeightPackageCount === 1 ? "" : "s"} charged on actual weight · {dimensionalWeightPackageCount} package{dimensionalWeightPackageCount === 1 ? "" : "s"} charged on dimensional weight</p>}<div className="mt-3 flex flex-wrap gap-2"><Badge variant="secondary">Customs included</Badge><Badge variant="secondary">Door to Door</Badge><Badge variant="secondary">All taxes included</Badge></div></div><div className="text-right"><p className="text-2xl font-bold">SAR {quote.pricing.totalAmountSar.toFixed(2)}</p><p className="mt-1 text-xs uppercase text-muted-foreground">All inclusive</p></div></div></div><p className="mt-3 text-xs text-muted-foreground">Rate valid until {format(new Date(quote.expiresAt), "h:mm a")}.</p></CardContent>{footer("Continue to Documents")}</Card>}
 
-    {step === 7 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" />Documents</CardTitle><CardDescription>Upload required documents and review customs items</CardDescription></CardHeader><CardContent className="space-y-6"><div><p className="mb-3 text-sm font-semibold">Commercial invoice *</p>{uploadZone("invoice", commercialInvoice)}{isExtractingInvoice && <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LoadingSpinner size="sm" />Processing invoice and matching HS codes...</div>}</div><div className="border-t pt-5"><p className="mb-3 text-sm font-semibold">Packing list <span className="font-normal text-muted-foreground">(optional)</span></p>{uploadZone("packing", packingList)}</div><div className="border-t pt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold">Invoice items</p><Button variant="outline" size="sm" onClick={() => setItems([...items, emptyItem()])}>Add item</Button></div><div className="space-y-3">{items.map((item, index) => <div className="grid gap-2 rounded-lg border p-3 md:grid-cols-7" key={index}><Input placeholder="Item name" value={item.itemName} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, itemName: e.target.value } : current))} /><Input placeholder="Category" value={item.category} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, category: e.target.value } : current))} /><Input placeholder="Origin" maxLength={2} value={item.countryOfOrigin} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, countryOfOrigin: e.target.value.toUpperCase() } : current))} /><Input type="number" min="1" step="1" placeholder="Qty" value={item.quantity} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, quantity: Number(e.target.value) } : current))} /><Input type="number" min="0" step="0.01" placeholder="Price" value={item.price} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, price: Number(e.target.value) } : current))} /><Input placeholder="HS code" value={item.hsCode || ""} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, hsCode: e.target.value } : current))} /><Button variant="ghost" size="icon" onClick={() => setItems(items.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button></div>)}</div></div></CardContent>{footer("Continue")}</Card>}
+    {step === 7 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" />Documents</CardTitle><CardDescription>Upload required documents and review customs items</CardDescription></CardHeader><CardContent className="space-y-6"><div><p className="mb-3 text-sm font-semibold">Commercial invoice *</p>{uploadZone("invoice", commercialInvoice)}{isExtractingInvoice && <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LoadingSpinner size="sm" />Processing invoice and matching HS codes...</div>}</div><div className="border-t pt-5"><p className="mb-3 text-sm font-semibold">Packing list <span className="font-normal text-muted-foreground">(optional)</span></p>{uploadZone("packing", packingList)}</div><div className="border-t pt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold">Invoice items</p><Button variant="outline" size="sm" onClick={() => setItems([...items, emptyItem()])}>Add item</Button></div><div className="space-y-3">{items.map((item, index) => <div className="grid gap-2 rounded-lg border p-3 md:grid-cols-7" key={index}><Input placeholder="Item name" value={item.itemName} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, itemName: e.target.value } : current))} /><Input placeholder="Category" value={item.category} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, category: e.target.value } : current))} /><Input placeholder="Origin" maxLength={2} value={item.countryOfOrigin} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, countryOfOrigin: e.target.value.toUpperCase() } : current))} /><Input type="number" min="1" step="1" placeholder="Qty" value={item.quantity} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, quantity: Number(e.target.value) } : current))} /><Input type="number" min="0" step="0.01" placeholder="Price" value={item.price} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, price: Number(e.target.value) } : current))} /><Input placeholder="HS code" value={item.hsCode || ""} onChange={(e) => setItems(items.map((current, i) => i === index ? { ...current, hsCode: e.target.value } : current))} /><Button variant="ghost" size="icon" onClick={() => setItems(items.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4 text-destructive" /></Button></div>)}</div></div></CardContent>{footer(quoteMode ? (checkoutMutation.isPending ? "Sending…" : "Send quotation to client") : "Continue", quoteMode && checkoutMutation.isPending)}</Card>}
 
     {step === 8 && <Card><CardHeader><CardTitle className="flex items-center gap-2"><NotebookPen className="h-5 w-5" />Notes & terms</CardTitle><CardDescription>Add special instructions and confirm your agreement</CardDescription></CardHeader><CardContent className="space-y-5"><div className="space-y-1"><Label>Special instructions <span className="text-xs text-muted-foreground">(optional)</span></Label><Textarea rows={5} placeholder="Fragile items, call before delivery, or specific unloading requirements..." value={specialInstructions} onChange={(e) => setSpecialInstructions(e.target.value)} /></div><div className="space-y-3 border-t pt-5"><Label className="flex items-start gap-3 rounded-lg border p-3 text-sm font-normal"><Checkbox className="mt-0.5" checked={accepted.customs} onCheckedChange={(checked) => setAccepted({ ...accepted, customs: checked === true })} />I confirm that the shipment contents are accurate and comply with customs regulations and import laws.</Label><Label className="flex items-start gap-3 rounded-lg border p-3 text-sm font-normal"><Checkbox className="mt-0.5" checked={accepted.terms} onCheckedChange={(checked) => setAccepted({ ...accepted, terms: checked === true })} /><span>I agree to Ezhalha's <a className="font-medium text-primary underline underline-offset-2" href="/policy/terms-and-conditions" target="_blank" rel="noreferrer">Terms & Conditions</a> and <a className="font-medium text-primary underline underline-offset-2" href="/policy/shipping-return-policy" target="_blank" rel="noreferrer">Shipping & Return Policy</a>.</span></Label><Label className="flex items-start gap-3 rounded-lg border p-3 text-sm font-normal"><Checkbox className="mt-0.5" checked={accepted.broker} onCheckedChange={(checked) => setAccepted({ ...accepted, broker: checked === true })} />I authorize Ezhalha to act as my customs broker and clearance agent for this shipment.</Label></div></CardContent>{footer(checkoutMutation.isPending ? "Preparing checkout..." : "Continue to Payment", checkoutMutation.isPending)}</Card>}
 
-    {step === 9 && checkout && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Payment options</CardTitle><CardDescription>Choose how you'd like to pay for this shipment</CardDescription></CardHeader><CardContent className="space-y-5"><div className="space-y-2 rounded-lg bg-muted p-4 text-sm"><div className="flex justify-between gap-3"><span>Shipment ID</span><span className="font-mono text-primary">{checkout.trackingNumber}</span></div><div className="flex justify-between gap-3"><span>Route</span><span className="font-medium">{routeLabel}</span></div><div className="flex justify-between gap-3"><span>Method</span><span className="font-medium">{transportMethod === "air" ? "Air freight" : "Sea freight"} · Door to Door</span></div><div className="flex justify-between gap-3"><span>Billable quantity</span><span className="font-medium">{checkout.pricing.billableQuantity} {checkout.pricing.billingUnit}</span></div><div className="mt-3 flex justify-between border-t pt-3"><span className="font-semibold">Total amount</span><span className="text-lg font-bold">SAR {checkout.amount.toFixed(2)}</span></div></div><TapCardForm amount={checkout.amount} currency={checkout.currency} shipmentId={checkout.shipmentId} submitLabel="Pay Now" pending={pay.isPending || confirm.isPending} onSubmit={(payload) => pay.mutate(payload)} /><div className="relative flex items-center py-1"><div className="flex-grow border-t" /><span className="px-3 text-xs uppercase text-muted-foreground">or</span><div className="flex-grow border-t" /></div>{creditAccess?.creditEnabled ? <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-950/20"><p className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-4 w-4" />Credit / Pay Later</p><p className="text-sm text-muted-foreground">Create your DDP shipment now and receive an invoice with 30-day payment terms.</p><Button variant="outline" className="w-full" onClick={() => credit.mutate()} disabled={credit.isPending}>Use Credit / Pay Later</Button></div> : <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">Credit / Pay Later is not enabled for your account. You can request access from your Billing page.</div>}</CardContent><CardFooter><Button variant="outline" onClick={() => goTo(8)}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button></CardFooter></Card>}
+    {step === 9 && checkout && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Payment options</CardTitle><CardDescription>Choose how you'd like to pay for this shipment</CardDescription></CardHeader><CardContent className="space-y-5"><div className="space-y-2 rounded-lg bg-muted p-4 text-sm"><div className="flex justify-between gap-3"><span>Shipment ID</span><span className="font-mono text-primary">{checkout.trackingNumber}</span></div><div className="flex justify-between gap-3"><span>Route</span><span className="font-medium">{routeLabel}</span></div><div className="flex justify-between gap-3"><span>Method</span><span className="font-medium">{transportMethod === "air" ? "Air freight" : "Sea freight"} · Door to Door</span></div><div className="flex justify-between gap-3"><span>Billable quantity</span><span className="font-medium">{checkout.pricing.billableQuantity} {checkout.pricing.billingUnit}</span></div><div className="mt-3 flex justify-between border-t pt-3"><span className="font-semibold">Total amount</span><span className="text-lg font-bold">SAR {checkout.amount.toFixed(2)}</span></div></div><TapCardForm amount={checkout.amount} currency={checkout.currency} shipmentId={checkout.shipmentId} submitLabel="Pay Now" pending={pay.isPending || confirm.isPending} onSubmit={(payload) => pay.mutate(payload)} /><div className="relative flex items-center py-1"><div className="flex-grow border-t" /><span className="px-3 text-xs uppercase text-muted-foreground">or</span><div className="flex-grow border-t" /></div>{creditAccess?.creditEnabled ? <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-950/20"><p className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-4 w-4" />Credit / Pay Later</p><p className="text-sm text-muted-foreground">Create your Door To Door Freight shipment now and receive an invoice with 30-day payment terms.</p><Button variant="outline" className="w-full" onClick={() => credit.mutate()} disabled={credit.isPending}>Use Credit / Pay Later</Button></div> : <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">Credit / Pay Later is not enabled for your account. You can request access from your Billing page.</div>}</CardContent><CardFooter><Button variant="outline" onClick={() => goTo(8)}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button></CardFooter></Card>}
 
-    {step === 10 && <Card><CardHeader className="text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900"><CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" /></div><CardTitle>DDP shipment submitted successfully!</CardTitle><CardDescription>Our team will review the booking and manage the shipment manually.</CardDescription></CardHeader><CardContent>{checkout && <div className="space-y-2 rounded-lg bg-muted p-4 text-sm"><div className="flex justify-between"><span>Shipment ID</span><span className="font-mono">{checkout.trackingNumber}</span></div><div className="flex justify-between"><span>Route</span><span>{routeLabel}</span></div><div className="flex justify-between"><span>Method</span><span>{transportMethod === "air" ? "Air freight" : "Sea freight"} · Door to Door</span></div></div>}</CardContent><CardFooter className="justify-center"><Button onClick={() => navigate("/client/shipments")}><House className="mr-2 h-4 w-4" />View all shipments</Button></CardFooter></Card>}
-  </div></ClientLayout>;
+    {step === 10 && quoteMode && <Card><CardHeader className="text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900"><CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" /></div><CardTitle>Quotation sent to client</CardTitle><CardDescription>Quotation {quotationSent?.trackingNumber} was created for {quotation?.clientName || "the client"} and they've been notified to review, modify and pay.</CardDescription></CardHeader><CardFooter className="justify-center"><Button onClick={() => navigate("/admin/shipments")}><House className="mr-2 h-4 w-4" />Back to shipments</Button></CardFooter></Card>}
+    {step === 10 && !quoteMode && <Card><CardHeader className="text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900"><CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" /></div><CardTitle>Door To Door Freight shipment submitted successfully!</CardTitle><CardDescription>Our team will review the booking and manage the shipment manually.</CardDescription></CardHeader><CardContent>{checkout && <div className="space-y-2 rounded-lg bg-muted p-4 text-sm"><div className="flex justify-between"><span>Shipment ID</span><span className="font-mono">{checkout.trackingNumber}</span></div><div className="flex justify-between"><span>Route</span><span>{routeLabel}</span></div><div className="flex justify-between"><span>Method</span><span>{transportMethod === "air" ? "Air freight" : "Sea freight"} · Door to Door</span></div></div>}</CardContent><CardFooter className="justify-center"><Button onClick={() => navigate("/client/shipments")}><House className="mr-2 h-4 w-4" />View all shipments</Button></CardFooter></Card>}
+  </div></QuoteShell>;
 }

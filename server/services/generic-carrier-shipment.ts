@@ -1,6 +1,7 @@
 import { type Shipment } from "@shared/schema";
 import { type CreateShipmentRequest, type ShipmentItem } from "../integrations/fedex";
 import { buildCommercialInvoiceDocument } from "./commercial-invoice";
+import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
 
 function buildPackages(shipment: Shipment): CreateShipmentRequest["packages"] {
   if (shipment.packagesData) {
@@ -106,6 +107,7 @@ export async function buildGenericCarrierShipmentRequestFromShipment(
     carrierRequest: {
       shipper: {
         name: shipment.senderName,
+        companyName: shipment.senderCompany || undefined,
         streetLine1: shipment.senderAddress,
         streetLine2: shipment.senderAddressLine2 || undefined,
         streetLine3: shipment.senderShortAddress || undefined,
@@ -114,10 +116,11 @@ export async function buildGenericCarrierShipmentRequestFromShipment(
         postalCode: shipment.senderPostalCode || "",
         countryCode: shipment.senderCountry,
         phone: shipment.senderPhone,
-        email: shipment.senderEmail || undefined,
+        email: CARRIER_CONTACT_EMAIL,
       },
       recipient: {
         name: shipment.recipientName,
+        companyName: shipment.recipientCompany || undefined,
         streetLine1: shipment.recipientAddress,
         streetLine2: shipment.recipientAddressLine2 || undefined,
         streetLine3: shipment.recipientShortAddress || undefined,
@@ -126,7 +129,7 @@ export async function buildGenericCarrierShipmentRequestFromShipment(
         postalCode: shipment.recipientPostalCode || "",
         countryCode: shipment.recipientCountry,
         phone: shipment.recipientPhone,
-        email: shipment.recipientEmail || undefined,
+        email: CARRIER_CONTACT_EMAIL,
       },
       packages,
       serviceType: shipment.carrierServiceType || shipment.serviceType || (isInternational ? "PPX" : "ONP"),
@@ -140,6 +143,9 @@ export async function buildGenericCarrierShipmentRequestFromShipment(
       commercialInvoiceDate: internalCommercialInvoice.issueDate,
       incoterm: shipment.isDdp ? "DDP" : "DAP",
       items,
+      // Virtual-carrier routing note — tells an aggregator provider (Fizzpa/Shipox) which
+      // downstream courier to assign. Null for ordinary carriers, which ignore it.
+      note: shipment.carrierAssignmentNote || undefined,
     },
     tradeDocumentsData: shipment.tradeDocumentsData ?? null,
   };

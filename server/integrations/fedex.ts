@@ -123,6 +123,7 @@ export class CarrierError extends Error {
 
 export interface ShippingAddress {
   name: string;
+  companyName?: string;
   streetLine1: string;
   streetLine2?: string;
   streetLine3?: string;
@@ -283,6 +284,10 @@ export interface CreateShipmentRequest {
   commercialInvoiceDate?: string;
   items?: ShipmentItem[];
   tradeDocuments?: TradeDocumentReference[];
+  // Free-text note forwarded to the carrier's order (e.g. Fizzpa OrderNote / Shipox note).
+  // Used by virtual-carrier routing to tell an aggregator's ops which courier to assign.
+  // Carriers that expose no note field ignore it.
+  note?: string;
 }
 
 export interface CreateShipmentResponse {
@@ -301,6 +306,33 @@ export interface TrackingEvent {
   location?: string;
 }
 
+// Carrier pickup request. Fired after a shipment is booked with the carrier (so the pickup
+// is tied to a real waybill). Address/packages come from the booked shipment; the date/time
+// window comes from the create/quote flow.
+export interface PickupRequest {
+  shipper: ShippingAddress;
+  packages: PackageDetails[];
+  /** Local pickup date, "YYYY-MM-DD". */
+  pickupDate: string;
+  /** Earliest ready time and latest close time, "HH:MM" (24h, shipper-local). */
+  readyTime: string;
+  closeTime: string;
+  location?: string; // e.g. "Reception", "Warehouse dock"
+  instructions?: string;
+  isInternational?: boolean;
+  declaredValue?: number;
+  currency?: string;
+  /** Carrier product/service code the shipment was booked with (e.g. DHL "P"). */
+  serviceType?: string;
+  /** The booked waybill, when the carrier can link the pickup to an existing shipment. */
+  trackingNumber?: string;
+}
+
+export interface PickupResponse {
+  confirmationNumber: string;
+  raw?: unknown;
+}
+
 export interface TrackingResponse {
   trackingNumber: string;
   status: string;
@@ -315,6 +347,10 @@ export interface CarrierCapabilityProfile {
   domesticZones?: boolean;
   labelFormat?: "PDF" | "ZPL";
   trackingMode?: "push" | "poll";
+  // Aggregator backends (Fizzpa / Shipox) that clients never pick directly — they are only
+  // reached through client-facing virtual carriers. Hidden from the client rate list but
+  // still resolvable by code for booking/tracking. See virtualCarriers.
+  providerOnly?: boolean;
 }
 
 export interface CarrierAdapter {
@@ -331,6 +367,12 @@ export interface CarrierAdapter {
   trackShipment(trackingNumber: string): Promise<TrackingResponse>;
   cancelShipment(trackingNumber: string, senderCountryCode?: string): Promise<boolean>;
   validateWebhookSignature(payload: string, signature: string): boolean;
+  // Optional: carriers that support scheduling a courier pickup implement these. Absent =>
+  // pickup not supported (the booking flow simply skips it). Kept optional so existing
+  // adapters remain valid.
+  supportsPickup?: boolean;
+  requestPickup?(request: PickupRequest): Promise<PickupResponse>;
+  cancelPickup?(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean>;
 }
 
 const MAX_RETRIES = 3;
@@ -629,6 +671,13 @@ export class FedExAdapter implements CarrierAdapter {
   private accessToken: string | undefined;
   private tokenExpiry: number = 0;
   private tokenCredentialFingerprint: string | undefined;
+
+  // FedEx "Basic Integrated Visibility" (formerly Track API) must live in its OWN project with
+  // its OWN key — it cannot share the Ship/Rate project. So tracking authenticates with separate
+  // FEDEX_TRACK_* credentials when present; otherwise it falls back to the Ship/Rate credentials.
+  private trackAccessToken: string | undefined;
+  private trackTokenExpiry: number = 0;
+  private trackTokenFingerprint: string | undefined;
 
   private get clientId(): string | undefined {
     return getIntegrationEnv("FEDEX_CLIENT_ID") || getIntegrationEnv("FEDEX_API_KEY");
@@ -1170,14 +1219,20 @@ export class FedExAdapter implements CarrierAdapter {
         packagingTypesToTry = userPackaging ? [userPackaging] : ["YOUR_PACKAGING"];
       }
 
-      if (request.serviceType && !serviceTypesToTry.includes(request.serviceType)) {
-        serviceTypesToTry.unshift(request.serviceType);
+      // Order the service types to try. AUTO (no serviceType) must come FIRST for rate
+      // discovery: a single FedEx rate call with no serviceType returns rateReplyDetails for
+      // EVERY available service level. Trying a specific service first returned only that one
+      // service — the reason the rates page showed a single service level. Specific services
+      // are kept only as a per-service fallback for lanes/accounts where AUTO errors out.
+      const discoveredServices = serviceTypesToTry;
+      serviceTypesToTry = [];
+      if (request.serviceType) {
+        // Booking a specific chosen service — quote that one first.
+        serviceTypesToTry.push(request.serviceType);
       }
-
-      serviceTypesToTry.push("");
-
-      if (serviceTypesToTry.length === 1 && serviceTypesToTry[0] === "") {
-        // no-op, we already have the empty string for auto-detect
+      serviceTypesToTry.push(""); // AUTO — one call returns all service levels
+      for (const svc of discoveredServices) {
+        if (!serviceTypesToTry.includes(svc)) serviceTypesToTry.push(svc);
       }
 
       const isRetryableError = (msg: string) => 
@@ -1871,8 +1926,69 @@ export class FedExAdapter implements CarrierAdapter {
     };
   }
 
+  // Track creds resolve from the bound FedEx account (Apps tab) first, then fall back to
+  // process.env — so they can be deployed either way. (The bound-account scope normally hides
+  // process.env, so we read it explicitly here.)
+  private get trackClientId(): string | undefined {
+    return getIntegrationEnv("FEDEX_TRACK_CLIENT_ID") || getIntegrationEnv("FEDEX_TRACK_API_KEY")
+      || process.env.FEDEX_TRACK_CLIENT_ID || process.env.FEDEX_TRACK_API_KEY;
+  }
+  private get trackClientSecret(): string | undefined {
+    return getIntegrationEnv("FEDEX_TRACK_CLIENT_SECRET") || getIntegrationEnv("FEDEX_TRACK_SECRET_KEY")
+      || process.env.FEDEX_TRACK_CLIENT_SECRET || process.env.FEDEX_TRACK_SECRET_KEY;
+  }
+  private get trackBaseUrl(): string {
+    return getIntegrationEnv("FEDEX_TRACK_BASE_URL") || process.env.FEDEX_TRACK_BASE_URL || this.baseUrl;
+  }
+  private get hasDedicatedTrackCreds(): boolean {
+    return !!(this.trackClientId && this.trackClientSecret);
+  }
+
+  private async getTrackAccessToken(): Promise<string> {
+    const fingerprint = `${this.trackClientId}:${this.trackClientSecret}:${this.trackBaseUrl}`;
+    if (this.trackAccessToken && Date.now() < this.trackTokenExpiry && this.trackTokenFingerprint === fingerprint) {
+      return this.trackAccessToken;
+    }
+    const res = await fetch(`${this.trackBaseUrl}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: this.trackClientId!, client_secret: this.trackClientSecret! }),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok || !data.access_token) {
+      throw new CarrierError("AUTH_FAILED", `FedEx tracking auth failed: ${res.status} - ${JSON.stringify(data).slice(0, 200)}`);
+    }
+    this.trackAccessToken = data.access_token;
+    this.trackTokenExpiry = Date.now() + ((Number(data.expires_in) || 3600) - 60) * 1000;
+    this.trackTokenFingerprint = fingerprint;
+    return this.trackAccessToken!;
+  }
+
+  /** POST the track request using dedicated Basic-Integrated-Visibility creds, else fall back. */
+  private async trackRequest(body: any): Promise<any> {
+    if (!this.hasDedicatedTrackCreds) {
+      const { data } = await this.makeRequest<any>("/track/v1/trackingnumbers", "POST", body);
+      return data;
+    }
+    const token = await this.getTrackAccessToken();
+    const res = await fetch(`${this.trackBaseUrl}/track/v1/trackingnumbers`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-locale": "en_US" },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { /* non-JSON */ }
+    if (!res.ok) {
+      const msg = data?.errors?.[0]?.message || text?.slice(0, 200) || res.statusText;
+      throw new CarrierError(`HTTP_${res.status}`, `FedEx tracking error: ${res.status} - ${msg}`);
+    }
+    return data;
+  }
+
   async trackShipment(trackingNumber: string): Promise<TrackingResponse> {
-    if (!this.isConfigured()) {
+    // Tracking is usable when either the dedicated track creds OR the Ship/Rate creds exist.
+    if (!this.hasDedicatedTrackCreds && !this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
       }
@@ -1880,7 +1996,7 @@ export class FedExAdapter implements CarrierAdapter {
     }
 
     try {
-      const { data } = await this.makeRequest<any>("/track/v1/trackingnumbers", "POST", {
+      const data = await this.trackRequest({
         trackingInfo: [{ trackingNumberInfo: { trackingNumber } }],
         includeDetailedScans: true,
       });
@@ -1970,6 +2086,70 @@ export class FedExAdapter implements CarrierAdapter {
     }
   }
 
+  supportsPickup = true;
+
+  /**
+   * Schedule a FedEx courier pickup for an already-booked shipment via the FedEx Pickup API
+   * (POST /pickup/v1/pickups). Returns the pickupConfirmationCode. Best-effort: verify against
+   * your FedEx account's pickup entitlements before relying on it in production.
+   */
+  async requestPickup(request: PickupRequest): Promise<PickupResponse> {
+    if (!this.isConfigured()) {
+      throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured — cannot request a pickup.");
+    }
+    const s = request.shipper;
+    const iso = `${request.pickupDate}T${request.readyTime}:00${isoOffsetForCountry(s.countryCode, request.pickupDate)}`;
+    const unit = request.packages[0]?.weightUnit === "LB" ? "LB" : "KG";
+    const totalWeight = request.packages.reduce((sum, p) => sum + (Number(p.weight) || 0), 0);
+    const body = {
+      associatedAccountNumber: { value: this.accountNumber },
+      originDetails: {
+        pickupLocation: {
+          contact: { personName: s.name, phoneNumber: s.phone, companyName: s.companyName || s.name },
+          address: {
+            streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
+            city: s.city,
+            stateOrProvinceCode: s.stateOrProvince || undefined,
+            postalCode: s.postalCode || "",
+            countryCode: s.countryCode,
+            residential: false,
+          },
+        },
+        readyDateTimestamp: iso,
+        customerCloseTime: `${request.closeTime}:00`,
+      },
+      totalWeight: { units: unit, value: Math.max(0.1, Math.round(totalWeight * 100) / 100) },
+      packageCount: request.packages.length || 1,
+      carrierCode: "FDXE",
+      countryRelationships: request.isInternational ? "INTERNATIONAL" : "DOMESTIC",
+      ...(request.instructions ? { remarks: request.instructions } : {}),
+    };
+    const { data } = await this.makeRequest<any>("/pickup/v1/pickups", "POST", body, 1);
+    const output = (data as any)?.output ?? data;
+    const confirmationNumber = String(output?.pickupConfirmationCode ?? output?.confirmationCode ?? "").trim();
+    if (!confirmationNumber) {
+      throw new CarrierError("PICKUP_FAILED", "FedEx pickup booking returned no confirmation code.");
+    }
+    return { confirmationNumber, raw: data };
+  }
+
+  async cancelPickup(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    try {
+      await this.makeRequest<any>("/pickup/v1/pickups/cancel", "PUT", {
+        associatedAccountNumber: { value: this.accountNumber },
+        pickupConfirmationCode: confirmationNumber,
+        carrierCode: "FDXE",
+        ...(request?.pickupDate ? { scheduledDate: request.pickupDate } : {}),
+        ...(request?.instructions ? { remarks: request.instructions } : {}),
+      }, 1);
+      return true;
+    } catch (error) {
+      logError(`FedEx: cancel pickup failed for ${confirmationNumber}`, error);
+      return false;
+    }
+  }
+
   validateWebhookSignature(payload: string, signature: string): boolean {
     if (!this.webhookSecret) {
       return true;
@@ -1988,6 +2168,33 @@ export class FedExAdapter implements CarrierAdapter {
     } catch {
       return false;
     }
+  }
+}
+
+// ISO offset ("+02:00") for a country on a given date, for FedEx's readyDateTimestamp.
+const PICKUP_COUNTRY_TZ: Record<string, string> = {
+  DE: "Europe/Berlin", GB: "Europe/London", FR: "Europe/Paris", NL: "Europe/Amsterdam",
+  BE: "Europe/Brussels", IT: "Europe/Rome", ES: "Europe/Madrid", CH: "Europe/Zurich",
+  AT: "Europe/Vienna", PL: "Europe/Warsaw", CZ: "Europe/Prague", SE: "Europe/Stockholm",
+  TR: "Europe/Istanbul", AE: "Asia/Dubai", SA: "Asia/Riyadh", QA: "Asia/Qatar",
+  KW: "Asia/Kuwait", BH: "Asia/Bahrain", OM: "Asia/Muscat", EG: "Africa/Cairo",
+  JO: "Asia/Amman", CN: "Asia/Shanghai", HK: "Asia/Hong_Kong", IN: "Asia/Kolkata",
+  JP: "Asia/Tokyo", SG: "Asia/Singapore", US: "America/New_York", CA: "America/Toronto",
+};
+
+function isoOffsetForCountry(countryCode: string, dateISO: string): string {
+  const tz = PICKUP_COUNTRY_TZ[(countryCode || "").toUpperCase()] || "UTC";
+  try {
+    const date = new Date(`${dateISO}T12:00:00Z`);
+    const name =
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
+        .formatToParts(date)
+        .find((p) => p.type === "timeZoneName")?.value || "GMT+00:00";
+    const m = name.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+    if (!m) return "+00:00";
+    return `${m[1]}${m[2].padStart(2, "0")}:${(m[3] || "00").padStart(2, "0")}`;
+  } catch {
+    return "+00:00";
   }
 }
 

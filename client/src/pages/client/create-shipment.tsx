@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
@@ -6,6 +6,7 @@ import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingSpinner, LoadingScreen } from "@/components/loading-spinner";
 import { SearchableSelect } from "@/components/searchable-select";
+import { PhoneInput } from "@/components/phone-input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,15 @@ import {
 } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
+import { useQuotationMode } from "@/lib/quotation-mode";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { humanizeError } from "@/lib/friendly-error";
+import { GeoSuggestInput, type GeoSuggestion } from "@/components/geo-suggest-input";
 import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
-import dhlLogo from "@/assets/carriers/dhl-logo.png";
+import { CarrierLogo } from "@/components/carrier-logo";
 import type {
   ClientAccount,
   HsCodeSourceValue,
@@ -240,6 +244,7 @@ interface ShipmentFormData {
   serviceType: string;
   shipper: {
     name: string;
+    company?: string;
     phone: string;
     email?: string;
     countryCode: string;
@@ -252,6 +257,7 @@ interface ShipmentFormData {
   };
   recipient: {
     name: string;
+    company?: string;
     phone: string;
     email?: string;
     countryCode: string;
@@ -411,6 +417,35 @@ const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
 
 const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
 
+// Per-country postal-code format checks (common lanes). Catches typos up-front so the carrier
+// doesn't reject them with a cryptic error at the rates step. Countries not listed only need a
+// non-empty value. { regex, hint }.
+const POSTAL_FORMATS: Record<string, { regex: RegExp; hint: string }> = {
+  SA: { regex: /^\d{5}$/, hint: "Saudi postal codes are 5 digits (e.g. 12345)." },
+  US: { regex: /^\d{5}(-\d{4})?$/, hint: "US ZIP codes are 5 digits (e.g. 90210)." },
+  CA: { regex: /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/, hint: "Canadian codes look like A1A 1A1." },
+  GB: { regex: /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s?\d[A-Za-z]{2}$/, hint: "UK postcodes look like SW1A 1AA." },
+  DE: { regex: /^\d{5}$/, hint: "German postal codes are 5 digits." },
+  FR: { regex: /^\d{5}$/, hint: "French postal codes are 5 digits." },
+  EG: { regex: /^\d{5}$/, hint: "Egyptian postal codes are 5 digits." },
+  IN: { regex: /^\d{6}$/, hint: "Indian PIN codes are 6 digits." },
+  CN: { regex: /^\d{6}$/, hint: "Chinese postal codes are 6 digits." },
+  JP: { regex: /^\d{3}-?\d{4}$/, hint: "Japanese postal codes look like 100-0001." },
+  AU: { regex: /^\d{4}$/, hint: "Australian postcodes are 4 digits." },
+  NL: { regex: /^\d{4}\s?[A-Za-z]{2}$/, hint: "Dutch codes look like 1011 AB." },
+  ES: { regex: /^\d{5}$/, hint: "Spanish postal codes are 5 digits." },
+  IT: { regex: /^\d{5}$/, hint: "Italian postal codes are 5 digits." },
+};
+
+// KSA National Address short code: 4 letters + 4 digits (e.g. RCTB4359).
+const SA_SHORT_ADDRESS_REGEX = /^[A-Za-z]{4}\d{4}$/;
+
+function postalFormatError(countryCode: string, postalCode: string): string | null {
+  const fmt = POSTAL_FORMATS[countryCode?.toUpperCase()];
+  if (!fmt) return null;
+  return fmt.regex.test((postalCode || "").trim()) ? null : fmt.hint;
+}
+
 const packageTypes = [
   { value: "YOUR_PACKAGING", label: "Your Own Packaging" },
   { value: "FEDEX_ENVELOPE", label: "FedEx Envelope" },
@@ -435,42 +470,7 @@ const carriers = [
 ];
 
 function CarrierMark({ carrierCode }: { carrierCode: string }) {
-  if (carrierCode === "FEDEX") {
-    return (
-      <div className="inline-flex items-center justify-center" aria-label="FedEx">
-        <span className="text-2xl font-black tracking-tight">
-          <span className="text-[#4D148C]">Fed</span>
-          <span className="text-[#FF6600]">Ex</span>
-        </span>
-      </div>
-    );
-  }
-
-  if (carrierCode === "ARAMEX") {
-    return (
-      <div
-        className="inline-flex min-w-[132px] items-center justify-center rounded-md bg-[#D71920] px-4 py-2 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]"
-        aria-label="Aramex"
-      >
-        <span className="text-xl font-black tracking-tight">Aramex</span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="inline-flex min-w-[132px] items-center justify-center rounded-md bg-[#FFCC00] px-4 py-2 shadow-[inset_0_0_0_1px_rgba(212,5,17,0.15)]"
-      aria-label="DHL"
-    >
-      <img
-        src={dhlLogo}
-        alt="DHL"
-        className="h-[18px] w-auto object-contain"
-        loading="eager"
-        decoding="async"
-      />
-    </div>
-  );
+  return <CarrierLogo carrierCode={carrierCode} />;
 }
 
 function titleCaseLabel(value: string): string {
@@ -523,15 +523,60 @@ interface MyPermissions {
   isPrimaryContact: boolean;
 }
 
+// Module-level so its identity is stable across renders. Defining this inside the component
+// made React treat it as a new component type on every keystroke, remounting the whole form
+// and dropping input focus after each character.
+function QuoteShell({ quoteMode, profile, children }: { quoteMode: boolean; profile?: string | null; children: React.ReactNode }) {
+  return quoteMode ? <>{children}</> : <ClientLayout clientProfile={profile ?? undefined}>{children}</ClientLayout>;
+}
+
+// Express shipments are booked for a carrier pickup automatically. Keep PICKUP_CUTOFF_HOUR in
+// sync with the server (routes.ts). Before the cutoff on a business day → same-day pickup;
+// otherwise the next business day. KSA weekend = Friday & Saturday.
+const PICKUP_CUTOFF_HOUR = 15; // 24h, KSA local
+function isKsaWeekendDow(dow: number): boolean {
+  return dow === 5 || dow === 6;
+}
+function computeDefaultPickup(now: Date = new Date()): { date: string; sameDay: boolean } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false,
+  }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {} as Record<string, string>);
+  const y = Number(parts.year), m = Number(parts.month), d = Number(parts.day);
+  const hour = Number(parts.hour === "24" ? "0" : parts.hour);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  if (hour < PICKUP_CUTOFF_HOUR && !isKsaWeekendDow(cur.getUTCDay())) {
+    return { date: cur.toISOString().slice(0, 10), sameDay: true };
+  }
+  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekendDow(cur.getUTCDay()));
+  return { date: cur.toISOString().slice(0, 10), sameDay: false };
+}
+
 export default function CreateShipment() {
   const [, navigate] = useLocation();
   const searchString = useSearch();
   const { toast } = useToast();
+  // Admin quotation mode — when present, this same flow is being used by an admin to build a
+  // quote for the selected client; endpoints swap to admin on-behalf-of variants and the final
+  // step Sends the quote instead of Pay. When null, behaviour is the normal client flow.
+  const quotation = useQuotationMode();
+  const quoteMode = Boolean(quotation);
   const [step, setStep] = useState(1);
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
   const [rates, setRates] = useState<RatesResponse | null>(null);
+  // Quotation mode: maps a rate row's synthetic quoteId → the admin option (carrier + base rate).
+  const [adminRateOptions, setAdminRateOptions] = useState<Record<string, { carrierCode?: string; serviceType?: string; serviceName: string; baseRate: number }>>({});
+  const [quotationSent, setQuotationSent] = useState<{ trackingNumber: string } | null>(null);
   const [checkoutData, setCheckoutData] = useState<CheckoutResponse | null>(null);
   const [confirmData, setConfirmData] = useState<ConfirmResponse | null>(null);
+  // Carrier pickup — express shipments are ALWAYS booked for pickup. `custom` = the client chose
+  // a specific date/window instead of the automatic cutoff-based default.
+  const [pickup, setPickup] = useState({ custom: false, date: "", readyTime: "09:00", closeTime: "17:00", location: "", instructions: "" });
+  // Dedupe guards for step navigation. Declared at the top (before any early return) so the
+  // hook order is stable — placing useRef after the access-denied early return crashed the
+  // page with "Rendered more hooks than during the previous render."
+  const lastCheckoutSignatureRef = useRef<string | null>(null);
+  const lastRatesSignatureRef = useRef<string | null>(null);
   const [isProcessingCallback, setIsProcessingCallback] = useState(false);
 
   const [formData, setFormData] = useState<ShipmentFormData>({
@@ -541,6 +586,7 @@ export default function CreateShipment() {
     serviceType: "",
     shipper: {
       name: "",
+      company: "",
       phone: "",
       email: "",
       countryCode: "",
@@ -553,6 +599,7 @@ export default function CreateShipment() {
     },
     recipient: {
       name: "",
+      company: "",
       phone: "",
       email: "",
       countryCode: "",
@@ -611,7 +658,7 @@ export default function CreateShipment() {
   });
 
   const { data: account } = useQuery<ClientAccount>({
-    queryKey: ["/api/client/account"],
+    queryKey: [quoteMode ? `/api/admin/quotations/client/${quotation!.clientAccountId}` : "/api/client/account"],
   });
 
   // Helper function to create address from account's default shipping address
@@ -619,6 +666,8 @@ export default function CreateShipment() {
     if (!account) return null;
     return {
       name: account.shippingContactName || account.name || "",
+      // For company accounts, pre-fill the sender company from the account.
+      company: account.accountType === "company" ? (account.companyName || "") : "",
       phone: account.shippingContactPhone || account.phone || "",
       countryCode: account.shippingCountryCode || "",
       stateOrProvince: (account as any).shippingStateOrProvince || "",
@@ -713,6 +762,31 @@ export default function CreateShipment() {
 
   const getRatesMutation = useMutation({
     mutationFn: async (data: ShipmentFormData) => {
+      if (quoteMode) {
+        // Admin on-behalf rates → live carrier options for the selected client.
+        const res = await apiRequest("POST", "/api/admin/quotations/rates", {
+          clientAccountId: quotation!.clientAccountId,
+          type: "express",
+          shipper: { ...data.shipper, addressLine2: data.shipper.addressLine2 || "", shortAddress: data.shipper.shortAddress || "" },
+          recipient: { ...data.recipient, addressLine2: data.recipient.addressLine2 || "", shortAddress: data.recipient.shortAddress || "" },
+          packages: data.packages,
+          weightUnit: data.weightUnit,
+          dimensionUnit: data.dimensionUnit,
+        });
+        const body = await res.json() as { options: Array<{ carrierCode?: string; carrierName?: string; serviceType?: string; serviceName: string; baseRate: number; clientTotal: number; transitDays?: number | null }> };
+        const map: Record<string, { carrierCode?: string; serviceType?: string; serviceName: string; baseRate: number }> = {};
+        const quotes: RateQuote[] = body.options.map((o, i) => {
+          const quoteId = `q${i}`;
+          map[quoteId] = { carrierCode: o.carrierCode, serviceType: o.serviceType, serviceName: o.serviceName, baseRate: o.baseRate };
+          return {
+            quoteId, carrierCode: o.carrierCode || "", carrierName: o.carrierName || o.serviceName,
+            serviceType: o.serviceType || "", serviceName: o.serviceName,
+            finalPrice: o.clientTotal, currency: "SAR", transitDays: Number(o.transitDays ?? 0),
+          };
+        });
+        setAdminRateOptions(map);
+        return { quotes, expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), availableCarriers: [] } as RatesResponse;
+      }
       const payload = {
         shipmentType: data.shipmentType,
         isDdp: data.isDdp,
@@ -736,8 +810,8 @@ export default function CreateShipment() {
     },
     onError: (error) => {
       toast({
-        title: "Failed to get rates",
-        description: error instanceof Error ? error.message : "Please try again",
+        title: "We couldn't get rates for this shipment",
+        description: humanizeError(error),
         variant: "destructive",
       });
     },
@@ -761,11 +835,40 @@ export default function CreateShipment() {
         quantity: number;
       }>;
       tradeDocuments?: ShipmentTradeDocument[];
+      pickup?: { requested: boolean; date?: string; readyTime?: string; closeTime?: string; location?: string; instructions?: string };
     }) => {
+      if (quoteMode) {
+        // Admin quotation: create the payment_pending quote for the client + notify them.
+        const opt = payload.quoteId ? adminRateOptions[payload.quoteId] : undefined;
+        const res = await apiRequest("POST", "/api/admin/quotations", {
+          clientAccountId: quotation!.clientAccountId,
+          type: "express",
+          shipper: { ...formData.shipper, addressLine2: formData.shipper.addressLine2 || "", shortAddress: formData.shipper.shortAddress || "" },
+          recipient: { ...formData.recipient, addressLine2: formData.recipient.addressLine2 || "", shortAddress: formData.recipient.shortAddress || "" },
+          packages: formData.packages,
+          weightUnit: formData.weightUnit,
+          dimensionUnit: formData.dimensionUnit,
+          currency: formData.currency,
+          carrierCode: opt?.carrierCode,
+          serviceType: opt?.serviceType,
+          serviceName: opt?.serviceName,
+          baseRateSar: opt?.baseRate,
+          items: payload.items,
+          tradeDocuments: payload.tradeDocuments,
+          pickup: payload.pickup,
+          sendNotification: true,
+        });
+        return res.json() as Promise<CheckoutResponse>;
+      }
       const res = await apiRequest("POST", "/api/client/shipments/checkout", payload);
       return res.json() as Promise<CheckoutResponse>;
     },
     onSuccess: (data) => {
+      if (quoteMode) {
+        setQuotationSent({ trackingNumber: (data as any).trackingNumber || "" });
+        setStep(confirmationStep);
+        return;
+      }
       setCheckoutData(data);
       queryClient.invalidateQueries({ queryKey: ["/api/client/address-book"] });
       setStep(paymentStep);
@@ -773,7 +876,7 @@ export default function CreateShipment() {
     onError: (error) => {
       toast({
         title: "Failed to process checkout",
-        description: error instanceof Error ? error.message : "Please try again",
+        description: humanizeError(error),
         variant: "destructive",
       });
     },
@@ -785,7 +888,10 @@ export default function CreateShipment() {
       tapTokenId?: string;
       saveCardForFuture?: boolean;
     }) => {
-      const res = await apiRequest("POST", "/api/client/shipments/pay", payload);
+      const res = await apiRequest("POST", "/api/client/shipments/pay", {
+        ...payload,
+        returnPath: "/client/create-shipment",
+      });
       return res.json() as Promise<ShipmentPaymentResponse>;
     },
     onSuccess: (data) => {
@@ -834,7 +940,7 @@ export default function CreateShipment() {
       queryClient.invalidateQueries({ queryKey: ["/api/client/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
       // Clear URL params after successful confirmation
-      navigate("/client/shipments/new", { replace: true });
+      navigate("/client/create-shipment", { replace: true });
     },
     onError: (error: any) => {
       const is502 = error?.status === 502 || (error instanceof Error && error.message?.includes("carrier"));
@@ -842,7 +948,7 @@ export default function CreateShipment() {
         title: is502 ? "Carrier Error" : "Failed to confirm shipment",
         description: is502
           ? "The carrier could not process this shipment. Please retry or contact support."
-          : (error instanceof Error ? error.message : "Please try again"),
+          : (humanizeError(error)),
         variant: "destructive",
       });
       navigate("/client/shipments", { replace: true });
@@ -879,7 +985,7 @@ export default function CreateShipment() {
         title: is502 ? "Carrier Error" : "Failed to process Pay Later",
         description: is502
           ? "The carrier could not process this shipment. Please retry or contact support."
-          : (error instanceof Error ? error.message : "Please try again"),
+          : (humanizeError(error)),
         variant: "destructive",
       });
     },
@@ -889,7 +995,9 @@ export default function CreateShipment() {
     queryKey: ["/api/client/my-permissions"],
   });
 
-  const canCreateShipments = myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
+  // In admin quotation mode the admin route already gates access; the client permission query
+  // doesn't apply, so treat creation as allowed.
+  const canCreateShipments = quoteMode || myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
 
   const { data: addressBookEntries = [] } = useQuery<AddressBookEntry[]>({
     queryKey: ["/api/client/address-book"],
@@ -903,8 +1011,9 @@ export default function CreateShipment() {
   const invoiceDocument = formData.tradeDocuments[0] ?? null;
   const isInternationalShipment =
     formData.shipmentType === "inbound" || formData.shipmentType === "outbound";
-  const customsStep = 6;
-  const paymentStep = isInternationalShipment ? 7 : 6;
+  const customsStep = 6; // international only
+  const pickupStep = isInternationalShipment ? 7 : 6;
+  const paymentStep = isInternationalShipment ? 8 : 7;
   const confirmationStep = paymentStep + 1;
   const selectedQuote = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId) ?? null;
   const selectedCarrierCode = selectedQuote?.carrierCode || formData.carrier || "";
@@ -965,6 +1074,7 @@ export default function CreateShipment() {
     return <LoadingScreen />;
   }
 
+  // In quotation mode the admin page supplies the layout; otherwise use ClientLayout.
   if (!canCreateShipments) {
     return (
       <ClientLayout>
@@ -997,6 +1107,30 @@ export default function CreateShipment() {
     setFormData(prev => ({
       ...prev,
       recipient: { ...prev.recipient, [field]: value },
+    }));
+  };
+
+  // Fill city + postal (+ state when empty) from a picked city/postal suggestion.
+  const pickShipperGeo = (s: GeoSuggestion) => {
+    setFormData(prev => ({
+      ...prev,
+      shipper: {
+        ...prev.shipper,
+        city: s.city,
+        postalCode: s.postalCode,
+        stateOrProvince: prev.shipper.stateOrProvince || s.state || "",
+      },
+    }));
+  };
+  const pickRecipientGeo = (s: GeoSuggestion) => {
+    setFormData(prev => ({
+      ...prev,
+      recipient: {
+        ...prev.recipient,
+        city: s.city,
+        postalCode: s.postalCode,
+        stateOrProvince: prev.recipient.stateOrProvince || s.state || "",
+      },
     }));
   };
 
@@ -1107,8 +1241,9 @@ export default function CreateShipment() {
     try {
       const extractionRes = await apiRequest(
         "POST",
-        "/api/client/shipments/extract-package-details",
+        quoteMode ? "/api/admin/quotations/extract-package-details" : "/api/client/shipments/extract-package-details",
         {
+          ...(quoteMode ? { clientAccountId: quotation!.clientAccountId, shipperCountryCode: formData.shipper.countryCode, recipientCountryCode: formData.recipient.countryCode, shipmentType: formData.shipmentType } : {}),
           fileName: uploadResponse.metadata.name,
           objectPath: uploadResponse.objectPath,
           contentType: normalizeTradeDocumentContentType(
@@ -1241,8 +1376,9 @@ export default function CreateShipment() {
     try {
       const extractionRes = await apiRequest(
         "POST",
-        "/api/client/shipments/extract-invoice-items",
+        quoteMode ? "/api/admin/quotations/extract-invoice-items" : "/api/client/shipments/extract-invoice-items",
         {
+          ...(quoteMode ? { clientAccountId: quotation!.clientAccountId } : {}),
           shipmentType: formData.shipmentType,
           shipperCountryCode: formData.shipper.countryCode,
           recipientCountryCode: formData.recipient.countryCode,
@@ -1406,7 +1542,7 @@ export default function CreateShipment() {
     const code = selectedCode || editingItem.hsCode;
     if (!code || !editingItem.itemName || !editingItem.category || !editingItem.countryOfOrigin) return;
     try {
-      await apiRequest("POST", "/api/client/hs-code/confirm", {
+      if (!quoteMode) await apiRequest("POST", "/api/client/hs-code/confirm", {
         itemName: editingItem.itemName,
         category: editingItem.category,
         material: editingItem.material || undefined,
@@ -1472,7 +1608,7 @@ export default function CreateShipment() {
     if (!item.hsCode || !item.itemName || !item.category || !item.countryOfOrigin) return;
 
     try {
-      await apiRequest("POST", "/api/client/hs-code/confirm", {
+      if (!quoteMode) await apiRequest("POST", "/api/client/hs-code/confirm", {
         itemName: item.itemName,
         category: item.category,
         material: item.material || undefined,
@@ -1508,15 +1644,26 @@ export default function CreateShipment() {
         return false;
       }
       if (isPostalRequired(countryCode) && !postalCode) {
-        toast({ title: `Postal code is required for ${countryCode}`, variant: "destructive" });
+        toast({ title: "Sender postal code is required", description: `A valid postal code is required for ${countryCode}.`, variant: "destructive" });
         return false;
       }
+      if (isPostalRequired(countryCode)) {
+        const hint = postalFormatError(countryCode, postalCode);
+        if (hint) {
+          toast({ title: "Check the sender postal code", description: hint, variant: "destructive" });
+          return false;
+        }
+      }
       if (countryCode === "SA" && !shortAddress) {
-        toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
+        toast({ title: "Sender National Address is required", description: "KSA addresses need a National Address short code (e.g. RCTB4359).", variant: "destructive" });
+        return false;
+      }
+      if (countryCode === "SA" && shortAddress && !SA_SHORT_ADDRESS_REGEX.test(shortAddress.trim())) {
+        toast({ title: "Check the sender National Address", description: "It should be 4 letters followed by 4 digits, e.g. RCTB4359.", variant: "destructive" });
         return false;
       }
       if (isStateRequired(countryCode) && !stateOrProvince) {
-        toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
+        toast({ title: "Sender state / province is required", description: "US and Canada addresses need a state or province.", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 3) {
@@ -1530,15 +1677,26 @@ export default function CreateShipment() {
         return false;
       }
       if (isPostalRequired(countryCode) && !postalCode) {
-        toast({ title: `Postal code is required for ${countryCode}`, variant: "destructive" });
+        toast({ title: "Recipient postal code is required", description: `A valid postal code is required for ${countryCode}.`, variant: "destructive" });
         return false;
       }
+      if (isPostalRequired(countryCode)) {
+        const hint = postalFormatError(countryCode, postalCode);
+        if (hint) {
+          toast({ title: "Check the recipient postal code", description: hint, variant: "destructive" });
+          return false;
+        }
+      }
       if (countryCode === "SA" && !shortAddress) {
-        toast({ title: "Short address is required for KSA addresses", variant: "destructive" });
+        toast({ title: "Recipient National Address is required", description: "KSA addresses need a National Address short code (e.g. RCTB4359).", variant: "destructive" });
+        return false;
+      }
+      if (countryCode === "SA" && shortAddress && !SA_SHORT_ADDRESS_REGEX.test(shortAddress.trim())) {
+        toast({ title: "Check the recipient National Address", description: "It should be 4 letters followed by 4 digits, e.g. RCTB4359.", variant: "destructive" });
         return false;
       }
       if (isStateRequired(countryCode) && !stateOrProvince) {
-        toast({ title: "State/Province is required for US and Canada addresses", variant: "destructive" });
+        toast({ title: "Recipient state / province is required", description: "US and Canada addresses need a state or province.", variant: "destructive" });
         return false;
       }
     } else if (currentStep === 4) {
@@ -1602,8 +1760,20 @@ export default function CreateShipment() {
         quantity: number;
       }>;
       tradeDocuments?: ShipmentTradeDocument[];
+      pickup?: { requested: boolean; date?: string; readyTime?: string; closeTime?: string; location?: string; instructions?: string };
     } = {
       quoteId: selectedQuoteId,
+    };
+
+    // Express shipments are always booked for a carrier pickup. Send a custom date/window only
+    // when the client explicitly chose one; otherwise the server applies the cutoff-based default.
+    payload.pickup = {
+      requested: true,
+      ...(pickup.custom && pickup.date
+        ? { date: pickup.date, readyTime: pickup.readyTime, closeTime: pickup.closeTime }
+        : {}),
+      location: pickup.location || undefined,
+      instructions: pickup.instructions || undefined,
     };
 
     if (isInternationalShipment) {
@@ -1629,34 +1799,64 @@ export default function CreateShipment() {
     return payload;
   };
 
+  // Signature of the rate-affecting inputs. Reused so stepping back to the package step and
+  // forward again does NOT re-fetch rates (which would mint new quote IDs and clear the
+  // existing checkout, causing a duplicate shipment). Only a real change re-quotes.
+  const ratesSignature = () =>
+    JSON.stringify({
+      shipper: formData.shipper,
+      recipient: formData.recipient,
+      packages: formData.packages,
+      weightUnit: formData.weightUnit,
+      dimensionUnit: formData.dimensionUnit,
+      packageType: formData.packageType,
+      currency: formData.currency,
+    });
+
+  const submitCheckout = () => {
+    const payload = buildCheckoutPayload();
+    if (!payload) return;
+    if (checkoutMutation.isPending) return; // a checkout is already in flight — ignore repeats
+    const signature = JSON.stringify(payload);
+    if (signature === lastCheckoutSignatureRef.current && (checkoutData || quotationSent)) {
+      setStep(quoteMode ? confirmationStep : paymentStep);
+      return;
+    }
+    lastCheckoutSignatureRef.current = signature;
+    checkoutMutation.mutate(payload);
+  };
+
   const nextStep = () => {
     if (!validateStep(step)) {
       return;
     }
 
     if (step === 4) {
+      if (getRatesMutation.isPending) return;
+      // Reuse existing quotes when the rate inputs are unchanged (back → forward), keeping the
+      // quote IDs + any checkout stable so no duplicate shipment is created.
+      if (rates && ratesSignature() === lastRatesSignatureRef.current) {
+        setStep(5);
+        return;
+      }
+      lastRatesSignatureRef.current = ratesSignature();
       getRatesMutation.mutate(formData);
       return;
     }
 
     if (step === 5) {
-      if (isInternationalShipment) {
-        setStep(customsStep);
-        return;
-      }
-
-      const payload = buildCheckoutPayload();
-      if (payload) {
-        checkoutMutation.mutate(payload);
-      }
+      // Rate selected → customs (international) or straight to the pickup step (domestic).
+      setStep(isInternationalShipment ? customsStep : pickupStep);
       return;
     }
 
     if (step === customsStep && isInternationalShipment) {
-      const payload = buildCheckoutPayload();
-      if (payload) {
-        checkoutMutation.mutate(payload);
-      }
+      setStep(pickupStep);
+      return;
+    }
+
+    if (step === pickupStep) {
+      submitCheckout();
       return;
     }
 
@@ -1675,6 +1875,7 @@ export default function CreateShipment() {
         "Package Details",
         "Select Rate",
         "Customs Details",
+        "Pickup",
         "Payment",
         "Confirmation",
       ]
@@ -1684,6 +1885,7 @@ export default function CreateShipment() {
         "Recipient Details",
         "Package Details",
         "Select Rate",
+        "Pickup",
         "Payment",
         "Confirmation",
       ];
@@ -1691,13 +1893,17 @@ export default function CreateShipment() {
   const senderNeedsShortAddress = formData.shipper.countryCode === "SA";
   const recipientNeedsShortAddress = formData.recipient.countryCode === "SA";
 
+  const returnToParam = new URLSearchParams(searchString).get("returnTo");
+  const backHref = returnToParam && returnToParam.startsWith("/client/") ? returnToParam : "/client/shipments";
+  const backLabel = backHref.includes("/quick-quote") ? "Back to Quick Quote" : "Back to Shipments";
+
   return (
-    <ClientLayout clientProfile={account?.profile}>
+    <QuoteShell quoteMode={quoteMode} profile={account?.profile}>
       <div className={`p-6 mx-auto ${step === 5 ? "max-w-7xl" : "max-w-3xl"}`}>
-        <Link href="/client/shipments">
+        <Link href={backHref}>
           <Button variant="ghost" className="mb-6" data-testid="button-back">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Shipments
+            {backLabel}
           </Button>
         </Link>
 
@@ -1917,6 +2123,17 @@ export default function CreateShipment() {
                   data-testid="input-shipper-name"
                 />
               </div>
+              {account?.accountType === "company" && (
+                <div>
+                  <Label>Company Name</Label>
+                  <Input
+                    value={formData.shipper.company || ""}
+                    onChange={(e) => updateShipper("company", e.target.value)}
+                    placeholder="Sender company"
+                    data-testid="input-shipper-company"
+                  />
+                </div>
+              )}
               <div>
                 <Label>Address Line 1 *</Label>
                 <Input
@@ -1938,9 +2155,12 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>City *</Label>
-                  <Input
+                  <GeoSuggestInput
+                    mode="city"
+                    country={formData.shipper.countryCode}
                     value={formData.shipper.city}
-                    onChange={(e) => updateShipper("city", e.target.value)}
+                    onChange={(v) => updateShipper("city", v)}
+                    onPick={(s) => pickShipperGeo(s)}
                     placeholder="City"
                     data-testid="input-shipper-city"
                   />
@@ -1958,12 +2178,18 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Postal Code {isPostalRequired(formData.shipper.countryCode) ? "*" : ""}</Label>
-                  <Input
+                  <GeoSuggestInput
+                    mode="postal"
+                    country={formData.shipper.countryCode}
                     value={formData.shipper.postalCode}
-                    onChange={(e) => updateShipper("postalCode", e.target.value)}
+                    onChange={(v) => updateShipper("postalCode", v)}
+                    onPick={(s) => pickShipperGeo(s)}
                     placeholder="Postal code"
                     data-testid="input-shipper-postal"
                   />
+                  {POSTAL_FORMATS[formData.shipper.countryCode?.toUpperCase()] && (
+                    <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.shipper.countryCode.toUpperCase()].hint}</p>
+                  )}
                 </div>
                 <div>
                   <Label>Country *</Label>
@@ -1984,10 +2210,10 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Phone *</Label>
-                  <Input
+                  <PhoneInput
                     value={formData.shipper.phone}
-                    onChange={(e) => updateShipper("phone", e.target.value)}
-                    placeholder="+1 234 567 890"
+                    onChange={(v) => updateShipper("phone", v)}
+                    defaultCountry={formData.shipper.countryCode || "SA"}
                     data-testid="input-shipper-phone"
                   />
                 </div>
@@ -2074,6 +2300,17 @@ export default function CreateShipment() {
                   data-testid="input-recipient-name"
                 />
               </div>
+              {account?.accountType === "company" && (
+                <div>
+                  <Label>Company Name</Label>
+                  <Input
+                    value={formData.recipient.company || ""}
+                    onChange={(e) => updateRecipient("company", e.target.value)}
+                    placeholder="Recipient company (optional)"
+                    data-testid="input-recipient-company"
+                  />
+                </div>
+              )}
               <div>
                 <Label>Address Line 1 *</Label>
                 <Input
@@ -2095,9 +2332,12 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>City *</Label>
-                  <Input
+                  <GeoSuggestInput
+                    mode="city"
+                    country={formData.recipient.countryCode}
                     value={formData.recipient.city}
-                    onChange={(e) => updateRecipient("city", e.target.value)}
+                    onChange={(v) => updateRecipient("city", v)}
+                    onPick={(s) => pickRecipientGeo(s)}
                     placeholder="City"
                     data-testid="input-recipient-city"
                   />
@@ -2115,12 +2355,18 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Postal Code {isPostalRequired(formData.recipient.countryCode) ? "*" : ""}</Label>
-                  <Input
+                  <GeoSuggestInput
+                    mode="postal"
+                    country={formData.recipient.countryCode}
                     value={formData.recipient.postalCode}
-                    onChange={(e) => updateRecipient("postalCode", e.target.value)}
+                    onChange={(v) => updateRecipient("postalCode", v)}
+                    onPick={(s) => pickRecipientGeo(s)}
                     placeholder="Postal code"
                     data-testid="input-recipient-postal"
                   />
+                  {POSTAL_FORMATS[formData.recipient.countryCode?.toUpperCase()] && (
+                    <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.recipient.countryCode.toUpperCase()].hint}</p>
+                  )}
                 </div>
                 <div>
                   <Label>Country *</Label>
@@ -2141,10 +2387,10 @@ export default function CreateShipment() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Phone *</Label>
-                  <Input
+                  <PhoneInput
                     value={formData.recipient.phone}
-                    onChange={(e) => updateRecipient("phone", e.target.value)}
-                    placeholder="+1 234 567 890"
+                    onChange={(v) => updateRecipient("phone", v)}
+                    defaultCountry={formData.recipient.countryCode || "SA"}
                     data-testid="input-recipient-phone"
                   />
                 </div>
@@ -2581,14 +2827,10 @@ export default function CreateShipment() {
               <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
               <Button
                 onClick={nextStep}
-                disabled={!selectedQuoteId || (!isInternationalShipment && checkoutMutation.isPending)}
+                disabled={!selectedQuoteId}
                 data-testid="button-continue-from-rates"
               >
-                {!isInternationalShipment && checkoutMutation.isPending
-                  ? "Processing..."
-                  : isInternationalShipment
-                    ? "Continue to Customs Details"
-                    : "Proceed to Payment"}
+                {isInternationalShipment ? "Continue to Customs Details" : "Continue to Pickup"}
               </Button>
             </CardFooter>
           </Card>
@@ -2871,13 +3113,72 @@ export default function CreateShipment() {
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
-              <Button
-                onClick={nextStep}
-                disabled={checkoutMutation.isPending}
-                data-testid="button-checkout"
-              >
+              <Button onClick={nextStep} data-testid="button-next">
+                Continue to Pickup
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === pickupStep && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" /> Carrier Pickup
+              </CardTitle>
+              <CardDescription>
+                Your shipment is booked for a courier pickup automatically. You'll get the pickup confirmation number once payment is complete.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(() => {
+                const def = computeDefaultPickup();
+                return (
+                  <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+                    <p className="font-medium">
+                      {def.sameDay ? "Same-day pickup" : "Next business day pickup"}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      Default pickup date: <span className="font-medium text-foreground">{def.date}</span>
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Orders placed before {String(PICKUP_CUTOFF_HOUR).padStart(2, "0")}:00 (KSA) are picked up the same day; later orders roll to the next business day (Fri/Sat weekend excluded).
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={pickup.custom}
+                  onChange={(e) => setPickup({ ...pickup, custom: e.target.checked, date: pickup.date || computeDefaultPickup().date })}
+                  data-testid="checkbox-custom-pickup"
+                />
+                I want to choose a custom pickup date
+              </label>
+
+              {pickup.custom && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Pickup date</Label>
+                    <Input type="date" min={new Date().toISOString().slice(0, 10)} value={pickup.date} onChange={(e) => setPickup({ ...pickup, date: e.target.value })} data-testid="input-pickup-date" />
+                  </div>
+                  <div className="space-y-1"><Label>Location (optional)</Label><Input placeholder="Reception / dock" value={pickup.location} onChange={(e) => setPickup({ ...pickup, location: e.target.value })} /></div>
+                  <div className="space-y-1"><Label>Ready time</Label><Input type="time" value={pickup.readyTime} onChange={(e) => setPickup({ ...pickup, readyTime: e.target.value })} /></div>
+                  <div className="space-y-1"><Label>Close time</Label><Input type="time" value={pickup.closeTime} onChange={(e) => setPickup({ ...pickup, closeTime: e.target.value })} /></div>
+                  <div className="space-y-1 sm:col-span-2"><Label>Instructions (optional)</Label><Input placeholder="e.g. call on arrival" value={pickup.instructions} onChange={(e) => setPickup({ ...pickup, instructions: e.target.value })} /></div>
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(isInternationalShipment ? customsStep : 5)} data-testid="button-prev">Back</Button>
+              <Button onClick={nextStep} disabled={checkoutMutation.isPending} data-testid="button-checkout">
                 {checkoutMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
+                ) : quoteMode ? (
+                  <>Send Quotation</>
                 ) : (
                   <>Proceed to Payment</>
                 )}
@@ -2944,7 +3245,7 @@ export default function CreateShipment() {
                         Extra {checkoutData.chargeableWeightUnit || "KG"} Charge
                       </span>
                       <span className="font-medium">
-                        <SarAmount amount={checkoutExtraKgCharge} /> {checkoutData.currency}
+                        <SarAmount amount={checkoutExtraKgCharge} />
                       </span>
                     </div>
                   </div>
@@ -2952,7 +3253,7 @@ export default function CreateShipment() {
                 <div className="flex justify-between text-sm mt-2">
                   <span>Total Amount</span>
                   <span className="font-bold text-lg">
-                    <SarAmount amount={checkoutData.amount} /> {checkoutData.currency}
+                    <SarAmount amount={checkoutData.amount} />
                   </span>
                 </div>
               </div>
@@ -3042,7 +3343,25 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === confirmationStep && confirmData && (
+        {step === confirmationStep && quoteMode && quotationSent && (
+          <Card>
+            <CardHeader className="text-center">
+              <div className="mx-auto w-12 h-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">
+                <Check className="h-6 w-6 text-green-600 dark:text-green-400" />
+              </div>
+              <CardTitle>Quotation sent to client</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-muted-foreground">
+                Quotation <span className="font-mono">{quotationSent.trackingNumber}</span> was created for{" "}
+                <span className="font-medium">{quotation?.clientName || "the client"}</span> and they've been notified to review, modify and pay.
+              </p>
+              <Button onClick={() => navigate("/admin/shipments")}>Back to shipments</Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === confirmationStep && !quoteMode && confirmData && (
           <Card>
             <CardHeader className="text-center">
               <div className="mx-auto w-12 h-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">
@@ -3071,6 +3390,17 @@ export default function CreateShipment() {
                     <span>{format(new Date(confirmData.estimatedDelivery), "MMM d, yyyy")}</span>
                   </div>
                 )}
+                {confirmData.shipment?.pickupConfirmationNumber ? (
+                  <div className="flex justify-between text-sm">
+                    <span>Pickup Number</span>
+                    <span className="font-mono font-medium">{confirmData.shipment.pickupConfirmationNumber}</span>
+                  </div>
+                ) : confirmData.shipment?.pickupRequested ? (
+                  <div className="flex justify-between text-sm">
+                    <span>Pickup</span>
+                    <span className="text-muted-foreground">Booking{confirmData.shipment?.pickupDate ? ` for ${confirmData.shipment.pickupDate}` : ""} — number will appear on the shipment shortly</span>
+                  </div>
+                ) : null}
               </div>
               {confirmData.labelUrl && (
                 <Button variant="outline" className="w-full" asChild>
@@ -3299,6 +3629,6 @@ export default function CreateShipment() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
-    </ClientLayout>
+    </QuoteShell>
   );
 }

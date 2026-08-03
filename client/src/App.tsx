@@ -6,10 +6,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/lib/theme-provider";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { LoadingScreen } from "@/components/loading-spinner";
+import { RouteProgress } from "@/components/route-progress";
+import { SalesFeatureGate } from "@/components/sales-feature-gate";
 
 // Pages
 import LoginPage from "@/pages/login";
 import ApplyPage from "@/pages/apply";
+import ResetPasswordPage from "@/pages/reset-password";
 import NotFound from "@/pages/not-found";
 import AcceptInvitePage from "@/pages/accept-invite";
 
@@ -19,11 +22,11 @@ import AdminUsers from "@/pages/admin/users";
 import AdminClients from "@/pages/admin/clients";
 import AdminApplications from "@/pages/admin/applications";
 import AdminShipments from "@/pages/admin/shipments";
+import QuotationNew from "@/pages/admin/quotation-new";
 import AdminInvoices from "@/pages/admin/invoices";
 import AdminPayments from "@/pages/admin/payments";
 import AdminRefundRequests from "@/pages/admin/refund-requests";
 import AdminPricing from "@/pages/admin/pricing";
-import AdminDdpPricing from "@/pages/admin/ddp-pricing";
 import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminIntegrationLogs from "@/pages/admin/integration-logs";
 import AdminApps from "@/pages/admin/apps";
@@ -32,6 +35,7 @@ import AdminEditClient from "@/pages/admin/edit-client";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 import AdminCreditRequests from "@/pages/admin/credit-requests";
+import AdminSalesFeatureRequests from "@/pages/admin/sales-feature-requests";
 import AdminEmailTemplates from "@/pages/admin/email-templates";
 import AdminSystemLogs from "@/pages/admin/system-logs";
 import AdminSettings from "@/pages/admin/settings";
@@ -43,6 +47,15 @@ import TasksPage from "@/pages/tasks";
 import ClientDashboard from "@/pages/client/dashboard";
 import ClientShipments from "@/pages/client/shipments";
 import CreateShipment from "@/pages/client/create-shipment";
+import CreateShipmentSelect from "@/pages/client/create-shipment-select";
+import QuickQuote from "@/pages/client/quick-quote";
+import QuotationDetail from "@/pages/client/quotation-detail";
+import ClientSalesChannels from "@/pages/client/sales-channels";
+import ClientSalesChannelDetail from "@/pages/client/sales-channel-detail";
+import ClientOrders from "@/pages/client/orders";
+import ClientOrderFulfill from "@/pages/client/order-fulfill";
+import ClientAssignmentRules from "@/pages/client/assignment-rules";
+import CreateLocalShipment from "@/pages/client/create-local-shipment";
 import ClientInvoices from "@/pages/client/invoices";
 import ClientPayments from "@/pages/client/payments";
 import ClientSettings from "@/pages/client/settings";
@@ -133,6 +146,7 @@ function Router() {
       {/* Public routes */}
       <Route path="/" component={AuthRedirect} />
       <Route path="/apply" component={ApplyPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/invite/accept/:token" component={AcceptInvitePage} />
       <Route path="/policy/:slug" component={PolicyPage} />
 
@@ -203,6 +217,13 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.shipments.anyOf}
         />
       </Route>
+      <Route path="/admin/quotations/new">
+        <ProtectedRoute
+          component={QuotationNew}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.quotations.anyOf}
+        />
+      </Route>
       <Route path="/admin/shipments">
         <ProtectedRoute
           component={AdminShipments}
@@ -224,12 +245,12 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.pricing.anyOf}
         />
       </Route>
+      {/* Old standalone pricing pages now live as tabs under /admin/pricing */}
       <Route path="/admin/ddp-pricing">
-        <ProtectedRoute
-          component={AdminDdpPricing}
-          requiredUserType="admin"
-          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.pricing.anyOf}
-        />
+        <Redirect to="/admin/pricing?tab=ddp" />
+      </Route>
+      <Route path="/admin/local-pricing">
+        <Redirect to="/admin/pricing?tab=local" />
       </Route>
       <Route path="/admin/system-logs">
         <ProtectedRoute
@@ -307,6 +328,13 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.creditRequests.anyOf}
         />
       </Route>
+      <Route path="/admin/sales-feature-requests">
+        <ProtectedRoute
+          component={AdminSalesFeatureRequests}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.salesFeatureRequests.anyOf}
+        />
+      </Route>
       <Route path="/admin/email-templates">
         <ProtectedRoute
           component={AdminEmailTemplates}
@@ -341,10 +369,34 @@ function Router() {
         <ProtectedRoute component={ClientShipments} requiredUserType="client" />
       </Route>
       <Route path="/client/shipments/new">
-        <ProtectedRoute component={CreateShipment} requiredUserType="client" />
+        <ProtectedRoute component={CreateShipmentSelect} requiredUserType="client" />
+      </Route>
+      <Route path="/client/quick-quote">
+        <ProtectedRoute component={QuickQuote} requiredUserType="client" />
+      </Route>
+      <Route path="/client/quotations/:id">
+        <ProtectedRoute component={QuotationDetail} requiredUserType="client" />
       </Route>
       <Route path="/client/ddp">
         <ProtectedRoute component={ClientDdp} requiredUserType="client" />
+      </Route>
+      <Route path="/client/sales-channels/:id">
+        <ProtectedRoute component={() => <SalesFeatureGate><ClientSalesChannelDetail /></SalesFeatureGate>} requiredUserType="client" />
+      </Route>
+      <Route path="/client/sales-channels">
+        <ProtectedRoute component={() => <SalesFeatureGate><ClientSalesChannels /></SalesFeatureGate>} requiredUserType="client" />
+      </Route>
+      <Route path="/client/assignment-rules">
+        <ProtectedRoute component={() => <SalesFeatureGate><ClientAssignmentRules /></SalesFeatureGate>} requiredUserType="client" />
+      </Route>
+      <Route path="/client/orders/:id/fulfill">
+        <ProtectedRoute component={() => <SalesFeatureGate><ClientOrderFulfill /></SalesFeatureGate>} requiredUserType="client" />
+      </Route>
+      <Route path="/client/orders">
+        <ProtectedRoute component={() => <SalesFeatureGate><ClientOrders /></SalesFeatureGate>} requiredUserType="client" />
+      </Route>
+      <Route path="/client/local/new">
+        <ProtectedRoute component={CreateLocalShipment} requiredUserType="client" />
       </Route>
       <Route path="/client/create-shipment">
         <ProtectedRoute component={CreateShipment} requiredUserType="client" />
@@ -377,6 +429,7 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <TooltipProvider>
+            <RouteProgress />
             <Router />
             <Toaster />
           </TooltipProvider>

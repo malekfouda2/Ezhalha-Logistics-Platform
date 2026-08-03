@@ -24,6 +24,7 @@ afterEach(() => {
     "ZOHO_ORGANIZATION_ID",
     "ZOHO_ACCOUNTS_BASE_URL",
     "ZOHO_API_BASE_URL",
+    "ZOHO_VAT_TAX_ID",
   ]) {
     delete process.env[key];
   }
@@ -32,13 +33,16 @@ afterEach(() => {
 });
 
 describe("Zoho regional invoice synchronization", () => {
-  it("uses the configured regional hosts when updating and deleting an invoice", async () => {
+  it("uses the configured regional hosts when updating an invoice", async () => {
     process.env.ZOHO_CLIENT_ID = "client-id";
     process.env.ZOHO_CLIENT_SECRET = "client-secret";
     process.env.ZOHO_REFRESH_TOKEN = "refresh-token";
     process.env.ZOHO_ORGANIZATION_ID = "organization-id";
     process.env.ZOHO_ACCOUNTS_BASE_URL = "https://accounts.zoho.eu";
     process.env.ZOHO_API_BASE_URL = "https://www.zohoapis.eu";
+    // Provide the VAT tax id so the update path does not make a live /settings/taxes
+    // lookup — keeps the mocked fetch sequence to token + PUT.
+    process.env.ZOHO_VAT_TAX_ID = "vat-tax-id";
 
     vi.spyOn(storage, "createIntegrationLog").mockResolvedValue({} as any);
     const fetchMock = vi.fn()
@@ -46,14 +50,14 @@ describe("Zoho regional invoice synchronization", () => {
         access_token: "regional-access-token",
         expires_in: 3600,
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0 }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const service = new ZohoService();
     expect(await service.updateInvoice("zoho-invoice-1", invoiceParams)).toBe(true);
-    expect(await service.deleteInvoice("zoho-invoice-1")).toBe(true);
 
+    // Invoice deletion is performed manually in Zoho, not through our system, so it is
+    // intentionally not exercised here.
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "https://accounts.zoho.eu/oauth/v2/token",
@@ -61,13 +65,8 @@ describe("Zoho regional invoice synchronization", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://www.zohoapis.eu/books/v3/invoices/zoho-invoice-1?organization_id=organization-id&ignore_auto_number_generation=true",
-      expect.objectContaining({ method: "PUT" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
       "https://www.zohoapis.eu/books/v3/invoices/zoho-invoice-1?organization_id=organization-id",
-      expect.objectContaining({ method: "DELETE" }),
+      expect.objectContaining({ method: "PUT" }),
     );
   });
 });

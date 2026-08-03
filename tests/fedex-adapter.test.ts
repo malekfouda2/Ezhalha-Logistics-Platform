@@ -129,6 +129,48 @@ describe("FedExAdapter", () => {
     expect(payload.requestedShipment.shipper.address.stateOrProvinceCode).toBe("TX");
   });
 
+  it("rate discovery calls FedEx with no serviceType (AUTO) and returns ALL service levels", async () => {
+    let rateBody: any = null;
+    const fetchMock = vi.fn(async (url: any, init: any) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 });
+      }
+      if (u.includes("/availability")) {
+        // Force the availability lookup to fail so getRates falls back to the AUTO path only.
+        return new Response("{}", { status: 500 });
+      }
+      if (u.includes("/rate/v1/rates/quotes")) {
+        rateBody = JSON.parse(String(init.body));
+        return new Response(JSON.stringify({
+          output: {
+            rateReplyDetails: [
+              { serviceType: "FEDEX_INTERNATIONAL_PRIORITY", serviceName: "Intl Priority", ratedShipmentDetails: [{ totalNetCharge: 150, currency: "SAR" }] },
+              { serviceType: "FEDEX_INTERNATIONAL_ECONOMY", serviceName: "Intl Economy", ratedShipmentDetails: [{ totalNetCharge: 100, currency: "SAR" }] },
+              { serviceType: "INTERNATIONAL_FIRST", serviceName: "Intl First", ratedShipmentDetails: [{ totalNetCharge: 220, currency: "SAR" }] },
+            ],
+          },
+        }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new FedExAdapter();
+    const rates = await adapter.getRates({
+      shipper: { name: "S", streetLine1: "1 A St", city: "Cairo", postalCode: "11511", countryCode: "EG", phone: "1" },
+      recipient: { name: "R", streetLine1: "2 B St", city: "Riyadh", postalCode: "11564", countryCode: "SA", phone: "2" },
+      packages: [{ weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING", dimensions: { length: 20, width: 15, height: 10, unit: "CM" } }],
+      currency: "SAR",
+    });
+
+    // All three service levels returned from the single AUTO call.
+    expect(rates).toHaveLength(3);
+    expect(rates.map((r) => r.serviceType).sort()).toEqual(["FEDEX_INTERNATIONAL_ECONOMY", "FEDEX_INTERNATIONAL_PRIORITY", "INTERNATIONAL_FIRST"]);
+    // AUTO: the rate request carried no serviceType.
+    expect(rateBody.requestedShipment.serviceType).toBeUndefined();
+  });
+
   it("throws a carrier error when real tracking fails for a configured FedEx adapter", async () => {
     vi.stubGlobal(
       "fetch",

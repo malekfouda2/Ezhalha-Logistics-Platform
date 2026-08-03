@@ -229,7 +229,7 @@ describe("Client - Shipments", () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Use the dedicated DDP flow for door-to-door shipments.");
+    expect(res.body.error).toBe("Use the dedicated Door To Door Freight flow for door-to-door shipments.");
   });
 
   it("GET /api/client/ddp/lanes should hide legacy origin-city lanes from the simplified flow", async () => {
@@ -331,7 +331,7 @@ describe("Client - Shipments", () => {
   it("should submit a manual DDP shipment for review through credit without booking a carrier", async () => {
     const clientUser = await storage.getUserByUsername(testClientUsername);
     expect(clientUser?.clientAccountId).toBeDefined();
-    await storage.updateClientAccount(clientUser!.clientAccountId!, { creditEnabled: true } as any);
+    await storage.updateClientAccount(clientUser!.clientAccountId!, { creditEnabled: true, creditLimitSar: "100000" } as any);
 
     const lane = await storage.createDdpPricingLane({
       originCountryCode: "QX",
@@ -719,6 +719,7 @@ describe("Client - Shipments", () => {
     expect(clientUser?.clientAccountId).toBeDefined();
     await storage.updateClientAccount(clientUser!.clientAccountId!, {
       creditEnabled: true,
+      creditLimitSar: "100000",
     } as any);
 
     const tradeDocument = await uploadTradeDocumentThroughApi(
@@ -773,6 +774,7 @@ describe("Client - Shipments", () => {
     expect(clientUser?.clientAccountId).toBeDefined();
     await storage.updateClientAccount(clientUser!.clientAccountId!, {
       creditEnabled: true,
+      creditLimitSar: "100000",
     } as any);
 
     const ratesRes = await clientAgent
@@ -1037,6 +1039,10 @@ describe("Client - Payments", () => {
     const clientUser = await storage.getUserByUsername(testClientUsername);
     expect(clientUser?.clientAccountId).toBeDefined();
 
+    // Real Tap charge ids are globally unique; use a per-run id so the ux_payments_txn
+    // idempotency index doesn't collide with a payment left by a previous test run.
+    const chargeId = `chg_test_shipment_webhook_${Date.now()}`;
+
     const shipment = await storage.createShipment({
       clientAccountId: clientUser!.clientAccountId!,
       senderName: "Tap Shipment Sender",
@@ -1086,14 +1092,14 @@ describe("Client - Payments", () => {
           quantity: 1,
         },
       ]),
-      paymentIntentId: "chg_test_shipment_webhook",
+      paymentIntentId: chargeId,
       paymentStatus: "pending",
     });
 
     const res = await clientAgent
       .post("/api/webhooks/tap")
       .send({
-        id: "chg_test_shipment_webhook",
+        id: chargeId,
         object: "charge",
         status: "CAPTURED",
         amount: 120,
@@ -1123,7 +1129,7 @@ describe("Client - Payments", () => {
     const shipmentPayment = payments.find((payment) => payment.invoiceId === invoice?.id);
     expect(shipmentPayment?.status).toBe("completed");
     expect(shipmentPayment?.paymentMethod).toBe("tap");
-    expect(shipmentPayment?.transactionId).toBe("chg_test_shipment_webhook");
+    expect(shipmentPayment?.transactionId).toBe(chargeId);
   });
 
   it("POST /api/client/shipments/pay should apply active abandoned recovery discounts", async () => {
@@ -1210,7 +1216,7 @@ describe("Client - Payments", () => {
 
     const tapChargeSpy = vi.spyOn(tapService, "createCharge").mockImplementation(async (params) => {
       const charge = {
-        id: "tap_mock_abandoned_recovery_discount",
+        id: `tap_mock_abandoned_recovery_discount_${Date.now()}`,
         object: "charge",
         status: "CAPTURED",
         amount: params.amount,
@@ -1295,6 +1301,8 @@ describe("Client - Payments", () => {
     const clientUser = await storage.getUserByUsername(testClientUsername);
     expect(clientUser?.clientAccountId).toBeDefined();
 
+    const chargeId = `chg_test_invoice_webhook_${Date.now()}`;
+
     const invoice = await storage.createInvoice({
       clientAccountId: clientUser!.clientAccountId!,
       amount: "88.00",
@@ -1309,13 +1317,13 @@ describe("Client - Payments", () => {
       amount: "88.00",
       paymentMethod: "tap",
       status: "pending",
-      transactionId: "chg_test_invoice_webhook",
+      transactionId: chargeId,
     });
 
     const res = await clientAgent
       .post("/api/webhooks/tap")
       .send({
-        id: "chg_test_invoice_webhook",
+        id: chargeId,
         object: "charge",
         status: "CAPTURED",
         amount: 88,
@@ -1527,6 +1535,33 @@ describe("Public - Application Submission", () => {
     expect(res.body.status).toBe("pending");
   });
 
+  it("POST /api/applications auto-approves individual applicants and creates a login", async () => {
+    const uniqueEmail = `test_individual_${Date.now()}@example.com`;
+    const res = await supertest(app)
+      .post("/api/applications")
+      .send({
+        accountType: "individual",
+        name: "Individual Applicant",
+        email: uniqueEmail,
+        phone: "55598765432",
+        shippingContactName: "Individual Applicant",
+        shippingContactPhone: "55598765432",
+        shippingCountryCode: "US",
+        shippingStateOrProvince: "Texas",
+        shippingCity: "Austin",
+        shippingPostalCode: "73301",
+        shippingAddressLine1: "1 Personal Way",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("approved");
+
+    // A client user + account should now exist for that email.
+    const user = await storage.getUserByEmail(uniqueEmail);
+    expect(user).toBeTruthy();
+    expect(user?.userType).toBe("client");
+    expect(user?.clientAccountId).toBeTruthy();
+  });
+
   it("POST /api/applications should reject company applications with missing required documents", async () => {
     const uniqueEmail = `test_missing_docs_${Date.now()}@example.com`;
     const res = await supertest(app)
@@ -1607,7 +1642,8 @@ describe("Public - Application Submission", () => {
         shippingShortAddress: "RCTB4359",
       });
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe("pending");
+    // Individual applicants are auto-approved.
+    expect(res.body.status).toBe("approved");
   });
 });
 

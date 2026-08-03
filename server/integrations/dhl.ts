@@ -19,6 +19,8 @@ import {
   type TrackingResponse,
   type ShippingAddress,
   type ShipmentItem,
+  type PickupRequest,
+  type PickupResponse,
 } from "./fedex";
 import { logError, logInfo } from "../services/logger";
 import { storage } from "../storage";
@@ -227,19 +229,24 @@ function buildPartyDetails(address: ShippingAddress, compact: boolean = false) {
   };
 }
 
+// DHL requires either a package dimensions block (each side ≥ 0.001) OR a package typeCode —
+// a package with zero/absent dimensions is rejected (422 "not greater or equal to 0.001",
+// or 400 "Either typeCode or dimensions must be provided"). When a caller supplies no valid
+// dimensions (e.g. the address-less Quick Quote), fall back to a small nominal parcel so the
+// rate returns; the volumetric weight it implies is negligible against any real actual weight.
+const DHL_NOMINAL_DIMENSIONS = { length: 10, width: 10, height: 10 };
+
 function buildPackages(request: RateRequest | CreateShipmentRequest) {
-  return request.packages.map((pkg) => ({
-    weight: pkg.weight,
-    ...(pkg.dimensions
-      ? {
-          dimensions: {
-            length: pkg.dimensions.length,
-            width: pkg.dimensions.width,
-            height: pkg.dimensions.height,
-          },
-        }
-      : {}),
-  }));
+  return request.packages.map((pkg) => {
+    const d = pkg.dimensions;
+    const hasDims = d && Number(d.length) > 0 && Number(d.width) > 0 && Number(d.height) > 0;
+    return {
+      weight: pkg.weight,
+      dimensions: hasDims
+        ? { length: d!.length, width: d!.width, height: d!.height }
+        : { ...DHL_NOMINAL_DIMENSIONS },
+    };
+  });
 }
 
 function buildRateChargeableWeightSummary(request: RateRequest | CreateShipmentRequest) {
@@ -325,13 +332,14 @@ function buildDeclaredValue(items?: ShipmentItem[]): number | undefined {
   return Math.min(total, MAX_DECLARED_VALUE);
 }
 
-function formatDeclaredValue(value: number): string {
+// DHL's Shipment Request API validation now rejects quoted (string) values for
+// content.declaredValue — it must be a numeric value. Clamp to the allowed range and
+// round to 2 decimals, returning a number (never a string).
+function normalizeDeclaredValue(value: number): number {
   const normalizedValue = Math.min(MAX_DECLARED_VALUE, Math.max(0, value));
-  if (Number.isInteger(normalizedValue)) {
-    return String(normalizedValue);
-  }
-
-  return normalizedValue.toFixed(2);
+  return Number.isInteger(normalizedValue)
+    ? normalizedValue
+    : Math.round(normalizedValue * 100) / 100;
 }
 
 function buildCommodityDescription(request: CreateShipmentRequest, items?: ShipmentItem[]): string {
@@ -990,7 +998,7 @@ export class DhlAdapter implements CarrierAdapter {
           isCustomsDeclarable: isInternational,
           description: buildCommodityDescription(request, sanitizedItems),
           packages: buildPackages(request),
-          declaredValue: formatDeclaredValue(declaredValue),
+          declaredValue: normalizeDeclaredValue(declaredValue),
           declaredValueCurrency: request.currency || "SAR",
         },
       };
@@ -1076,8 +1084,121 @@ export class DhlAdapter implements CarrierAdapter {
     }
   }
 
+  supportsPickup = true;
+
+  /**
+   * Book a DHL Express courier pickup for an already-created shipment via POST /pickups.
+   * Returns the dispatchConfirmationNumber. The 3-letter prefix is DHL's service-area code,
+   * assigned server-side from the booking account — not controllable from the request.
+   */
+  async requestPickup(request: PickupRequest): Promise<PickupResponse> {
+    if (!this.isConfigured()) {
+      throw new CarrierError("NOT_CONFIGURED", "DHL is not configured — cannot request a pickup.");
+    }
+    const s = request.shipper;
+    const offset = gmtOffsetForCountry(s.countryCode, request.pickupDate);
+    const packages = request.packages.map((p) => {
+      const weightKg = p.weightUnit === "LB" ? Number(p.weight) * 0.453592 : Number(p.weight);
+      const d = p.dimensions;
+      const toCm = (v: number) => (d?.unit === "IN" ? v * 2.54 : v);
+      return {
+        weight: Math.max(0.1, Math.round(weightKg * 100) / 100),
+        ...(d ? { dimensions: { length: Math.round(toCm(d.length)), width: Math.round(toCm(d.width)), height: Math.round(toCm(d.height)) } } : {}),
+      };
+    });
+    const body = {
+      plannedPickupDateAndTime: `${request.pickupDate}T${request.readyTime}:00 ${offset}`,
+      closeTime: request.closeTime,
+      location: request.location || "Reception",
+      locationType: "business",
+      accounts: [{ typeCode: "shipper", number: this.accountNumber }],
+      customerDetails: {
+        shipperDetails: {
+          postalAddress: {
+            postalCode: s.postalCode || "",
+            cityName: s.city,
+            countryCode: s.countryCode,
+            addressLine1: s.streetLine1,
+          },
+          contactInformation: {
+            companyName: s.name,
+            fullName: s.name,
+            phone: s.phone,
+            email: s.email || "",
+          },
+        },
+      },
+      shipmentDetails: [{
+        productCode: request.serviceType || "P",
+        isCustomsDeclarable: Boolean(request.isInternational),
+        declaredValue: Number(request.declaredValue) > 0 ? Number(request.declaredValue) : 1,
+        declaredValueCurrency: request.currency || "EUR",
+        unitOfMeasurement: "metric",
+        accounts: [{ typeCode: "shipper", number: this.accountNumber }],
+        packages,
+      }],
+      ...(request.instructions ? { specialInstructions: [{ value: request.instructions }] } : {}),
+    };
+    const { data } = await this.makeRequest<any>("/pickups", "POST", body, 1);
+    const confirmationNumber = String(
+      data?.dispatchConfirmationNumbers?.[0] ?? data?.dispatchConfirmationNumber ?? "",
+    ).trim();
+    if (!confirmationNumber) {
+      throw new CarrierError("PICKUP_FAILED", "DHL pickup booking returned no dispatch confirmation number.");
+    }
+    return { confirmationNumber, raw: data };
+  }
+
+  async cancelPickup(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    const requestorName = encodeURIComponent(request?.shipper?.name || "Ezhalha Logistics");
+    const reason = encodeURIComponent(request?.instructions || "Cancelled by shipper");
+    try {
+      await this.makeRequest<any>(
+        `/pickups/${encodeURIComponent(confirmationNumber)}?requestorName=${requestorName}&reason=${reason}`,
+        "DELETE",
+        undefined,
+        1,
+      );
+      return true;
+    } catch (error) {
+      logError(`DHL: cancel pickup failed for ${confirmationNumber}`, error);
+      return false;
+    }
+  }
+
   validateWebhookSignature(_payload: string, _signature: string): boolean {
     return false;
+  }
+}
+
+// Representative IANA timezone per country for building DHL's plannedPickupDateAndTime offset
+// (e.g. "GMT+02:00"). Covers common shipping origins; unknown countries fall back to UTC.
+const COUNTRY_TZ: Record<string, string> = {
+  DE: "Europe/Berlin", GB: "Europe/London", FR: "Europe/Paris", NL: "Europe/Amsterdam",
+  BE: "Europe/Brussels", IT: "Europe/Rome", ES: "Europe/Madrid", CH: "Europe/Zurich",
+  AT: "Europe/Vienna", PL: "Europe/Warsaw", CZ: "Europe/Prague", SE: "Europe/Stockholm",
+  DK: "Europe/Copenhagen", IE: "Europe/Dublin", PT: "Europe/Lisbon", TR: "Europe/Istanbul",
+  AE: "Asia/Dubai", SA: "Asia/Riyadh", QA: "Asia/Qatar", KW: "Asia/Kuwait", BH: "Asia/Bahrain",
+  OM: "Asia/Muscat", EG: "Africa/Cairo", JO: "Asia/Amman", CN: "Asia/Shanghai",
+  HK: "Asia/Hong_Kong", IN: "Asia/Kolkata", JP: "Asia/Tokyo", KR: "Asia/Seoul",
+  SG: "Asia/Singapore", US: "America/New_York", CA: "America/Toronto", BR: "America/Sao_Paulo",
+  AU: "Australia/Sydney",
+};
+
+/** DHL offset string "GMT±HH:MM" for a country on a given date (handles DST). */
+function gmtOffsetForCountry(countryCode: string, dateISO: string): string {
+  const tz = COUNTRY_TZ[(countryCode || "").toUpperCase()] || "UTC";
+  try {
+    const date = new Date(`${dateISO}T12:00:00Z`);
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(date);
+    const name = parts.find((p) => p.type === "timeZoneName")?.value || "GMT+00:00";
+    // Intl returns "GMT+2" in some runtimes → normalise to "GMT+02:00".
+    const m = name.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+    if (!m) return "GMT+00:00";
+    return `GMT${m[1]}${m[2].padStart(2, "0")}:${(m[3] || "00").padStart(2, "0")}`;
+  } catch {
+    return "GMT+00:00";
   }
 }
 

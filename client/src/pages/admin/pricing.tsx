@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminLayout } from "@/components/admin-layout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LocalCarriersTab } from "@/pages/admin/local-pricing";
+import { VirtualCarriersTab } from "@/pages/admin/virtual-carriers";
+import { DdpLanesTab } from "@/pages/admin/ddp-pricing";
 import { LoadingScreen, LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -453,7 +458,7 @@ function BadgeDesigner({
   );
 }
 
-export default function AdminPricing() {
+function ClientMarkupTab() {
   const { toast } = useToast();
   const adminAccess = useAdminAccess();
   const [selectedRule, setSelectedRule] = useState<PricingRule | null>(null);
@@ -506,7 +511,7 @@ export default function AdminPricing() {
     queryFn: async () => {
       if (!expandedProfile) return [];
       const res = await fetch(`/api/admin/pricing/${expandedProfile}/ddp-tiers`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch DDP tiers");
+      if (!res.ok) throw new Error("Failed to fetch Door To Door Freight tiers");
       return res.json();
     },
     enabled: !!expandedProfile,
@@ -669,11 +674,11 @@ export default function AdminPricing() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/pricing", expandedProfile, "ddp-tiers"] });
-      toast({ title: "DDP tiers saved", description: "DDP pricing tiers have been updated." });
+      toast({ title: "Door To Door Freight tiers saved", description: "Door To Door Freight pricing tiers have been updated." });
     },
     onError: (error) => {
       toast({
-        title: "Failed to save DDP tiers",
+        title: "Failed to save Door To Door Freight tiers",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
@@ -843,23 +848,17 @@ export default function AdminPricing() {
   });
 
   if (isLoading) {
-    return (
-      <AdminLayout>
-        <LoadingScreen message="Loading pricing rules..." />
-      </AdminLayout>
-    );
+    return <LoadingScreen message="Loading pricing rules..." />;
   }
 
   return (
-    <AdminLayout>
-      <div className="p-6 space-y-6">
+    <>
+      <div className="space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold">Pricing Profiles</h1>
-            <p className="text-muted-foreground">
-              Create and manage pricing profiles with tiered markups
-            </p>
-          </div>
+          <p className="text-muted-foreground text-sm max-w-2xl">
+            Per-profile client markup: a default markup %, optional value-based tiers, and the Door To Door Freight markup %.
+            The percentages here apply on top of the carrier / lane base rate.
+          </p>
           {canCreatePricing && (
             <Button onClick={() => setIsCreateOpen(true)} data-testid="button-add-profile">
               <Plus className="h-4 w-4 mr-2" />
@@ -1072,10 +1071,10 @@ export default function AdminPricing() {
                         <div>
                           <h4 className="font-medium flex items-center gap-2">
                             <Settings className="h-4 w-4" />
-                            DDP Pricing Tiers
+                            Door To Door Freight Pricing Tiers
                           </h4>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            Applied to manually fulfilled DDP lanes using the billable KG for air or billable CBM for sea.
+                            Applied to manually fulfilled Door To Door Freight lanes using the billable KG for air or billable CBM for sea.
                           </p>
                         </div>
                         {canUpdatePricing && (
@@ -1086,7 +1085,7 @@ export default function AdminPricing() {
                             data-testid="button-add-ddp-tier"
                           >
                             <Plus className="h-4 w-4 mr-1" />
-                            Add DDP Tier
+                            Add Door To Door Freight Tier
                           </Button>
                         )}
                       </div>
@@ -1099,8 +1098,8 @@ export default function AdminPricing() {
                         <div className="mt-4 space-y-3">
                           {editingDdpTiers.filter(t => !t.isDeleted).length === 0 ? (
                             <div className="text-center py-4 text-muted-foreground">
-                              <p className="text-sm">No DDP pricing tiers defined.</p>
-                              <p className="text-xs">Using the DDP fallback markup of {rule.ddpMarginPercentage}% for all DDP shipments.</p>
+                              <p className="text-sm">No Door To Door Freight pricing tiers defined.</p>
+                              <p className="text-xs">Using the Door To Door Freight fallback markup of {rule.ddpMarginPercentage}% for all Door To Door Freight shipments.</p>
                             </div>
                           ) : (
                             editingDdpTiers.filter(t => !t.isDeleted).map((tier, index) => {
@@ -1165,7 +1164,7 @@ export default function AdminPricing() {
                             disabled={saveDdpTiersMutation.isPending}
                             data-testid="button-save-ddp-tiers"
                           >
-                            {saveDdpTiersMutation.isPending ? "Saving..." : "Save DDP Tiers"}
+                            {saveDdpTiersMutation.isPending ? "Saving..." : "Save Door To Door Freight Tiers"}
                           </Button>
                         </div>
                       )}
@@ -1278,12 +1277,12 @@ export default function AdminPricing() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="editDdpMargin">DDP Default Markup (fallback)</Label>
+              <Label htmlFor="editDdpMargin">Door To Door Freight Default Markup (fallback)</Label>
               <div className="relative">
                 <Input id="editDdpMargin" type="number" min="0" max="100" step="0.5" value={editDdpMargin} onChange={(e) => setEditDdpMargin(e.target.value)} className="pr-10" disabled={!canUpdatePricing} />
                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               </div>
-              <p className="text-xs text-muted-foreground">Used for manual DDP lane pricing when no DDP pricing tiers are defined.</p>
+              <p className="text-xs text-muted-foreground">Used for manual Door To Door Freight lane pricing when no Door To Door Freight pricing tiers are defined.</p>
             </div>
             <BadgeDesigner
               label="Badge Design"
@@ -1366,7 +1365,7 @@ export default function AdminPricing() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="newDdpMargin">DDP Default Markup (fallback)</Label>
+              <Label htmlFor="newDdpMargin">Door To Door Freight Default Markup (fallback)</Label>
               <div className="relative w-32">
                 <Input id="newDdpMargin" type="number" min="0" max="100" step="0.5" value={newDdpMargin} onChange={(e) => setNewDdpMargin(e.target.value)} className="pr-10" />
                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1439,12 +1438,12 @@ export default function AdminPricing() {
             <div className="border-t pt-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <Label>DDP Pricing Tiers</Label>
+                  <Label>Door To Door Freight Pricing Tiers</Label>
                   <p className="mt-1 text-xs text-muted-foreground">Markup formula based on billable KG for air and billable CBM for sea.</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={addNewDdpTierToCreate} data-testid="button-add-new-ddp-tier">
                   <Plus className="h-4 w-4 mr-1" />
-                  Add DDP Tier
+                  Add Door To Door Freight Tier
                 </Button>
               </div>
 
@@ -1535,6 +1534,345 @@ export default function AdminPricing() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "How pricing works" explainer — states the actual formula from the code.
+// ---------------------------------------------------------------------------
+function HowPricingWorks() {
+  return (
+    <details className="group rounded-lg border border-primary/20 bg-primary/5 px-4 py-3" open>
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium">
+        <Info className="h-4 w-4 text-primary" />
+        How pricing works
+        <span className="text-sm font-normal text-muted-foreground">
+          — base rate → markup → minimum → 15% VAT
+        </span>
+        <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="rounded-md border bg-background p-3">
+          <p className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <Badge className="bg-emerald-600 hover:bg-emerald-600">Local</Badge> Domestic KSA
+          </p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            carrier base rate + markup (% or flat), floored at min charge, then +15% VAT (full, DCE).
+          </p>
+        </div>
+        <div className="rounded-md border bg-background p-3">
+          <p className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <Badge className="bg-sky-600 hover:bg-sky-600">Express</Badge> International
+          </p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            live carrier rate + profile markup % (value-tier aware); VAT margin-only on import/export.
+          </p>
+        </div>
+        <div className="rounded-md border bg-background p-3">
+          <p className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <Badge className="bg-purple-600 hover:bg-purple-600">D2D</Badge> Door To Door Freight
+          </p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            billable qty × lane rate, floored at min shipment charge, + profile Door To Door Freight markup %; VAT margin-only.
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Rates come from the carrier APIs where connected; rate-card values are only a fallback. Full
+        reference: <code className="text-[11px]">docs/pricing.md</code>.
+      </p>
+    </details>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preview tab — read-only price simulator. Calls POST /api/admin/pricing/preview,
+// which reuses the production rate engines. Creates no shipment.
+// ---------------------------------------------------------------------------
+type PreviewResult = {
+  type: string;
+  baseRate: number;
+  markup: number;
+  markupPercentage?: number;
+  billingUnit?: string;
+  billableQuantity?: number;
+  ratePerUnit?: number;
+  minChargeApplied?: boolean;
+  vat: number;
+  vatMode: "full" | "margin";
+  clientTotal: number;
+};
+
+function PricingPreviewTab() {
+  const { toast } = useToast();
+  const [previewType, setPreviewType] = useState<"local" | "express" | "ddp">("local");
+  const [profile, setProfile] = useState<string>("regular");
+  const [result, setResult] = useState<PreviewResult | null>(null);
+
+  // Local fields
+  const [carrierCode, setCarrierCode] = useState("SMSA");
+  const [weightKg, setWeightKg] = useState("3");
+  const [localBase, setLocalBase] = useState("30");
+  // Express fields
+  const [expressBase, setExpressBase] = useState("400");
+  const [expressDirection, setExpressDirection] = useState<"inbound" | "outbound">("outbound");
+  // DDP fields
+  const [laneId, setLaneId] = useState("");
+  const [transportMethod, setTransportMethod] = useState<"air" | "sea">("air");
+  const [ddpWeight, setDdpWeight] = useState("12");
+  const [ddpCbm, setDdpCbm] = useState("1");
+
+  const { data: rules = [] } = useQuery<PricingRule[]>({ queryKey: ["/api/admin/pricing"] });
+  const { data: lanes = [] } = useQuery<any[]>({ queryKey: ["/api/admin/ddp-pricing"] });
+
+  useEffect(() => {
+    if (!laneId && lanes.length > 0) setLaneId(lanes[0].id);
+  }, [lanes, laneId]);
+
+  const preview = useMutation({
+    mutationFn: async () => {
+      let payload: Record<string, any> = { type: previewType, profile };
+      if (previewType === "local") {
+        payload = { ...payload, carrierCode, weightKg: Number(weightKg), baseRate: localBase === "" ? null : Number(localBase) };
+      } else if (previewType === "express") {
+        payload = { ...payload, baseRate: Number(expressBase), shipmentType: expressDirection, recipientCountryCode: "SA" };
+      } else {
+        payload = {
+          ...payload,
+          laneId,
+          transportMethod,
+          weightKg: Number(ddpWeight),
+          totalCbm: Number(ddpCbm),
+        };
+      }
+      const res = await apiRequest("POST", "/api/admin/pricing/preview", payload);
+      return (await res.json()) as PreviewResult;
+    },
+    onSuccess: (data) => setResult(data),
+    onError: (error: Error) => {
+      setResult(null);
+      toast({ title: "Could not compute preview", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const segBtn = (value: typeof previewType, label: string) => (
+    <button
+      type="button"
+      onClick={() => {
+        setPreviewType(value);
+        setResult(null);
+      }}
+      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        previewType === value ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Price simulator</CardTitle>
+          <CardDescription>Reuses the live rate engine (read-only). No shipment is created.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-1 rounded-lg bg-muted p-1">
+            {segBtn("local", "Local")}
+            {segBtn("express", "Express")}
+            {segBtn("ddp", "Door To Door Freight")}
+          </div>
+
+          <div className="space-y-1">
+            <Label>Client profile</Label>
+            <Select value={profile} onValueChange={setProfile}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {rules.map((r) => (
+                  <SelectItem key={r.id} value={r.profile}>{r.displayName || r.profile}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {previewType === "local" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Carrier</Label>
+                <Select value={carrierCode} onValueChange={setCarrierCode}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SMSA">SMSA</SelectItem>
+                    <SelectItem value="NAQEL">NAQEL</SelectItem>
+                    <SelectItem value="JT">J&T Express</SelectItem>
+                    <SelectItem value="REDBOX">RedBox</SelectItem>
+                    <SelectItem value="ZAJIL">Zajil Express</SelectItem>
+                    <SelectItem value="IMILE">iMile</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Weight (kg)</Label>
+                <Input type="number" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label>Carrier base rate (SAR)</Label>
+                <Input type="number" value={localBase} onChange={(e) => setLocalBase(e.target.value)} placeholder="blank = use rate-card fallback" />
+              </div>
+            </div>
+          )}
+
+          {previewType === "express" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Direction</Label>
+                <Select value={expressDirection} onValueChange={(v) => setExpressDirection(v as "inbound" | "outbound")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="outbound">Export (outbound)</SelectItem>
+                    <SelectItem value="inbound">Import (inbound)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Carrier base rate (SAR)</Label>
+                <Input type="number" value={expressBase} onChange={(e) => setExpressBase(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {previewType === "ddp" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 space-y-1">
+                <Label>Lane</Label>
+                <Select value={laneId} onValueChange={setLaneId}>
+                  <SelectTrigger><SelectValue placeholder="Select lane" /></SelectTrigger>
+                  <SelectContent>
+                    {lanes.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.originCountryCode} → {l.destinationCountryCode}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Method</Label>
+                <Select value={transportMethod} onValueChange={(v) => setTransportMethod(v as "air" | "sea")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="air">Air (per kg)</SelectItem>
+                    <SelectItem value="sea">Sea (per cbm)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                {transportMethod === "air" ? (
+                  <>
+                    <Label>Chargeable weight (kg)</Label>
+                    <Input type="number" value={ddpWeight} onChange={(e) => setDdpWeight(e.target.value)} />
+                  </>
+                ) : (
+                  <>
+                    <Label>Volume (cbm)</Label>
+                    <Input type="number" value={ddpCbm} onChange={(e) => setDdpCbm(e.target.value)} />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          <Button className="w-full" onClick={() => preview.mutate()} disabled={preview.isPending}>
+            {preview.isPending ? "Calculating..." : "Calculate price"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Client pays</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!result ? (
+            <p className="text-sm text-muted-foreground">Enter values and calculate to see the breakdown.</p>
+          ) : (
+            <div className="divide-y">
+              <div className="flex items-center justify-between py-3">
+                <div className="text-sm text-muted-foreground">
+                  {result.type === "express" ? "Live carrier rate" : result.type === "ddp" ? "Lane base" : "Carrier base rate"}
+                  {result.type === "ddp" && result.billableQuantity != null && (
+                    <span className="block text-xs">
+                      {result.ratePerUnit} ﷼/{result.billingUnit?.toLowerCase()} × {result.billableQuantity} {result.billingUnit?.toLowerCase()}
+                      {result.minChargeApplied ? " · min shipment charge applied" : ""}
+                    </span>
+                  )}
+                </div>
+                <span className="font-semibold tabular-nums">{formatSAR(result.baseRate)}</span>
+              </div>
+              <div className="flex items-center justify-between py-3">
+                <div className="text-sm text-muted-foreground">
+                  Markup
+                  {result.markupPercentage != null && <span className="block text-xs">{result.markupPercentage}%</span>}
+                </div>
+                <span className="font-semibold tabular-nums text-emerald-600">+ {formatSAR(result.markup)}</span>
+              </div>
+              <div className="flex items-center justify-between py-3">
+                <div className="text-sm text-muted-foreground">
+                  VAT (15%)<span className="block text-xs">{result.vatMode === "full" ? "full (domestic)" : "margin only"}</span>
+                </div>
+                <span className="font-semibold tabular-nums">{formatSAR(result.vat)}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-b-md bg-primary/5 py-3">
+                <span className="font-semibold">Client total</span>
+                <span className="text-xl font-bold tabular-nums text-primary">{formatSAR(result.clientTotal)}</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+const PRICING_TABS = ["markup", "local", "virtual", "ddp", "preview"] as const;
+type PricingTabValue = (typeof PRICING_TABS)[number];
+
+export default function AdminPricing() {
+  const search = useSearch();
+  const [, setLocation] = useLocation();
+  const requested = new URLSearchParams(search).get("tab") as PricingTabValue | null;
+  const activeTab: PricingTabValue = PRICING_TABS.includes(requested as PricingTabValue) ? (requested as PricingTabValue) : "markup";
+
+  return (
+    <AdminLayout>
+      <div className="p-6 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Pricing</h1>
+          <p className="text-muted-foreground max-w-2xl">
+            One place to set what clients pay across every shipment type — domestic, international express,
+            and Door To Door Freight.
+          </p>
+        </div>
+
+        <HowPricingWorks />
+
+        <Tabs value={activeTab} onValueChange={(v) => setLocation(`/admin/pricing?tab=${v}`)}>
+          <TabsList>
+            <TabsTrigger value="markup">Client Markup</TabsTrigger>
+            <TabsTrigger value="local">Local Carriers</TabsTrigger>
+            <TabsTrigger value="virtual">Virtual Carriers</TabsTrigger>
+            <TabsTrigger value="ddp">Door To Door Freight Lanes</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+          </TabsList>
+          <TabsContent value="markup" className="mt-6"><ClientMarkupTab /></TabsContent>
+          <TabsContent value="local" className="mt-6"><LocalCarriersTab /></TabsContent>
+          <TabsContent value="virtual" className="mt-6"><VirtualCarriersTab /></TabsContent>
+          <TabsContent value="ddp" className="mt-6"><DdpLanesTab /></TabsContent>
+          <TabsContent value="preview" className="mt-6"><PricingPreviewTab /></TabsContent>
+        </Tabs>
+      </div>
     </AdminLayout>
   );
 }

@@ -59,8 +59,14 @@ function getShipmentIntegrationRoutingOptions(shipment: Shipment) {
 // caller can keep the previous status instead of writing the raw carrier
 // string into `shipments.status` — a raw string there silently knocks the
 // shipment out of the cancellable set and breaks cancellation.
-function mapCarrierTrackingStatusToShipmentStatus(tracking: TrackingResponse): string | null {
-  const status = (tracking.status || "").toLowerCase();
+export function mapCarrierTrackingStatusToShipmentStatus(tracking: TrackingResponse): string | null {
+  // Consider the top-level status AND the most recent event text, since carriers sometimes leave
+  // the top-level string generic (e.g. "transit") while the latest event carries the real milestone
+  // ("Out for delivery", "Customs clearance").
+  const latestEvent = Array.isArray(tracking.events) && tracking.events.length > 0
+    ? `${tracking.events[0]?.status || ""} ${tracking.events[0]?.description || ""}`
+    : "";
+  const status = `${tracking.status || ""} ${latestEvent}`.toLowerCase();
   if (!status.trim()) return null;
   if (status.includes("delivered")) return "delivered";
   if (status.includes("out for delivery") || status.includes("vehicle for delivery")) return "out_for_delivery";
@@ -72,7 +78,10 @@ function mapCarrierTrackingStatusToShipmentStatus(tracking: TrackingResponse): s
     status.includes("departed") ||
     status.includes("arrived") ||
     status.includes("facility") ||
-    status.includes("on the way")
+    status.includes("on the way") ||
+    status.includes("in-transit") ||
+    status.includes("processed at") ||
+    status.includes("with delivery courier")
   ) {
     return "in_transit";
   }
@@ -83,12 +92,69 @@ function mapCarrierTrackingStatusToShipmentStatus(tracking: TrackingResponse): s
     status.includes("label") ||
     status.includes("information sent") ||
     status.includes("information received") ||
+    status.includes("pre-transit") ||
     status.includes("ready for") ||
     status.includes("order processed")
   ) {
     return "created";
   }
   return null;
+}
+
+/**
+ * Apply a fresh carrier TrackingResponse to a shipment: map the carrier status to our internal
+ * status, persist status + carrierStatus + ETA/actual-delivery, and record the status change.
+ * Shared by the scheduler and the on-demand track endpoints so a manual "Sync now" moves the
+ * shipment's real status, not just the tracking timeline. Returns the updated shipment (or the
+ * original when nothing changed).
+ */
+export async function applyCarrierTrackingToShipment(
+  shipment: Shipment,
+  tracking: TrackingResponse,
+  source: string,
+): Promise<Shipment> {
+  const mappedStatus = mapCarrierTrackingStatusToShipmentStatus(tracking);
+  const previousStatus = shipment.status;
+  // Never regress a delivered/cancelled shipment, and never overwrite a real status with a
+  // carrier string we couldn't map.
+  const nextStatus = mappedStatus && !["delivered", "cancelled"].includes(previousStatus)
+    ? mappedStatus
+    : previousStatus;
+  const previousCarrierStatus = shipment.carrierStatus;
+
+  const statusChanged = nextStatus !== previousStatus;
+  const carrierStatusChanged = tracking.status !== previousCarrierStatus;
+  const estimatedChanged = !!(tracking.estimatedDelivery && `${tracking.estimatedDelivery}` !== `${shipment.estimatedDelivery}`);
+  const actualChanged = !!(tracking.actualDelivery && `${tracking.actualDelivery}` !== `${shipment.actualDelivery}`);
+
+  const previousRepeatCount = shipment.carrierStatusRepeatCount ?? 0;
+  const nextRepeatCount = carrierStatusChanged ? 0 : previousRepeatCount + 1;
+  const meaningfulChange = statusChanged || carrierStatusChanged || estimatedChanged || actualChanged;
+
+  if (!meaningfulChange && nextRepeatCount === previousRepeatCount) {
+    return shipment;
+  }
+
+  const updated = await storage.updateShipment(shipment.id, {
+    ...(statusChanged ? { status: nextStatus } : {}),
+    carrierStatus: tracking.status,
+    carrierStatusRepeatCount: nextRepeatCount,
+    estimatedDelivery: tracking.estimatedDelivery || shipment.estimatedDelivery,
+    actualDelivery: tracking.actualDelivery || shipment.actualDelivery,
+    carrierLastAttemptAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  if (updated && meaningfulChange) {
+    await recordShipmentStatusChange({
+      shipment: updated,
+      previousStatus,
+      nextStatus,
+      source,
+    });
+  }
+
+  return updated || shipment;
 }
 
 function shouldRefreshShipment(shipment: Shipment): boolean {
@@ -120,46 +186,11 @@ export async function refreshExpressCarrierStatuses(): Promise<number> {
           getShipmentIntegrationRoutingOptions(shipment),
           () => carrierAdapter.trackShipment(shipment.carrierTrackingNumber!),
         );
-        const mappedStatus = mapCarrierTrackingStatusToShipmentStatus(tracking);
-        const previousStatus = shipment.status;
-        const nextStatus = mappedStatus ?? previousStatus;
-        const previousCarrierStatus = shipment.carrierStatus;
-
-        const statusChanged = nextStatus !== previousStatus;
-        const carrierStatusChanged = tracking.status !== previousCarrierStatus;
-        const estimatedChanged = !!(tracking.estimatedDelivery && `${tracking.estimatedDelivery}` !== `${shipment.estimatedDelivery}`);
-        const actualChanged = !!(tracking.actualDelivery && `${tracking.actualDelivery}` !== `${shipment.actualDelivery}`);
-
-        // Count how many consecutive refreshes returned the identical carrier
-        // status. Reset to 0 the moment the carrier reports something new.
-        const previousRepeatCount = shipment.carrierStatusRepeatCount ?? 0;
-        const nextRepeatCount = carrierStatusChanged ? 0 : previousRepeatCount + 1;
-
-        const meaningfulChange = statusChanged || carrierStatusChanged || estimatedChanged || actualChanged;
-
-        if (meaningfulChange || nextRepeatCount !== previousRepeatCount) {
-          const updated = await storage.updateShipment(shipment.id, {
-            ...(statusChanged ? { status: nextStatus } : {}),
-            carrierStatus: tracking.status,
-            carrierStatusRepeatCount: nextRepeatCount,
-            estimatedDelivery: tracking.estimatedDelivery || shipment.estimatedDelivery,
-            actualDelivery: tracking.actualDelivery || shipment.actualDelivery,
-            carrierLastAttemptAt: new Date(),
-            updatedAt: new Date(),
-          });
-
-          // recordShipmentStatusChange owns statusChangedAt + stale-flag
-          // resolution; only call it on a real status/carrier movement, not on
-          // a pure repeat-count bump.
-          if (updated && meaningfulChange) {
-            await recordShipmentStatusChange({
-              shipment: updated,
-              previousStatus,
-              nextStatus,
-              source: "carrier_refresh",
-            });
-            updatedCount++;
-          }
+        const before = shipment.status;
+        const beforeCarrier = shipment.carrierStatus;
+        const updated = await applyCarrierTrackingToShipment(shipment, tracking, "carrier_refresh");
+        if (updated.status !== before || updated.carrierStatus !== beforeCarrier) {
+          updatedCount++;
         }
       } catch (error) {
         logError("Express tracking refresh failed for shipment", {

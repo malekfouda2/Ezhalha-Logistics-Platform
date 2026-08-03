@@ -87,7 +87,7 @@ export default function AcceptInvitePage({ params }: AcceptInvitePageProps) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <header className="flex items-center justify-between p-4">
-          <img src="/assets/branding/logo.png" alt="ezhalha" className="h-10 w-auto" />
+          <img src="/assets/branding/logo.png" alt="ezhalha" className="h-14 w-auto" />
           <ThemeToggle />
         </header>
         <main className="flex-1 flex items-center justify-center p-4">
@@ -107,7 +107,7 @@ export default function AcceptInvitePage({ params }: AcceptInvitePageProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="flex items-center justify-between p-4">
-        <img src="/assets/branding/logo.png" alt="ezhalha" className="h-10 w-auto" />
+        <img src="/assets/branding/logo.png" alt="ezhalha" className="h-14 w-auto" />
         <ThemeToggle />
       </header>
 

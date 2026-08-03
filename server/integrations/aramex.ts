@@ -15,6 +15,8 @@ import {
   type ServiceAvailabilityRequest,
   type ServiceAvailabilityResponse,
   type TrackingResponse,
+  type PickupRequest,
+  type PickupResponse,
 } from "./fedex";
 import { logError, logInfo, logWarn } from "../services/logger";
 import { storage } from "../storage";
@@ -633,6 +635,83 @@ export class AramexAdapter implements CarrierAdapter {
       "CANCEL_NOT_IMPLEMENTED",
       "Aramex cancellation requires final account-specific service enablement before live cancellation can be called.",
     );
+  }
+
+  supportsPickup = true;
+
+  // Aramex JSON Location API — CreatePickup. Best-effort: verify against your Aramex account
+  // before relying on it in production (WCF date format + product codes are account-specific).
+  async requestPickup(request: PickupRequest): Promise<PickupResponse> {
+    if (!this.isConfigured()) {
+      throw new CarrierError("NOT_CONFIGURED", "Aramex is not configured — cannot request a pickup.");
+    }
+    const s = request.shipper;
+    const isInternational = Boolean(request.isInternational);
+    const totalWeightKg = request.packages.reduce((sum, p) => sum + kgValue(p.weight, p.weightUnit), 0);
+    // Aramex uses WCF JSON dates: /Date(epochMillis)/.
+    const wcf = (dateISO: string, time: string) => `/Date(${new Date(`${dateISO}T${time}:00Z`).getTime()})/`;
+    const payload = {
+      ClientInfo: this.buildClientInfo(),
+      Transaction: { Reference1: request.trackingNumber || `EZH-PU-${Date.now()}` },
+      Pickup: {
+        PickupAddress: {
+          Line1: s.streetLine1,
+          Line2: s.streetLine2 || "",
+          City: s.city,
+          StateOrProvinceCode: s.stateOrProvince || "",
+          PostCode: normalizePostalCode(s.postalCode),
+          CountryCode: normalizeCountryCode(s.countryCode),
+        },
+        PickupContact: {
+          PersonName: s.name,
+          CompanyName: s.name,
+          PhoneNumber1: s.phone,
+          CellPhone: s.phone,
+          EmailAddress: s.email || "",
+        },
+        PickupLocation: request.location || "Reception",
+        PickupDate: wcf(request.pickupDate, request.readyTime),
+        ReadyTime: wcf(request.pickupDate, request.readyTime),
+        LastPickupTime: wcf(request.pickupDate, request.closeTime),
+        ClosingTime: wcf(request.pickupDate, request.closeTime),
+        Comments: request.instructions || "",
+        Reference1: request.trackingNumber || "",
+        Vehicle: "",
+        Status: "Ready",
+        PickupItems: [{
+          ProductGroup: isInternational ? "EXP" : "DOM",
+          ProductType: request.serviceType || (isInternational ? "PPX" : "ONP"),
+          Payment: "P",
+          ShipmentWeight: { Unit: "KG", Value: Math.max(0.5, Math.round(totalWeightKg * 100) / 100) },
+          NumberOfShipments: 1,
+          NumberOfPieces: request.packages.length || 1,
+        }],
+      },
+      LabelInfo: null,
+    };
+    const data = await this.makeRequest<any>("/shippingapi.v2/location/service_1_0.svc/json/CreatePickup", payload);
+    const processed = data?.ProcessedPickup ?? data;
+    const confirmationNumber = String(processed?.ID ?? processed?.GUID ?? processed?.Reference1 ?? "").trim();
+    if (!confirmationNumber) {
+      throw new CarrierError("PICKUP_FAILED", "Aramex pickup booking returned no id.");
+    }
+    return { confirmationNumber, raw: data };
+  }
+
+  async cancelPickup(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    try {
+      await this.makeRequest<any>("/shippingapi.v2/location/service_1_0.svc/json/CancelPickup", {
+        ClientInfo: this.buildClientInfo(),
+        Transaction: { Reference1: confirmationNumber },
+        PickupGUID: confirmationNumber,
+        Comments: request?.instructions || "Cancelled by shipper",
+      });
+      return true;
+    } catch (error) {
+      logError(`Aramex: cancel pickup failed for ${confirmationNumber}`, error);
+      return false;
+    }
   }
 }
 

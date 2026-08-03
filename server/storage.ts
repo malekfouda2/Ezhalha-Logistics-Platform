@@ -27,6 +27,17 @@ import {
   type InsertDdpPricingTier,
   type DdpPricingLane,
   type InsertDdpPricingLane,
+  type LocalCarrierPricingTier,
+  type InsertLocalCarrierPricingTier,
+  type VirtualCarrier,
+  type InsertVirtualCarrier,
+  type IntegrationAppLogo,
+  type SalesChannel,
+  type InsertSalesChannel,
+  type Order,
+  type InsertOrder,
+  type CarrierAssignmentRule,
+  type InsertCarrierAssignmentRule,
   type AuditLog,
   type InsertAuditLog,
   type Department,
@@ -65,6 +76,12 @@ import {
   type InsertEmailTemplate,
   type CreditAccessRequest,
   type InsertCreditAccessRequest,
+  type SalesFeatureAccessRequest,
+  type InsertSalesFeatureAccessRequest,
+  type EmailLoginOtp,
+  type InsertEmailLoginOtp,
+  type PasswordResetToken,
+  type InsertPasswordResetToken,
   type CreditInvoice,
   type InsertCreditInvoice,
   type CreditNotificationEvent,
@@ -93,6 +110,12 @@ import {
   pricingTiers,
   ddpPricingTiers,
   ddpPricingLanes,
+  localCarrierPricingTiers,
+  virtualCarriers,
+  integrationAppLogos,
+  salesChannels,
+  orders,
+  carrierAssignmentRules,
   auditLogs,
   departments,
   roles,
@@ -115,6 +138,9 @@ import {
   policyVersions,
   emailTemplates,
   creditAccessRequests,
+  salesFeatureAccessRequests,
+  emailLoginOtps,
+  passwordResetTokens,
   creditInvoices,
   creditNotificationEvents,
   creditTransactions,
@@ -147,6 +173,15 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByPhone(phone: string): Promise<User | undefined>;
+  createEmailLoginOtp(otp: InsertEmailLoginOtp): Promise<EmailLoginOtp>;
+  getActiveEmailLoginOtp(email: string): Promise<EmailLoginOtp | undefined>;
+  updateEmailLoginOtp(id: string, updates: Partial<EmailLoginOtp>): Promise<EmailLoginOtp | undefined>;
+  countRecentEmailLoginOtps(email: string, sinceMs: number): Promise<number>;
+  createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken>;
+  getPasswordResetTokenByHash(tokenHash: string): Promise<PasswordResetToken | undefined>;
+  consumePasswordResetToken(id: string): Promise<void>;
+  invalidatePasswordResetTokensForUser(userId: string): Promise<void>;
   getUsersByUserType(userType: string): Promise<User[]>;
   getAccountManagers(): Promise<User[]>;
   getUsersByClientAccount(clientAccountId: string): Promise<User[]>;
@@ -287,6 +322,46 @@ export interface IStorage {
   deletePricingTier(id: string): Promise<void>;
   getMarginForAmount(profileId: string, amount: number): Promise<number>;
 
+  listLocalCarrierPricingTiers(carrierCode?: string): Promise<LocalCarrierPricingTier[]>;
+  createLocalCarrierPricingTier(tier: InsertLocalCarrierPricingTier): Promise<LocalCarrierPricingTier>;
+  updateLocalCarrierPricingTier(id: string, updates: Partial<LocalCarrierPricingTier>): Promise<LocalCarrierPricingTier | undefined>;
+  deleteLocalCarrierPricingTier(id: string): Promise<void>;
+
+  listVirtualCarriers(enabledOnly?: boolean): Promise<VirtualCarrier[]>;
+  getVirtualCarrierByCode(code: string): Promise<VirtualCarrier | undefined>;
+  createVirtualCarrier(carrier: InsertVirtualCarrier): Promise<VirtualCarrier>;
+  updateVirtualCarrier(id: string, updates: Partial<VirtualCarrier>): Promise<VirtualCarrier | undefined>;
+  deleteVirtualCarrier(id: string): Promise<void>;
+
+
+  // Integration app logos (Apps tab, keyed by app definition key)
+  getIntegrationAppLogos(): Promise<Record<string, string>>;
+  setIntegrationAppLogo(appKey: string, logo: string): Promise<void>;
+  deleteIntegrationAppLogo(appKey: string): Promise<void>;
+
+  // Sales channels (connected e-commerce stores)
+  listSalesChannels(clientAccountId: string): Promise<SalesChannel[]>;
+  listAllSalesChannels(): Promise<SalesChannel[]>;
+  getSalesChannel(id: string): Promise<SalesChannel | undefined>;
+  createSalesChannel(channel: InsertSalesChannel): Promise<SalesChannel>;
+  updateSalesChannel(id: string, updates: Partial<SalesChannel>): Promise<SalesChannel | undefined>;
+  deleteSalesChannel(id: string): Promise<void>;
+
+  // Orders (imported store orders)
+  listOrders(clientAccountId: string, filters?: { status?: string; salesChannelId?: string }): Promise<Order[]>;
+  getOrder(id: string): Promise<Order | undefined>;
+  getOrderByExternalId(salesChannelId: string, externalOrderId: string): Promise<Order | undefined>;
+  // Idempotent ingest: upsert on (sales_channel_id, external_order_id).
+  upsertOrder(order: InsertOrder): Promise<Order>;
+  updateOrder(id: string, updates: Partial<Order>): Promise<Order | undefined>;
+
+  // Carrier assignment rules (opt-in auto-assignment)
+  listCarrierAssignmentRules(clientAccountId: string): Promise<CarrierAssignmentRule[]>;
+  getCarrierAssignmentRule(id: string): Promise<CarrierAssignmentRule | undefined>;
+  createCarrierAssignmentRule(rule: InsertCarrierAssignmentRule): Promise<CarrierAssignmentRule>;
+  updateCarrierAssignmentRule(id: string, updates: Partial<CarrierAssignmentRule>): Promise<CarrierAssignmentRule | undefined>;
+  deleteCarrierAssignmentRule(id: string): Promise<void>;
+
   // DDP Pricing Tiers
   getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]>;
   createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier>;
@@ -309,6 +384,7 @@ export interface IStorage {
 
   // Audit Logs
   getAuditLogs(): Promise<AuditLog[]>;
+  getAuditLogsForEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
   getAuditLogsPaginated(params: {
     page: number;
     limit: number;
@@ -457,6 +533,12 @@ export interface IStorage {
   createCreditAccessRequest(request: InsertCreditAccessRequest): Promise<CreditAccessRequest>;
   updateCreditAccessRequest(id: string, updates: Partial<CreditAccessRequest>): Promise<CreditAccessRequest | undefined>;
 
+  // Sales-feature Access Requests
+  getSalesFeatureAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: SalesFeatureAccessRequest[]; total: number; page: number; totalPages: number }>;
+  getSalesFeatureAccessRequestByClient(clientAccountId: string): Promise<SalesFeatureAccessRequest | undefined>;
+  createSalesFeatureAccessRequest(request: InsertSalesFeatureAccessRequest): Promise<SalesFeatureAccessRequest>;
+  updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined>;
+
   // Credit Invoices
   getCreditInvoices(params?: {
     page?: number;
@@ -548,6 +630,64 @@ export class DatabaseStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
     return user || undefined;
+  }
+
+  async getUserByPhone(phone: string): Promise<User | undefined> {
+    const normalized = phone.replace(/[^\d+]/g, "");
+    if (!normalized) return undefined;
+    // Match on the normalized phone (digits + optional leading +), active users first.
+    const rows = await db.select().from(users).where(eq(users.phone, normalized));
+    if (rows.length > 0) return rows.find((u) => u.isActive) || rows[0];
+    // Fallback: some stored numbers may carry formatting — compare loosely.
+    const all = await db.select().from(users);
+    return all.find((u) => (u.phone || "").replace(/[^\d+]/g, "") === normalized && u.isActive)
+      || all.find((u) => (u.phone || "").replace(/[^\d+]/g, "") === normalized);
+  }
+
+  // Email login OTPs
+  async createEmailLoginOtp(otp: InsertEmailLoginOtp): Promise<EmailLoginOtp> {
+    const [created] = await db.insert(emailLoginOtps).values(otp).returning();
+    return created;
+  }
+
+  async getActiveEmailLoginOtp(email: string): Promise<EmailLoginOtp | undefined> {
+    const [row] = await db.select().from(emailLoginOtps)
+      .where(and(eq(emailLoginOtps.email, email), isNull(emailLoginOtps.consumedAt)))
+      .orderBy(desc(emailLoginOtps.createdAt))
+      .limit(1);
+    return row || undefined;
+  }
+
+  async updateEmailLoginOtp(id: string, updates: Partial<EmailLoginOtp>): Promise<EmailLoginOtp | undefined> {
+    const [updated] = await db.update(emailLoginOtps).set(updates).where(eq(emailLoginOtps.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async countRecentEmailLoginOtps(email: string, sinceMs: number): Promise<number> {
+    const rows = await db.select().from(emailLoginOtps)
+      .where(and(eq(emailLoginOtps.email, email), gte(emailLoginOtps.createdAt, new Date(Date.now() - sinceMs))));
+    return rows.length;
+  }
+
+  // Password reset / set tokens
+  async createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken> {
+    const [created] = await db.insert(passwordResetTokens).values(token).returning();
+    return created;
+  }
+
+  async getPasswordResetTokenByHash(tokenHash: string): Promise<PasswordResetToken | undefined> {
+    const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash)).limit(1);
+    return row || undefined;
+  }
+
+  async consumePasswordResetToken(id: string): Promise<void> {
+    await db.update(passwordResetTokens).set({ consumedAt: new Date() }).where(eq(passwordResetTokens.id, id));
+  }
+
+  // Invalidate any outstanding (unconsumed) tokens for a user before issuing a new one.
+  async invalidatePasswordResetTokensForUser(userId: string): Promise<void> {
+    await db.update(passwordResetTokens).set({ consumedAt: new Date() })
+      .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.consumedAt)));
   }
 
   async getUsersByUserType(userType: string): Promise<User[]> {
@@ -1024,6 +1164,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPayment(payment: InsertPayment): Promise<Payment> {
+    // Idempotent on transactionId: the Tap redirect and webhook can both process the same
+    // charge near-simultaneously, so a plain insert used to race and create duplicate payment
+    // rows. The partial unique index ux_payments_txn (transaction_id where not null) makes the
+    // second insert a no-op; we then return the row that actually won the insert.
+    if (payment.transactionId) {
+      const [inserted] = await db
+        .insert(payments)
+        .values(payment)
+        .onConflictDoNothing({
+          target: payments.transactionId,
+          where: sql`transaction_id is not null`,
+        })
+        .returning();
+      if (inserted) return inserted;
+      const existing = await this.getPaymentByTransactionId(payment.transactionId);
+      if (existing) return existing;
+      // No row and no existing match (e.g. index absent on an un-migrated DB): fall through.
+    }
     const [newPayment] = await db.insert(payments).values(payment).returning();
     return newPayment;
   }
@@ -1330,6 +1488,220 @@ export class DatabaseStorage implements IStorage {
     return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
   }
 
+  // Local carrier pricing tiers
+  async listLocalCarrierPricingTiers(carrierCode?: string): Promise<LocalCarrierPricingTier[]> {
+    const query = db.select().from(localCarrierPricingTiers);
+    const rows = carrierCode
+      ? await query.where(eq(localCarrierPricingTiers.carrierCode, carrierCode.toUpperCase()))
+      : await query;
+    return rows.sort((a, b) => {
+      if (a.carrierCode !== b.carrierCode) return a.carrierCode.localeCompare(b.carrierCode);
+      return Number(a.minWeightKg) - Number(b.minWeightKg);
+    });
+  }
+
+  async createLocalCarrierPricingTier(tier: InsertLocalCarrierPricingTier): Promise<LocalCarrierPricingTier> {
+    const [row] = await db.insert(localCarrierPricingTiers)
+      .values({ ...tier, carrierCode: tier.carrierCode.toUpperCase() })
+      .returning();
+    return row;
+  }
+
+  async updateLocalCarrierPricingTier(id: string, updates: Partial<LocalCarrierPricingTier>): Promise<LocalCarrierPricingTier | undefined> {
+    const normalized = updates.carrierCode
+      ? { ...updates, carrierCode: updates.carrierCode.toUpperCase() }
+      : updates;
+    const [row] = await db.update(localCarrierPricingTiers)
+      .set({ ...normalized, updatedAt: new Date() })
+      .where(eq(localCarrierPricingTiers.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteLocalCarrierPricingTier(id: string): Promise<void> {
+    await db.delete(localCarrierPricingTiers).where(eq(localCarrierPricingTiers.id, id));
+  }
+
+  async listVirtualCarriers(enabledOnly = false): Promise<VirtualCarrier[]> {
+    const rows = enabledOnly
+      ? await db.select().from(virtualCarriers).where(eq(virtualCarriers.enabled, true))
+      : await db.select().from(virtualCarriers);
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async getVirtualCarrierByCode(code: string): Promise<VirtualCarrier | undefined> {
+    const [row] = await db.select().from(virtualCarriers)
+      .where(eq(virtualCarriers.code, code.trim().toUpperCase()));
+    return row || undefined;
+  }
+
+  async createVirtualCarrier(carrier: InsertVirtualCarrier): Promise<VirtualCarrier> {
+    const [row] = await db.insert(virtualCarriers)
+      .values({ ...carrier, code: carrier.code.trim().toUpperCase() })
+      .returning();
+    return row;
+  }
+
+  async updateVirtualCarrier(id: string, updates: Partial<VirtualCarrier>): Promise<VirtualCarrier | undefined> {
+    const normalized = updates.code
+      ? { ...updates, code: updates.code.trim().toUpperCase() }
+      : updates;
+    const [row] = await db.update(virtualCarriers)
+      .set({ ...normalized, updatedAt: new Date() })
+      .where(eq(virtualCarriers.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteVirtualCarrier(id: string): Promise<void> {
+    await db.delete(virtualCarriers).where(eq(virtualCarriers.id, id));
+  }
+
+
+  // Integration app logos
+  async getIntegrationAppLogos(): Promise<Record<string, string>> {
+    const rows = await db.select().from(integrationAppLogos);
+    return Object.fromEntries(rows.map((r) => [r.appKey, r.logo]));
+  }
+
+  async setIntegrationAppLogo(appKey: string, logo: string): Promise<void> {
+    await db.insert(integrationAppLogos)
+      .values({ appKey, logo })
+      .onConflictDoUpdate({
+        target: integrationAppLogos.appKey,
+        set: { logo, updatedAt: new Date() },
+      });
+  }
+
+  async deleteIntegrationAppLogo(appKey: string): Promise<void> {
+    await db.delete(integrationAppLogos).where(eq(integrationAppLogos.appKey, appKey));
+  }
+
+  // Sales channels
+  async listSalesChannels(clientAccountId: string): Promise<SalesChannel[]> {
+    return db.select().from(salesChannels)
+      .where(eq(salesChannels.clientAccountId, clientAccountId))
+      .orderBy(desc(salesChannels.createdAt));
+  }
+
+  async listAllSalesChannels(): Promise<SalesChannel[]> {
+    return db.select().from(salesChannels).orderBy(desc(salesChannels.createdAt));
+  }
+
+  async getSalesChannel(id: string): Promise<SalesChannel | undefined> {
+    const [row] = await db.select().from(salesChannels).where(eq(salesChannels.id, id));
+    return row || undefined;
+  }
+
+  async createSalesChannel(channel: InsertSalesChannel): Promise<SalesChannel> {
+    const [row] = await db.insert(salesChannels).values(channel).returning();
+    return row;
+  }
+
+  async updateSalesChannel(id: string, updates: Partial<SalesChannel>): Promise<SalesChannel | undefined> {
+    const [row] = await db.update(salesChannels)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(salesChannels.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteSalesChannel(id: string): Promise<void> {
+    await db.delete(salesChannels).where(eq(salesChannels.id, id));
+  }
+
+  // Orders
+  async listOrders(
+    clientAccountId: string,
+    filters?: { status?: string; salesChannelId?: string },
+  ): Promise<Order[]> {
+    const conditions = [eq(orders.clientAccountId, clientAccountId)];
+    if (filters?.status) conditions.push(eq(orders.status, filters.status));
+    if (filters?.salesChannelId) conditions.push(eq(orders.salesChannelId, filters.salesChannelId));
+    return db.select().from(orders)
+      .where(and(...conditions))
+      .orderBy(desc(orders.createdAt));
+  }
+
+  async getOrder(id: string): Promise<Order | undefined> {
+    const [row] = await db.select().from(orders).where(eq(orders.id, id));
+    return row || undefined;
+  }
+
+  async getOrderByExternalId(salesChannelId: string, externalOrderId: string): Promise<Order | undefined> {
+    const [row] = await db.select().from(orders).where(
+      and(
+        eq(orders.salesChannelId, salesChannelId),
+        eq(orders.externalOrderId, externalOrderId),
+      ),
+    );
+    return row || undefined;
+  }
+
+  // Idempotent ingest: insert, or update the existing row on the
+  // (sales_channel_id, external_order_id) unique index. A re-synced order never
+  // duplicates and never clobbers an already-fulfilled shipment link.
+  async upsertOrder(order: InsertOrder): Promise<Order> {
+    const [row] = await db.insert(orders)
+      .values(order)
+      .onConflictDoUpdate({
+        target: [orders.salesChannelId, orders.externalOrderId],
+        set: {
+          externalOrderNumber: order.externalOrderNumber,
+          status: order.status,
+          customer: order.customer,
+          shipTo: order.shipTo,
+          items: order.items,
+          packageWeightKg: order.packageWeightKg,
+          packageDims: order.packageDims,
+          packagePieces: order.packagePieces,
+          currency: order.currency,
+          orderTotal: order.orderTotal,
+          syncedAt: order.syncedAt ?? new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  async updateOrder(id: string, updates: Partial<Order>): Promise<Order | undefined> {
+    const [row] = await db.update(orders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(orders.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  // Carrier assignment rules
+  async listCarrierAssignmentRules(clientAccountId: string): Promise<CarrierAssignmentRule[]> {
+    return db.select().from(carrierAssignmentRules)
+      .where(eq(carrierAssignmentRules.clientAccountId, clientAccountId))
+      .orderBy(desc(carrierAssignmentRules.priority));
+  }
+
+  async getCarrierAssignmentRule(id: string): Promise<CarrierAssignmentRule | undefined> {
+    const [row] = await db.select().from(carrierAssignmentRules).where(eq(carrierAssignmentRules.id, id));
+    return row || undefined;
+  }
+
+  async createCarrierAssignmentRule(rule: InsertCarrierAssignmentRule): Promise<CarrierAssignmentRule> {
+    const [row] = await db.insert(carrierAssignmentRules).values(rule).returning();
+    return row;
+  }
+
+  async updateCarrierAssignmentRule(id: string, updates: Partial<CarrierAssignmentRule>): Promise<CarrierAssignmentRule | undefined> {
+    const [row] = await db.update(carrierAssignmentRules)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(carrierAssignmentRules.id, id))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteCarrierAssignmentRule(id: string): Promise<void> {
+    await db.delete(carrierAssignmentRules).where(eq(carrierAssignmentRules.id, id));
+  }
+
   // DDP Pricing Tiers
   async getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]> {
     return db.select().from(ddpPricingTiers)
@@ -1431,6 +1803,14 @@ export class DatabaseStorage implements IStorage {
   // Audit Logs
   async getAuditLogs(): Promise<AuditLog[]> {
     return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  }
+
+  async getAuditLogsForEntity(entityType: string, entityId: string): Promise<AuditLog[]> {
+    return db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)))
+      .orderBy(auditLogs.createdAt);
   }
 
   async getAuditLogsPaginated(params: {
@@ -2566,8 +2946,8 @@ export class DatabaseStorage implements IStorage {
 <h3>2. Shipment Information</h3>
 <p>You are responsible for providing accurate sender, recipient, package, invoice, and customs information. Additional charges may apply when actual shipment measurements or customs information differ from the submitted details.</p>
 
-<h3>3. DDP Services</h3>
-<p>Door-to-door DDP shipments are manually managed by ezhalha. Rates are based on the configured lane, transport method, billable weight or volume, minimum charges, and your pricing profile.</p>
+<h3>3. Door To Door Freight Services</h3>
+<p>Door To Door Freight shipments are manually managed by ezhalha. Rates are based on the configured lane, transport method, billable weight or volume, minimum charges, and your pricing profile.</p>
 
 <h3>4. Payments and Adjustments</h3>
 <p>Shipment payment is required before processing unless approved credit terms apply. Billable adjustments, including additional weight or volume identified after booking, may generate a separate invoice.</p>
@@ -2634,6 +3014,37 @@ export class DatabaseStorage implements IStorage {
 
   async updateCreditAccessRequest(id: string, updates: Partial<CreditAccessRequest>): Promise<CreditAccessRequest | undefined> {
     const [updated] = await db.update(creditAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(creditAccessRequests.id, id)).returning();
+    return updated;
+  }
+
+  // Sales-feature access requests (Orders / Sales Channels / Assignment Rules bundle)
+  async getSalesFeatureAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: SalesFeatureAccessRequest[]; total: number; page: number; totalPages: number }> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 25;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(salesFeatureAccessRequests.status, params.status));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [totalResult] = await db.select({ count: count() }).from(salesFeatureAccessRequests).where(whereClause);
+    const total = totalResult?.count || 0;
+    const requests = await db.select().from(salesFeatureAccessRequests).where(whereClause).orderBy(desc(salesFeatureAccessRequests.createdAt)).limit(limit).offset(offset);
+    return { requests, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  async getSalesFeatureAccessRequestByClient(clientAccountId: string): Promise<SalesFeatureAccessRequest | undefined> {
+    const [request] = await db.select().from(salesFeatureAccessRequests).where(eq(salesFeatureAccessRequests.clientAccountId, clientAccountId)).orderBy(desc(salesFeatureAccessRequests.createdAt)).limit(1);
+    return request;
+  }
+
+  async createSalesFeatureAccessRequest(request: InsertSalesFeatureAccessRequest): Promise<SalesFeatureAccessRequest> {
+    const [created] = await db.insert(salesFeatureAccessRequests).values(request).returning();
+    return created;
+  }
+
+  async updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined> {
+    const [updated] = await db.update(salesFeatureAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(salesFeatureAccessRequests.id, id)).returning();
     return updated;
   }
 

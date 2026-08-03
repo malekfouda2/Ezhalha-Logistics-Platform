@@ -2,6 +2,7 @@ import { vi } from "vitest";
 
 vi.mock("../server/services/logger", () => ({
   logInfo: vi.fn(),
+  logWarn: vi.fn(),
   logError: vi.fn(),
   logAuditToFile: vi.fn(),
   logApiRequest: vi.fn(),

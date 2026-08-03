@@ -11,6 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { SearchableSelect } from "@/components/searchable-select";
+import { PhoneInput } from "@/components/phone-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Form,
   FormControl,
@@ -23,7 +31,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound, Truck } from "lucide-react";
+import { User, Building, Mail, Phone, MapPin, Shield, Calendar, Save, Lock, KeyRound, Truck, Coins } from "lucide-react";
 import type { ClientAccount } from "@shared/schema";
 import { useAuth } from "@/lib/auth-context";
 import { format } from "date-fns";
@@ -217,6 +225,26 @@ export default function ClientSettings() {
     updateShippingMutation.mutate(data);
   };
 
+  // Billing currency — changing it re-renders every price/invoice/payment in the portal and
+  // sets the checkout charge currency. Pricing stays SAR under the hood; the FX rate applies.
+  const currencyMutation = useMutation({
+    mutationFn: async (preferredCurrency: "SAR" | "USD") => {
+      const res = await apiRequest("PATCH", "/api/client/account", { preferredCurrency });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/client/account"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/fx-rate"] });
+      toast({
+        title: "Currency updated",
+        description: "All amounts now display in your selected currency.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   const watchedShippingCountry = shippingForm.watch("shippingCountryCode");
   const showShortAddress = watchedShippingCountry === "SA";
 
@@ -328,11 +356,11 @@ export default function ClientSettings() {
                         <FormItem>
                           <FormLabel>Phone Number</FormLabel>
                           <FormControl>
-                            <Input
-                              type="tel"
-                              placeholder="+1 234 567 8900"
+                            <PhoneInput
+                              value={field.value || ""}
+                              onChange={field.onChange}
+                              onBlur={field.onBlur}
                               data-testid="input-phone"
-                              {...field}
                             />
                           </FormControl>
                           <FormMessage />
@@ -409,6 +437,39 @@ export default function ClientSettings() {
                 <span className="text-sm text-muted-foreground">Current Tier</span>
                 <ProfileBadge profile={account?.profile || "regular"} />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Billing Currency Card */}
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Coins className="h-5 w-5" />
+                Billing Currency
+              </CardTitle>
+              <CardDescription>
+                The currency used for all prices, invoices, payments and financial reports across your account
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="max-w-xs">
+                <Select
+                  value={account?.preferredCurrency || "SAR"}
+                  onValueChange={(v) => currencyMutation.mutate(v as "SAR" | "USD")}
+                  disabled={currencyMutation.isPending}
+                >
+                  <SelectTrigger data-testid="select-billing-currency">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SAR">SAR — Saudi Riyal</SelectItem>
+                    <SelectItem value="USD">USD — US Dollar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Prices are set in Saudi Riyal and converted at the live exchange rate. You are charged in your selected currency at checkout.
+              </p>
             </CardContent>
           </Card>
 
@@ -545,10 +606,11 @@ export default function ClientSettings() {
                         <FormItem>
                           <FormLabel>Contact Phone</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="+966 50 123 4567"
+                            <PhoneInput
+                              value={field.value || ""}
+                              onChange={field.onChange}
+                              onBlur={field.onBlur}
                               data-testid="input-shipping-contact-phone"
-                              {...field}
                             />
                           </FormControl>
                           <FormMessage />

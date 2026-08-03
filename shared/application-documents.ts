@@ -1,7 +1,7 @@
 export const COMPANY_APPLICATION_DOCUMENTS = [
   { type: "TAX_CERTIFICATE", label: "Tax Certificate" },
   { type: "COMMERCIAL_REGISTRATION", label: "Commercial Registration" },
-  { type: "ESTABLISHMENT_CONTRACT", label: "Establishment Contract" },
+  { type: "ESTABLISHMENT_CONTRACT", label: "Memorandum of Association" },
   { type: "DIRECTOR_ID", label: "Director ID" },
 ] as const;
 

@@ -29,6 +29,22 @@ const ALLOWED_PROVIDER_HOSTS: Record<string, Set<string>> = {
   fedex: new Set(["apis.fedex.com", "apis-sandbox.fedex.com", "documentapi.prod.fedex.com", "documentapitest.prod.fedex.com"]),
   dhl: new Set(["express.api.dhl.com"]),
   aramex: new Set(["ws.aramex.net", "ws.dev.aramex.net"]),
+  smsa: new Set(["ecomapis.smsaexpress.com", "track.smsaexpress.com", "api.smsaexpress.com"]),
+  naqel: new Set(["api.naqelexpress.com", "webservices.naqelksa.com"]),
+  jt: new Set(["openapi.jtexpress.com.sa", "uat-openapi.jtexpress.com.sa", "openapi.jtjms-me.com"]),
+  redbox: new Set(["api.redboxsa.com", "api.redbox.global", "api.redboxglobal.com"]),
+  zajil: new Set(["api.zajil-express.com"]),
+  imile: new Set(["openapi.52imile.cn", "openapi.imile.com"]),
+  spl: new Set([
+    "api.splonline.com.sa",
+    "apis.splonline.com.sa",
+    "b2b.splonline.com.sa",
+    "b2bapi.splonline.com.sa",
+    "sandbox.splonline.com.sa",
+    "uat-api.splonline.com.sa",
+  ]),
+  fizzpa: new Set(["rest.fizzpa.net"]),
+  shipox: new Set(["prodapi.shipox.com", "api.shipox.com"]),
   tap: new Set(["api.tap.company"]),
   zoho: new Set([
     "accounts.zoho.com",
@@ -48,6 +64,16 @@ const ALLOWED_PROVIDER_HOSTS: Record<string, Set<string>> = {
   ]),
 };
 
+// Contact-channel settings for a carrier, keyed by the carrier's env prefix (FEDEX / DHL / ARAMEX
+// …). Surfaced in the operations hub so ops can call / email / WhatsApp the carrier directly.
+function carrierContactFields(prefix: string): IntegrationCredentialField[] {
+  return [
+    { key: `${prefix}_SUPPORT_PHONE`, label: "Support Phone", placeholder: "+9668001000530", helpText: "Carrier customer-service number. Shown as a 'Call carrier' action in the Operations Hub." },
+    { key: `${prefix}_SUPPORT_EMAIL`, label: "Support Email", placeholder: "support@carrier.com", helpText: "Carrier support email for the Operations Hub contact actions." },
+    { key: `${prefix}_SUPPORT_WHATSAPP`, label: "Support WhatsApp", placeholder: "+9665XXXXXXXX", helpText: "Carrier WhatsApp number (international format). Optional." },
+  ];
+}
+
 export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
   {
     key: "fedex",
@@ -64,10 +90,14 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "FEDEX_BASE_URL", label: "API Base URL", placeholder: "https://apis-sandbox.fedex.com" },
       { key: "FEDEX_DOCUMENT_BASE_URL", label: "Document Upload Base URL", placeholder: "https://documentapitest.prod.fedex.com" },
       { key: "FEDEX_WEBHOOK_SECRET", label: "Webhook Secret", secret: true },
+      { key: "FEDEX_TRACK_API_KEY", label: "Track API Key (Basic Integrated Visibility)", secret: true, helpText: "FedEx requires tracking to live in its own project/key, separate from Ship/Rate. Paste the Basic Integrated Visibility key here; tracking uses it, everything else uses the keys above. Leave blank to track with the Ship/Rate key." },
+      { key: "FEDEX_TRACK_SECRET_KEY", label: "Track Secret Key", secret: true },
     ],
     settingsFields: [
       { key: "FEDEX_REQUIRE_HS", label: "Require HS Codes For International Shipments", placeholder: "false" },
       { key: "FEDEX_STRICT_ADDRESS", label: "Strict Address Validation", placeholder: "false" },
+      { key: "FEDEX_TRACK_BASE_URL", label: "Track API Base URL", placeholder: "https://apis.fedex.com", helpText: "Base URL for the Basic Integrated Visibility (Track) project. Production: https://apis.fedex.com" },
+      ...carrierContactFields("FEDEX"),
     ],
   },
   {
@@ -83,6 +113,9 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "DHL_API_SECRET", label: "API Secret", required: true, secret: true },
       { key: "DHL_ACCOUNT_NUMBER", label: "Account Number", required: true },
       { key: "DHL_BASE_URL", label: "Base URL", placeholder: "https://express.api.dhl.com/mydhlapi/test" },
+    ],
+    settingsFields: [
+      ...carrierContactFields("DHL"),
     ],
   },
   {
@@ -104,6 +137,147 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
     ],
     settingsFields: [
       { key: "ARAMEX_MOCK_MODE", label: "Allow Mock Responses", placeholder: "false" },
+      ...carrierContactFields("ARAMEX"),
+    ],
+  },
+  {
+    key: "smsa",
+    name: "SMSA Express",
+    category: "shipping",
+    description: "Domestic KSA local shipments: booking (AWB), A6 PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "SMSA's REST API authenticates with an apikey header plus a customer account (and optional passkey). Leave the base URL blank to use the default host.",
+    credentialFields: [
+      { key: "SMSA_API_KEY", label: "API Key", required: true, secret: true },
+      { key: "SMSA_ACCOUNT_NUMBER", label: "Customer Account Number", required: true },
+      { key: "SMSA_PASSKEY", label: "Pass Key (if issued)", secret: true },
+      { key: "SMSA_BASE_URL", label: "API Base URL", placeholder: "https://ecomapis.smsaexpress.com" },
+    ],
+  },
+  {
+    key: "naqel",
+    name: "Naqel Express",
+    category: "shipping",
+    description: "Domestic KSA local shipments: waybill creation, PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "Naqel's REST API authenticates with a ClientID + Password (and account number) sent as ClientInfo on each request. Leave the base URL blank to use the default host.",
+    credentialFields: [
+      { key: "NAQEL_CLIENT_ID", label: "Client ID", required: true, secret: true },
+      { key: "NAQEL_PASSWORD", label: "Password", required: true, secret: true },
+      { key: "NAQEL_ACCOUNT_NUMBER", label: "Client Account Number", required: true },
+      { key: "NAQEL_API_VERSION", label: "API Version", placeholder: "1.0" },
+      { key: "NAQEL_BASE_URL", label: "API Base URL", placeholder: "https://api.naqelexpress.com" },
+    ],
+  },
+  {
+    key: "jt",
+    name: "J&T Express",
+    category: "shipping",
+    description: "Domestic KSA local shipments: waybill creation, PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "J&T's Open Platform authenticates with an API account + private key: each request carries an apiAccount header and a digest = Base64(MD5(bizContent + privateKey)); the customer code travels in the payload. Leave the base URL blank to use the default host.",
+    credentialFields: [
+      { key: "JT_API_ACCOUNT", label: "API Account", required: true, secret: true },
+      { key: "JT_PRIVATE_KEY", label: "Private Key", required: true, secret: true },
+      { key: "JT_CUSTOMER_CODE", label: "Customer Code", required: true },
+      { key: "JT_BASE_URL", label: "API Base URL", placeholder: "https://openapi.jtexpress.com.sa" },
+    ],
+  },
+  {
+    key: "redbox",
+    name: "RedBox",
+    category: "shipping",
+    description: "Domestic KSA local shipments: order creation, PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "RedBox's REST API authenticates with a Bearer API key; the merchant id travels in the payload. Leave the base URL blank to use the default host.",
+    credentialFields: [
+      { key: "REDBOX_API_KEY", label: "API Key", required: true, secret: true },
+      { key: "REDBOX_MERCHANT_ID", label: "Merchant ID", required: true },
+      { key: "REDBOX_BASE_URL", label: "API Base URL", placeholder: "https://api.redboxsa.com" },
+    ],
+  },
+  {
+    key: "zajil",
+    name: "Zajil Express",
+    category: "shipping",
+    description: "Domestic KSA local shipments: booking (AWB), PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "Zajil's Shipment Integration API authenticates with a raw API key in the Authorization header plus a numeric customer ID. Domestic Saudi lanes only — Zajil's API carries no country or customs fields. Zajil allowlists partner server IPs, so share this server's egress IP with them or requests return 403. Keep the environment on Test until Zajil signs off the integration. Zajil has no rate API (add a Zajil rate card under Local Pricing) and no cancel API (cancel through Zajil operations). Zajil accounts flagged for TGA compliance reject bookings unless the recipient has a valid Saudi National Address short code (8 characters, e.g. RQWA3237) in their short-address field.",
+    credentialFields: [
+      { key: "ZAJIL_API_KEY", label: "API Key", required: true, secret: true, helpText: "Sent as the raw Authorization header value." },
+      { key: "ZAJIL_CUSTOMER_ID", label: "Customer ID", required: true, placeholder: "534", helpText: "Numeric customer ID issued by Zajil." },
+      { key: "ZAJIL_BASE_URL", label: "API Base URL", placeholder: "https://api.zajil-express.com" },
+    ],
+    settingsFields: [
+      { key: "ZAJIL_ENVIRONMENT", label: "Environment (test or production)", placeholder: "test", helpText: "'test' routes to Zajil's staging Odoo — no real couriers or billing. Switch to 'production' only after Zajil signs off." },
+    ],
+  },
+  {
+    key: "spl",
+    name: "SPL (Saudi Post)",
+    category: "shipping",
+    description: "Domestic KSA local shipments via Saudi Post: shipment/waybill creation, PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "SPL's B2B API sits behind an Azure API Management gateway: each request carries an Ocp-Apim-Subscription-Key header plus an OAuth2 client-credentials access token (client id + secret), and the partner contract id travels in the payload. Leave the base URL blank to use the default host. SPL has no rate API — pricing is a flat contract tariff, so add an SPL rate card under Local Pricing (same as Zajil). Confirm the exact credential field names against your SPL partner onboarding pack before going live.",
+    credentialFields: [
+      { key: "SPL_SUBSCRIPTION_KEY", label: "Subscription Key", required: true, secret: true, helpText: "Azure APIM key sent as the Ocp-Apim-Subscription-Key header." },
+      { key: "SPL_CLIENT_ID", label: "Client ID", required: true, secret: true, helpText: "OAuth2 client-credentials client id." },
+      { key: "SPL_CLIENT_SECRET", label: "Client Secret", required: true, secret: true, helpText: "OAuth2 client-credentials client secret." },
+      { key: "SPL_CONTRACT_ID", label: "Contract / Customer ID", required: true, helpText: "SPL partner contract number sent in the shipment payload." },
+      { key: "SPL_BASE_URL", label: "API Base URL", placeholder: "https://api.splonline.com.sa", helpText: "Leave blank to use the default SPL host." },
+    ],
+  },
+  {
+    key: "imile",
+    name: "iMile",
+    category: "shipping",
+    description: "Domestic KSA/AE and cross-border shipments via iMile: live rates, order creation, base64 PDF labels, and tracking.",
+    capabilities: ["Rates", "Local", "International", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "iMile's OpenAPI wraps every request in a JSON envelope { customerId, sign, signMethod, timestamp, timeZone, accessToken, param } and uses a two-step auth: grant a 2-hour access token, then repeat it on each call. The `sign` is the API secret; with signMethod 'SimpleKey' (the default) it is sent verbatim. Live rates come from iMile's shipping-fee estimate (calShippingFee); when a lane's product is not enabled the platform falls back to the iMile rate card under Local Pricing, so keep one configured. Keep the base URL on the test host (openapi.52imile.cn) until iMile signs off, then switch to openapi.imile.com.",
+    credentialFields: [
+      { key: "IMILE_CUSTOMER_ID", label: "Customer ID", required: true, helpText: "iMile client code, e.g. C2102175701." },
+      { key: "IMILE_SIGN", label: "Sign / API Secret", required: true, secret: true, helpText: "API secret issued by iMile; sent verbatim with signMethod 'SimpleKey'." },
+      { key: "IMILE_BASE_URL", label: "API Base URL", placeholder: "https://openapi.52imile.cn", helpText: "Test: https://openapi.52imile.cn · Production: https://openapi.imile.com" },
+    ],
+    settingsFields: [
+      { key: "IMILE_TIME_ZONE", label: "Time Zone", placeholder: "+3", helpText: "Account time-zone offset sent on each request (KSA = +3, UAE = +4)." },
+      { key: "IMILE_SIGN_METHOD", label: "Sign Method", placeholder: "SimpleKey", helpText: "SimpleKey (default), MD5, or SHA256 — per your iMile contract." },
+    ],
+  },
+  {
+    key: "fizzpa",
+    name: "Fizzpa",
+    category: "shipping",
+    description: "KSA last-mile aggregator reached through client-facing virtual carriers: order creation, PDF labels, and tracking.",
+    capabilities: ["Local", "Shipments", "Labels", "Tracking"],
+    docsSummary:
+      "Fizzpa authenticates with a raw API key in the Authorization header (NOT a Bearer token) plus a required Referer header set to the URL Fizzpa registered for this account — a wrong Referer returns 401/403. Fizzpa exposes no rate API and no downstream-carrier selection: set up client-facing virtual carriers (Admin → Virtual Carriers) mapped to this provider, each with its own rate card under Local Pricing. City IDs are numeric and come from Fizzpa's Cities.xlsx (no live cities API), so paste a JSON name→id map into City ID Map, e.g. {\"riyadh\":1,\"jeddah\":2}. The chosen virtual courier is written onto the Fizzpa order note. Cancellation only works before pickup.",
+    credentialFields: [
+      { key: "FIZZPA_API_KEY", label: "API Key", required: true, secret: true, helpText: "Sent as the raw Authorization header value (no Bearer prefix)." },
+      { key: "FIZZPA_REFERER", label: "Referer", placeholder: "https://app.ezhalha.co", helpText: "Exact Referer value Fizzpa registered for this account." },
+      { key: "FIZZPA_CITY_MAP", label: "City ID Map (JSON)", helpText: "JSON map of city name → Fizzpa numeric CityId, e.g. {\"riyadh\":1,\"jeddah\":2}." },
+      { key: "FIZZPA_BASE_URL", label: "API Base URL", placeholder: "https://rest.fizzpa.net/api", helpText: "Leave blank to use the default Fizzpa host." },
+    ],
+  },
+  {
+    key: "shipox",
+    name: "Shipox",
+    category: "shipping",
+    description: "Delivery-management aggregator reached through client-facing virtual carriers: order creation and tracking.",
+    capabilities: ["Local", "Shipments", "Tracking"],
+    docsSummary:
+      "Shipox is a tenant/customer API: authenticate with username + password to receive a JWT that the adapter caches and refreshes on 401. Shipox's rate API returns a blended, geocode-driven tariff with an opaque delivering carrier and exposes no downstream-carrier selection, so price off a rate card instead: set up client-facing virtual carriers (Admin → Virtual Carriers) mapped to this provider, each with its own rate card under Local Pricing. The chosen virtual courier is written onto the Shipox order note. Cancellation goes through Shipox operations.",
+    credentialFields: [
+      { key: "SHIPOX_USERNAME", label: "Username", required: true, helpText: "Shipox customer account username/email." },
+      { key: "SHIPOX_PASSWORD", label: "Password", required: true, secret: true, helpText: "Shipox customer account password." },
+      { key: "SHIPOX_BASE_URL", label: "API Base URL", placeholder: "https://prodapi.shipox.com", helpText: "Leave blank to use the default Shipox host." },
     ],
   },
   {
@@ -619,6 +793,40 @@ async function testAramex(credentials: Record<string, string>, environment: stri
   };
 }
 
+async function testZajil(credentials: Record<string, string>): Promise<IntegrationAccountTestResult> {
+  if (!/^\d+$/.test((credentials.ZAJIL_CUSTOMER_ID || "").trim())) {
+    return { success: false, message: "Customer ID must be a whole number (for example 534)." };
+  }
+
+  const baseUrl = normalizeBaseUrl(credentials.ZAJIL_BASE_URL, "https://api.zajil-express.com");
+  // Zajil only enforces the API key on POST /api/shipment/create, and that books a real
+  // shipment — so there is no way to validate the key without side effects. Probe the
+  // city list instead: it proves the base URL, network path and IP allowlist, which is
+  // where Zajil integrations actually fail. The key itself is proven at first booking.
+  const response = await fetchWithTimeout(`${baseUrl}/api/cities`, {
+    method: "GET",
+    headers: { Authorization: credentials.ZAJIL_API_KEY || "", Accept: "application/json" },
+  });
+  const detail = await readProviderMessage(response);
+
+  if (response.status === 403) {
+    return {
+      success: false,
+      message: `Zajil rejected this server with HTTP 403${detail ? `: ${detail}` : ""}. Zajil allowlists partner IPs — send them this server's egress IP address.`,
+    };
+  }
+
+  if (!response.ok) {
+    return { success: false, message: providerStatusMessage("Zajil connectivity failed", response, detail) };
+  }
+
+  return {
+    success: true,
+    message:
+      "Zajil is reachable and this server's IP is accepted. Note: Zajil only checks the API key when booking, so the key is confirmed on the first live shipment.",
+  };
+}
+
 async function testTap(credentials: Record<string, string>): Promise<IntegrationAccountTestResult> {
   const baseUrl = normalizeBaseUrl(credentials.TAP_BASE_URL, "https://api.tap.company/v2");
   // Tap has no charge-list endpoint (GET /charges 404s), so probe the GET
@@ -754,6 +962,7 @@ export async function runIntegrationAccountTest(account: IntegrationAccount): Pr
     if (account.appKey === "fedex") return await testFedEx(credentials, account.environment);
     if (account.appKey === "dhl") return await testDhl(credentials, account.environment);
     if (account.appKey === "aramex") return await testAramex(credentials, account.environment);
+    if (account.appKey === "zajil") return await testZajil(credentials);
     if (account.appKey === "tap") return await testTap(credentials);
     if (account.appKey === "gemini") return await testGemini(credentials);
     if (account.appKey === "zoho") return await testZoho(credentials);

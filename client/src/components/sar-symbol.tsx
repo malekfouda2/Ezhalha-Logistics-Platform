@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useCurrency } from "@/lib/use-currency";
 
 interface SarSymbolProps {
   className?: string;
@@ -44,11 +45,28 @@ interface SarAmountProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   decimals?: number;
   showDecimals?: boolean;
+  // For already-charged amounts (e.g. a paid shipment), pass the shipment's snapshotted
+  // fxRate so history renders at the rate the client was actually charged, not today's.
+  snapshotRate?: number | null;
 }
 
-export function SarAmount({ amount, className, size = "sm", decimals = 2, showDecimals = true }: SarAmountProps) {
+// Renders a monetary amount that is stored in SAR. For SAR-billed sessions it shows the
+// Saudi Riyal glyph (unchanged). For non-SAR sessions (e.g. a USD-billed client) it converts
+// via the live/snapshotted FX rate and renders the account currency (e.g. "$26.67"). Admin/
+// operations sessions always resolve to SAR, so their displays are unaffected.
+export function SarAmount({ amount, className, size = "sm", decimals = 2, showDecimals = true, snapshotRate }: SarAmountProps) {
+  const { isConverted, format } = useCurrency();
   const num = typeof amount === "string" ? Number(amount) : amount;
   const safeNum = isNaN(num) ? 0 : num;
+
+  if (isConverted) {
+    return (
+      <span className={cn("inline-flex items-center", className)} data-testid="text-sar-amount">
+        {format(safeNum, snapshotRate)}
+      </span>
+    );
+  }
+
   const formatted = showDecimals ? formatSAR(safeNum, decimals) : safeNum.toLocaleString();
   return (
     <span className={cn("inline-flex items-center gap-0.5", className)} data-testid="text-sar-amount">

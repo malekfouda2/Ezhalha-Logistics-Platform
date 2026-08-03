@@ -321,6 +321,90 @@ describe("Admin - Financial Statements", () => {
     expect(matchedShipment.isClientPaid).toBe(true);
   });
 
+  it("GET /api/admin/financial-statements reports DDP real margin from the supplier cost without touching the client price", async () => {
+    const unique = Date.now();
+    const clientAccount = await storage.createClientAccount({
+      name: `DDP Margin Client ${unique}`,
+      email: `ddp_margin_client_${unique}@test.com`,
+      phone: "5551234599",
+      country: "Saudi Arabia",
+      profile: "regular",
+      accountType: "company",
+      companyName: "DDP Margin Co",
+      isActive: true,
+      shippingContactName: "DDP Contact",
+      shippingContactPhone: "5551234599",
+      shippingCountryCode: "SA",
+      shippingStateOrProvince: "Riyadh",
+      shippingCity: "Riyadh",
+      shippingPostalCode: "12345",
+      shippingAddressLine1: "1 DDP Street",
+      shippingShortAddress: "RCTB4360",
+    });
+
+    // Recorded cost (lane sell base) = 100, markup = 20 → recorded margin 20.
+    // Real supplier cost = 70 → real margin = revenueExclTax(120) − 70 = 50.
+    const shipment = await storage.createShipment({
+      clientAccountId: clientAccount.id,
+      senderName: "Supplier Origin",
+      senderAddress: "Pickup coordination required",
+      senderCity: "Guangzhou",
+      senderCountry: "CN",
+      senderPhone: "5550000010",
+      recipientName: "Inbound Recipient",
+      recipientAddress: "200 Recipient Road",
+      recipientCity: "Riyadh",
+      recipientCountry: "SA",
+      recipientPhone: "5550000011",
+      weight: "10.00",
+      weightUnit: "KG",
+      packageType: "DDP_MANUAL",
+      shipmentType: "inbound",
+      isDdp: true,
+      fulfillmentType: "ddp_manual",
+      ddpTransportMethod: "air",
+      ddpSupplierCostSar: "70.00",
+      status: "created",
+      baseRate: "100.00",
+      marginAmount: "20.00",
+      margin: "20.00",
+      finalPrice: "122.61",
+      accountingCurrency: "SAR",
+      taxScenario: "DDP",
+      costAmountSar: "100.00",
+      costTaxAmountSar: "0.00",
+      sellSubtotalAmountSar: "120.00",
+      sellTaxAmountSar: "2.61",
+      clientTotalAmountSar: "122.61",
+      systemCostTotalAmountSar: "100.00",
+      taxPayableAmountSar: "2.61",
+      revenueExcludingTaxAmountSar: "120.00",
+      currency: "SAR",
+      carrierCode: "DDP",
+      carrierName: "DDP",
+      paymentStatus: "paid",
+    });
+
+    const res = await asAdmin.get(
+      `/api/admin/financial-statements?search=${encodeURIComponent(clientAccount.name)}&scenario=DDP`,
+    );
+    expect(res.status).toBe(200);
+
+    const row = res.body.shipments.find((entry: any) => entry.id === shipment.id);
+    expect(row).toBeDefined();
+    // Client-facing figures untouched.
+    expect(Number(row.clientTotalAmountSar)).toBe(122.61);
+    expect(Number(row.costAmountSar)).toBe(100); // recorded cost = lane base
+    expect(Number(row.netProfitAmountSar)).toBe(20); // recorded margin unchanged
+    // New: supplier cost + real margin surfaced.
+    expect(Number(row.ddpSupplierCostSar)).toBe(70);
+    expect(Number(row.realMarginAmountSar)).toBe(50); // 120 revenue − 70 supplier cost
+    expect(Number(row.realNetProfitAmountSar)).toBe(50); // no expenses
+    // Summary aggregates the new fields.
+    expect(Number(res.body.summary.realMarginAmountSar)).toBeGreaterThanOrEqual(50);
+    expect(Number(res.body.summary.ddpSupplierCostSar)).toBeGreaterThanOrEqual(70);
+  });
+
   it("GET /api/admin/financial-statements should exclude unpaid and payment-pending shipments by default", async () => {
     const unique = Date.now();
     const clientAccount = await storage.createClientAccount({
@@ -1636,7 +1720,9 @@ describe("Admin - Client Management", () => {
     expect(createdUser).toBeDefined();
     expect(createdUser?.userType).toBe("client");
     expect(createdUser?.isPrimaryContact).toBe(true);
-    expect(createdUser?.mustChangePassword).toBe(true);
+    // Onboarding now emails a set-password link instead of a temp password, so the user is
+    // created without the must-change-password flag.
+    expect(createdUser?.mustChangePassword).toBe(false);
   });
 
   it("POST /api/admin/clients should allow assigning an account manager", async () => {
@@ -2434,6 +2520,7 @@ describe("Admin - Account Managers", () => {
       weight: "2.50",
       packageType: "parcel",
       status: "processing",
+      paymentStatus: "paid",
       baseRate: "100.00",
       margin: "20.00",
       finalPrice: "120.00",

@@ -205,7 +205,9 @@ describe("DhlAdapter", () => {
 
     expect(payload.plannedShippingDateAndTime).toBe("2026-04-26T09:00:00 GMT+00:00");
     expect(payload.content.description).toBe("Bambu Lab H2S");
-    expect(payload.content.declaredValue).toBe("4198");
+    // DHL now requires a numeric declaredValue (no quotes).
+    expect(payload.content.declaredValue).toBe(4198);
+    expect(typeof payload.content.declaredValue).toBe("number");
     expect(payload.content.exportDeclaration.invoice.customerReferences[0].typeCode).toBe("CU");
     expect(payload.content.exportDeclaration.lineItems).toHaveLength(1);
     expect(payload.content.exportDeclaration.lineItems[0].description).toBe("Bambu Lab H2S");
@@ -219,5 +221,37 @@ describe("DhlAdapter", () => {
     expect(payload.content.exportDeclaration.invoice.totalGrossWeight).toBeGreaterThan(
       payload.content.exportDeclaration.invoice.totalNetWeight,
     );
+  });
+
+  it("books a pickup via POST /pickups and returns the dispatch confirmation number", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ dispatchConfirmationNumbers: ["PRG260729153064"] }), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "BERICAP Aluminium GmbH", streetLine1: "Im Vorwerk 7", city: "Barchfeld",
+        postalCode: "36456", countryCode: "DE", phone: "+49369617770", email: "ops@example.com",
+      },
+      packages: [
+        { weight: 9, weightUnit: "KG", packageType: "YOUR_PACKAGING", dimensions: { length: 50, width: 40, height: 40, unit: "CM" } },
+        { weight: 9, weightUnit: "KG", packageType: "YOUR_PACKAGING", dimensions: { length: 50, width: 40, height: 40, unit: "CM" } },
+      ],
+      pickupDate: "2026-07-29", readyTime: "12:00", closeTime: "17:00",
+      isInternational: true, serviceType: "P", currency: "EUR",
+    });
+
+    expect(result.confirmationNumber).toBe("PRG260729153064");
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups"))!;
+    expect(String(call[0])).toMatch(/\/pickups$/);
+    expect(call[1].method).toBe("POST");
+    const body = JSON.parse(call[1].body);
+    expect(body.plannedPickupDateAndTime).toBe("2026-07-29T12:00:00 GMT+02:00"); // Berlin DST offset
+    expect(body.closeTime).toBe("17:00");
+    expect(body.accounts[0].number).toBe("123456789");
+    expect(body.customerDetails.shipperDetails.postalAddress.cityName).toBe("Barchfeld");
+    expect(body.shipmentDetails[0].packages).toHaveLength(2);
   });
 });

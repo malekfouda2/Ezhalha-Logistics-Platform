@@ -10,6 +10,7 @@ import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/phone-input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -31,7 +32,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
-import { ArrowLeft, Save, Building, User, MapPin, Globe, Wallet } from "lucide-react";
+import { ArrowLeft, Save, Building, User, MapPin, Globe, Wallet, Store } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { insertClientAccountSchema, type ClientAccount } from "@shared/schema";
 
 const editClientSchema = insertClientAccountSchema.partial().extend({
@@ -77,6 +79,41 @@ interface CreditSummary {
     reason: string | null;
     createdAt: string;
   }>;
+}
+
+function ClientSalesFeatureCard({ clientId, enabled, disabled }: { clientId: string; enabled: boolean; disabled: boolean }) {
+  const { toast } = useToast();
+  const toggle = useMutation({
+    mutationFn: async (next: boolean) => {
+      const res = await apiRequest("PATCH", `/api/admin/clients/${clientId}/sales-features`, { enabled: next });
+      return readJsonResponse(res);
+    },
+    onSuccess: (_d, next) => {
+      toast({ title: next ? "Sales Channels enabled" : "Sales Channels disabled" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/clients", clientId] });
+    },
+    onError: (error: any) => toast({ title: "Could not update", description: error?.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Store className="w-5 h-5" />
+          Sales Channels Feature
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <p className="text-sm font-medium">Orders, Sales Channels & Assignment Rules</p>
+            <p className="text-sm text-muted-foreground">Unlock the bundled feature for this client (no request needed).</p>
+          </div>
+          <Switch checked={enabled} disabled={disabled || toggle.isPending} onCheckedChange={(v) => toggle.mutate(v)} data-testid="switch-sales-features" />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ClientCreditCard({ clientId, disabled }: { clientId: string; disabled: boolean }) {
@@ -200,6 +237,7 @@ export default function AdminEditClient() {
       shippingShortAddress: "",
       profile: "",
       isActive: true,
+      preferredCurrency: "SAR",
       assignedAccountManagerUserId: "unassigned",
       nameAr: "",
       companyNameAr: "",
@@ -266,6 +304,7 @@ export default function AdminEditClient() {
         shippingShortAddress: client.shippingShortAddress || "",
         profile: client.profile || "",
         isActive: client.isActive,
+        preferredCurrency: client.preferredCurrency || "SAR",
         assignedAccountManagerUserId: client.assignedAccountManager?.id || "unassigned",
         nameAr: client.nameAr || "",
         companyNameAr: client.companyNameAr || "",
@@ -409,7 +448,7 @@ export default function AdminEditClient() {
                         <FormItem>
                           <FormLabel>Phone</FormLabel>
                           <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-phone" />
+                            <PhoneInput value={field.value || ""} onChange={field.onChange} onBlur={field.onBlur} data-testid="input-phone" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -521,9 +560,34 @@ export default function AdminEditClient() {
                         )}
                       />
                     )}
+                    <FormField
+                      control={form.control}
+                      name="preferredCurrency"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Billing currency</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value || "SAR"}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-currency">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="SAR">SAR — Saudi Riyal</SelectItem>
+                              <SelectItem value="USD">USD — US Dollar</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Currency the client is charged in at checkout. Pricing is kept in SAR and converted at the live rate when paying.
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </CardContent>
                 </Card>
 
+                {clientId && <ClientSalesFeatureCard clientId={clientId} enabled={Boolean((client as any)?.salesFeaturesEnabled)} disabled={isAccountManager} />}
                 {clientId && <ClientCreditCard clientId={clientId} disabled={isAccountManager} />}
 
                 <Card>
@@ -606,7 +670,7 @@ export default function AdminEditClient() {
                         <FormItem>
                           <FormLabel>Contact Phone</FormLabel>
                           <FormControl>
-                            <Input {...field} value={field.value || ""} data-testid="input-shipping-contact-phone" />
+                            <PhoneInput value={field.value || ""} onChange={field.onChange} onBlur={field.onBlur} data-testid="input-shipping-contact-phone" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -775,7 +839,7 @@ export default function AdminEditClient() {
                         <FormItem>
                           <FormLabel>Contact Phone (Arabic)</FormLabel>
                           <FormControl>
-                            <Input {...field} dir="rtl" value={field.value || ""} data-testid="input-shipping-contact-phone-ar" />
+                            <PhoneInput value={field.value || ""} onChange={field.onChange} onBlur={field.onBlur} data-testid="input-shipping-contact-phone-ar" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>

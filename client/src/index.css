@@ -170,8 +170,59 @@
     @apply border-border;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Inter stylistic sets: cleaner lowercase l, single-story a, rounded quotes,
+       and disabled ligatures on code-like content. Sharpens type app-wide. */
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    letter-spacing: -0.006em;
+  }
+
+  /* Tighter tracking on headings/emphasis for a sleeker, more deliberate look. */
+  h1, h2, h3, h4, .font-bold, .font-semibold {
+    letter-spacing: -0.018em;
+  }
+
+  /* Monospace + numeric contexts read straighter with tabular, lined figures. */
+  .font-mono, [class*="tabular"], table td, table th {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "ss01";
+  }
+
+  /* Themed, unobtrusive scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.28);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.45);
+  }
+
+  /* Branded text selection. */
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
   }
 }
 
@@ -348,5 +399,97 @@
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
+  }
+}
+
+/*
+ * App-wide smoothness + micro-interactions.
+ * Kept intentionally lightweight so it applies globally without perf cost, and
+ * fully disabled for users who prefer reduced motion.
+ */
+@layer base {
+  a,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea,
+  .shadcn-card,
+  [data-radix-collection-item] {
+    transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Entrance animations for page/section content. Pair with animate-* helpers. */
+  @keyframes ez-fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes ez-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes ez-scale-in {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  /*
+   * Use `backwards` (not `both`) fill for the transform-based entrances: `both`
+   * would hold the final `translateY(0)`/`scale(1)` as a computed transform, and a
+   * non-none transform turns the element into the containing block for any
+   * position:fixed descendant — which clips/mis-positions modals. `backwards`
+   * applies the `from` frame before the run and reverts to no transform after.
+   */
+  .animate-fade-up {
+    animation: ez-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .animate-fade-in {
+    animation: ez-fade-in 0.3s ease-out both;
+  }
+  .animate-scale-in {
+    animation: ez-scale-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* Explicit tabular figures for money/metric readouts. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Shimmer surface for richer loading skeletons. */
+  @keyframes ez-shimmer {
+    100% { transform: translateX(100%); }
+  }
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    animation: ez-shimmer 1.6s infinite;
   }
 }

@@ -107,7 +107,7 @@ export default function PolicyPage() {
           <img
             src="/assets/branding/logo.png"
             alt="ezhalha"
-            className="h-8 w-auto"
+            className="h-11 w-auto"
           />
         </div>
       </header>

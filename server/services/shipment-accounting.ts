@@ -48,7 +48,7 @@ export function resolveShipmentTaxScenario(
 ): ShipmentTaxScenarioValue {
   if (isDdp) {
     if (!isDdpEligibleForShipment(shipmentType, recipientCountryCode)) {
-      throw new Error("DDP is only available for inbound door-to-door shipments");
+      throw new Error("Door To Door Freight is only available for inbound door-to-door shipments");
     }
     return ShipmentTaxScenario.DDP;
   }

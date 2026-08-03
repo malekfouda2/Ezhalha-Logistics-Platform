@@ -440,7 +440,7 @@ export default function AdminCreditInvoices() {
                 <h4 className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" />Invoice Info</h4>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <span className="text-muted-foreground">Amount</span>
-                  <span className="font-medium"><SarAmount amount={Number(detailInvoice.amount)} /> {detailInvoice.currency}</span>
+                  <span className="font-medium"><SarAmount amount={Number(detailInvoice.amount)} /></span>
                   <span className="text-muted-foreground">Issued</span>
                   <span>{format(new Date(detailInvoice.issuedAt || detailInvoice.createdAt), "MMM d, yyyy h:mm a")}</span>
                   <span className="text-muted-foreground">Due Date</span>
@@ -656,7 +656,7 @@ export default function AdminCreditInvoices() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount</span>
-                <span className="font-medium"><SarAmount amount={Number(actionDialog.invoice.amount)} /> {actionDialog.invoice.currency}</span>
+                <span className="font-medium"><SarAmount amount={Number(actionDialog.invoice.amount)} /></span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Due</span>

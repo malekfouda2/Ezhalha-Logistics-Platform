@@ -64,8 +64,10 @@ import {
   Home,
   Upload,
   CheckCircle2,
+  Pencil,
 } from "lucide-react";
 import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
+import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -138,8 +140,18 @@ function hasAccountingSnapshot(shipment: Shipment) {
   return Boolean(shipment.taxScenario && shipment.accountingCurrency === "SAR");
 }
 
+// Shipment fulfillment kind for the list "Type" column — mirrors the server's
+// getOperationShipmentKind (Door To Door / Local / Express).
+function formatShipmentKindLabel(shipment: Shipment): string {
+  if (shipment.fulfillmentType === "ddp_manual" || (shipment as any).isDdp || shipment.carrierCode === "DDP") {
+    return "Door to Door";
+  }
+  if (shipment.fulfillmentType === "local") return "Local";
+  return "Express";
+}
+
 function formatTaxScenarioLabel(shipment: Shipment) {
-  if (shipment.taxScenario === "DDP") return "DDP Import";
+  if (shipment.taxScenario === "DDP") return "Door To Door Freight";
   if (shipment.taxScenario === "DCE") return "DCE Domestic";
   if (shipment.taxScenario === "IMPORT") return "Import";
   if (shipment.taxScenario === "EXPORT") return "Export";
@@ -268,6 +280,12 @@ function getStatusBadgeClass(status: AbandonedStatus) {
   return "bg-muted text-muted-foreground";
 }
 
+function fmtDateTime(value?: string | Date | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 export default function AdminShipments({ abandonedOnly = false }: AdminShipmentsProps = {}) {
   const adminAccess = useAdminAccess();
   const [searchQuery, setSearchQuery] = useState("");
@@ -276,6 +294,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [editShipment, setEditShipment] = useState<Shipment | null>(null);
+  const [extraWeightInput, setExtraWeightInput] = useState("");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [abandonedTab, setAbandonedTab] = useState<"all" | AbandonedStatus>("all");
   const [methodFilter, setMethodFilter] = useState("all");
@@ -330,6 +350,31 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     },
     enabled: abandonedOnly,
   });
+
+  // Creator + activity timeline for the currently open shipment (derived from the audit log).
+  const { data: shipmentDetails } = useQuery<{
+    createdBy: { username: string; userType: string } | null;
+    createdVia: string;
+    createdAt: string;
+    clientName: string | null;
+    clientEmail: string | null;
+    activity: Array<{ action: string; at: string; by: string; byType: string | null; details: string | null }>;
+  }>({
+    queryKey: ["/api/admin/shipments", selectedShipment?.id, "details"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/shipments/${selectedShipment!.id}/details`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch shipment details");
+      return res.json();
+    },
+    enabled: !!selectedShipment?.id,
+  });
+
+  // Extra-weight helpers for the drawer (server computes the authoritative amount on save).
+  const extraFeesUnit = (selectedShipment as any)?.chargeableWeightUnit || selectedShipment?.weightUnit || "KG";
+  const extraFeesPerUnitRate = selectedShipment
+    ? Number((selectedShipment as any).clientTotalAmountSar || selectedShipment.finalPrice || 0) /
+      Math.max(Number(selectedShipment.chargeableWeight || selectedShipment.weight || 1), 0.001)
+    : 0;
 
   const sendAbandonedDiscountMutation = useMutation({
     mutationFn: async ({ shipmentIds, payload }: {
@@ -424,6 +469,24 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     },
   });
 
+  const updateExtraFeesMutation = useMutation({
+    mutationFn: async (params: { shipmentId: string; extraWeightValue?: string; clear?: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/admin/financial-statements/shipments/${params.shipmentId}/extra-fees`, {
+        extraWeightValue: params.extraWeightValue,
+        clear: params.clear,
+      });
+      return res.json();
+    },
+    onSuccess: (updated: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/shipments", selectedShipment?.id, "details"] });
+      if (selectedShipment && updated?.id) setSelectedShipment({ ...selectedShipment, ...updated } as any);
+      setExtraWeightInput("");
+      toast({ title: "Extra weight charge saved", description: "Extra-weight billing was synced for the client (invoice created/updated, client notified)." });
+    },
+    onError: (error: Error) => toast({ title: "Failed to save extra weight charge", description: error.message, variant: "destructive" }),
+  });
+
   const retryCarrierMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiRequest("POST", `/api/admin/shipments/${id}/retry-carrier`);
@@ -471,9 +534,9 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     onSuccess: () => {
       setDdpAdjustmentDescription("");
       setDdpAdjustmentAmount("");
-      toast({ title: "DDP adjustment invoiced", description: "A separate payable client invoice has been created." });
+      toast({ title: "Door To Door Freight adjustment invoiced", description: "A separate payable client invoice has been created." });
     },
-    onError: (error: Error) => toast({ title: "Could not add DDP adjustment", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Could not add Door To Door Freight adjustment", description: error.message, variant: "destructive" }),
   });
 
   const hasActiveFilters = statusFilter !== "all" || debouncedSearch;
@@ -1152,6 +1215,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                       <TableHead>Shipment ID</TableHead>
                       <TableHead>Origin</TableHead>
                       <TableHead>Destination</TableHead>
+                      <TableHead>Carrier</TableHead>
+                      <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
                       {abandonedOnly && <TableHead>Payment</TableHead>}
                       <TableHead>Weight</TableHead>
@@ -1168,6 +1233,12 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                         </TableCell>
                         <TableCell>
                           <span className="text-sm">{shipment.recipientCity}, {shipment.recipientCountry}</span>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={shipment.status} />
@@ -1226,11 +1297,135 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   <StatusBadge status={selectedShipment.status} />
                 </div>
               </div>
+
+              {/* Creation + ownership */}
+              <div className="rounded-lg border p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Created by</span><span className="font-medium text-right">{shipmentDetails?.createdBy ? `${shipmentDetails.createdBy.username} (${shipmentDetails.createdBy.userType})` : "System / automated"}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Created via</span><span className="font-medium capitalize text-right">{(shipmentDetails?.createdVia || "").replace(/_/g, " ") || "—"}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Created at</span><span className="font-medium text-right">{fmtDateTime(selectedShipment.createdAt)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Last updated</span><span className="font-medium text-right">{fmtDateTime((selectedShipment as any).updatedAt)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Client</span><span className="font-medium text-right">{shipmentDetails?.clientName || "—"}{shipmentDetails?.clientEmail ? ` · ${shipmentDetails.clientEmail}` : ""}</span></div>
+              </div>
+
+              {/* Route — sender / recipient (single source of truth) */}
+              <div>
+                <p className="mb-2 text-sm font-semibold">Route</p>
+                <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
+                  <div className="space-y-1 text-sm">
+                    <div className="mb-1 flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">From</span>
+                    </div>
+                    <p className="font-medium">{selectedShipment.senderName}</p>
+                    <p className="text-muted-foreground">{selectedShipment.senderAddress}{(selectedShipment as any).senderAddressLine2 ? `, ${(selectedShipment as any).senderAddressLine2}` : ""}</p>
+                    <p className="text-muted-foreground">{[selectedShipment.senderCity, (selectedShipment as any).senderStateOrProvince, selectedShipment.senderPostalCode, selectedShipment.senderCountry].filter(Boolean).join(", ")}</p>
+                    <p className="text-muted-foreground">{[selectedShipment.senderPhone, (selectedShipment as any).senderEmail].filter(Boolean).join(" · ")}</p>
+                  </div>
+                  <div className="space-y-1 text-sm sm:border-l sm:pl-4">
+                    <div className="mb-1 flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <span className="font-medium">To</span>
+                    </div>
+                    <p className="font-medium">{selectedShipment.recipientName}</p>
+                    <p className="text-muted-foreground">{selectedShipment.recipientAddress}{(selectedShipment as any).recipientAddressLine2 ? `, ${(selectedShipment as any).recipientAddressLine2}` : ""}</p>
+                    <p className="text-muted-foreground">{[selectedShipment.recipientCity, (selectedShipment as any).recipientStateOrProvince, selectedShipment.recipientPostalCode, selectedShipment.recipientCountry].filter(Boolean).join(", ")}</p>
+                    <p className="text-muted-foreground">{[selectedShipment.recipientPhone, (selectedShipment as any).recipientEmail].filter(Boolean).join(" · ")}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Service, weight & pricing */}
+              <div>
+                <p className="mb-2 text-sm font-semibold">Service &amp; weight</p>
+                <div className="grid gap-x-6 gap-y-2 rounded-lg border p-4 text-sm sm:grid-cols-2">
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Carrier</span><span className="font-medium text-right">{selectedShipment.carrierName || selectedShipment.carrierCode || "—"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Service</span><span className="font-medium text-right">{(selectedShipment as any).serviceType || (selectedShipment as any).carrierServiceType || "—"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Shipment type</span><span className="font-medium capitalize text-right">{selectedShipment.shipmentType || "—"}{(selectedShipment as any).isDdp ? " · DDP" : ""}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Packages</span><span className="font-medium text-right">{(selectedShipment as any).numberOfPackages ?? 1} × {(selectedShipment as any).packageType || "parcel"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Actual weight</span><span className="font-medium text-right">{selectedShipment.weight} {selectedShipment.weightUnit}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Dimensional / chargeable</span><span className="font-medium text-right">{(selectedShipment as any).dimensionalWeight ?? "—"} / {selectedShipment.chargeableWeight ?? "—"} {(selectedShipment as any).chargeableWeightUnit || selectedShipment.weightUnit}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Base rate + margin</span><span className="font-medium text-right">{selectedShipment.baseRate ?? "—"} + {(selectedShipment as any).marginAmount ?? "—"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Total charged</span><span className="font-medium text-right">{formatSAR(Number(selectedShipment.finalPrice || 0))}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Payment</span><span className="font-medium capitalize text-right">{(selectedShipment as any).paymentMethod || "—"} · {selectedShipment.paymentStatus || "—"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-muted-foreground">Est. delivery</span><span className="font-medium text-right">{(selectedShipment as any).estimatedDelivery ? fmtDateTime((selectedShipment as any).estimatedDelivery) : "—"}</span></div>
+                </div>
+              </div>
+
+              {/* Extra weight charge — same engine as the payments page */}
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-sm font-semibold">Extra weight charge</p>
+                {Number((selectedShipment as any).extraFeesAmountSar) > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Current: {(selectedShipment as any).extraFeesWeightValue || 0} {extraFeesUnit} · <SarAmount amount={Number((selectedShipment as any).extraFeesAmountSar) || 0} />
+                  </p>
+                )}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor="drawer-extra-weight">Extra billable {extraFeesUnit}</Label>
+                    <Input
+                      id="drawer-extra-weight"
+                      inputMode="decimal"
+                      value={extraWeightInput}
+                      onChange={(e) => setExtraWeightInput(e.target.value)}
+                      placeholder={`0.00 ${extraFeesUnit}`}
+                      data-testid="input-drawer-extra-weight"
+                    />
+                  </div>
+                  <Button
+                    onClick={() => updateExtraFeesMutation.mutate({ shipmentId: selectedShipment.id, extraWeightValue: extraWeightInput })}
+                    disabled={updateExtraFeesMutation.isPending || !(Number(extraWeightInput) > 0)}
+                    data-testid="button-drawer-add-extra-weight"
+                  >
+                    Add charge
+                  </Button>
+                  {Number((selectedShipment as any).extraFeesAmountSar) > 0 && (
+                    <Button
+                      variant="outline"
+                      onClick={() => updateExtraFeesMutation.mutate({ shipmentId: selectedShipment.id, clear: true })}
+                      disabled={updateExtraFeesMutation.isPending}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                {Number(extraWeightInput) > 0 && extraFeesPerUnitRate > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Estimate: <SarAmount amount={Number(extraWeightInput) * extraFeesPerUnitRate} /> — the server bills the final amount at the shipment's per-{extraFeesUnit} rate, creates/updates the extra-weight invoice, and notifies the client.
+                  </p>
+                )}
+              </div>
+
               {selectedShipment.carrierTrackingNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
                   <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
                 </div>
+              )}
+              {(selectedShipment as any).pickupConfirmationNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Pickup Confirmation #</p>
+                  <p className="font-mono font-medium">{(selectedShipment as any).pickupConfirmationNumber}</p>
+                  {(selectedShipment as any).pickupStatus && (
+                    <p className="text-xs text-muted-foreground">Pickup: {(selectedShipment as any).pickupStatus}</p>
+                  )}
+                </div>
+              )}
+              {(selectedShipment as any).pickupStatus === "failed" && !(selectedShipment as any).pickupConfirmationNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Pickup</p>
+                  <p className="text-sm font-medium text-destructive">Failed{(selectedShipment as any).pickupError ? `: ${(selectedShipment as any).pickupError}` : ""}</p>
+                </div>
+              )}
+              {selectedShipment.status === "payment_pending" && !selectedShipment.carrierTrackingNumber && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="button-modify-shipment"
+                  onClick={() => setEditShipment(selectedShipment)}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Modify shipment
+                </Button>
               )}
               {(selectedShipment as any).carrierLabelBase64 && (
                 <Button
@@ -1254,26 +1449,6 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   Commercial Invoice (PDF)
                 </Button>
               )}
-              <div className="p-4 rounded-lg bg-muted/50">
-                <div className="flex items-center gap-2 mb-3">
-                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Origin</span>
-                </div>
-                <p className="font-medium">{selectedShipment.senderName}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.senderAddress}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.senderCity}, {selectedShipment.senderCountry}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.senderPhone}</p>
-              </div>
-              <div className="p-4 rounded-lg bg-muted/50">
-                <div className="flex items-center gap-2 mb-3">
-                  <MapPin className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Destination</span>
-                </div>
-                <p className="font-medium">{selectedShipment.recipientName}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.recipientAddress}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.recipientCity}, {selectedShipment.recipientCountry}</p>
-                <p className="text-sm text-muted-foreground">{selectedShipment.recipientPhone}</p>
-              </div>
               <div className="p-4 rounded-lg bg-muted/50 space-y-3">
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-primary" />
@@ -1538,7 +1713,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
               {selectedShipment.fulfillmentType === "ddp_manual" && canUpdateShipments && (
                 <div className="rounded-lg border p-4 space-y-3">
                   <div>
-                    <p className="text-sm font-medium">Add DDP Adjustment</p>
+                    <p className="text-sm font-medium">Add Door To Door Freight Adjustment</p>
                     <p className="text-xs text-muted-foreground">Creates a separate payable client invoice for this manual shipment.</p>
                   </div>
                   <div className="space-y-1">
@@ -1558,10 +1733,38 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   </Button>
                 </div>
               )}
+
+              {/* Activity timeline (who did what, when) */}
+              {shipmentDetails?.activity && shipmentDetails.activity.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-semibold">Activity</p>
+                  <div className="space-y-2">
+                    {shipmentDetails.activity.map((a, i) => (
+                      <div key={i} className="flex gap-3 text-sm">
+                        <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary/60" />
+                        <div className="min-w-0">
+                          <p className="font-medium capitalize">{a.action.replace(/_/g, " ")}</p>
+                          <p className="text-xs text-muted-foreground">{a.by}{a.byType && a.byType !== "system" ? ` (${a.byType})` : ""} · {fmtDateTime(a.at)}</p>
+                          {a.details && <p className="text-xs text-muted-foreground break-words">{a.details}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </SheetContent>
       </Sheet>
+      {editShipment && (
+        <EditPendingShipmentDialog
+          shipment={editShipment}
+          endpoint={`/api/admin/shipments/${editShipment.id}`}
+          open={!!editShipment}
+          onOpenChange={(v) => { if (!v) setEditShipment(null); }}
+          invalidateKeys={["/api/admin/shipments"]}
+        />
+      )}
     </AdminLayout>
   );
 }

@@ -8,6 +8,7 @@ import { ADMIN_NAV_ITEMS, hasAdminPermissionAccess } from "@/lib/admin-navigatio
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notification-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +37,7 @@ import {
   Bug,
   RotateCcw,
   Headset,
+  Menu,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -45,6 +47,7 @@ interface AdminLayoutProps {
 interface OperationsNavSummary {
   ddpCount: number;
   expressCount: number;
+  localCount: number;
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
@@ -116,6 +119,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     () => ({
       "/admin/operations?view=d2d": operationsSummary?.ddpCount ?? 0,
       "/admin/operations?view=express": operationsSummary?.expressCount ?? 0,
+      "/admin/operations?view=local": operationsSummary?.localCount ?? 0,
       "/admin/operations?view=attention": operationsSummary?.attentionCount ?? 0,
       "/admin/operations?view=special": operationsSummary?.specialHandlingCount ?? 0,
       "/admin/operations?view=delivered": operationsSummary?.deliveredCount ?? 0,
@@ -167,23 +171,25 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     return currentPath === href || (href !== "/admin" && currentPath.startsWith(href));
   };
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const closeMobileNav = () => setMobileNavOpen(false);
+
   const navigateSidebarHref = (href: string) => {
+    closeMobileNav();
     if (typeof window === "undefined") return;
     window.history.pushState(null, "", href);
     window.dispatchEvent(new Event("ez-location-change"));
   };
 
-  return (
-    <div className="flex h-screen w-full">
-      {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
+  const sidebarContent = (
+    <div className="flex h-full flex-col bg-sidebar">
         {/* Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-sidebar-border">
-          <Link href="/admin" className="flex items-center gap-3">
+        <div className="h-16 flex items-center justify-center px-6 border-b border-sidebar-border">
+          <Link href="/admin" className="flex items-center justify-center gap-3" onClick={closeMobileNav}>
             <img
               src="/assets/branding/logo.png"
               alt="ezhalha"
-              className="h-9 w-auto"
+              className="h-12 w-auto"
             />
           </Link>
         </div>
@@ -224,8 +230,14 @@ export function AdminLayout({ children }: AdminLayoutProps) {
                     />
                   </button>
 
-                  {isOpen && (
-                    <div className="space-y-1 border-l border-sidebar-border/80 ml-5 pl-4">
+                  <div
+                    className={cn(
+                      "grid transition-[grid-template-rows,opacity] duration-300 ease-out",
+                      isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                    <div className="space-y-1 border-l border-sidebar-border/80 ml-5 pl-4 pt-1">
                       {visibleChildren.map((child) => {
                         const childActive = isHrefActive(child.href);
                         const childCount = operationCounts[child.href as keyof typeof operationCounts];
@@ -271,23 +283,27 @@ export function AdminLayout({ children }: AdminLayoutProps) {
                         );
                       })}
                     </div>
-                  )}
+                    </div>
+                  </div>
                 </div>
               );
             }
             
             return (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href} onClick={closeMobileNav}>
                 <div
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors hover-elevate active-elevate-2",
+                    "relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                     isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                      ? "bg-gradient-to-r from-primary to-[hsl(14_100%_46%)] text-primary-foreground shadow-md shadow-primary/25"
+                      : "text-sidebar-foreground hover-elevate active-elevate-2 hover:bg-sidebar-accent"
                   )}
                   data-testid={`nav-${item.label.toLowerCase()}`}
                 >
-                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary-foreground/90" />
+                  )}
+                  <Icon className={cn("h-5 w-5 flex-shrink-0 transition-transform", isActive && "scale-110")} />
                   <span>{item.label}</span>
                 </div>
               </Link>
@@ -326,7 +342,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              <Link href="/admin/settings">
+              <Link href="/admin/settings" onClick={closeMobileNav}>
                 <DropdownMenuItem data-testid="menu-settings">
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
@@ -340,19 +356,46 @@ export function AdminLayout({ children }: AdminLayoutProps) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen w-full">
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex w-64 flex-shrink-0 border-r border-sidebar-border flex-col">
+        {sidebarContent}
       </aside>
+
+      {/* Mobile Sidebar (drawer) */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="w-72 p-0 lg:hidden">
+          {sidebarContent}
+        </SheetContent>
+      </Sheet>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <header className="h-16 flex items-center justify-end gap-2 px-6 border-b bg-background">
+        <header className="h-16 flex items-center gap-2 px-4 sm:px-6 border-b bg-background">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="lg:hidden flex items-center justify-center h-9 w-9 -ml-1 rounded-md hover-elevate active-elevate-2"
+            aria-label="Open navigation"
+            data-testid="button-open-nav"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <div className="flex-1" />
           <NotificationBell />
           <ThemeToggle />
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto">
-          {children}
+        <main className="flex-1 overflow-auto bg-gradient-to-b from-background via-background to-muted/25">
+          <div key={location} className="animate-fade-up">
+            {children}
+          </div>
         </main>
       </div>
     </div>

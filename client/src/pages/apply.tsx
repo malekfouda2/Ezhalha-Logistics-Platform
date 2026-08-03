@@ -20,6 +20,7 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { SearchableSelect } from "@/components/searchable-select";
+import { PhoneInput } from "@/components/phone-input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useUpload } from "@/hooks/use-upload";
@@ -38,6 +39,7 @@ interface UploadedDocument {
   label: string;
   name: string;
   path: string;
+  contentType: string;
 }
 
 export default function ApplyPage() {
@@ -45,7 +47,9 @@ export default function ApplyPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isAutoApproved, setIsAutoApproved] = useState(false);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
+  const [isExtracting, setIsExtracting] = useState(false);
   const autofilledContactNameRef = useRef("");
   const { uploadFile, isUploading } = useUpload({
     requestUrlEndpoint: "/api/public/uploads/request-url",
@@ -64,6 +68,61 @@ export default function ApplyPage() {
     },
   });
 
+  // Read the uploaded company documents with AI and pre-fill empty form fields. Never overwrites
+  // a value the applicant already typed.
+  const autofillFromDocuments = async (docs: UploadedDocument[]) => {
+    if (docs.length === 0) return;
+    setIsExtracting(true);
+    try {
+      const response = await apiRequest("POST", "/api/public/applications/extract-company-details", {
+        documents: docs.map((doc) => ({
+          objectPath: doc.path,
+          fileName: doc.name,
+          contentType: doc.contentType,
+          label: doc.label,
+        })),
+      });
+      const { details } = (await response.json()) as { details: Record<string, string> };
+
+      const applyIfEmpty = (fieldName: keyof ApplicationFormData, value?: string) => {
+        const clean = (value || "").trim();
+        if (!clean) return false;
+        if (String(form.getValues(fieldName) || "").trim()) return false;
+        form.setValue(fieldName, clean as never, { shouldValidate: false });
+        return true;
+      };
+
+      const filledCount = [
+        applyIfEmpty("companyName", details.companyName),
+        applyIfEmpty("shippingContactName", details.contactName),
+        applyIfEmpty("shippingContactPhone", details.contactPhone),
+        applyIfEmpty("shippingCountryCode", details.countryCode),
+        applyIfEmpty("shippingStateOrProvince", details.stateOrProvince),
+        applyIfEmpty("shippingCity", details.city),
+        applyIfEmpty("shippingPostalCode", details.postalCode),
+        applyIfEmpty("shippingAddressLine1", details.addressLine1),
+        applyIfEmpty("shippingAddressLine2", details.addressLine2),
+        applyIfEmpty("shippingShortAddress", details.shortAddress),
+      ].filter(Boolean).length;
+
+      if (filledCount > 0) {
+        toast({
+          title: "Details autofilled",
+          description: `We filled ${filledCount} field${filledCount === 1 ? "" : "s"} from your documents. Please review before submitting.`,
+        });
+      }
+    } catch (error) {
+      // Non-fatal — the applicant can still fill the form manually.
+      toast({
+        title: "Could not read documents",
+        description: error instanceof Error ? error.message : "Please fill the details manually.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   const handleFileSelect = async (
     documentType: CompanyApplicationDocumentType,
     e: React.ChangeEvent<HTMLInputElement>,
@@ -73,15 +132,19 @@ export default function ApplyPage() {
 
     const uploadResponse = await uploadFile(file);
     if (uploadResponse) {
-      setUploadedDocs((prev) => [
-        ...prev.filter((doc) => doc.type !== documentType),
+      const nextDocs = [
+        ...uploadedDocs.filter((doc) => doc.type !== documentType),
         {
           type: documentType,
           label: getCompanyApplicationDocumentLabel(documentType),
           name: uploadResponse.metadata.name,
           path: uploadResponse.objectPath,
+          contentType: file.type || "application/octet-stream",
         },
-      ]);
+      ];
+      setUploadedDocs(nextDocs);
+      // Auto-read the newly uploaded set and pre-fill the form.
+      void autofillFromDocuments(nextDocs);
     }
 
     e.target.value = "";
@@ -199,11 +262,16 @@ export default function ApplyPage() {
           }),
         ),
       };
-      await apiRequest("POST", "/api/applications", applicationData);
+      const res = await apiRequest("POST", "/api/applications", applicationData);
+      const created = (await res.json().catch(() => null)) as { status?: string } | null;
+      const approved = created?.status === "approved";
+      setIsAutoApproved(approved);
       setIsSubmitted(true);
       toast({
-        title: "Application submitted!",
-        description: "We'll review your application and get back to you soon.",
+        title: approved ? "Account created!" : "Application submitted!",
+        description: approved
+          ? "Check your email for your login credentials."
+          : "We'll review your application and get back to you soon.",
       });
     } catch (error) {
       toast({
@@ -223,7 +291,7 @@ export default function ApplyPage() {
           <img
             src="/assets/branding/logo.png"
             alt="ezhalha"
-            className="h-10 w-auto"
+            className="h-14 w-auto"
           />
           <ThemeToggle />
         </header>
@@ -236,15 +304,18 @@ export default function ApplyPage() {
                   <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold mb-2">Application Submitted!</h2>
+              <h2 className="text-2xl font-bold mb-2">
+                {isAutoApproved ? "Your account is ready!" : "Application Submitted!"}
+              </h2>
               <p className="text-muted-foreground mb-6">
-                Thank you for your interest in ezhalha. Our team will review your
-                application and contact you via email within 1-2 business days.
+                {isAutoApproved
+                  ? "Your account has been created. We've emailed your login credentials — sign in and start shipping."
+                  : "Thank you for your interest in ezhalha. Our team will review your application and contact you via email within 1-2 business days."}
               </p>
               <Link href="/">
                 <Button variant="outline" data-testid="button-back-login">
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Login
+                  {isAutoApproved ? "Go to Login" : "Back to Login"}
                 </Button>
               </Link>
             </CardContent>
@@ -260,7 +331,7 @@ export default function ApplyPage() {
         <img
           src="/assets/branding/logo.png"
           alt="ezhalha"
-          className="h-10 w-auto"
+          className="h-14 w-auto"
         />
         <ThemeToggle />
       </header>
@@ -374,10 +445,11 @@ export default function ApplyPage() {
                       <FormItem>
                         <FormLabel>Phone Number</FormLabel>
                         <FormControl>
-                          <Input
-                            placeholder="+1 234 567 890"
+                          <PhoneInput
+                            value={field.value || ""}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
                             data-testid="input-phone"
-                            {...field}
                           />
                         </FormControl>
                         <FormMessage />
@@ -486,10 +558,11 @@ export default function ApplyPage() {
                             <FormItem>
                               <FormLabel>Contact Phone</FormLabel>
                               <FormControl>
-                                <Input
-                                  placeholder="+966 5XX XXX XXXX"
+                                <PhoneInput
+                                  value={field.value || ""}
+                                  onChange={field.onChange}
+                                  onBlur={field.onBlur}
                                   data-testid="input-shipping-contact-phone"
-                                  {...field}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -598,9 +671,31 @@ export default function ApplyPage() {
                       Upload Company Documents
                     </h3>
                     <FormDescription className="mb-3">
-                      Upload all required company documents to complete your application.
+                      Upload all required company documents to complete your application. We'll read
+                      them automatically and fill in your company details for you.
                     </FormDescription>
-                    
+
+                    {uploadedDocs.length > 0 && (
+                      <div className="mb-3 flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2">
+                        <span className="text-xs text-muted-foreground">
+                          {isExtracting
+                            ? "Reading your documents and filling the form..."
+                            : "Company details are filled from your documents. Review before submitting."}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isExtracting}
+                          onClick={() => autofillFromDocuments(uploadedDocs)}
+                          data-testid="button-autofill-documents"
+                        >
+                          {isExtracting ? <LoadingSpinner size="sm" className="mr-2" /> : null}
+                          {isExtracting ? "Reading..." : "Re-scan documents"}
+                        </Button>
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                       <p className="text-xs text-muted-foreground">
                         PDF, DOC, DOCX, JPG, PNG. One file is required for each document type below.

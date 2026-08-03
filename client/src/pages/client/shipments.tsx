@@ -26,7 +26,8 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil } from "lucide-react";
+import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { SarAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -52,6 +53,15 @@ function canPayShipment(shipment: Shipment): boolean {
     String((shipment as any).paymentMethod || "PAY_NOW").toUpperCase() !== "CREDIT" &&
     ["payment_pending", "carrier_error"].includes(String(shipment.status || "").toLowerCase())
   );
+}
+
+// Shipment fulfillment kind for the list "Type" column (Door To Door / Local / Express).
+function formatShipmentKindLabel(shipment: Shipment): string {
+  if (shipment.fulfillmentType === "ddp_manual" || (shipment as any).isDdp || shipment.carrierCode === "DDP") {
+    return "Door to Door";
+  }
+  if (shipment.fulfillmentType === "local") return "Local";
+  return "Express";
 }
 
 function formatPackageWord(count: number) {
@@ -90,6 +100,7 @@ export default function ClientShipments() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
+  const [editShipment, setEditShipment] = useState<Shipment | null>(null);
   const [resumedShipmentId, setResumedShipmentId] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -279,9 +290,12 @@ export default function ClientShipments() {
                     <TableHead>Shipment ID</TableHead>
                     <TableHead>Recipient</TableHead>
                     <TableHead>Destination</TableHead>
+                    <TableHead>Carrier</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Shipment</TableHead>
                     <TableHead>Payment</TableHead>
                     <TableHead>Date</TableHead>
+                    <TableHead>ETA</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead className="w-12"></TableHead>
                   </TableRow>
@@ -296,6 +310,12 @@ export default function ClientShipments() {
                       <TableCell className="text-sm">
                         {shipment.recipientCity}, {shipment.recipientCountry}
                       </TableCell>
+                      <TableCell className="text-sm">
+                        {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>
+                      </TableCell>
                       <TableCell>
                         <StatusBadge status={shipment.status} />
                       </TableCell>
@@ -304,6 +324,9 @@ export default function ClientShipments() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {format(new Date(shipment.createdAt), "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {shipment.estimatedDelivery ? format(new Date(shipment.estimatedDelivery), "MMM d, yyyy") : "—"}
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         <SarAmount amount={Number(shipment.clientTotalAmountSar ?? shipment.finalPrice ?? 0)} />
@@ -352,6 +375,14 @@ export default function ClientShipments() {
                   <StatusBadge status={selectedShipment.paymentStatus || "pending"} />
                 </div>
               </div>
+              {selectedShipment.estimatedDelivery && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Estimated Delivery</p>
+                  <p className="font-medium">
+                    {format(new Date(selectedShipment.estimatedDelivery), "EEE, MMM d, yyyy")}
+                  </p>
+                </div>
+              )}
               {selectedShipment.carrierTrackingNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
@@ -362,6 +393,23 @@ export default function ClientShipments() {
                     className="font-medium"
                   />
                 </div>
+              )}
+              {(selectedShipment as any).pickupConfirmationNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Pickup Confirmation #</p>
+                  <p className="font-mono font-medium">{(selectedShipment as any).pickupConfirmationNumber}</p>
+                </div>
+              )}
+              {selectedShipment.status === "payment_pending" && !selectedShipment.carrierTrackingNumber && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="button-modify-shipment"
+                  onClick={() => setEditShipment(selectedShipment)}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Modify shipment
+                </Button>
               )}
               {(selectedShipment as any).carrierLabelBase64 && (
                 <Button
@@ -621,6 +669,15 @@ export default function ClientShipments() {
           )}
         </SheetContent>
       </Sheet>
+      {editShipment && (
+        <EditPendingShipmentDialog
+          shipment={editShipment}
+          endpoint={`/api/client/shipments/${editShipment.id}`}
+          open={!!editShipment}
+          onOpenChange={(v) => { if (!v) setEditShipment(null); }}
+          invalidateKeys={["/api/client/shipments"]}
+        />
+      )}
     </ClientLayout>
   );
 }

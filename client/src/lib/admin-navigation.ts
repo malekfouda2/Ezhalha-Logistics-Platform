@@ -28,12 +28,14 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   operations: { anyOf: ["operations:read"] },
   tasks: { anyOf: ["tasks:read"] },
   shipments: { anyOf: ["shipments:read"] },
+  quotations: { anyOf: ["shipments:create"] },
   financialManagement: {
     anyOf: [
       "invoices:read",
       "payments:read",
       "refund-requests:read",
       "credit-requests:read",
+      "sales-feature-requests:read",
       "credit-invoices:read",
       "pricing-rules:read",
     ],
@@ -42,6 +44,7 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   payments: { anyOf: ["payments:read"] },
   refundRequests: { anyOf: ["refund-requests:read"] },
   creditRequests: { anyOf: ["credit-requests:read"] },
+  salesFeatureRequests: { anyOf: ["sales-feature-requests:read"] },
   creditInvoices: { anyOf: ["credit-invoices:read"] },
   pricing: { anyOf: ["pricing-rules:read"] },
   system: {
@@ -84,6 +87,7 @@ export const ADMIN_NAV_ITEMS = [
     children: [
       { href: "/admin/operations?view=d2d", label: "Door to Door", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=express", label: "Express Shipments", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=local", label: "Local Shipments", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=attention", label: "Needs Attention", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=special", label: "Special Handling", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=delivered", label: "Delivered", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
@@ -95,6 +99,7 @@ export const ADMIN_NAV_ITEMS = [
     permissions: ADMIN_ROUTE_PERMISSIONS.shipments,
     children: [
       { href: "/admin/shipments", label: "All Shipments", permissions: ADMIN_ROUTE_PERMISSIONS.shipments },
+      { href: "/admin/quotations/new", label: "New Quotation", permissions: ADMIN_ROUTE_PERMISSIONS.quotations },
       { href: "/admin/shipments/abandoned", label: "Abandoned Shipments", permissions: ADMIN_ROUTE_PERMISSIONS.shipments },
     ],
   },
@@ -107,9 +112,9 @@ export const ADMIN_NAV_ITEMS = [
       { href: "/admin/payments", label: "Financial Statements", permissions: ADMIN_ROUTE_PERMISSIONS.payments },
       { href: "/admin/refund-requests", label: "Refund Requests", permissions: ADMIN_ROUTE_PERMISSIONS.refundRequests },
       { href: "/admin/credit-requests", label: "Credit Requests", permissions: ADMIN_ROUTE_PERMISSIONS.creditRequests },
+      { href: "/admin/sales-feature-requests", label: "Feature Requests", permissions: ADMIN_ROUTE_PERMISSIONS.salesFeatureRequests },
       { href: "/admin/credit-invoices", label: "Credit Invoices", permissions: ADMIN_ROUTE_PERMISSIONS.creditInvoices },
       { href: "/admin/pricing", label: "Pricing", permissions: ADMIN_ROUTE_PERMISSIONS.pricing },
-      { href: "/admin/ddp-pricing", label: "DDP Pricing", permissions: ADMIN_ROUTE_PERMISSIONS.pricing },
     ],
   },
   {

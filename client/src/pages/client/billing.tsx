@@ -297,7 +297,7 @@ export default function ClientBilling() {
                             ) : "-"}
                           </TableCell>
                           <TableCell className="font-medium" data-testid={`text-amount-${inv.id}`}>
-                            <SarAmount amount={Number(inv.amount)} /> {inv.currency}
+                            <SarAmount amount={Number(inv.amount)} />
                           </TableCell>
                           <TableCell>{getStatusBadge(inv.status)}</TableCell>
                           <TableCell data-testid={`text-due-date-${inv.id}`}>
@@ -345,7 +345,7 @@ export default function ClientBilling() {
                 <h4 className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" />Invoice</h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <span className="text-muted-foreground">Amount</span>
-                  <span className="font-medium"><SarAmount amount={Number(selectedInvoice.amount)} /> {selectedInvoice.currency}</span>
+                  <span className="font-medium"><SarAmount amount={Number(selectedInvoice.amount)} /></span>
                   <span className="text-muted-foreground">Issued</span>
                   <span>{format(new Date(selectedInvoice.issuedAt), "MMM d, yyyy")}</span>
                   <span className="text-muted-foreground">Due Date</span>

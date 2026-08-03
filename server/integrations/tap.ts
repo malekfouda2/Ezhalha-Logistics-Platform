@@ -129,6 +129,47 @@ function toTapAmountValue(amount: number, currency: string): number {
   return Number(formatTapAmount(amount, currency));
 }
 
+function readByPath(obj: any, path: string): unknown {
+  return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+}
+
+// When a charge is settled in SAR but presented in another currency (e.g. USD), Tap converts
+// the amount itself. For accounting we must record Tap's own SAR figure — not our FX-API
+// estimate. Tap exposes this on a settlement/`post` field that isn't in the public docs, so
+// the exact path is configurable via TAP_SETTLED_SAR_FIELD; we also probe the known candidates.
+// Returns the SAR amount, or null when the charge is already SAR / no SAR figure is present
+// (caller then falls back to the computed SAR).
+const TAP_SETTLED_SAR_CANDIDATES = [
+  "post.amount",
+  "post_amount",
+  "acquirer.amount",
+  "reference.acquirer_amount",
+  "transaction.amount",
+];
+
+export function getTapSettledSarAmount(charge: TapCharge | null | undefined): number | null {
+  if (!charge) return null;
+  // Charge already in SAR: the presented amount IS the settled amount.
+  if ((charge.currency || "").toUpperCase() === "SAR") {
+    const amt = Number(charge.amount);
+    return Number.isFinite(amt) && amt > 0 ? amt : null;
+  }
+
+  const raw = charge as any;
+  const paths: string[] = [];
+  const configured = process.env.TAP_SETTLED_SAR_FIELD?.trim();
+  if (configured) paths.push(configured);
+  paths.push(...TAP_SETTLED_SAR_CANDIDATES);
+
+  for (const path of paths) {
+    const value = Number(readByPath(raw, path));
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function normalizeTapStatus(status: string | undefined | null): string {
   return (status || "").trim().toUpperCase();
 }
