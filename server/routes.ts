@@ -16623,7 +16623,11 @@ export async function registerRoutes(
               rate.chargeableWeightDetails ||
               buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode),
           };
-          const chargeableWeightDetails = parseStoredChargeableWeightSummary(quoteShipmentData.chargeableWeightDetails)
+          // Prefer the carrier's own chargeable weight (FedEx billing weight / DHL provided vs
+          // volumetric) so the stored quote — and the extra-weight charge derived from it at
+          // checkout — matches what the carrier actually bills. Fall back to our estimate.
+          const chargeableWeightDetails = rate.chargeableWeightDetails
+            || parseStoredChargeableWeightSummary(quoteShipmentData.chargeableWeightDetails)
             || buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode);
           const quote = await storage.createShipmentRateQuote({
             clientAccountId: user.clientAccountId,

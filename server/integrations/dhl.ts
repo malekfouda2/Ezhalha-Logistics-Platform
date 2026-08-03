@@ -1,6 +1,6 @@
 import "../load-env";
 import crypto from "crypto";
-import { calculateChargeableWeight } from "@shared/chargeable-weight";
+import { calculateChargeableWeight, convertWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import {
   CarrierError,
   parseMoney,
@@ -452,6 +452,32 @@ function buildExportDeclaration(request: CreateShipmentRequest, items?: Shipment
   };
 }
 
+// DHL Express rating returns the carrier's own chargeable weight per product under
+// `product.weight` — `provided` (actual) vs `volumetric` (dimensional); the chargeable weight
+// is the greater of the two. Prefer it over our dimensional estimate so extra-weight billing at
+// checkout matches what DHL actually charges. Returns undefined if the field is absent.
+function extractDhlBillingWeight(product: any): { value: number; unit: "KG" | "LB" } | undefined {
+  const w = product?.weight;
+  if (!w) return undefined;
+  const unit: "KG" | "LB" = String(w.unitOfMeasurement || "").toLowerCase().includes("imperial") ? "LB" : "KG";
+  const candidates = [Number(w.provided), Number(w.volumetric)].filter((v) => Number.isFinite(v) && v > 0);
+  if (candidates.length === 0) return undefined;
+  return { value: Math.max(...candidates), unit };
+}
+
+// Override the summary's chargeable weight with the carrier's billed weight (mirrors FedEx).
+function applyDhlCarrierWeight(
+  summary: ChargeableWeightSummary,
+  billing?: { value: number; unit: "KG" | "LB" },
+): ChargeableWeightSummary {
+  if (!billing) return summary;
+  return {
+    ...summary,
+    chargeableWeight: Number(convertWeight(billing.value, billing.unit, summary.weightUnit).toFixed(3)),
+    chargeableWeightKg: Number(convertWeight(billing.value, billing.unit, "KG").toFixed(3)),
+  };
+}
+
 function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
   const products = Array.isArray(data?.products)
     ? data.products
@@ -476,6 +502,10 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
       if (!Number.isFinite(baseRate)) {
         return null;
       }
+
+      // Prefer DHL's own chargeable weight for this product; fall back to our estimate.
+      const carrierBilling = extractDhlBillingWeight(product);
+      const details = applyDhlCarrierWeight(chargeableWeightDetails, carrierBilling);
 
       const estimatedDelivery =
         parseEstimatedDate(product.deliveryCapabilities?.estimatedDeliveryDateAndTime) ||
@@ -502,12 +532,12 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
           product.localProductCode ||
           serviceType,
         packagingType: request.packagingType,
-        actualWeight: chargeableWeightDetails.actualWeight,
-        dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
-        chargeableWeight: chargeableWeightDetails.chargeableWeight,
-        chargeableWeightUnit: chargeableWeightDetails.weightUnit,
-        chargeableWeightSource: "system",
-        chargeableWeightDetails,
+        actualWeight: details.actualWeight,
+        dimensionalWeight: details.dimensionalWeight,
+        chargeableWeight: details.chargeableWeight,
+        chargeableWeightUnit: details.weightUnit,
+        chargeableWeightSource: carrierBilling ? "carrier" : "system",
+        chargeableWeightDetails: details,
       } satisfies RateResponse;
     })
     .filter((rate: RateResponse | null): rate is RateResponse => {

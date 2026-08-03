@@ -2217,8 +2217,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPermission(permission: InsertPermission): Promise<Permission> {
-    const [newPermission] = await db.insert(permissions).values(permission).returning();
-    return newPermission;
+    // Idempotent on the unique `name`: all pm2 cluster instances run seedDefaultPermissions on
+    // boot at once, so a plain insert raced and threw duplicate-key for whichever instance lost.
+    // onConflictDoNothing makes concurrent seeding safe; return the row that won the insert.
+    const [inserted] = await db
+      .insert(permissions)
+      .values(permission)
+      .onConflictDoNothing({ target: permissions.name })
+      .returning();
+    if (inserted) return inserted;
+    const [existing] = await db.select().from(permissions).where(eq(permissions.name, permission.name));
+    return existing;
   }
 
   async deletePermission(id: string): Promise<void> {
