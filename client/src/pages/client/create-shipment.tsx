@@ -3057,7 +3057,7 @@ export default function CreateShipment() {
                               )}
                             </div>
                             <div className="text-xs text-muted-foreground mt-1">
-                              Qty: {item.quantity} × {item.price.toFixed(2)} {item.currency}
+                              Qty: {item.quantity} × {Number(item.price.toFixed(7))} {item.currency}
                               {item.category && (
                                 <span className="ml-2">
                                   · {itemCategories.find(c => c.value === item.category)?.label || item.category}
@@ -3480,7 +3480,7 @@ export default function CreateShipment() {
                 <Label>Unit Price *</Label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   value={editingItem.price}
                   onChange={(e) => updateEditingItem("price", parseFloat(e.target.value) || 0)}
