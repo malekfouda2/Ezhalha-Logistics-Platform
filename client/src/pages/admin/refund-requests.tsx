@@ -63,6 +63,7 @@ interface AdminRefundRequestSummary {
   canApproveAsFinance: boolean;
   createdAt: string;
   completedAt?: string | null;
+  gatewayRefundId?: string | null;
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -343,6 +344,14 @@ export default function AdminRefundRequests() {
                           <div className="space-y-2">
                             {statusBadge(request.status)}
                             <div className="text-xs text-muted-foreground">{getPendingStep(request)}</div>
+                            {request.gatewayRefundId && (
+                              <div className="text-xs text-emerald-600 dark:text-emerald-400">
+                                Refunded via Tap
+                                <span className="block font-mono text-[10px] text-muted-foreground break-all">
+                                  {request.gatewayRefundId}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="min-w-[260px]">

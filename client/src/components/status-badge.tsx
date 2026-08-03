@@ -37,6 +37,7 @@ const statusColors: Record<string, StatusColor> = {
   inactive: "gray",
   paid: "green",
   unpaid: "amber",
+  refunded: "blue",
 };
 
 const statusLabels: Record<string, string> = {
@@ -57,6 +58,7 @@ const statusLabels: Record<string, string> = {
   inactive: "Inactive",
   paid: "Paid",
   unpaid: "Unpaid",
+  refunded: "Refunded",
 };
 
 // Statuses whose dot pulses to signal ongoing activity.

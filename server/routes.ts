@@ -3913,6 +3913,8 @@ async function ensureShipmentRefundRequestForCancellation(params: {
         if (refundPaymentContext.invoiceId) {
           await storage.updateInvoice(refundPaymentContext.invoiceId, { status: "refunded" });
         }
+        // Reflect the refund on the shipment itself so it reads "Refunded", not "Paid".
+        await storage.updateShipment(shipment.id, { paymentStatus: "refunded" });
         await logAudit(
           user.id,
           "shipment_refund_auto",
