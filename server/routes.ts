@@ -11495,6 +11495,10 @@ export async function registerRoutes(
   });
   const quotationPricingControls = {
     discountSar: z.number().nonnegative().optional(),
+    // Discount as a percent of the client total, or a fixed SAR amount. Resolved to discountSar
+    // server-side against the auto client total. Wins over discountSar when provided.
+    discountType: z.enum(["percent", "fixed"]).optional(),
+    discountValue: z.number().nonnegative().optional(),
     extraChargeSar: z.number().nonnegative().optional(),
     priceOverrideSar: z.number().nonnegative().optional(),
   };
@@ -11566,6 +11570,8 @@ export async function registerRoutes(
       carrierCode: data.carrierCode,
       ddpTransportMethod: data.ddpTransportMethod,
       discountSar: data.discountSar,
+      discountType: data.discountType,
+      discountValue: data.discountValue,
       extraChargeSar: data.extraChargeSar,
       priceOverrideSar: data.priceOverrideSar,
     };

@@ -37,7 +37,7 @@ import { useQuotationMode } from "@/lib/quotation-mode";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { humanizeError } from "@/lib/friendly-error";
 import { GeoSuggestInput, type GeoSuggestion } from "@/components/geo-suggest-input";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X, Percent } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
@@ -568,6 +568,9 @@ export default function CreateShipment() {
   // Quotation mode: maps a rate row's synthetic quoteId → the admin option (carrier + base rate).
   const [adminRateOptions, setAdminRateOptions] = useState<Record<string, { carrierCode?: string; serviceType?: string; serviceName: string; baseRate: number }>>({});
   const [quotationSent, setQuotationSent] = useState<{ trackingNumber: string } | null>(null);
+  // Admin quotation discount (percent of total, or a fixed SAR amount off the client total).
+  const [quoteDiscountType, setQuoteDiscountType] = useState<"percent" | "fixed">("fixed");
+  const [quoteDiscountValue, setQuoteDiscountValue] = useState<number>(0);
   const [checkoutData, setCheckoutData] = useState<CheckoutResponse | null>(null);
   const [confirmData, setConfirmData] = useState<ConfirmResponse | null>(null);
   // Carrier pickup — express shipments are ALWAYS booked for pickup. `custom` = the client chose
@@ -857,6 +860,9 @@ export default function CreateShipment() {
           items: payload.items,
           tradeDocuments: payload.tradeDocuments,
           pickup: payload.pickup,
+          ...(quoteDiscountValue > 0
+            ? { discountType: quoteDiscountType, discountValue: quoteDiscountValue }
+            : {}),
           sendNotification: true,
         });
         return res.json() as Promise<CheckoutResponse>;
@@ -2823,6 +2829,46 @@ export default function CreateShipment() {
                   );
                 })}
               </RadioGroup>
+
+              {quoteMode && selectedQuote && (() => {
+                const total = Number(selectedQuote.finalPrice || 0);
+                const discountAmount = quoteDiscountValue > 0
+                  ? (quoteDiscountType === "percent"
+                      ? Math.round((total * Math.min(quoteDiscountValue, 100) / 100) * 100) / 100
+                      : Math.min(quoteDiscountValue, total))
+                  : 0;
+                return (
+                  <div className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                    <div className="text-sm font-semibold flex items-center gap-2">
+                      <Percent className="h-4 w-4 text-primary" /> Apply discount (optional)
+                    </div>
+                    <div className="grid grid-cols-[130px_1fr] gap-3">
+                      <Select value={quoteDiscountType} onValueChange={(v) => setQuoteDiscountType(v as "percent" | "fixed")}>
+                        <SelectTrigger data-testid="select-quote-discount-type"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed (SAR)</SelectItem>
+                          <SelectItem value="percent">Percent (%)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder={quoteDiscountType === "percent" ? "e.g. 10" : "e.g. 50.00"}
+                        value={quoteDiscountValue || ""}
+                        onChange={(e) => setQuoteDiscountValue(Math.max(0, parseFloat(e.target.value) || 0))}
+                        data-testid="input-quote-discount-value"
+                      />
+                    </div>
+                    {discountAmount > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        Discount: <span className="font-medium text-foreground">− {discountAmount.toFixed(2)} SAR</span>
+                        {" · "}Client total: <span className="font-medium text-foreground">{(total - discountAmount).toFixed(2)} SAR</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>

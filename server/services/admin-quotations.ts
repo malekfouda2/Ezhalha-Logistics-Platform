@@ -26,6 +26,8 @@ export interface QuotationPricingInput {
   ddpTransportMethod?: DdpTransportMethodValue;
   // Admin manual pricing controls (applied on top of the auto rate)
   discountSar?: number;
+  discountType?: "percent" | "fixed"; // when set with discountValue, resolves discountSar
+  discountValue?: number;
   extraChargeSar?: number;
   priceOverrideSar?: number; // final client total (incl VAT) — wins over discount/extra
 }
@@ -158,7 +160,17 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
   const autoSnapshot = calculateShipmentAccounting({ ...accountingParams, marginAmount: autoMargin });
   const autoClientTotal = autoSnapshot.clientTotalAmountSar;
 
-  const discountSar = Math.max(0, round2(input.discountSar || 0));
+  // Resolve the discount: percent of the auto client total, or a fixed SAR amount.
+  // discountType/discountValue win over a raw discountSar when provided.
+  const discountSar =
+    input.discountType && input.discountValue != null
+      ? Math.max(
+          0,
+          input.discountType === "percent"
+            ? round2(autoClientTotal * Math.min(Math.max(input.discountValue, 0), 100) / 100)
+            : round2(Math.max(input.discountValue, 0)),
+        )
+      : Math.max(0, round2(input.discountSar || 0));
   const extraChargeSar = Math.max(0, round2(input.extraChargeSar || 0));
   const targetTotal =
     input.priceOverrideSar != null && input.priceOverrideSar >= 0
