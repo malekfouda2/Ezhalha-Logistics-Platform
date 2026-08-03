@@ -511,10 +511,11 @@ function formatRateServiceMeta(serviceType: string, serviceName: string): string
   return normalized;
 }
 
+// Express is international only — domestic goes through the Local flow. Inbound/outbound are
+// shown to the client as Import/Export.
 const shipmentTypeOptions = [
-  { value: "domestic", label: "Domestic", description: "Shipping within Saudi Arabia" },
-  { value: "inbound", label: "Inbound", description: "International shipping into a country" },
-  { value: "outbound", label: "Outbound", description: "International shipping out of a country" },
+  { value: "inbound", label: "Import", description: "International shipping into a country" },
+  { value: "outbound", label: "Export", description: "International shipping out of a country" },
 ];
 
 

@@ -818,6 +818,8 @@ export const shipmentRefundRequests = pgTable("shipment_refund_requests", {
   financeApprovedAt: timestamp("finance_approved_at"),
   completedAt: timestamp("completed_at"),
   rejectionReason: text("rejection_reason"),
+  // Tap refund id when the refund was auto-issued to the gateway (still-booked cancellations).
+  gatewayRefundId: text("gateway_refund_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -2149,6 +2151,9 @@ export interface ShipmentItem {
   hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
   price: number;
   quantity: number;
+  // Currency the client declared this item's value in (e.g. "GBP") — the customs/declared
+  // value currency, distinct from the SAR freight charge currency.
+  currency?: string;
 }
 
 // HS Code Mappings table (history-based accuracy improvement)

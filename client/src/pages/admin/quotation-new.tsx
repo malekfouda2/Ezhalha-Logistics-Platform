@@ -16,8 +16,8 @@ type Type = "express" | "ddp" | "local";
 
 const TYPES: { key: Type; label: string; description: string; icon: typeof Plane; wrap: string; color: string }[] = [
   { key: "local", label: "Local Delivery", description: "Last-mile delivery within Saudi Arabia.", icon: MapPin, wrap: "bg-emerald-500/10", color: "text-emerald-500" },
+  { key: "express", label: "Express Shipment", description: "International courier (import & export) via FedEx, DHL, Aramex.", icon: Plane, wrap: "bg-primary/10", color: "text-primary" },
   { key: "ddp", label: "Door To Door Freight", description: "Import with duties & taxes prepaid on fixed lane pricing.", icon: DoorOpen, wrap: "bg-blue-500/10", color: "text-blue-500" },
-  { key: "express", label: "Express Shipment", description: "International & domestic courier via FedEx, DHL, Aramex.", icon: Plane, wrap: "bg-primary/10", color: "text-primary" },
 ];
 
 export default function QuotationNew() {

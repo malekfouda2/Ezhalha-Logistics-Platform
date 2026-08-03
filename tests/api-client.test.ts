@@ -915,12 +915,15 @@ describe("Client - Shipments", () => {
 
     const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/cancel`).send({});
 
+    // Still-booked (pre-pickup) client cancellation auto-issues the Tap refund and completes the
+    // request with no approval workflow. (Tap is unconfigured in tests → mock refund id.)
     expect(res.status).toBe(200);
     expect(res.body.shipment.status).toBe("cancelled");
     expect(res.body.refundRequest).toBeTruthy();
-    expect(res.body.refundRequest.status).toBe("PENDING");
-    expect(res.body.refundRequest.financeApprovalStatus).toBe("PENDING");
+    expect(res.body.refundRequest.status).toBe("COMPLETED");
+    expect(res.body.refundRequest.financeApprovalStatus).toBe("NOT_REQUIRED");
     expect(res.body.refundRequest.accountManagerApprovalStatus).toBe("NOT_REQUIRED");
+    expect(res.body.refundRequest.gatewayRefundId).toBeTruthy();
     expect(res.body.refundRequest.amount).toBe("120.00");
 
     const storedRefundRequest = await storage.getShipmentRefundRequestByShipmentId(shipment.id);

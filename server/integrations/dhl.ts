@@ -486,7 +486,7 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
       : [];
   const chargeableWeightDetails = buildRateChargeableWeightSummary(request);
 
-  return products
+  const mappedRates = products
     .map((product: any) => {
       const serviceType = product.productCode || product.localProductCode || product.serviceCode;
       if (!serviceType) {
@@ -544,9 +544,28 @@ function extractDhlRates(data: any, request: RateRequest): RateResponse[] {
       if (!rate) {
         return false;
       }
-
+      // Never surface a zero/invalid-priced service — unprofessional and unbookable.
+      if (!(Number.isFinite(rate.baseRate) && rate.baseRate > 0)) {
+        return false;
+      }
+      // Hide DHL "Medical Express" — not offered to clients.
+      const label = `${rate.serviceName || ""} ${rate.serviceType || ""}`.toLowerCase();
+      if (label.includes("medical")) {
+        return false;
+      }
       return !request.serviceType || rate.serviceType === request.serviceType;
     });
+
+  // DHL can return the same product more than once — collapse duplicates by service, keeping the
+  // cheapest, so the rates page never shows two identical service levels.
+  const cheapestByService = new Map<string, RateResponse>();
+  for (const rate of mappedRates) {
+    const existing = cheapestByService.get(rate.serviceType);
+    if (!existing || rate.baseRate < existing.baseRate) {
+      cheapestByService.set(rate.serviceType, rate);
+    }
+  }
+  return Array.from(cheapestByService.values());
 }
 
 function extractLabelDocument(documents: any[]): { labelData?: string } {
@@ -1100,18 +1119,15 @@ export class DhlAdapter implements CarrierAdapter {
       return true;
     }
 
-    const query = senderCountryCode
-      ? `?requesterCountryCode=${encodeURIComponent(normalizeCountryCode(senderCountryCode))}`
-      : "";
-
-    try {
-      await this.makeRequest<any>(`/shipments/${encodeURIComponent(trackingNumber)}${query}`, "DELETE", undefined, 1);
-      return true;
-    } catch (error) {
-      throw error instanceof CarrierError
-        ? error
-        : new CarrierError("CANCEL_FAILED", (error as Error).message || "DHL shipment cancellation failed");
-    }
+    // DHL Express (MyDHL API) has NO shipment-cancellation operation — a created waybill cannot
+    // be voided via API; it simply expires unused if never tendered. Attempting DELETE /shipments
+    // is rejected by DHL's gateway with "405 MessageBlocked". So carrier-side cancel is a graceful
+    // no-op: the shipment is still cancelled in our system. A booked courier pickup, if any, is
+    // cancelled separately via cancelPickup(dispatchConfirmationNumber).
+    logInfo("DHL shipment cancellation is a no-op (MyDHL API has no cancel endpoint); waybill will expire unused", {
+      trackingNumber,
+    });
+    return true;
   }
 
   supportsPickup = true;

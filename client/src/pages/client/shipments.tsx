@@ -28,7 +28,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil } from "lucide-react";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
-import { SarAmount } from "@/components/sar-symbol";
+import { SarAmount, formatCurrencyAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ClientAccount, ShipmentItem } from "@shared/schema";
@@ -559,7 +559,7 @@ export default function ClientShipments() {
                               <span>{item.category}</span>
                               <span>Origin: {item.countryOfOrigin}</span>
                               <span>Qty: {item.quantity}</span>
-                              <span><SarAmount amount={item.price} /> each</span>
+                              <span>{formatCurrencyAmount(item.price, item.currency)} each</span>
                             </div>
                           </div>
                         ))}

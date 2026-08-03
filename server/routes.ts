@@ -1365,6 +1365,44 @@ async function bookCarrierPickupIfRequested(
   }
 }
 
+// Best-effort release of a booked carrier courier pickup when a shipment is cancelled. Express
+// shipments auto-book a pickup, so a cancelled shipment MUST also cancel the pickup or a courier
+// still shows up. Never throws — a failed pickup cancel must not block the shipment cancellation.
+async function cancelCarrierPickupIfBooked(
+  shipment: Shipment,
+  adapter: CarrierAdapter,
+  appKey: string,
+): Promise<void> {
+  if (!shipment.pickupConfirmationNumber || !adapter.cancelPickup) return;
+  try {
+    const ok = await withBoundIntegrationAccount(
+      appKey,
+      shipment.carrierIntegrationAccountId,
+      getShipmentIntegrationRoutingOptions(shipment),
+      () =>
+        adapter.cancelPickup!(shipment.pickupConfirmationNumber!, {
+          shipper: {
+            name: shipment.senderName,
+            streetLine1: shipment.senderAddress,
+            city: shipment.senderCity,
+            postalCode: shipment.senderPostalCode || "",
+            countryCode: shipment.senderCountry,
+            phone: shipment.senderPhone,
+          },
+          pickupDate: shipment.pickupDate || undefined,
+          instructions: "Shipment cancelled",
+        }),
+    );
+    await storage.updateShipment(shipment.id, { pickupStatus: ok ? "cancelled" : shipment.pickupStatus });
+    logInfo(
+      `Pickup cancel ${ok ? "succeeded" : "not confirmed"} for ${shipment.trackingNumber} (${adapter.carrierCode})`,
+      { confirmationNumber: shipment.pickupConfirmationNumber },
+    );
+  } catch (error) {
+    logError(`Pickup cancel failed for shipment ${shipment.trackingNumber} (${adapter.carrierCode})`, error);
+  }
+}
+
 async function finalizePaidShipmentAfterPayment(params: {
   shipment: Shipment;
   transactionId?: string | null;
@@ -3740,6 +3778,24 @@ function canShipmentBeCancelled(shipment: Shipment): boolean {
   return !NON_CANCELLABLE_CARRIER_STATUSES.has(normalizedCarrierStatus);
 }
 
+// Carrier statuses that mean the parcel has left the shipper (collected or moving). A shipment
+// that has NOT reached one of these is "still booked" — its cancellation refund is issued
+// automatically; anything beyond booked routes through the manual approval workflow.
+const COLLECTED_OR_MOVING_CARRIER_STATUSES = new Set([
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+]);
+
+function isShipmentStillBooked(shipment: Shipment): boolean {
+  const normalizedCarrierStatus = (shipment.carrierStatus || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return !COLLECTED_OR_MOVING_CARRIER_STATUSES.has(normalizedCarrierStatus);
+}
+
 function isShipmentRefundApprovalSatisfied(status: string | null | undefined): boolean {
   return (
     status === ShipmentRefundApprovalStatus.APPROVED ||
@@ -3814,8 +3870,9 @@ function getRefundActorType(user: User): "CLIENT" | "ACCOUNT_MANAGER" | "ADMIN" 
 async function ensureShipmentRefundRequestForCancellation(params: {
   shipment: Shipment;
   user: User;
+  autoRefund?: boolean;
 }): Promise<ShipmentRefundRequest | null> {
-  const { shipment, user } = params;
+  const { shipment, user, autoRefund } = params;
   const existingRequest = await storage.getShipmentRefundRequestByShipmentId(shipment.id);
   if (existingRequest) {
     return existingRequest;
@@ -3824,6 +3881,73 @@ async function ensureShipmentRefundRequestForCancellation(params: {
   const refundPaymentContext = await getShipmentRefundPaymentContext(shipment);
   if (!refundPaymentContext.requiresRefund) {
     return null;
+  }
+
+  // Still-booked cancellations: issue the Tap refund immediately and complete the request with
+  // no approval workflow. A gateway failure falls through to the manual approval flow below.
+  if (autoRefund) {
+    const chargeId = refundPaymentContext.payment?.transactionId || shipment.paymentIntentId;
+    if (chargeId) {
+      try {
+        const refund = await withBoundIntegrationAccount(
+          "tap",
+          shipment.tapIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(shipment),
+          async () => {
+            const charge = await tapService.retrieveCharge(chargeId);
+            const amount = Number(charge?.amount) > 0 ? Number(charge!.amount) : refundPaymentContext.amount;
+            const currency = charge?.currency || shipment.currency || refundPaymentContext.currency || "SAR";
+            return tapService.refundCharge({
+              chargeId,
+              amount,
+              currency,
+              reason: "requested_by_customer",
+              reference: shipment.trackingNumber,
+            });
+          },
+        );
+
+        if (refundPaymentContext.payment) {
+          await storage.updatePayment(refundPaymentContext.payment.id, { status: "refunded" });
+        }
+        if (refundPaymentContext.invoiceId) {
+          await storage.updateInvoice(refundPaymentContext.invoiceId, { status: "refunded" });
+        }
+        await logAudit(
+          user.id,
+          "shipment_refund_auto",
+          "shipment",
+          shipment.id,
+          `Auto-refunded ${refund.amount} ${refund.currency} via Tap (${refund.refundId}) on still-booked cancellation of ${shipment.trackingNumber}`,
+        );
+
+        return storage.createShipmentRefundRequest({
+          shipmentId: shipment.id,
+          clientAccountId: shipment.clientAccountId,
+          invoiceId: refundPaymentContext.invoiceId,
+          amount: formatMoney(refundPaymentContext.amount),
+          currency: refundPaymentContext.currency,
+          status: ShipmentRefundRequestStatus.COMPLETED,
+          requestedByUserId: user.id,
+          requestedByActorType: getRefundActorType(user),
+          accountManagerUserId: null,
+          accountManagerApprovalStatus: ShipmentRefundApprovalStatus.NOT_REQUIRED,
+          accountManagerApprovedByUserId: null,
+          accountManagerApprovedAt: null,
+          financeApprovalStatus: ShipmentRefundApprovalStatus.NOT_REQUIRED,
+          financeApprovedByUserId: null,
+          financeApprovedAt: null,
+          completedAt: new Date(),
+          gatewayRefundId: refund.refundId,
+        });
+      } catch (refundError) {
+        logError(
+          `Automatic Tap refund failed for ${shipment.trackingNumber}; falling back to manual approval`,
+          refundError,
+        );
+        // fall through to the manual approval request below
+      }
+    }
   }
 
   const assignedAccountManager = await storage.getPrimaryAccountManagerForClient(shipment.clientAccountId);
@@ -8774,6 +8898,16 @@ export async function registerRoutes(
             carrierErrorDetail: carrierDetail,
           });
         }
+      }
+
+      // Release the auto-booked courier pickup so no driver arrives for the cancelled shipment.
+      if (shipment.carrierTrackingNumber && shipment.pickupConfirmationNumber) {
+        const pickupAdapter = getAdapterForShipment(shipment);
+        await cancelCarrierPickupIfBooked(
+          shipment,
+          pickupAdapter,
+          getIntegrationAppKeyForCarrier(pickupAdapter.carrierCode),
+        );
       }
 
       const updated = await storage.updateShipment(id, {
@@ -18095,6 +18229,16 @@ export async function registerRoutes(
         }
       }
 
+      // Release the auto-booked courier pickup so no driver arrives for the cancelled shipment.
+      if (shipment.carrierTrackingNumber && shipment.pickupConfirmationNumber) {
+        const pickupAdapter = getAdapterForShipment(shipment);
+        await cancelCarrierPickupIfBooked(
+          shipment,
+          pickupAdapter,
+          getIntegrationAppKeyForCarrier(pickupAdapter.carrierCode),
+        );
+      }
+
       const updated = await storage.updateShipment(id, {
         status: "cancelled",
         carrierStatus: "cancelled",
@@ -18107,6 +18251,7 @@ export async function registerRoutes(
         ? await ensureShipmentRefundRequestForCancellation({
             shipment: updated,
             user,
+            autoRefund: isShipmentStillBooked(updated),
           })
         : null;
 

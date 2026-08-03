@@ -468,6 +468,90 @@ export class TapService {
     }
   }
 
+  // Refund a charge via POST /refunds. amount+currency must match the original charge currency
+  // (pass the charge's own amount for a full refund). Returns Tap's refund id + status.
+  async refundCharge(params: {
+    chargeId: string;
+    amount: number;
+    currency: string;
+    reason?: string;
+    reference?: string;
+  }): Promise<{ refundId: string; status: string; amount: number; currency: string; raw: any }> {
+    const currency = params.currency.toUpperCase();
+    if (!this.isConfigured()) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error("Tap is not configured — cannot issue a refund.");
+      }
+      return { refundId: `re_mock_${Date.now()}`, status: "REFUNDED", amount: params.amount, currency, raw: {} };
+    }
+
+    const startTime = Date.now();
+    const payload = {
+      charge_id: params.chargeId,
+      amount: toTapAmountValue(params.amount, currency),
+      currency,
+      reason: params.reason || "requested_by_customer",
+      ...(params.reference ? { reference: { merchant: params.reference } } : {}),
+    };
+
+    try {
+      const response = await fetch(`${this.baseUrl}/refunds/`, {
+        method: "POST",
+        headers: {
+          Authorization: this.getAuthHeader(),
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const duration = Date.now() - startTime;
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        await storage.createIntegrationLog({
+          serviceName: "tap",
+          operation: "refund_charge",
+          success: false,
+          statusCode: response.status,
+          errorMessage: data?.message || `Tap API error: ${response.status}`,
+          duration,
+          requestPayload: JSON.stringify(payload),
+          responsePayload: JSON.stringify(data),
+        });
+        throw new Error(data?.message || `Tap refund error: ${response.status}`);
+      }
+
+      await storage.createIntegrationLog({
+        serviceName: "tap",
+        operation: "refund_charge",
+        success: true,
+        statusCode: response.status,
+        duration,
+        requestPayload: JSON.stringify(payload),
+        responsePayload: JSON.stringify({ refundId: data?.id, status: data?.status }),
+      });
+
+      return {
+        refundId: String(data?.id || ""),
+        status: String(data?.status || "PENDING"),
+        amount: Number(data?.amount ?? params.amount),
+        currency: String(data?.currency || currency),
+        raw: data,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await storage.createIntegrationLog({
+        serviceName: "tap",
+        operation: "refund_charge",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        duration,
+        requestPayload: JSON.stringify(payload),
+      });
+      throw error;
+    }
+  }
+
   async createSavedCardToken(params: CreateTapSavedCardTokenParams): Promise<{ id: string; status?: string }> {
     if (!this.isConfigured()) {
       return {

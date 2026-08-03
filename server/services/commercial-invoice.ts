@@ -63,6 +63,7 @@ type CommercialInvoiceShipmentItem = {
   hsCode?: string;
   price: number;
   quantity: number;
+  currency?: string;
 };
 
 function safeNumber(value: unknown, fallback = 0): number {
@@ -173,6 +174,24 @@ function parseShipmentItems(shipment: Shipment): CommercialInvoiceItemLine[] {
   }
 }
 
+// Customs/declared-value currency is the item's OWN currency (what the client entered per item,
+// e.g. GBP), not the freight charge currency (shipment.currency — always SAR). Items share one
+// currency; use the first that declares one. Fallbacks: shipment.currency, then SAR.
+function resolveDeclaredCurrency(shipment: Shipment): string {
+  try {
+    const items = JSON.parse(shipment.itemsData || "[]") as CommercialInvoiceShipmentItem[];
+    const withCurrency = items.find(
+      (item) => typeof item.currency === "string" && item.currency.trim().length > 0,
+    );
+    if (withCurrency?.currency) {
+      return withCurrency.currency.trim().toUpperCase();
+    }
+  } catch {
+    /* fall through to shipment currency */
+  }
+  return (shipment.currency || "SAR").toUpperCase();
+}
+
 function buildDimensionSummary(shipment: Shipment): string | undefined {
   if (shipment.packagesData) {
     try {
@@ -237,7 +256,7 @@ export function buildCommercialInvoiceDocument(shipment: Shipment): CommercialIn
     carrierName: shipment.carrierName || shipment.carrierCode || "Carrier",
     serviceType: shipment.carrierServiceType || shipment.serviceType || "STANDARD",
     incoterm: buildIncoterm(shipment),
-    currency: shipment.currency || "SAR",
+    currency: resolveDeclaredCurrency(shipment),
     packageCount: shipment.numberOfPackages || 1,
     grossWeight: safeNumber(shipment.weight),
     weightUnit: shipment.weightUnit || "KG",

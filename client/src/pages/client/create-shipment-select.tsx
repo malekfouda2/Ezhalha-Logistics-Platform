@@ -29,6 +29,15 @@ const shipmentTypes: ShipmentTypeOption[] = [
     iconClass: "text-emerald-500",
   },
   {
+    key: "express",
+    label: "Express Shipment",
+    description: "International courier delivery (import & export) via FedEx, DHL and partners.",
+    href: "/client/create-shipment",
+    icon: Plane,
+    iconWrapClass: "bg-primary/10",
+    iconClass: "text-primary",
+  },
+  {
     key: "ddp",
     label: "Door To Door Freight",
     description: "Import goods with all duties and taxes prepaid on fixed lane pricing.",
@@ -36,15 +45,6 @@ const shipmentTypes: ShipmentTypeOption[] = [
     icon: DoorOpen,
     iconWrapClass: "bg-blue-500/10",
     iconClass: "text-blue-500",
-  },
-  {
-    key: "express",
-    label: "Express Shipment",
-    description: "International & domestic courier delivery via FedEx, DHL and partners.",
-    href: "/client/create-shipment",
-    icon: Plane,
-    iconWrapClass: "bg-primary/10",
-    iconClass: "text-primary",
   },
 ];
 

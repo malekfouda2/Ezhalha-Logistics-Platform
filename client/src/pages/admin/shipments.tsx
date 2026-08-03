@@ -66,7 +66,7 @@ import {
   CheckCircle2,
   Pencil,
 } from "lucide-react";
-import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
+import { SarSymbol, SarAmount, formatSAR, formatCurrencyAmount } from "@/components/sar-symbol";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAdminAccess } from "@/hooks/use-admin-access";
@@ -1539,7 +1539,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                               <span>{item.category}</span>
                               <span>Origin: {item.countryOfOrigin}</span>
                               <span>Qty: {item.quantity}</span>
-                              <span><SarAmount amount={item.price} /> each</span>
+                              <span>{formatCurrencyAmount(item.price, item.currency)} each</span>
                             </div>
                           </div>
                         ))}

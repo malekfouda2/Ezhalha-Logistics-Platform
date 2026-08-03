@@ -30,6 +30,25 @@ export function SarSymbol({ className, size = "sm" }: SarSymbolProps) {
   );
 }
 
+// Format an amount in a specific currency literally (no FX conversion) — used for customs/
+// declared item values, which must show the currency the client entered (e.g. GBP), not the
+// account display currency. Falls back to "<amount> <CODE>" if Intl can't format the code.
+export function formatCurrencyAmount(amount: number | string, currency?: string): string {
+  const num = typeof amount === "string" ? Number(amount) : amount;
+  const safe = isNaN(num) ? 0 : num;
+  const code = (currency || "SAR").toUpperCase();
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(safe);
+  } catch {
+    return `${safe.toFixed(2)} ${code}`;
+  }
+}
+
 export function formatSAR(amount: number | string, decimals: number = 2): string {
   const num = typeof amount === "string" ? Number(amount) : amount;
   if (isNaN(num)) return "0.00";
