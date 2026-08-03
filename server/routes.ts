@@ -946,6 +946,72 @@ function buildShipmentRecipientAddress(shipment: Shipment): ReusableShipmentAddr
   };
 }
 
+// Build a client's reusable address book (default shipping + de-duplicated shipment history),
+// sorted default-first then most-recent. Shared by the client endpoint and the admin quotation
+// flow (so admins building a quote see the same saved addresses the client would).
+async function buildClientAddressBook(clientAccountId: string): Promise<AddressBookEntryResponse[]> {
+  const [account, clientShipments] = await Promise.all([
+    storage.getClientAccount(clientAccountId),
+    storage.getShipmentsByClientAccount(clientAccountId),
+  ]);
+  if (!account) return [];
+
+  const entriesByKey = new Map<string, AddressBookEntryResponse>();
+  const addEntry = (
+    address: ReusableShipmentAddress | null,
+    options: { source: "default_shipping" | "shipment_history"; useForShipper: boolean; useForRecipient: boolean; lastUsedAt?: Date | null },
+  ) => {
+    if (!isReusableShipmentAddress(address)) return;
+    const key = buildAddressBookKey(address);
+    const existing = entriesByKey.get(key);
+    const lastUsedAtIso = options.lastUsedAt ? options.lastUsedAt.toISOString() : null;
+    if (!existing) {
+      entriesByKey.set(key, {
+        id: key,
+        label: buildAddressBookLabel(address, options.source),
+        source: options.source,
+        useForShipper: options.useForShipper,
+        useForRecipient: options.useForRecipient,
+        lastUsedAt: lastUsedAtIso,
+        ...address,
+      });
+      return;
+    }
+    const existingTime = existing.lastUsedAt ? new Date(existing.lastUsedAt).getTime() : 0;
+    const incomingTime = options.lastUsedAt ? options.lastUsedAt.getTime() : 0;
+    const shouldPromoteDefault = options.source === "default_shipping" && existing.source !== "default_shipping";
+    entriesByKey.set(key, {
+      ...existing,
+      email: existing.email || address.email || null,
+      useForShipper: existing.useForShipper || options.useForShipper,
+      useForRecipient: existing.useForRecipient || options.useForRecipient,
+      source: shouldPromoteDefault ? "default_shipping" : existing.source,
+      label: shouldPromoteDefault ? buildAddressBookLabel(address, "default_shipping") : existing.label,
+      lastUsedAt: incomingTime > existingTime ? lastUsedAtIso : existing.lastUsedAt,
+    });
+  };
+
+  addEntry(buildAccountDefaultShipmentAddress(account), {
+    source: "default_shipping",
+    useForShipper: true,
+    useForRecipient: true,
+    lastUsedAt: account.createdAt,
+  });
+  for (const shipment of clientShipments) {
+    addEntry(buildShipmentSenderAddress(shipment), { source: "shipment_history", useForShipper: true, useForRecipient: false, lastUsedAt: shipment.createdAt });
+    addEntry(buildShipmentRecipientAddress(shipment), { source: "shipment_history", useForShipper: false, useForRecipient: true, lastUsedAt: shipment.createdAt });
+  }
+
+  return Array.from(entriesByKey.values()).sort((a, b) => {
+    if (a.source === "default_shipping" && b.source !== "default_shipping") return -1;
+    if (b.source === "default_shipping" && a.source !== "default_shipping") return 1;
+    const aTime = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+    const bTime = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+    if (aTime !== bTime) return bTime - aTime;
+    return a.label.localeCompare(b.label);
+  });
+}
+
 function resolveCarrierCode(carrier?: string | null): string {
   return carrier?.trim() ? carrier.trim().toUpperCase() : "FEDEX";
 }
@@ -15053,99 +15119,28 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Client account not found" });
       }
 
-      const [account, clientShipments] = await Promise.all([
-        storage.getClientAccount(user.clientAccountId),
-        storage.getShipmentsByClientAccount(user.clientAccountId),
-      ]);
-
-      if (!account) {
-        return res.status(404).json({ error: "Client account not found" });
-      }
-
-      const entriesByKey = new Map<string, AddressBookEntryResponse>();
-
-      const addEntry = (
-        address: ReusableShipmentAddress | null,
-        options: {
-          source: "default_shipping" | "shipment_history";
-          useForShipper: boolean;
-          useForRecipient: boolean;
-          lastUsedAt?: Date | null;
-        },
-      ) => {
-        if (!isReusableShipmentAddress(address)) {
-          return;
-        }
-
-        const key = buildAddressBookKey(address);
-        const existing = entriesByKey.get(key);
-        const lastUsedAtIso = options.lastUsedAt ? options.lastUsedAt.toISOString() : null;
-
-        if (!existing) {
-          entriesByKey.set(key, {
-            id: key,
-            label: buildAddressBookLabel(address, options.source),
-            source: options.source,
-            useForShipper: options.useForShipper,
-            useForRecipient: options.useForRecipient,
-            lastUsedAt: lastUsedAtIso,
-            ...address,
-          });
-          return;
-        }
-
-        const existingTime = existing.lastUsedAt ? new Date(existing.lastUsedAt).getTime() : 0;
-        const incomingTime = options.lastUsedAt ? options.lastUsedAt.getTime() : 0;
-        const shouldPromoteDefault = options.source === "default_shipping" && existing.source !== "default_shipping";
-
-        entriesByKey.set(key, {
-          ...existing,
-          email: existing.email || address.email || null,
-          useForShipper: existing.useForShipper || options.useForShipper,
-          useForRecipient: existing.useForRecipient || options.useForRecipient,
-          source: shouldPromoteDefault ? "default_shipping" : existing.source,
-          label: shouldPromoteDefault ? buildAddressBookLabel(address, "default_shipping") : existing.label,
-          lastUsedAt: incomingTime > existingTime ? lastUsedAtIso : existing.lastUsedAt,
-        });
-      };
-
-      addEntry(buildAccountDefaultShipmentAddress(account), {
-        source: "default_shipping",
-        useForShipper: true,
-        useForRecipient: true,
-        lastUsedAt: account.createdAt,
-      });
-
-      for (const shipment of clientShipments) {
-        addEntry(buildShipmentSenderAddress(shipment), {
-          source: "shipment_history",
-          useForShipper: true,
-          useForRecipient: false,
-          lastUsedAt: shipment.createdAt,
-        });
-
-        addEntry(buildShipmentRecipientAddress(shipment), {
-          source: "shipment_history",
-          useForShipper: false,
-          useForRecipient: true,
-          lastUsedAt: shipment.createdAt,
-        });
-      }
-
-      const entries = Array.from(entriesByKey.values()).sort((a, b) => {
-        if (a.source === "default_shipping" && b.source !== "default_shipping") return -1;
-        if (b.source === "default_shipping" && a.source !== "default_shipping") return 1;
-
-        const aTime = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
-        const bTime = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
-        if (aTime !== bTime) {
-          return bTime - aTime;
-        }
-
-        return a.label.localeCompare(b.label);
-      });
-
+      const entries = await buildClientAddressBook(user.clientAccountId);
       res.json(entries);
+    },
+  );
+
+  // Admin (quotation flow) - the target client's address book, so building a quote offers the
+  // same saved sender/recipient addresses the client sees in create-shipment.
+  app.get(
+    "/api/admin/quotations/client/:clientAccountId/address-book",
+    requireAdminPermission("shipments", "create"),
+    async (req, res) => {
+      try {
+        const account = await storage.getClientAccount(req.params.clientAccountId);
+        if (!account) {
+          return res.status(404).json({ error: "Client account not found" });
+        }
+        const entries = await buildClientAddressBook(req.params.clientAccountId);
+        res.json(entries);
+      } catch (error) {
+        logError("Error building client address book for quotation", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
     },
   );
 

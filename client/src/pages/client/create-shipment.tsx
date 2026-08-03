@@ -1007,7 +1007,11 @@ export default function CreateShipment() {
   const canCreateShipments = quoteMode || myPerms?.isPrimaryContact || myPerms?.permissions.includes("create_shipments");
 
   const { data: addressBookEntries = [] } = useQuery<AddressBookEntry[]>({
-    queryKey: ["/api/client/address-book"],
+    // In admin quotation mode, load the TARGET client's address book (same saved addresses the
+    // client sees), not the admin's.
+    queryKey: quoteMode
+      ? [`/api/admin/quotations/client/${quotation!.clientAccountId}/address-book`]
+      : ["/api/client/address-book"],
     enabled: !!canCreateShipments,
   });
 
