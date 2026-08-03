@@ -2774,13 +2774,14 @@ describe("Admin - Account Managers", () => {
       paidAt: new Date(),
     });
 
+    // No gateway transaction id → not auto-refundable, so the cancellation routes through the
+    // manual finance-approval workflow (still-booked cancels WITH a Tap charge auto-refund instead).
     await storage.createPayment({
       invoiceId: invoice.id,
       clientAccountId: assignedClientId,
       amount: "120.00",
-      paymentMethod: "tap",
+      paymentMethod: "credit",
       status: "completed",
-      transactionId: `am_refund_tx_${unique}`,
     });
 
     const cancelRes = await asAccountManager.post(`/api/admin/shipments/${refundShipment.id}/cancel`).send({});

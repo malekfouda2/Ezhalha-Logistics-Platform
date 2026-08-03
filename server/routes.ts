@@ -8922,6 +8922,7 @@ export async function registerRoutes(
         ? await ensureShipmentRefundRequestForCancellation({
             shipment: updated,
             user: adminUser,
+            autoRefund: isShipmentStillBooked(updated),
           })
         : null;
       
