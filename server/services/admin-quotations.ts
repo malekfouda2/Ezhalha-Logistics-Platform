@@ -172,13 +172,19 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
         )
       : Math.max(0, round2(input.discountSar || 0));
   const extraChargeSar = Math.max(0, round2(input.extraChargeSar || 0));
-  const targetTotal =
-    input.priceOverrideSar != null && input.priceOverrideSar >= 0
-      ? round2(input.priceOverrideSar)
-      : round2(autoClientTotal - discountSar + extraChargeSar);
 
-  const marginAmount = solveMarginForTotal(accountingParams, targetTotal);
-  const snapshot = calculateShipmentAccounting({ ...accountingParams, marginAmount });
+  // An explicit price override still solves the margin to hit that exact total. Otherwise keep
+  // the full list markup and let the discount/extra reduce the client total (the discount comes
+  // off the shipment total, NOT out of the markup).
+  let marginAmount: number;
+  let snapshot: ReturnType<typeof calculateShipmentAccounting>;
+  if (input.priceOverrideSar != null && input.priceOverrideSar >= 0) {
+    marginAmount = solveMarginForTotal(accountingParams, round2(input.priceOverrideSar));
+    snapshot = calculateShipmentAccounting({ ...accountingParams, marginAmount });
+  } else {
+    marginAmount = round2(autoMargin);
+    snapshot = calculateShipmentAccounting({ ...accountingParams, marginAmount, discountSar, extraChargeSar });
+  }
 
   return {
     baseRate: round2(baseRate),

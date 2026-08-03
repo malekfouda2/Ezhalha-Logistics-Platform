@@ -11889,6 +11889,11 @@ export async function registerRoutes(
         recipientCountryCode: data.recipient.countryCode,
         baseRate: pricing.baseRate,
         marginAmount: pricing.marginAmount,
+        // Only apply the discount/extra to the snapshot when the margin is the full list markup
+        // (no explicit price override) — mirrors computeQuotationPricing so stored totals match.
+        ...(data.priceOverrideSar != null && data.priceOverrideSar >= 0
+          ? {}
+          : { discountSar: pricing.discountSar, extraChargeSar: pricing.extraChargeSar }),
       });
 
       const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);

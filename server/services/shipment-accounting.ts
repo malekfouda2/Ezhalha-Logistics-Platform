@@ -13,6 +13,10 @@ export interface ShipmentAccountingInput {
   recipientCountryCode: string;
   baseRate: number;
   marginAmount: number;
+  // A price concession off the sell side (e.g. an admin quote discount) and/or an extra charge.
+  // The full marginAmount (list markup) is preserved; these adjust the client total and VAT.
+  discountSar?: number;
+  extraChargeSar?: number;
 }
 
 export interface ShipmentAccountingSnapshot {
@@ -76,6 +80,8 @@ export function calculateShipmentAccounting(
 
   const costAmountSar = roundCurrency(input.baseRate);
   const marginAmountSar = roundCurrency(input.marginAmount);
+  const discountSar = roundCurrency(Math.max(0, input.discountSar || 0));
+  const extraChargeSar = roundCurrency(Math.max(0, input.extraChargeSar || 0));
   const sellSubtotalAmountSar = roundCurrency(costAmountSar + marginAmountSar);
 
   let costTaxAmountSar = 0;
@@ -91,6 +97,10 @@ export function calculateShipmentAccounting(
       marginAmountSar - marginAmountSar / (1 + VAT_RATE),
     );
   }
+
+  // A quote discount/extra is a flat concession off the FINAL client total — the full markup and
+  // VAT above are preserved (the discount comes off the shipment total, not the markup).
+  clientTotalAmountSar = roundCurrency(Math.max(0, clientTotalAmountSar - discountSar + extraChargeSar));
 
   const systemCostTotalAmountSar = roundCurrency(costAmountSar + costTaxAmountSar);
   const taxPayableAmountSar = roundCurrency(sellTaxAmountSar - costTaxAmountSar);

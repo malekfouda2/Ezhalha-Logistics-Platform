@@ -261,8 +261,7 @@ export default function QuotationDetail() {
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Price</CardTitle></CardHeader>
           <CardContent className="space-y-1.5 text-sm">
-            <Row label="Base rate" value={sar(p.baseRate)} />
-            <Row label="Markup" value={sar(p.marginAmount)} />
+            <Row label="Subtotal" value={sar(p.baseRate + p.marginAmount)} />
             {p.discountSar > 0 && <Row label="Discount" value={`− ${sar(p.discountSar)}`} />}
             {p.extraChargeSar > 0 && <Row label="Extra charge" value={sar(p.extraChargeSar)} />}
             <Row label="VAT (15%)" value={sar(p.vatAmountSar)} />
