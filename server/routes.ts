@@ -675,7 +675,7 @@ async function sendPasswordSetupEmail(user: User, purpose: "onboard" | "reset"):
   });
   const url = `${APP_BASE_URL}/reset-password?token=${token}`;
   const onboard = purpose === "onboard";
-  await sendEmail({
+  const delivered = await sendEmail({
     to: user.email,
     subject: onboard ? "Welcome to ezhalha — set your password" : "Reset your ezhalha password",
     html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
@@ -688,6 +688,9 @@ async function sendPasswordSetupEmail(user: User, purpose: "onboard" | "reset"):
     </div>`,
     text: `${onboard ? "Welcome to ezhalha. Set your password" : "Reset your ezhalha password"}: ${url} (expires in ${onboard ? "7 days" : "1 hour"})`,
   });
+  if (!delivered) {
+    logError("Password setup/reset email was not delivered", undefined, { email: user.email, purpose });
+  }
 }
 
 // VAT embedded in an invoice's amount, mirroring the platform's own tax engine
@@ -7800,7 +7803,7 @@ export async function registerRoutes(
           codeHash: hashOtp(code),
           expiresAt: new Date(Date.now() + OTP_TTL_MS),
         });
-        await sendEmail({
+        const otpDelivered = await sendEmail({
           to: email,
           subject: "Your ezhalha login code",
           html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
@@ -7811,6 +7814,9 @@ export async function registerRoutes(
           </div>`,
           text: `Your ezhalha login code is ${code}. It expires in 10 minutes.`,
         });
+        if (!otpDelivered) {
+          logError("OTP login code email was not delivered", undefined, { email });
+        }
         await logAudit(user.id, "otp_requested", "security", user.id, `Login code requested for ${email}`, req.ip);
       }
 

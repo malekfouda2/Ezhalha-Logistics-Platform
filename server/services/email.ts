@@ -51,7 +51,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
     try {
       const fromAddress = getIntegrationEnv("SMTP_FROM") || "noreply@ezhalha.com";
 
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: `"ezhalha" <${fromAddress}>`,
         to: options.to,
         subject: options.subject,
@@ -59,7 +59,24 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         text: options.text || options.html.replace(/<[^>]*>/g, ""),
       });
 
-      logInfo("Email sent successfully", { to: options.to, subject: options.subject });
+      // Log the SMTP response + messageId + accepted/rejected recipients so a "didn't receive"
+      // report can be traced against the mail server (accepted ≠ delivered — rejects show here).
+      logInfo("Email sent successfully", {
+        to: options.to,
+        subject: options.subject,
+        messageId: info?.messageId,
+        response: info?.response,
+        accepted: info?.accepted,
+        rejected: info?.rejected,
+      });
+      if (Array.isArray(info?.rejected) && info.rejected.length > 0) {
+        logError("Email recipients rejected by SMTP server", undefined, {
+          to: options.to,
+          subject: options.subject,
+          rejected: info.rejected,
+          response: info?.response,
+        });
+      }
       return true;
     } catch (error) {
       logError("Failed to send email", error, { to: options.to, subject: options.subject });
