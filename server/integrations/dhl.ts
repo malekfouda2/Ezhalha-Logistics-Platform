@@ -1177,7 +1177,9 @@ export class DhlAdapter implements CarrierAdapter {
       shipmentDetails: [{
         productCode: request.serviceType || "P",
         isCustomsDeclarable: Boolean(request.isInternational),
-        declaredValue: Number(request.declaredValue) > 0 ? Number(request.declaredValue) : 1,
+        // Round to 2 dp: DHL requires declaredValue to be a multiple of 0.001, but summing item
+        // prices yields float artifacts (e.g. 468.65999999999997) that DHL rejects with a 422.
+        declaredValue: Number(request.declaredValue) > 0 ? Math.round(Number(request.declaredValue) * 100) / 100 : 1,
         declaredValueCurrency: request.currency || "EUR",
         unitOfMeasurement: "metric",
         accounts: [{ typeCode: "shipper", number: this.accountNumber }],

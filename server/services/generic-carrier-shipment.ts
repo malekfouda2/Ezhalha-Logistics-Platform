@@ -87,10 +87,9 @@ function buildCommoditySummary(items?: ShipmentItem[]) {
 
   return {
     commodityDescription: items.map((item) => item.description).join(", ").slice(0, 150),
-    declaredValue: items.reduce(
-      (sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 0),
-      0,
-    ),
+    declaredValue: Math.round(
+      items.reduce((sum, item) => sum + Number(item.unitPrice || 0) * Number(item.quantity || 0), 0) * 100,
+    ) / 100,
   };
 }
 

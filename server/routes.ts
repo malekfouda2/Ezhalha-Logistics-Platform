@@ -1369,6 +1369,7 @@ async function bookCarrierPickupIfRequested(
   try {
     const items: any[] = shipment.itemsData ? JSON.parse(shipment.itemsData) : [];
     declaredValue = items.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+    declaredValue = Math.round(declaredValue * 100) / 100; // avoid float artifacts carriers reject
   } catch { /* ignore */ }
   const pickupRequest: PickupRequest = {
     shipper: {
