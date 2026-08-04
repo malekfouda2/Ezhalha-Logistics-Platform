@@ -159,8 +159,11 @@ export async function applyCarrierTrackingToShipment(
 
 function shouldRefreshShipment(shipment: Shipment): boolean {
   if (getOperationShipmentKind(shipment) !== OperationShipmentKind.EXPRESS) return false;
+  // A carrier tracking number means the shipment is booked with the carrier — track it regardless
+  // of how it was paid. Gating on paymentStatus previously excluded credit/pending shipments
+  // (real value is "pending", never "unpaid"), so their status stayed frozen at booking.
   if (!shipment.carrierTrackingNumber) return false;
-  if (!["paid", "unpaid"].includes(shipment.paymentStatus || "")) return false;
+  if (shipment.paymentStatus === "refunded") return false;
   if (["delivered", "cancelled"].includes(shipment.status)) return false;
   return true;
 }

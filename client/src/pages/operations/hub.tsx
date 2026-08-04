@@ -794,6 +794,28 @@ function getExpressTab(shipment: OperationShipmentSummary): "received" | "transi
   return "received";
 }
 
+// Maps the real (carrier-synced) shipment status to the active step index (0-based) in the
+// 9-step express timeline. Pre-pickup statuses stay at step 0 so the timeline never marks
+// "Picked up" / "Received at facility" as done before the carrier actually moves the shipment.
+function getExpressStepIndex(status?: string | null): number {
+  switch ((status || "").toLowerCase()) {
+    case "delivered":
+      return 8;
+    case "out_for_delivery":
+      return 7;
+    case "customs_clearance":
+    case "carrier_error":
+      return 6;
+    case "in_transit":
+      return 4;
+    case "picked_up":
+      return 1;
+    default:
+      // created / booked / awaiting_review / processing / awaiting_payment — not yet picked up
+      return 0;
+  }
+}
+
 function isShipmentDelivered(shipment: Pick<OperationShipmentSummary, "status"> | Pick<OperationShipmentDetail, "status">) {
   return shipment.status?.toLowerCase() === "delivered";
 }
@@ -1951,7 +1973,7 @@ function ShipmentListItem({ shipment, view, active, onClick }: {
     : view === "d2d"
     ? <span className="badge b-pr">Stage {stage}: {d2dStages[stage - 1]}</span>
     : view === "express"
-      ? <span className={`badge ${expressTab === "customs" ? "b-amber" : expressTab === "lastmile" ? "b-purple" : expressTab === "transit" ? "b-blue" : "b-green"}`}>{formatStatus(expressTab)}</span>
+      ? <span className={`badge ${expressTab === "customs" ? "b-amber" : expressTab === "lastmile" ? "b-purple" : expressTab === "transit" ? "b-blue" : "b-gray"}`}>{formatStatus(shipment.status || "created")}</span>
       : view === "local"
       ? <span className="badge b-blue">{formatStatus(shipment.status || "created")}</span>
       : view === "attention"
@@ -1984,7 +2006,7 @@ function DetailHeader({ shipment, onMessage, onSpecial }: {
       : <span className="badge b-pr">Stage {getD2DStage(shipment)} · {d2dStages[getD2DStage(shipment) - 1]}</span>
     : isShipmentDelivered(shipment)
       ? <span className="badge b-green">Delivered</span>
-      : <span className="badge b-blue">{formatStatus(getExpressTab(shipment))}</span>;
+      : <span className="badge b-blue">{formatStatus(shipment.status || "created")}</span>;
 
   return (
     <div className="dp-header">
@@ -3057,7 +3079,7 @@ function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSync
     <div className="dp-grid">
       <div>
         {tab === "customs" && <div className="alert alert-amber"><AlertTriangle /> Customs or carrier attention is required. Review the tracking and update the client with a friendly milestone.</div>}
-        {tab === "received" && <div className="alert alert-green"><CheckCircle2 /> Received by carrier or prepared for carrier monitoring.</div>}
+        {tab === "received" && <div className="alert alert-blue"><Clock3 /> Booked with the carrier — awaiting pickup. Status updates automatically as the carrier scans it.</div>}
         {tab === "lastmile" && <div className="alert alert-purple"><MapPin /> Shipment is in the last-mile phase. Keep the recipient updated.</div>}
         <ShipmentDetailsPanel shipment={shipment} />
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -3435,11 +3457,11 @@ function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetai
   const labels = variant === "d2d"
     ? ["Received at origin warehouse", "Customs clearance - origin", "Departed origin", "In transit", "Arrived destination", "Customs clearance - destination", "Last-mile delivery"]
     : ["Order created and booked", "Picked up from sender", "Received at carrier origin facility", "Departed origin", "In transit", "Arrived destination facility", "Customs clearance", "Out for delivery", "Delivered"];
-  const active = variant === "d2d" ? getD2DStage(shipment) + 1 : expressTabs.findIndex((tab) => tab.key === getExpressTab(shipment)) + 3;
+  const activeIndex = variant === "d2d" ? getD2DStage(shipment) : getExpressStepIndex(shipment.status);
   return (
     <div className="track-wrap">
       {labels.map((label, index) => {
-        const state = shipment.status === "delivered" || index < active - 1 ? "done" : index === active - 1 ? "active-step" : "pending";
+        const state = shipment.status === "delivered" || index < activeIndex ? "done" : index === activeIndex ? "active-step" : "pending";
         return (
           <div className="track-step" key={label}>
             <div className={`track-check ${state}`}>
