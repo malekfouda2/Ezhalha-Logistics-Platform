@@ -44,6 +44,10 @@ export function GeoSuggestInput({
   const [highlight, setHighlight] = React.useState(-1);
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const justPicked = React.useRef(false);
+  // Track focus so we only auto-open the dropdown when the user is actually typing in
+  // THIS field. Picking a city programmatically fills the sibling postal field's value,
+  // which would otherwise pop that field's suggestion list open and force a second pick.
+  const focusedRef = React.useRef(false);
   const testId = rest["data-testid"];
 
   // Close on outside click.
@@ -80,7 +84,8 @@ export function GeoSuggestInput({
         const list: GeoSuggestion[] = Array.isArray(data?.results) ? data.results : [];
         setResults(list);
         setHighlight(-1);
-        if (list.length > 0) setOpen(true);
+        // Only pop the list when the user is focused here — never on a programmatic fill.
+        if (list.length > 0 && focusedRef.current) setOpen(true);
       } catch {
         if (!cancelled) setResults([]);
       } finally {
@@ -113,7 +118,8 @@ export function GeoSuggestInput({
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onFocus={() => results.length > 0 && setOpen(true)}
+        onFocus={() => { focusedRef.current = true; if (results.length > 0) setOpen(true); }}
+        onBlur={() => { focusedRef.current = false; }}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         disabled={disabled}
