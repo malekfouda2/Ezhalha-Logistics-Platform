@@ -3,33 +3,48 @@ import { logInfo, logError } from "./logger";
 import { getRenderedTemplate } from "./email-templates";
 import { getIntegrationEnv, withShipmentIntegrationAccount } from "./integration-runtime";
 
-interface EmailConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  auth: {
-    user: string;
-    pass: string;
-  };
+interface ResolvedTransport {
+  transporter: nodemailer.Transporter;
+  provider: string;
+  // Postmark routes each message through a "message stream"; the header selects it.
+  messageStream?: string;
 }
 
-function getTransporter() {
-  const config: EmailConfig = {
-    host: getIntegrationEnv("SMTP_HOST") || "smtp.example.com",
-    port: parseInt(getIntegrationEnv("SMTP_PORT") || "587"),
-    secure: getIntegrationEnv("SMTP_SECURE") === "true",
-    auth: {
-      user: getIntegrationEnv("SMTP_USER") || "",
-      pass: getIntegrationEnv("SMTP_PASS") || "",
-    },
-  };
+// Resolve the outbound mail transport. Prefer Postmark (dedicated transactional IPs +
+// delivery/bounce visibility) whenever POSTMARK_SERVER_TOKEN is present; otherwise fall
+// back to generic SMTP (Hostinger) so nothing breaks before the token is provisioned.
+function getTransporter(): ResolvedTransport | null {
+  const postmarkToken = getIntegrationEnv("POSTMARK_SERVER_TOKEN");
+  if (postmarkToken) {
+    return {
+      transporter: nodemailer.createTransport({
+        host: "smtp.postmarkapp.com",
+        port: 587,
+        secure: false, // STARTTLS is negotiated on 587
+        auth: { user: postmarkToken, pass: postmarkToken },
+      }),
+      provider: "postmark",
+      messageStream: getIntegrationEnv("POSTMARK_MESSAGE_STREAM") || "outbound",
+    };
+  }
 
-  if (!config.auth.user || !config.auth.pass) {
+  const user = getIntegrationEnv("SMTP_USER") || "";
+  const pass = getIntegrationEnv("SMTP_PASS") || "";
+
+  if (!user || !pass) {
     logInfo("Email service not configured - SMTP credentials missing");
     return null;
   }
 
-  return nodemailer.createTransport(config);
+  return {
+    transporter: nodemailer.createTransport({
+      host: getIntegrationEnv("SMTP_HOST") || "smtp.example.com",
+      port: parseInt(getIntegrationEnv("SMTP_PORT") || "587"),
+      secure: getIntegrationEnv("SMTP_SECURE") === "true",
+      auth: { user, pass },
+    }),
+    provider: "hostinger-smtp",
+  };
 }
 
 interface SendEmailOptions {
@@ -41,12 +56,14 @@ interface SendEmailOptions {
 
 export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
   return withShipmentIntegrationAccount("smtp", {}, async () => {
-    const transporter = getTransporter();
-    
-    if (!transporter) {
+    const resolved = getTransporter();
+
+    if (!resolved) {
       logInfo("Email not sent - service not configured", { to: options.to, subject: options.subject });
       return false;
     }
+
+    const { transporter, provider, messageStream } = resolved;
 
     try {
       const fromAddress = getIntegrationEnv("SMTP_FROM") || "noreply@ezhalha.com";
@@ -57,6 +74,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
         subject: options.subject,
         html: options.html,
         text: options.text || options.html.replace(/<[^>]*>/g, ""),
+        // Postmark selects its message stream via this header; ignored by plain SMTP.
+        ...(messageStream ? { headers: { "X-PM-Message-Stream": messageStream } } : {}),
       });
 
       // Log the SMTP response + messageId + accepted/rejected recipients so a "didn't receive"
@@ -64,6 +83,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
       logInfo("Email sent successfully", {
         to: options.to,
         subject: options.subject,
+        provider,
         messageId: info?.messageId,
         response: info?.response,
         accepted: info?.accepted,
