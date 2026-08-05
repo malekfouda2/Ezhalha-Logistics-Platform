@@ -2126,6 +2126,21 @@ export default function CreateShipment() {
                 </div>
               )}
               <div>
+                <Label>Country *</Label>
+                <SearchableSelect
+                  value={formData.shipper.countryCode}
+                  onValueChange={(v) => updateShipper("countryCode", v)}
+                  options={COUNTRY_CODE_SELECT_OPTIONS}
+                  placeholder="Select country"
+                  searchPlaceholder="Search countries..."
+                  disabled={formData.shipmentType === "domestic"}
+                  data-testid="select-shipper-country"
+                />
+                {formData.shipmentType === "domestic" && (
+                  <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
+                )}
+              </div>
+              <div>
                 <Label>Full Name *</Label>
                 <Input
                   value={formData.shipper.name}
@@ -2186,37 +2201,20 @@ export default function CreateShipment() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Postal Code {isPostalRequired(formData.shipper.countryCode) ? "*" : ""}</Label>
-                  <GeoSuggestInput
-                    mode="postal"
-                    country={formData.shipper.countryCode}
-                    value={formData.shipper.postalCode}
-                    onChange={(v) => updateShipper("postalCode", v)}
-                    onPick={(s) => pickShipperGeo(s)}
-                    placeholder="Postal code"
-                    data-testid="input-shipper-postal"
-                  />
-                  {POSTAL_FORMATS[formData.shipper.countryCode?.toUpperCase()] && (
-                    <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.shipper.countryCode.toUpperCase()].hint}</p>
-                  )}
-                </div>
-                <div>
-                  <Label>Country *</Label>
-                  <SearchableSelect
-                    value={formData.shipper.countryCode}
-                    onValueChange={(v) => updateShipper("countryCode", v)}
-                    options={COUNTRY_CODE_SELECT_OPTIONS}
-                    placeholder="Select country"
-                    searchPlaceholder="Search countries..."
-                    disabled={formData.shipmentType === "domestic"}
-                    data-testid="select-shipper-country"
-                  />
-                  {formData.shipmentType === "domestic" && (
-                    <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
-                  )}
-                </div>
+              <div>
+                <Label>Postal Code {isPostalRequired(formData.shipper.countryCode) ? "*" : ""}</Label>
+                <GeoSuggestInput
+                  mode="postal"
+                  country={formData.shipper.countryCode}
+                  value={formData.shipper.postalCode}
+                  onChange={(v) => updateShipper("postalCode", v)}
+                  onPick={(s) => pickShipperGeo(s)}
+                  placeholder="Postal code"
+                  data-testid="input-shipper-postal"
+                />
+                {POSTAL_FORMATS[formData.shipper.countryCode?.toUpperCase()] && (
+                  <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.shipper.countryCode.toUpperCase()].hint}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -2303,6 +2301,21 @@ export default function CreateShipment() {
                 </div>
               )}
               <div>
+                <Label>Country *</Label>
+                <SearchableSelect
+                  value={formData.recipient.countryCode}
+                  onValueChange={(v) => updateRecipient("countryCode", v)}
+                  options={COUNTRY_CODE_SELECT_OPTIONS}
+                  placeholder="Select country"
+                  searchPlaceholder="Search countries..."
+                  disabled={formData.shipmentType === "domestic"}
+                  data-testid="select-recipient-country"
+                />
+                {formData.shipmentType === "domestic" && (
+                  <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
+                )}
+              </div>
+              <div>
                 <Label>Full Name *</Label>
                 <Input
                   value={formData.recipient.name}
@@ -2363,37 +2376,20 @@ export default function CreateShipment() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Postal Code {isPostalRequired(formData.recipient.countryCode) ? "*" : ""}</Label>
-                  <GeoSuggestInput
-                    mode="postal"
-                    country={formData.recipient.countryCode}
-                    value={formData.recipient.postalCode}
-                    onChange={(v) => updateRecipient("postalCode", v)}
-                    onPick={(s) => pickRecipientGeo(s)}
-                    placeholder="Postal code"
-                    data-testid="input-recipient-postal"
-                  />
-                  {POSTAL_FORMATS[formData.recipient.countryCode?.toUpperCase()] && (
-                    <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.recipient.countryCode.toUpperCase()].hint}</p>
-                  )}
-                </div>
-                <div>
-                  <Label>Country *</Label>
-                  <SearchableSelect
-                    value={formData.recipient.countryCode}
-                    onValueChange={(v) => updateRecipient("countryCode", v)}
-                    options={COUNTRY_CODE_SELECT_OPTIONS}
-                    placeholder="Select country"
-                    searchPlaceholder="Search countries..."
-                    disabled={formData.shipmentType === "domestic"}
-                    data-testid="select-recipient-country"
-                  />
-                  {formData.shipmentType === "domestic" && (
-                    <p className="text-xs text-muted-foreground mt-1">Domestic shipments are within Saudi Arabia only</p>
-                  )}
-                </div>
+              <div>
+                <Label>Postal Code {isPostalRequired(formData.recipient.countryCode) ? "*" : ""}</Label>
+                <GeoSuggestInput
+                  mode="postal"
+                  country={formData.recipient.countryCode}
+                  value={formData.recipient.postalCode}
+                  onChange={(v) => updateRecipient("postalCode", v)}
+                  onPick={(s) => pickRecipientGeo(s)}
+                  placeholder="Postal code"
+                  data-testid="input-recipient-postal"
+                />
+                {POSTAL_FORMATS[formData.recipient.countryCode?.toUpperCase()] && (
+                  <p className="mt-1 text-xs text-muted-foreground">{POSTAL_FORMATS[formData.recipient.countryCode.toUpperCase()].hint}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
