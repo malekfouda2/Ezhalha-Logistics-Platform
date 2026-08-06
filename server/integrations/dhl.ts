@@ -608,6 +608,38 @@ function extractCreateShipmentResponse(data: any, request: CreateShipmentRequest
   };
 }
 
+// Human-readable milestone text for DHL Express event typeCodes. The keyword strings are chosen
+// so mapCarrierTrackingStatusToShipmentStatus() maps them to the right internal status.
+// "RR" (Response Received) is an electronic-data ping, NOT a physical scan — treated as noise.
+const DHL_EVENT_TYPECODE_LABELS: Record<string, string> = {
+  PU: "Shipment picked up",
+  PL: "Processed at location",
+  DF: "Departed facility",
+  DD: "Departed facility",
+  AF: "Arrived at facility",
+  AR: "Arrived at facility",
+  PD: "In transit",
+  BR: "In transit",
+  SF: "In transit",
+  CC: "Customs clearance processing",
+  CR: "Customs status updated",
+  CI: "Customs clearance processing",
+  WC: "With delivery courier",
+  OD: "Out for delivery",
+  OK: "Delivered",
+  DL: "Delivered",
+};
+
+// Event typeCodes that are electronic-data acknowledgements, not real shipment movement.
+const DHL_NOISE_TYPECODES = new Set(["RR", "PY"]);
+
+function isMeaningfulDhlEvent(event: { status?: string; description?: string }): boolean {
+  const code = String(event?.status || "").toUpperCase();
+  if (DHL_NOISE_TYPECODES.has(code)) return false;
+  if (/response received/i.test(event?.description || "")) return false;
+  return true;
+}
+
 function extractTrackingResponse(trackingNumber: string, data: any): TrackingResponse {
   const shipments = Array.isArray(data?.shipments) ? data.shipments : [];
   const shipment = shipments[0] || data;
@@ -623,23 +655,29 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
     .map((event: any) => {
       const timestamp =
         parseTrackingTimestamp(event?.timestamp) ||
-        parseTrackingTimestamp(event?.date) ||
-        parseTrackingTimestamp(event?.dateTime);
+        parseTrackingTimestamp(event?.dateTime) ||
+        // DHL Express splits the scan into separate date + time fields.
+        parseTrackingTimestamp(event?.date && event?.time ? `${event.date}T${event.time}` : event?.date);
 
       if (!timestamp) {
         return null;
       }
 
+      // DHL events carry a `typeCode` (PU/AF/OK/…) — NOT a `status` field. Use it as the event
+      // status, and never fall back to the envelope's `shipment.status` ("Success").
+      const typeCode = String(event?.typeCode || event?.statusCode || "").toUpperCase();
+      const description =
+        event?.description ||
+        event?.statusDescription ||
+        DHL_EVENT_TYPECODE_LABELS[typeCode] ||
+        (typeCode ? `DHL update (${typeCode})` : "DHL shipment event");
+
       return {
         timestamp,
-        status: event?.status || event?.statusCode || shipment?.status || "IN_TRANSIT",
-        description:
-          event?.description ||
-          event?.statusDescription ||
-          event?.serviceArea?.description ||
-          "DHL shipment event",
+        status: typeCode || event?.status || "UPDATE",
+        description,
         location:
-          event?.serviceArea?.description ||
+          (Array.isArray(event?.serviceArea) ? event.serviceArea[0]?.description : event?.serviceArea?.description) ||
           event?.location?.address?.addressLocality ||
           event?.location?.address?.addressRegion,
       } satisfies TrackingEvent;
@@ -649,19 +687,24 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
 
   const estimatedDelivery =
     parseEstimatedDate(shipment?.estimatedDeliveryDateAndTime) ||
-    parseEstimatedDate(shipment?.estimatedDelivery);
+    parseEstimatedDate(shipment?.estimatedDelivery) ||
+    parseEstimatedDate(shipment?.estimatedDeliveryDate);
   const actualDelivery =
     parseEstimatedDate(shipment?.actualDeliveryDateAndTime) ||
     parseEstimatedDate(shipment?.actualDelivery);
 
+  // Derive the shipment status from the latest MEANINGFUL milestone (ignore "Response Received"
+  // pings). Never use shipment.status — it is the API-call result ("Success"), not a milestone.
+  const latestMeaningful = events.find(isMeaningfulDhlEvent);
+  const status =
+    latestMeaningful?.description ||
+    // Only electronic acknowledgements so far → still pre-transit; report a neutral label that
+    // maps to "created" upstream rather than the bogus "Success".
+    (events.length > 0 ? "Shipment information received" : "Pending");
+
   return {
     trackingNumber,
-    status:
-      shipment?.status ||
-      shipment?.statusCode ||
-      shipment?.shipmentStatus ||
-      events[0]?.status ||
-      "IN_TRANSIT",
+    status,
     estimatedDelivery,
     actualDelivery,
     events,
