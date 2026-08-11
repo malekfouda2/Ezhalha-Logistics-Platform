@@ -1,6 +1,7 @@
 import "../load-env";
 import crypto from "crypto";
 import { calculateChargeableWeight, convertWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
+import { countryTimeZone } from "@shared/country-timezones";
 import {
   CarrierError,
   parseMoney,
@@ -1176,6 +1177,53 @@ export class DhlAdapter implements CarrierAdapter {
   supportsPickup = true;
 
   /**
+   * Resolve a pickup origin against DHL's own location gazetteer (GET /address-validate).
+   * POST /pickups matches cityName + postalCode EXACTLY against that gazetteer and rejects
+   * anything it doesn't carry with 420504 "The origin location is invalid" — even for addresses
+   * DHL happily accepted when the waybill was created (shipment creation is far more lenient).
+   * Real example: sender "Sariçam / 01000 / TR" books a waybill fine but has no gazetteer entry
+   * (DHL knows "SARICAM ADANA" at 01250/01340/01410/01790), so every pickup attempt 400s.
+   *
+   * Lookups are tried narrowest-first — pair as given, ASCII-folded city + postal, postal only,
+   * ASCII-folded city only — and the canonical cityName/postalCode DHL returns is what we send.
+   * Returns null when nothing matches, in which case the caller sends the address unchanged and
+   * lets DHL produce its own error.
+   */
+  private async resolvePickupOrigin(
+    countryCode: string,
+    cityName: string,
+    postalCode: string,
+  ): Promise<{ cityName: string; postalCode: string } | null> {
+    const country = (countryCode || "").toUpperCase();
+    if (!country) return null;
+    // Fold diacritics (Sariçam → Saricam): DHL's gazetteer is plain ASCII uppercase.
+    const asciiCity = (cityName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const postal = (postalCode || "").trim();
+    const queries: Array<Record<string, string>> = [];
+    if (cityName && postal) queries.push({ cityName, postalCode: postal });
+    if (asciiCity && asciiCity !== cityName && postal) queries.push({ cityName: asciiCity, postalCode: postal });
+    if (postal) queries.push({ postalCode: postal });
+    if (asciiCity) queries.push({ cityName: asciiCity });
+
+    for (const q of queries) {
+      const params = new URLSearchParams({ type: "pickup", countryCode: country, ...q });
+      try {
+        const { data } = await this.makeRequest<any>(`/address-validate?${params.toString()}`, "GET", undefined, 1);
+        const match = Array.isArray(data?.address) ? data.address[0] : undefined;
+        if (match?.cityName) {
+          return { cityName: String(match.cityName), postalCode: String(match.postalCode ?? postal ?? "") };
+        }
+      } catch {
+        // 400/404 = this combination is unknown to DHL; fall through to the next, broader query.
+      }
+    }
+    logError("DHL: pickup origin not found in DHL's location database", {
+      countryCode: country, cityName, postalCode: postal,
+    } as any);
+    return null;
+  }
+
+  /**
    * Book a DHL Express courier pickup for an already-created shipment via POST /pickups.
    * Returns the dispatchConfirmationNumber. The 3-letter prefix is DHL's service-area code,
    * assigned server-side from the booking account — not controllable from the request.
@@ -1185,6 +1233,7 @@ export class DhlAdapter implements CarrierAdapter {
       throw new CarrierError("NOT_CONFIGURED", "DHL is not configured — cannot request a pickup.");
     }
     const s = request.shipper;
+    const origin = await this.resolvePickupOrigin(s.countryCode, s.city, s.postalCode || "");
     const offset = gmtOffsetForCountry(s.countryCode, request.pickupDate);
     const packages = request.packages.map((p) => {
       const weightKg = p.weightUnit === "LB" ? Number(p.weight) * 0.453592 : Number(p.weight);
@@ -1204,10 +1253,14 @@ export class DhlAdapter implements CarrierAdapter {
       customerDetails: {
         shipperDetails: {
           postalAddress: {
-            postalCode: s.postalCode || "",
-            cityName: s.city,
+            // Canonical DHL gazetteer values when the origin resolved — the shipment's own
+            // city/postal is often not a DHL location and gets rejected with 420504.
+            postalCode: origin?.postalCode || s.postalCode || "",
+            cityName: origin?.cityName || s.city,
             countryCode: s.countryCode,
             addressLine1: s.streetLine1,
+            ...(s.streetLine2 ? { addressLine2: s.streetLine2 } : {}),
+            ...(s.stateOrProvince ? { countyName: s.stateOrProvince } : {}),
           },
           contactInformation: {
             companyName: s.name,
@@ -1263,23 +1316,9 @@ export class DhlAdapter implements CarrierAdapter {
   }
 }
 
-// Representative IANA timezone per country for building DHL's plannedPickupDateAndTime offset
-// (e.g. "GMT+02:00"). Covers common shipping origins; unknown countries fall back to UTC.
-const COUNTRY_TZ: Record<string, string> = {
-  DE: "Europe/Berlin", GB: "Europe/London", FR: "Europe/Paris", NL: "Europe/Amsterdam",
-  BE: "Europe/Brussels", IT: "Europe/Rome", ES: "Europe/Madrid", CH: "Europe/Zurich",
-  AT: "Europe/Vienna", PL: "Europe/Warsaw", CZ: "Europe/Prague", SE: "Europe/Stockholm",
-  DK: "Europe/Copenhagen", IE: "Europe/Dublin", PT: "Europe/Lisbon", TR: "Europe/Istanbul",
-  AE: "Asia/Dubai", SA: "Asia/Riyadh", QA: "Asia/Qatar", KW: "Asia/Kuwait", BH: "Asia/Bahrain",
-  OM: "Asia/Muscat", EG: "Africa/Cairo", JO: "Asia/Amman", CN: "Asia/Shanghai",
-  HK: "Asia/Hong_Kong", IN: "Asia/Kolkata", JP: "Asia/Tokyo", KR: "Asia/Seoul",
-  SG: "Asia/Singapore", US: "America/New_York", CA: "America/Toronto", BR: "America/Sao_Paulo",
-  AU: "Australia/Sydney",
-};
-
 /** DHL offset string "GMT±HH:MM" for a country on a given date (handles DST). */
 function gmtOffsetForCountry(countryCode: string, dateISO: string): string {
-  const tz = COUNTRY_TZ[(countryCode || "").toUpperCase()] || "UTC";
+  const tz = countryTimeZone(countryCode);
   try {
     const date = new Date(`${dateISO}T12:00:00Z`);
     const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(date);

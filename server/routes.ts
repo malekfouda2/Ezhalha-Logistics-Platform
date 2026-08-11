@@ -101,6 +101,7 @@ import {
 } from "./services/commercial-invoice";
 import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { normalizeCountryCode } from "@shared/countries";
+import { countryLocalNow } from "@shared/country-timezones";
 import {
   INTEGRATION_APP_DEFINITIONS,
   buildEnvAccount,
@@ -1295,6 +1296,61 @@ function computeDefaultPickupDate(now: Date = new Date()): { date: string; sameD
   return { date: cur.toISOString().slice(0, 10), sameDay: false };
 }
 
+/**
+ * Earliest bookable ready time for a pickup, in the SHIPPER's local timezone.
+ * Carriers reject a pickup whose ready time has already passed at origin (DHL: 400 "5019: The
+ * shipment date cannot be in the past") — and the origin is often not KSA, so checking only the
+ * date in KSA time is not enough: a 09:00 Turkey pickup is already 4h stale when a shipment is
+ * paid at 13:00 Riyadh. Returns the window to actually book, rolling to the next business day
+ * when today's window can no longer be served.
+ */
+const PICKUP_MIN_LEAD_MINUTES = 60; // couriers need lead time; don't ask for "right now"
+const PICKUP_MIN_WINDOW_MINUTES = 60; // ready→close must stay at least this wide
+
+function toMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+function fromMinutes(total: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(total)));
+  return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+}
+
+function normalizePickupWindow(
+  date: string,
+  readyTime: string,
+  closeTime: string,
+  senderCountry: string | null | undefined,
+  now: Date = new Date(),
+): { date: string; readyTime: string; closeTime: string } {
+  const local = countryLocalNow(senderCountry, now);
+  const closeMinutes = toMinutes(closeTime);
+  if (date > local.date) return { date, readyTime, closeTime };
+  // A past date, or today with a ready time that has already gone by, must be bumped.
+  const earliest = local.minutes + PICKUP_MIN_LEAD_MINUTES;
+  if (date === local.date && toMinutes(readyTime) >= earliest) {
+    return { date, readyTime, closeTime };
+  }
+  if (date === local.date && earliest + PICKUP_MIN_WINDOW_MINUTES <= closeMinutes) {
+    return { date, readyTime: fromMinutes(earliest), closeTime };
+  }
+  // Today is spent (or the date is stale) — roll to the next business day, default window.
+  return {
+    date: nextBusinessDayAfter(local.date),
+    readyTime: PICKUP_DEFAULT_READY_TIME,
+    closeTime: PICKUP_DEFAULT_CLOSE_TIME,
+  };
+}
+
+/** The first business day strictly after a YYYY-MM-DD date (KSA weekend rules). */
+function nextBusinessDayAfter(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
+  return cur.toISOString().slice(0, 10);
+}
+
 /** True when a YYYY-MM-DD pickup date is today-or-later in KSA and lands on a business day. */
 function isBookablePickupDate(dateStr: string | null | undefined, now: Date = new Date()): boolean {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
@@ -1361,12 +1417,36 @@ async function bookCarrierPickupIfRequested(
   if (!adapter.supportsPickup || !adapter.requestPickup) return;
   // Normalize the pickup date at booking time: a missing / past / weekend date (e.g. a quote
   // created days ago, or paid after the cutoff) is bumped to the current cutoff-based default so
-  // the carrier never rejects a stale date.
+  // the carrier never rejects a stale date. The stored window is updated to match what is booked.
   let effectivePickupDate: string = shipment.pickupDate ?? "";
   if (!isBookablePickupDate(effectivePickupDate)) {
     effectivePickupDate = computeDefaultPickupDate().date;
-    await storage.updateShipment(shipment.id, { pickupDate: effectivePickupDate });
-    shipment = { ...shipment, pickupDate: effectivePickupDate };
+  }
+  // Then normalize the window against the SHIPPER's local clock — a date that is "today" in KSA
+  // can already be past at an origin further east/west, which carriers reject outright.
+  const window = normalizePickupWindow(
+    effectivePickupDate,
+    shipment.pickupReadyTime || PICKUP_DEFAULT_READY_TIME,
+    shipment.pickupCloseTime || PICKUP_DEFAULT_CLOSE_TIME,
+    shipment.senderCountry,
+  );
+  effectivePickupDate = window.date;
+  if (
+    window.date !== shipment.pickupDate ||
+    window.readyTime !== shipment.pickupReadyTime ||
+    window.closeTime !== shipment.pickupCloseTime
+  ) {
+    await storage.updateShipment(shipment.id, {
+      pickupDate: window.date,
+      pickupReadyTime: window.readyTime,
+      pickupCloseTime: window.closeTime,
+    });
+    shipment = {
+      ...shipment,
+      pickupDate: window.date,
+      pickupReadyTime: window.readyTime,
+      pickupCloseTime: window.closeTime,
+    };
   }
   let declaredValue = 0;
   try {

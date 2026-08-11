@@ -224,8 +224,15 @@ describe("DhlAdapter", () => {
   });
 
   it("books a pickup via POST /pickups and returns the dispatch confirmation number", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ dispatchConfirmationNumbers: ["PRG260729153064"] }), { status: 201 }),
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/address-validate")
+          ? new Response(
+              JSON.stringify({ address: [{ countryCode: "DE", postalCode: "36456", cityName: "BARCHFELD", serviceArea: { code: "ERF" } }] }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ dispatchConfirmationNumbers: ["PRG260729153064"] }), { status: 201 }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -251,7 +258,80 @@ describe("DhlAdapter", () => {
     expect(body.plannedPickupDateAndTime).toBe("2026-07-29T12:00:00 GMT+02:00"); // Berlin DST offset
     expect(body.closeTime).toBe("17:00");
     expect(body.accounts[0].number).toBe("123456789");
-    expect(body.customerDetails.shipperDetails.postalAddress.cityName).toBe("Barchfeld");
+    expect(body.customerDetails.shipperDetails.postalAddress.cityName).toBe("BARCHFELD");
     expect(body.shipmentDetails[0].packages).toHaveLength(2);
+  });
+
+  it("replaces an unknown pickup city/postal with DHL's canonical location before booking", async () => {
+    // Real failure: sender "Sariçam / 01000 / TR" books a waybill but has no DHL gazetteer entry,
+    // so POST /pickups answers 400 "420504: The origin location is invalid".
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("/address-validate")) {
+        // Only the ASCII city-only lookup resolves; the city+postal pairs are unknown.
+        if (u.includes("postalCode")) {
+          return Promise.resolve(new Response(JSON.stringify({ detail: "3009: Address validation failed." }), { status: 404 }));
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ address: [{ countryCode: "TR", postalCode: "01250", cityName: "SARICAM ADANA", serviceArea: { code: "ADA" } }] }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ dispatchConfirmationNumbers: ["ADA260811001122"] }), { status: 201 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "TEMIZ IS TENEKE AMBALAJ", streetLine1: "ACIDIR OSB MAH ATATURK BLV NO:61",
+        streetLine2: "SARICAM ADANA", city: "Sariçam", stateOrProvince: "ADANA",
+        postalCode: "01000", countryCode: "TR", phone: "+905331551791",
+      },
+      packages: [{ weight: 8, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-12", readyTime: "15:30", closeTime: "17:00",
+      isInternational: true, serviceType: "P", currency: "SAR",
+    });
+
+    expect(result.confirmationNumber).toBe("ADA260811001122");
+    // Diacritics folded on the fallback lookup, so DHL can match its ASCII gazetteer.
+    expect(calls.some((u) => u.includes("Saricam") && !u.includes("postalCode"))).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups"))![1].body);
+    const address = body.customerDetails.shipperDetails.postalAddress;
+    expect(address.cityName).toBe("SARICAM ADANA");
+    expect(address.postalCode).toBe("01250");
+    expect(address.addressLine1).toBe("ACIDIR OSB MAH ATATURK BLV NO:61");
+    expect(address.countyName).toBe("ADANA");
+  });
+
+  it("books the pickup as-is when DHL knows no matching location", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/address-validate")
+          ? new Response(JSON.stringify({ detail: "3007: The origin location is invalid." }), { status: 400 })
+          : new Response(JSON.stringify({ dispatchConfirmationNumbers: ["PRG260811009900"] }), { status: 201 }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "Nowhere Ltd", streetLine1: "1 Main St", city: "Atlantis",
+        postalCode: "00000", countryCode: "TR", phone: "+905331551791",
+      },
+      packages: [{ weight: 1, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-12", readyTime: "10:00", closeTime: "17:00",
+      serviceType: "P", currency: "SAR",
+    });
+
+    expect(result.confirmationNumber).toBe("PRG260811009900");
+    const body = JSON.parse(fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups"))![1].body);
+    expect(body.customerDetails.shipperDetails.postalAddress.cityName).toBe("Atlantis");
+    expect(body.customerDetails.shipperDetails.postalAddress.postalCode).toBe("00000");
   });
 });
