@@ -6,6 +6,7 @@ import {
   convertWeight,
   type ChargeableWeightSummary,
 } from "@shared/chargeable-weight";
+import { countryTimeZone } from "@shared/country-timezones";
 import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
@@ -2089,6 +2090,65 @@ export class FedExAdapter implements CarrierAdapter {
   supportsPickup = true;
 
   /**
+   * Ask FedEx whether a pickup can be served at all for this origin/account/date
+   * (POST /pickup/v1/pickups/availabilities) before trying to book one.
+   *
+   * POST /pickup/v1/pickups answers an unbookable request with a bare
+   * `500 SYSTEM.UNEXPECTED.ERROR: GENERAL FAILURE {FAILURE_CAUSE}` — FedEx does not even fill in
+   * its own placeholder, so the booking call can never explain itself. The availability call
+   * does: it returns per-option `available` flags plus cut-off/access times, and its own error
+   * codes are specific (unserviced postal code, account not entitled at this origin, …).
+   *
+   * Returns null when the check itself could not be completed (never blocks a booking on a
+   * failure of the diagnostic); returns the reason when FedEx says a pickup is not available.
+   */
+  private async checkPickupAvailability(
+    request: PickupRequest,
+  ): Promise<{ available: boolean; reason?: string } | null> {
+    const s = request.shipper;
+    const body = {
+      pickupAddress: {
+        streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
+        city: s.city,
+        ...(s.stateOrProvince ? { stateOrProvinceCode: s.stateOrProvince } : {}),
+        postalCode: s.postalCode || "",
+        countryCode: s.countryCode,
+        residential: false,
+      },
+      dispatchDate: request.pickupDate,
+      packageReadyTime: `${request.readyTime}:00`,
+      customerCloseTime: `${request.closeTime}:00`,
+      pickupRequestType: ["FUTURE_DAY", "SAME_DAY"],
+      carriers: ["FDXE"],
+      countryRelationship: request.isInternational ? "INTERNATIONAL" : "DOMESTIC",
+      associatedAccountNumber: { value: this.accountNumber },
+    };
+    try {
+      const { data } = await this.makeRequest<any>("/pickup/v1/pickups/availabilities", "POST", body, 1);
+      const output = (data as any)?.output ?? data;
+      const options: any[] = Array.isArray(output?.options) ? output.options : [];
+      if (options.length === 0) {
+        return { available: false, reason: "FedEx reports no pickup options for this origin address and date." };
+      }
+      if (options.some((o) => o?.available === true)) {
+        return { available: true };
+      }
+      const reason = options.map((o) => o?.reason || o?.pickupDate).filter(Boolean).join("; ");
+      return {
+        available: false,
+        reason: reason
+          ? `FedEx reports no available pickup slot: ${reason}`
+          : "FedEx reports no available pickup slot for this origin address and date.",
+      };
+    } catch (error) {
+      logWarn(
+        `FedEx pickup availability check failed (booking will still be attempted): ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Schedule a FedEx courier pickup for an already-booked shipment via the FedEx Pickup API
    * (POST /pickup/v1/pickups). Returns the pickupConfirmationCode. Best-effort: verify against
    * your FedEx account's pickup entitlements before relying on it in production.
@@ -2098,6 +2158,10 @@ export class FedExAdapter implements CarrierAdapter {
       throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured — cannot request a pickup.");
     }
     const s = request.shipper;
+    const availability = await this.checkPickupAvailability(request);
+    if (availability && !availability.available) {
+      throw new CarrierError("PICKUP_UNAVAILABLE", availability.reason || "FedEx pickup is not available for this origin.");
+    }
     const iso = `${request.pickupDate}T${request.readyTime}:00${isoOffsetForCountry(s.countryCode, request.pickupDate)}`;
     const unit = request.packages[0]?.weightUnit === "LB" ? "LB" : "KG";
     const totalWeight = request.packages.reduce((sum, p) => sum + (Number(p.weight) || 0), 0);
@@ -2105,7 +2169,9 @@ export class FedExAdapter implements CarrierAdapter {
       associatedAccountNumber: { value: this.accountNumber },
       originDetails: {
         pickupLocation: {
-          contact: { personName: s.name, phoneNumber: s.phone, companyName: s.companyName || s.name },
+          // The Pickup API validates the phone as digits only (≤ 15) — a "+44…" that /ship
+          // accepts is rejected here.
+          contact: { personName: s.name, phoneNumber: sanitizePickupPhone(s.phone), companyName: s.companyName || s.name },
           address: {
             streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
             city: s.city,
@@ -2172,18 +2238,13 @@ export class FedExAdapter implements CarrierAdapter {
 }
 
 // ISO offset ("+02:00") for a country on a given date, for FedEx's readyDateTimestamp.
-const PICKUP_COUNTRY_TZ: Record<string, string> = {
-  DE: "Europe/Berlin", GB: "Europe/London", FR: "Europe/Paris", NL: "Europe/Amsterdam",
-  BE: "Europe/Brussels", IT: "Europe/Rome", ES: "Europe/Madrid", CH: "Europe/Zurich",
-  AT: "Europe/Vienna", PL: "Europe/Warsaw", CZ: "Europe/Prague", SE: "Europe/Stockholm",
-  TR: "Europe/Istanbul", AE: "Asia/Dubai", SA: "Asia/Riyadh", QA: "Asia/Qatar",
-  KW: "Asia/Kuwait", BH: "Asia/Bahrain", OM: "Asia/Muscat", EG: "Africa/Cairo",
-  JO: "Asia/Amman", CN: "Asia/Shanghai", HK: "Asia/Hong_Kong", IN: "Asia/Kolkata",
-  JP: "Asia/Tokyo", SG: "Asia/Singapore", US: "America/New_York", CA: "America/Toronto",
-};
+/** FedEx pickup contacts take digits only, max 15. */
+function sanitizePickupPhone(phone?: string): string {
+  return (phone || "").replace(/\D/g, "").slice(0, 15);
+}
 
 function isoOffsetForCountry(countryCode: string, dateISO: string): string {
-  const tz = PICKUP_COUNTRY_TZ[(countryCode || "").toUpperCase()] || "UTC";
+  const tz = countryTimeZone(countryCode);
   try {
     const date = new Date(`${dateISO}T12:00:00Z`);
     const name =

@@ -303,4 +303,68 @@ describe("FedExAdapter", () => {
 
     await expect(adapter.cancelShipment("794811298978", "US")).rejects.toThrow("CANCEL_FAILED");
   });
+  it("stops a pickup FedEx says it cannot serve, with FedEx's own reason", async () => {
+    // POST /pickups answers an unserviceable request with a bare 500 "GENERAL FAILURE
+    // {FAILURE_CAUSE}", so the availability call is the only source of a real reason.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/oauth/token")
+          ? new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 })
+          : new Response(
+              JSON.stringify({ output: { options: [{ available: false, reason: "PICKUP NOT AVAILABLE AT THIS LOCATION" }] } }),
+              { status: 200 },
+            ),
+      ),
+    ));
+
+    const adapter = new FedExAdapter();
+
+    await expect(adapter.requestPickup({
+      shipper: {
+        name: "Manar Alshammari", streetLine1: "196 Upper Dock Street", city: "Newport",
+        postalCode: "NP20 1DA", countryCode: "GB", phone: "+447384968635",
+      },
+      packages: [{ weight: 20, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-13", readyTime: "10:00", closeTime: "17:00", isInternational: true,
+    })).rejects.toThrow("PICKUP NOT AVAILABLE AT THIS LOCATION");
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    // Booking must not be attempted once FedEx has said no.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/pickup/v1/pickups"))).toBe(false);
+  });
+
+  it("books a pickup with a digits-only phone once FedEx confirms availability", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 }));
+      }
+      if (u.includes("/availabilities")) {
+        return Promise.resolve(new Response(JSON.stringify({ output: { options: [{ available: true }] } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ output: { pickupConfirmationCode: "1234567" } }), { status: 200 }));
+    }));
+
+    const adapter = new FedExAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "Manar Alshammari", streetLine1: "196 Upper Dock Street", city: "Newport",
+        postalCode: "NP20 1DA", countryCode: "GB", phone: "+447384968635",
+      },
+      packages: [
+        { weight: 20, weightUnit: "KG", packageType: "YOUR_PACKAGING" },
+        { weight: 15, weightUnit: "KG", packageType: "YOUR_PACKAGING" },
+      ],
+      pickupDate: "2026-08-13", readyTime: "10:00", closeTime: "17:00", isInternational: true,
+    });
+
+    expect(result.confirmationNumber).toBe("1234567");
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const booking = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pickup/v1/pickups"))!;
+    const body = JSON.parse(String(booking[1].body));
+    expect(body.originDetails.pickupLocation.contact.phoneNumber).toBe("447384968635");
+    expect(body.originDetails.readyDateTimestamp).toBe("2026-08-13T10:00:00+01:00"); // London BST
+    expect(body.packageCount).toBe(2);
+    expect(body.totalWeight).toEqual({ units: "KG", value: 35 });
+  });
 });
