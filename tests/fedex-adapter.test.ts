@@ -367,4 +367,54 @@ describe("FedExAdapter", () => {
     expect(body.packageCount).toBe(2);
     expect(body.totalWeight).toEqual({ units: "KG", value: 35 });
   });
+  it("snaps the pickup window onto a slot FedEx publishes for the origin", async () => {
+    // Newport GB: FedEx requires a 4-hour ready→close span and only serves half-hour slots, so a
+    // 16:15–17:00 request is unbookable — POST /pickups answers 500 GENERAL FAILURE for it.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 }));
+      }
+      if (u.includes("/availabilities")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          output: {
+            options: [{
+              carrier: "FDXE", available: true, pickupDate: "2026-08-13", cutOffTime: "13:15:00",
+              accessTime: { hours: 4, minutes: 0 },
+              readyTimeOptions: ["08:00:00", "08:30:00", "09:00:00", "09:30:00", "10:00:00"],
+              defaultReadyTime: "12:00:00",
+              latestTimeOptions: ["13:00:00", "13:30:00", "14:00:00", "18:00:00"],
+              defaultLatestTimeOptions: "18:00:00",
+            }],
+          },
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ output: { pickupConfirmationCode: "7654321" } }), { status: 200 }));
+    }));
+
+    const adapter = new FedExAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "Manar Alshammari", streetLine1: "196 Upper Dock Street", city: "Newport",
+        postalCode: "NP20 1DA", countryCode: "GB", phone: "+447384968635",
+      },
+      packages: [{ weight: 20, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-12", readyTime: "16:15", closeTime: "17:00", isInternational: true,
+    });
+
+    expect(result.confirmationNumber).toBe("7654321");
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+
+    // The availability call must use accountNumber:{value} — associatedAccountNumber:{value}
+    // is rejected 422 by this endpoint, for real and bogus account numbers alike.
+    const availability = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).includes("/availabilities"))![1].body));
+    expect(availability.accountNumber).toEqual({ value: "123456789" });
+    expect(availability.associatedAccountNumber).toBeUndefined();
+
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pickup/v1/pickups"))![1].body));
+    // Requested 16:15 is past every published slot → falls back to FedEx's default ready time,
+    // and the close time stretches to cover the 4-hour access time.
+    expect(body.originDetails.readyDateTimestamp).toBe("2026-08-13T12:00:00+01:00");
+    expect(body.originDetails.customerCloseTime).toBe("18:00:00");
+  });
 });

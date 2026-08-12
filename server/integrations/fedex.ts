@@ -2099,12 +2099,17 @@ export class FedExAdapter implements CarrierAdapter {
    * does: it returns per-option `available` flags plus cut-off/access times, and its own error
    * codes are specific (unserviced postal code, account not entitled at this origin, …).
    *
+   * NOTE the account field: this endpoint takes `accountNumber: { value }`. Sending
+   * `associatedAccountNumber: { value }` (the shape POST /pickups wants) is rejected with a
+   * 422 INVALID.INPUT.EXCEPTION — identically for a real and a bogus account number, i.e. FedEx
+   * never reads the number at all. Verified live against the production account.
+   *
    * Returns null when the check itself could not be completed (never blocks a booking on a
    * failure of the diagnostic); returns the reason when FedEx says a pickup is not available.
    */
   private async checkPickupAvailability(
     request: PickupRequest,
-  ): Promise<{ available: boolean; reason?: string } | null> {
+  ): Promise<{ available: boolean; reason?: string; option?: FedExPickupOption } | null> {
     const s = request.shipper;
     const body = {
       pickupAddress: {
@@ -2118,20 +2123,24 @@ export class FedExAdapter implements CarrierAdapter {
       dispatchDate: request.pickupDate,
       packageReadyTime: `${request.readyTime}:00`,
       customerCloseTime: `${request.closeTime}:00`,
-      pickupRequestType: ["FUTURE_DAY", "SAME_DAY"],
+      pickupType: "ON_CALL",
+      pickupRequestType: ["FUTURE_DAY"],
       carriers: ["FDXE"],
       countryRelationship: request.isInternational ? "INTERNATIONAL" : "DOMESTIC",
-      associatedAccountNumber: { value: this.accountNumber },
+      accountNumber: { value: this.accountNumber },
     };
     try {
       const { data } = await this.makeRequest<any>("/pickup/v1/pickups/availabilities", "POST", body, 1);
       const output = (data as any)?.output ?? data;
-      const options: any[] = Array.isArray(output?.options) ? output.options : [];
+      const options: FedExPickupOption[] = Array.isArray(output?.options) ? output.options : [];
       if (options.length === 0) {
         return { available: false, reason: "FedEx reports no pickup options for this origin address and date." };
       }
-      if (options.some((o) => o?.available === true)) {
-        return { available: true };
+      const usable = options.filter((o) => o?.available === true);
+      if (usable.length > 0) {
+        // Prefer the requested date; otherwise the earliest date FedEx will actually serve.
+        const match = usable.find((o) => o.pickupDate === request.pickupDate) ?? usable[0];
+        return { available: true, option: match };
       }
       const reason = options.map((o) => o?.reason || o?.pickupDate).filter(Boolean).join("; ");
       return {
@@ -2162,7 +2171,14 @@ export class FedExAdapter implements CarrierAdapter {
     if (availability && !availability.available) {
       throw new CarrierError("PICKUP_UNAVAILABLE", availability.reason || "FedEx pickup is not available for this origin.");
     }
-    const iso = `${request.pickupDate}T${request.readyTime}:00${isoOffsetForCountry(s.countryCode, request.pickupDate)}`;
+    const slot = fitPickupSlot(request, availability?.option);
+    if (slot.adjusted) {
+      logInfo(
+        `FedEx pickup window adjusted to a slot FedEx publishes for ${s.city} ${s.countryCode}: ` +
+        `${request.pickupDate} ${request.readyTime}–${request.closeTime} → ${slot.date} ${slot.readyTime}–${slot.closeTime}`,
+      );
+    }
+    const iso = `${slot.date}T${slot.readyTime}:00${isoOffsetForCountry(s.countryCode, slot.date)}`;
     const unit = request.packages[0]?.weightUnit === "LB" ? "LB" : "KG";
     const totalWeight = request.packages.reduce((sum, p) => sum + (Number(p.weight) || 0), 0);
     const body = {
@@ -2182,7 +2198,7 @@ export class FedExAdapter implements CarrierAdapter {
           },
         },
         readyDateTimestamp: iso,
-        customerCloseTime: `${request.closeTime}:00`,
+        customerCloseTime: `${slot.closeTime}:00`,
       },
       totalWeight: { units: unit, value: Math.max(0.1, Math.round(totalWeight * 100) / 100) },
       packageCount: request.packages.length || 1,
@@ -2241,6 +2257,86 @@ export class FedExAdapter implements CarrierAdapter {
 /** FedEx pickup contacts take digits only, max 15. */
 function sanitizePickupPhone(phone?: string): string {
   return (phone || "").replace(/\D/g, "").slice(0, 15);
+}
+
+/** One entry of the FedEx pickup-availability response (`output.options[]`). */
+interface FedExPickupOption {
+  carrier?: string;
+  available?: boolean;
+  pickupDate?: string;
+  cutOffTime?: string;
+  /** Minimum span the courier needs between ready time and close time. */
+  accessTime?: { hours?: number; minutes?: number };
+  readyTimeOptions?: string[];
+  defaultReadyTime?: string;
+  latestTimeOptions?: string[];
+  defaultLatestTimeOptions?: string;
+  reason?: string;
+}
+
+function timeToMinutes(value: string): number {
+  const [h, m] = value.split(":").map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+/** "HH:MM:SS" or "HH:MM" → "HH:MM". */
+function toHourMinute(value: string): string {
+  return value.slice(0, 5);
+}
+
+/**
+ * Snap a requested pickup window onto one FedEx actually publishes for this origin.
+ *
+ * Each availability option carries `readyTimeOptions` / `latestTimeOptions` (the slots the local
+ * station serves) and an `accessTime` — the minimum ready→close span the courier needs, which
+ * varies by origin: 4h for Newport GB, 1h for Jeddah SA. A window narrower than accessTime, or a
+ * time off the published grid, is not refused with a validation error — POST /pickups answers
+ * `500 GENERAL FAILURE`, which is why this has to be fixed before booking rather than after.
+ *
+ * Without an availability option (the check failed), the request is passed through untouched.
+ */
+function fitPickupSlot(
+  request: PickupRequest,
+  option?: FedExPickupOption,
+): { date: string; readyTime: string; closeTime: string; adjusted: boolean } {
+  const asIs = {
+    date: request.pickupDate,
+    readyTime: request.readyTime,
+    closeTime: request.closeTime,
+    adjusted: false,
+  };
+  if (!option) return asIs;
+
+  const date = option.pickupDate || request.pickupDate;
+  const readySlots = (option.readyTimeOptions || []).map(toHourMinute).sort();
+  const latestSlots = (option.latestTimeOptions || []).map(toHourMinute).sort();
+  const accessMinutes = (option.accessTime?.hours ?? 0) * 60 + (option.accessTime?.minutes ?? 0);
+
+  // Earliest published ready slot at or after the requested time.
+  const requestedReady = timeToMinutes(request.readyTime);
+  const readyTime =
+    readySlots.find((slot) => timeToMinutes(slot) >= requestedReady) ??
+    (option.defaultReadyTime ? toHourMinute(option.defaultReadyTime) : undefined) ??
+    readySlots[0] ??
+    request.readyTime;
+
+  // Close no earlier than ready + accessTime, and no earlier than what was asked for.
+  const minClose = Math.max(timeToMinutes(readyTime) + accessMinutes, timeToMinutes(request.closeTime));
+  const closeTime =
+    latestSlots.find((slot) => timeToMinutes(slot) >= minClose) ??
+    (option.defaultLatestTimeOptions ? toHourMinute(option.defaultLatestTimeOptions) : undefined) ??
+    latestSlots[latestSlots.length - 1] ??
+    request.closeTime;
+
+  return {
+    date,
+    readyTime,
+    closeTime,
+    adjusted:
+      date !== request.pickupDate ||
+      readyTime !== request.readyTime ||
+      closeTime !== request.closeTime,
+  };
 }
 
 function isoOffsetForCountry(countryCode: string, dateISO: string): string {
