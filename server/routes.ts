@@ -63,7 +63,7 @@ import {
   UserInvitationStatus,
   type RoleHierarchyLevelValue,
 } from "@shared/internal-users";
-import { logInfo, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
+import { logInfo, logWarn, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
@@ -1139,6 +1139,67 @@ async function buildCarrierShipmentRequestFromShipment(
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
+
+/**
+ * Ask the carrier whether it actually carries these postal codes, BEFORE the client pays.
+ *
+ * Rate quoting is lenient — FedEx happily quoted Shenzhen "518000" (a city-level prefix that is
+ * not a real delivery code) and only rejected it at booking with
+ * "SHIPMENTSERVICES.ZIPCODE.NOTAVAILABLE: Postal Code does not exist". The client had already
+ * been charged, so the shipment sat in carrier_error with no waybill. Our own address validation
+ * only checks that fields are non-empty, which cannot catch this.
+ *
+ * Fails the checkout with a clear message when the carrier explicitly says a code is unknown.
+ * Any other outcome — validation unsupported for the lane, network error, carrier outage — is
+ * logged and allowed through: this must never be the reason a valid shipment cannot be bought.
+ */
+async function assertPostalCodesAreServiceable(params: {
+  carrierCode: string;
+  shipper: { countryCode: string; postalCode?: string | null; stateOrProvince?: string | null };
+  recipient: { countryCode: string; postalCode?: string | null; stateOrProvince?: string | null };
+  clientAccountId?: string;
+}): Promise<void> {
+  const adapter = getCarrierAdapter(params.carrierCode);
+  if (!adapter?.validatePostalCode) return;
+
+  const sides = [
+    { label: "Sender", ...params.shipper },
+    { label: "Recipient", ...params.recipient },
+  ];
+
+  for (const side of sides) {
+    const countryCode = (side.countryCode || "").trim().toUpperCase();
+    const postalCode = (side.postalCode || "").trim();
+    if (!countryCode || !postalCode || POSTAL_CODE_EXEMPT_COUNTRIES.has(countryCode)) continue;
+
+    try {
+      const result = await withShipmentIntegrationAccount(
+        getIntegrationAppKeyForCarrier(params.carrierCode),
+        { shipperCountryCode: params.shipper.countryCode, recipientCountryCode: params.recipient.countryCode, clientAccountId: params.clientAccountId },
+        () => adapter.validatePostalCode!({
+          postalCode,
+          countryCode,
+          stateOrProvince: side.stateOrProvince || undefined,
+        }),
+      );
+      // Only a verdict from the carrier's own database may block a purchase; the local format
+      // heuristics reject perfectly good non-US postal codes.
+      if (result && result.valid === false && result.source === "carrier") {
+        throw new PostalCodeNotServiceableError(
+          `${side.label} postal code ${postalCode} is not recognised by ${params.carrierCode} for ${countryCode}. ` +
+          "Enter the specific delivery-area postal code for this address (a city-level code such as 518000 is not accepted).",
+        );
+      }
+    } catch (error) {
+      if (error instanceof PostalCodeNotServiceableError) throw error;
+      logWarn(
+        `Postal code validation unavailable for ${side.label.toLowerCase()} ${countryCode} ${postalCode} (${params.carrierCode}); allowing checkout: ${(error as Error).message}`,
+      );
+    }
+  }
+}
+
+class PostalCodeNotServiceableError extends Error {}
 
 const clientFinancialReconcileInFlight = new Map<string, Promise<void>>();
 
@@ -6677,7 +6738,10 @@ export async function registerRoutes(
       if (!user) return;
       const queue = typeof req.query.queue === "string" ? req.query.queue : undefined;
       const search = typeof req.query.search === "string" ? req.query.search : undefined;
-      const limit = req.query.limit ? Math.max(1, Math.min(200, Number(req.query.limit))) : 100;
+      // Number("abc") is NaN, and Math.max/min propagate it straight into SQL LIMIT — fall back
+      // to the default instead of 500ing on a typo'd query string.
+      const requestedLimit = Number(req.query.limit);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
       res.json(await listOperationShipments({ viewer: user, queue, search, limit }));
     } catch (error) {
       logError("Failed to fetch operations shipments", error);
@@ -17802,6 +17866,24 @@ export async function registerRoutes(
       );
       const totalShipmentWeight = shipmentData.packages.reduce((sum: number, p: { weight: number }) => sum + p.weight, 0);
 
+      // Last chance to reject an address the carrier cannot book, while the client can still fix
+      // it. After this point they are charged, and a rejected address means carrier_error on a
+      // paid shipment.
+      await assertPostalCodesAreServiceable({
+        carrierCode: quote.carrierCode,
+        shipper: {
+          countryCode: shipmentData.shipper.countryCode,
+          postalCode: shipmentData.shipper.postalCode,
+          stateOrProvince: shipmentData.shipper.stateOrProvince,
+        },
+        recipient: {
+          countryCode: shipmentData.recipient.countryCode,
+          postalCode: shipmentData.recipient.postalCode,
+          stateOrProvince: shipmentData.recipient.stateOrProvince,
+        },
+        clientAccountId: user.clientAccountId,
+      });
+
       // Create draft shipment with payment pending status
       const shipment = await storage.createShipment({
         clientAccountId: user.clientAccountId,
@@ -17891,6 +17973,10 @@ export async function registerRoutes(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
+      }
+      // The client can fix an unserviceable postal code — tell them, don't report a server fault.
+      if (error instanceof PostalCodeNotServiceableError) {
+        return res.status(400).json({ error: error.message });
       }
       logError("Failed to create checkout", error);
       res.status(500).json({ error: "Failed to create checkout" });

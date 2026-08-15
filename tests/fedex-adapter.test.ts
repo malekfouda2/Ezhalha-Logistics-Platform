@@ -417,4 +417,94 @@ describe("FedExAdapter", () => {
     expect(body.originDetails.readyDateTimestamp).toBe("2026-08-13T12:00:00+01:00");
     expect(body.originDetails.customerCloseTime).toBe("18:00:00");
   });
+  it("reports an unknown postal code as invalid instead of throwing", async () => {
+    // FedEx answers an unknown code with 400 COUNTRY.POSTALCODEORZIP.INVALID. Shenzhen "518000"
+    // is a city-level prefix that FedEx does not carry, which is what broke EZH089176079: the
+    // rate quote passed, the client paid, and only booking rejected the address.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/oauth/token")
+          ? new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 })
+          : new Response(
+              JSON.stringify({ errors: [{ code: "COUNTRY.POSTALCODEORZIP.INVALID", message: "Invalid postal code/ZIP for the country selected." }] }),
+              { status: 400 },
+            ),
+      ),
+    ));
+
+    const adapter = new FedExAdapter();
+    const result = await adapter.validatePostalCode({ postalCode: "518000", countryCode: "CN" });
+
+    expect(result.valid).toBe(false);
+    // Only a carrier-sourced verdict is allowed to block a checkout.
+    expect(result.source).toBe("carrier");
+  });
+
+  it("still throws when the validation service itself is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/oauth/token")
+          ? new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 })
+          : new Response(JSON.stringify({ errors: [{ code: "SYSTEM.UNAVAILABLE", message: "Service unavailable" }] }), { status: 503 }),
+      ),
+    ));
+
+    const adapter = new FedExAdapter();
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      // A dependency outage must not be mistaken for a verdict on the address.
+      await expect(adapter.validatePostalCode({ postalCode: "518115", countryCode: "CN" })).rejects.toThrow("POSTAL_VALIDATION_FAILED");
+    } finally {
+      process.env.NODE_ENV = previousEnv;
+    }
+  });
+
+  it("marks the offline heuristic so it can never block a checkout", async () => {
+    // Outside production an outage falls back to a US/CA-shaped regex, which rejects a valid
+    // 6-digit Chinese code. Tagging the source keeps that verdict advisory.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/oauth/token")
+          ? new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 })
+          : new Response(JSON.stringify({ errors: [{ code: "SYSTEM.UNAVAILABLE" }] }), { status: 503 }),
+      ),
+    ));
+
+    const adapter = new FedExAdapter();
+    const result = await adapter.validatePostalCode({ postalCode: "518115", countryCode: "CN" });
+
+    expect(result.valid).toBe(false);
+    expect(result.source).toBe("heuristic");
+  });
+
+  it("omits the province for countries with no FedEx code map rather than guessing", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/oauth/token")
+          ? new Response(JSON.stringify({ access_token: "fedex-test-token", expires_in: 3600 }), { status: 200 })
+          : new Response(JSON.stringify({ output: { transactionShipments: [{ masterTrackingNumber: "1", pieceResponses: [{ packageDocuments: [{ encodedLabel: "x" }] }] }] } }), { status: 200 }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new FedExAdapter();
+    await adapter.createShipment({
+      shipper: {
+        name: "New Upward SC", streetLine1: "A4-02, Building A", city: "Shenzhen",
+        stateOrProvince: "Guangdong", postalCode: "518115", countryCode: "CN", phone: "+8615789473913",
+      },
+      recipient: {
+        name: "Nojoud", streetLine1: "As Safa Dist.", city: "JEDDAH",
+        postalCode: "22442", countryCode: "SA", phone: "0567857770",
+      },
+      packages: [{ weight: 1, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      serviceType: "INTERNATIONAL_ECONOMY",
+      currency: "SAR",
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).includes("/ship/"))![1].body));
+    // "Guangdong" must not become "GU" — FedEx validates the postal code inside the province.
+    expect(body.requestedShipment.shipper.address.stateOrProvinceCode).toBeUndefined();
+  });
 });

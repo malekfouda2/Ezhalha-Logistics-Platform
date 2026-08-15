@@ -231,6 +231,7 @@ export class SmsaAdapter extends LocalCarrierAdapter {
         city: request.recipient.city,
         country: request.recipient.countryCode,
       },
+          source: "heuristic",
     };
     const body = await httpJson(`${this.baseUrl()}${SMSA_ENDPOINTS.createShipment}`, {
       method: "POST",

@@ -881,6 +881,7 @@ export class DhlAdapter implements CarrierAdapter {
       locationDescription: valid ? "Accepted format" : "Postal code format could not be validated",
       stateOrProvince: request.stateOrProvince,
       countryCode,
+          source: "heuristic",
     };
   }
 

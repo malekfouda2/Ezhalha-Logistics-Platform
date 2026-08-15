@@ -291,6 +291,7 @@ export class AramexAdapter implements CarrierAdapter {
       locationDescription: request.stateOrProvince,
       stateOrProvince: request.stateOrProvince,
       countryCode: normalizeCountryCode(request.countryCode),
+          source: "heuristic",
     };
   }
 

@@ -105,7 +105,12 @@ function sanitizeStateCode(countryCode: string, stateOrProvince?: string): strin
     if (aliasMap?.[normalizedState]) {
       return aliasMap[normalizedState];
     }
-    return trimmed.substring(0, 2).toUpperCase();
+    // No alias map for this country (CN, IN, BR, MX, JP): send nothing rather than the first two
+    // letters of the free-text province. That guess is right only by coincidence — "Shanghai"→SH
+    // happens to be correct while "Guangdong"→GU, "Beijing"→BE and "Sichuan"→SI are not codes at
+    // all — and a bogus code is worse than an absent one, since FedEx validates the postal code
+    // within the province it was given.
+    return undefined;
   }
   return undefined;
 }
@@ -214,6 +219,14 @@ export interface PostalCodeValidationResponse {
   locationDescription?: string;
   stateOrProvince?: string;
   countryCode: string;
+  /**
+   * Where the verdict came from. "carrier" means the carrier's own database answered; anything
+   * else is a local heuristic (format regex, mock) that is only meaningful for a handful of
+   * countries. Callers that block a customer action on `valid: false` must require "carrier" —
+   * a 6-digit Chinese code fails a US-shaped regex, and refusing checkout over that would be
+   * worse than the problem being prevented.
+   */
+  source?: "carrier" | "heuristic";
 }
 
 export interface ServiceAvailabilityRequest {
@@ -982,11 +995,27 @@ export class FedExAdapter implements CarrierAdapter {
         locationDescription: data.output?.locationDescription,
         stateOrProvince: data.output?.stateOrProvinceCode,
         countryCode: request.countryCode,
+        source: "carrier",
       };
     } catch (error) {
+      // FedEx answers an unknown postal code with a 400, not a 200 carrying valid:false. Treat
+      // that as a verdict ("this code does not exist") and everything else — auth, network,
+      // outage — as the check being unavailable, so callers can tell a bad address apart from a
+      // broken dependency.
+      const message = (error as Error).message || "";
+      if (/POSTALCODEORZIP\.INVALID|ZIPCODE\.NOTAVAILABLE|POSTAL\.CODE\.INVALID/i.test(message)) {
+        logInfo(`FedEx does not carry postal code ${request.postalCode} for ${request.countryCode}`);
+        return {
+          valid: false,
+          locationDescription: undefined,
+          stateOrProvince: request.stateOrProvince,
+          countryCode: request.countryCode,
+          source: "carrier",
+        };
+      }
       logError("FedEx postal code validation error", error);
       if (!isMockAllowed()) {
-        throw new CarrierError("POSTAL_VALIDATION_FAILED", (error as Error).message);
+        throw new CarrierError("POSTAL_VALIDATION_FAILED", message);
       }
       return this.getMockPostalCodeValidation(request);
     }
@@ -999,6 +1028,7 @@ export class FedExAdapter implements CarrierAdapter {
       locationDescription: "Mock Location",
       stateOrProvince: request.stateOrProvince,
       countryCode: request.countryCode,
+      source: "heuristic",
     };
   }
 
