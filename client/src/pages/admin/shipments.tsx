@@ -332,6 +332,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     return params.toString();
   };
 
+  // See the note in client/shipments.tsx: the global query defaults never refetch, so this list
+  // has to opt into polling or a status change lands in the DB and is never shown.
   const { data, isLoading, isFetching, refetch } = useQuery<PaginatedResponse>({
     queryKey: ["/api/admin/shipments", page, pageSize, debouncedSearch, statusFilter, abandonedOnly],
     queryFn: async () => {
@@ -339,6 +341,9 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
       if (!res.ok) throw new Error("Failed to fetch shipments");
       return res.json();
     },
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
   });
 
   const { data: clientDirectoryData } = useQuery<{ clients: ClientDirectoryEntry[] }>({

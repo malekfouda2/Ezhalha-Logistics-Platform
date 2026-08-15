@@ -1133,9 +1133,15 @@ export class DhlAdapter implements CarrierAdapter {
       };
     }
 
+    // The value is "all-checkpoints" — NOT "all-check-points". DHL does validate this parameter
+    // (an unknown value like "last-checkpoint-only" 400s), but the hyphenated misspelling is
+    // accepted and answered with 200 carrying ONLY the RR/PY data-exchange pings: no pickup, no
+    // transit scans, no delivery. Shipments that were moving normally looked frozen at
+    // "Shipment information received" for weeks. Omitting the parameter returns the same full
+    // set, so the bare path is the fallback.
     const endpointCandidates = [
-      `/shipments/${encodeURIComponent(trackingNumber)}/tracking?trackingView=all-check-points`,
-      `/track/shipments?trackingNumber=${encodeURIComponent(trackingNumber)}`,
+      `/shipments/${encodeURIComponent(trackingNumber)}/tracking?trackingView=all-checkpoints`,
+      `/shipments/${encodeURIComponent(trackingNumber)}/tracking`,
     ];
 
     let lastError: Error | null = null;

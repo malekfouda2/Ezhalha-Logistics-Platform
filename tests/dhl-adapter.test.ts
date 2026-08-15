@@ -334,4 +334,31 @@ describe("DhlAdapter", () => {
     expect(body.customerDetails.shipperDetails.postalAddress.cityName).toBe("Atlantis");
     expect(body.customerDetails.shipperDetails.postalAddress.postalCode).toBe("00000");
   });
+  it("requests all-checkpoints and derives status from real milestones, not API pings", async () => {
+    // "all-check-points" (hyphenated) is silently accepted by DHL and answered with only the
+    // RR/PY data-exchange pings, which made moving shipments look frozen. The valid value is
+    // "all-checkpoints".
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const events = String(url).includes("trackingView=all-checkpoints")
+        ? [
+            { date: "2026-08-13", time: "09:20:00", typeCode: "PU", description: "Shipment picked up", serviceArea: [{ description: "ADANA-TURKEY" }] },
+            { date: "2026-08-13", time: "13:06:46", typeCode: "RR", description: "Response Received" },
+            { date: "2026-08-14", time: "02:11:00", typeCode: "DF", description: "Shipment has departed from a DHL facility", serviceArea: [{ description: "ADANA-TURKEY" }] },
+          ]
+        : [{ date: "2026-08-13", time: "13:06:46", typeCode: "RR", description: "Response Received" }];
+      return Promise.resolve(new Response(JSON.stringify({
+        shipments: [{ shipmentTrackingNumber: "2470181162", status: "Success", events }],
+      }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    const tracking = await adapter.trackShipment("2470181162");
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("trackingView=all-checkpoints");
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("all-check-points");
+    // Latest meaningful milestone wins; "Success" is the API envelope and must never be the status.
+    expect(tracking.status).toBe("Shipment has departed from a DHL facility");
+    expect(tracking.events).toHaveLength(3);
+  });
 });

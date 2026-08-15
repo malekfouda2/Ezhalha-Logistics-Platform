@@ -108,8 +108,14 @@ export default function ClientShipments() {
     queryKey: ["/api/client/account"],
   });
 
+  // Carrier status is refreshed server-side every 10 minutes, but the app's global query defaults
+  // are staleTime: Infinity with no window-focus refetch — so without these overrides this list
+  // shows whatever the status was when the tab was opened, for as long as it stays open.
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/client/shipments"],
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
   });
 
   const { data: checkoutSummary, isLoading: isLoadingCheckoutSummary } = useQuery<ShipmentCheckoutSummary>({
