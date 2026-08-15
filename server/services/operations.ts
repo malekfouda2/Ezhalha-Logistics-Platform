@@ -707,7 +707,7 @@ function getRawDdpStageFromStatus(status?: string | null): number {
   if (normalizedStatus === "delivered" || normalizedStatus === "out_for_delivery") {
     return 5;
   }
-  if (["in_transit", "customs_clearance"].includes(normalizedStatus)) {
+  if (["in_transit", "customs_clearance", "on_hold", "returned"].includes(normalizedStatus)) {
     return 4;
   }
   if (["awaiting_payment", "payment_pending"].includes(normalizedStatus)) {
@@ -1034,6 +1034,8 @@ function getClientFriendlyMilestone(status: string): string | null {
     in_transit: "Your shipment is in transit.",
     customs_clearance: "Your shipment is in customs clearance.",
     out_for_delivery: "Your shipment is out for delivery.",
+    on_hold: "Your shipment is on hold with the carrier.",
+    returned: "Your shipment is being returned to the sender.",
     delivered: "Your shipment has been delivered.",
     cancelled: "Your shipment has been cancelled.",
     carrier_error: "Your shipment needs operational attention.",

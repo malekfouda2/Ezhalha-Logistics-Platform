@@ -179,7 +179,7 @@ function canCancelShipment(shipment: Shipment) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "delivered", "cancelled"];
+  const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "on_hold", "returned", "delivered", "cancelled"];
 
   return (
     ["created", "processing", "carrier_error", "payment_pending"].includes(shipment.status) &&
@@ -1201,6 +1201,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   <SelectItem value="in_transit">In Transit</SelectItem>
                   <SelectItem value="customs_clearance">Customs Clearance</SelectItem>
                   <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
+                  <SelectItem value="on_hold">On Hold</SelectItem>
+                  <SelectItem value="returned">Returned to Shipper</SelectItem>
                   <SelectItem value="delivered">Delivered</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                   <SelectItem value="carrier_error">Carrier Error</SelectItem>
@@ -1695,6 +1697,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                             <SelectItem value="customs_clearance">Customs Clearance</SelectItem>
                             <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
                           </>}
+                          <SelectItem value="on_hold">On Hold</SelectItem>
+                          <SelectItem value="returned">Returned to Shipper</SelectItem>
                           <SelectItem value="delivered">Delivered</SelectItem>
                         </SelectContent>
                       </Select>

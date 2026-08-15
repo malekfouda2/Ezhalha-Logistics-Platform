@@ -24,7 +24,12 @@ const statusColors: Record<string, StatusColor> = {
   payment_pending: "purple",
   created: "cyan",
   processing: "amber",
+  picked_up: "blue",
   in_transit: "blue",
+  customs_clearance: "amber",
+  out_for_delivery: "blue",
+  on_hold: "orange",
+  returned: "orange",
   delivered: "green",
   cancelled: "red",
   carrier_error: "orange",
@@ -45,7 +50,12 @@ const statusLabels: Record<string, string> = {
   payment_pending: "Awaiting Payment",
   created: "Booked",
   processing: "Processing",
+  picked_up: "Picked Up",
   in_transit: "In Transit",
+  customs_clearance: "Customs Clearance",
+  out_for_delivery: "Out for Delivery",
+  on_hold: "On Hold",
+  returned: "Returned to Shipper",
   delivered: "Delivered",
   cancelled: "Cancelled",
   carrier_error: "Carrier Error",
@@ -62,7 +72,7 @@ const statusLabels: Record<string, string> = {
 };
 
 // Statuses whose dot pulses to signal ongoing activity.
-const liveStatuses = new Set(["processing", "in_transit", "payment_pending", "pending"]);
+const liveStatuses = new Set(["processing", "picked_up", "in_transit", "out_for_delivery", "payment_pending", "pending"]);
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const color = statusColors[status] || "amber";

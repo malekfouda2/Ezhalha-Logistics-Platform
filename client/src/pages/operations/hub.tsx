@@ -356,6 +356,8 @@ const statusOptions = [
   "in_transit",
   "customs_clearance",
   "out_for_delivery",
+  "on_hold",
+  "returned",
   "delivered",
   "carrier_error",
   "cancelled",
@@ -789,6 +791,8 @@ function getD2DStage(shipment: OperationShipmentSummary) {
 function getExpressTab(shipment: OperationShipmentSummary): "received" | "transit" | "customs" | "lastmile" {
   const status = shipment.status?.toLowerCase();
   if (status === "customs_clearance" || status === "carrier_error") return "customs";
+  // On hold / returning are stalled, not new arrivals — group them with the other exceptions.
+  if (status === "on_hold" || status === "returned") return "customs";
   if (status === "out_for_delivery" || status === "delivered") return "lastmile";
   if (status === "picked_up" || status === "in_transit") return "transit";
   return "received";
@@ -807,6 +811,8 @@ function getExpressStepIndex(status?: string | null): number {
     case "carrier_error":
       return 6;
     case "in_transit":
+    case "on_hold":
+    case "returned":
       return 4;
     case "picked_up":
       return 1;

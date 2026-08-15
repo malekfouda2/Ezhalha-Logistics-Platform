@@ -69,6 +69,18 @@ export function mapCarrierTrackingStatusToShipmentStatus(tracking: TrackingRespo
   const status = `${tracking.status || ""} ${latestEvent}`.toLowerCase();
   if (!status.trim()) return null;
   if (status.includes("delivered")) return "delivered";
+  // Check return/hold BEFORE the movement keywords: "Returned to shipper" and "Shipment is on
+  // hold" otherwise fall through to in_transit (a return does travel) or to no match at all,
+  // leaving a stuck shipment looking like it is still on its way.
+  if (
+    status.includes("returned to shipper") ||
+    status.includes("return to shipper") ||
+    status.includes("returning to shipper") ||
+    status.includes("returned to sender")
+  ) {
+    return "returned";
+  }
+  if (status.includes("on hold") || status.includes("held")) return "on_hold";
   if (status.includes("out for delivery") || status.includes("vehicle for delivery")) return "out_for_delivery";
   if (status.includes("customs") || status.includes("clearance")) return "customs_clearance";
   if (status.includes("exception") || status.includes("failed") || status.includes("error")) return "carrier_error";

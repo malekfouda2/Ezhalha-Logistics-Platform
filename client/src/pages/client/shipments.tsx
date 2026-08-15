@@ -34,12 +34,21 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment, ClientAccount, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
 
+// Each filter tab covers a set of carrier-synced statuses; without this a shipment sitting at
+// "picked_up" or "customs_clearance" appears only under "All".
+const statusFilterGroups: Record<string, string[]> = {
+  processing: ["draft", "payment_pending", "created", "processing"],
+  in_transit: ["picked_up", "in_transit", "customs_clearance", "out_for_delivery"],
+  attention: ["on_hold", "returned", "carrier_error"],
+  delivered: ["delivered"],
+};
+
 function canCancelShipment(shipment: Shipment): boolean {
   const carrierStatus = String((shipment as any).carrierStatus || "")
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "delivered", "cancelled"];
+  const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "on_hold", "returned", "delivered", "cancelled"];
 
   return (
     ["created", "processing", "carrier_error", "payment_pending"].includes(shipment.status) &&
@@ -202,7 +211,9 @@ export default function ClientShipments() {
     const matchesSearch =
       shipment.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       shipment.recipientName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || shipment.status === statusFilter;
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilterGroups[statusFilter] ?? [statusFilter]).includes(shipment.status);
     return matchesSearch && matchesStatus;
   });
 
@@ -276,6 +287,9 @@ export default function ClientShipments() {
                   </TabsTrigger>
                   <TabsTrigger value="in_transit" data-testid="tab-in-transit">
                     In Transit
+                  </TabsTrigger>
+                  <TabsTrigger value="attention" data-testid="tab-attention">
+                    Attention
                   </TabsTrigger>
                   <TabsTrigger value="delivered" data-testid="tab-delivered">
                     Delivered
