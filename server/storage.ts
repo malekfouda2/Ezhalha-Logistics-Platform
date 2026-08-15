@@ -232,6 +232,7 @@ export interface IStorage {
   getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
+  recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
 
   // Invoices
   getInvoices(): Promise<Invoice[]>;
@@ -1002,6 +1003,18 @@ export class DatabaseStorage implements IStorage {
       updatedAt: new Date(),
     }).where(and(eq(shipments.id, id), isNull(shipments.deletedAt))).returning();
     return shipment || undefined;
+  }
+
+  /**
+   * Record that the carrier was polled and reported nothing new. Deliberately does NOT touch
+   * `updatedAt`: the tracking refresh runs every 10 minutes, so stamping it here would mean a
+   * shipment frozen for weeks still looks like it changed moments ago, and every "no update in
+   * N hours" detector goes blind. `carrierLastAttemptAt` is the field that tracks poll liveness.
+   */
+  async recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void> {
+    await db.update(shipments)
+      .set({ carrierStatusRepeatCount: repeatCount, carrierLastAttemptAt: new Date() })
+      .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
   }
 
   // Invoices

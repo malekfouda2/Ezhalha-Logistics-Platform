@@ -2356,6 +2356,7 @@ export async function detectOperationAttentionFlags(): Promise<number> {
     .from(shipments)
     .where(
       and(
+        isNull(shipments.deletedAt),
         ne(shipments.status, "delivered"),
         ne(shipments.status, "cancelled"),
         inArray(shipments.paymentStatus, ["paid", "unpaid"]),

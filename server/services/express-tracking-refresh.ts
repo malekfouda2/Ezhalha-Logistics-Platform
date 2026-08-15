@@ -143,8 +143,13 @@ export async function applyCarrierTrackingToShipment(
   const nextRepeatCount = carrierStatusChanged ? 0 : previousRepeatCount + 1;
   const meaningfulChange = statusChanged || carrierStatusChanged || estimatedChanged || actualChanged;
 
-  if (!meaningfulChange && nextRepeatCount === previousRepeatCount) {
-    return shipment;
+  // Nothing new from the carrier: bump the repeat counter and the poll timestamp only. Going
+  // through storage.updateShipment here would stamp `updatedAt`, and since this runs every 10
+  // minutes that made `updatedAt` mean "last polled" rather than "last changed" — which silently
+  // killed the 36h "no recent update" attention flag for every express shipment.
+  if (!meaningfulChange) {
+    await storage.recordShipmentCarrierPoll(shipment.id, nextRepeatCount);
+    return { ...shipment, carrierStatusRepeatCount: nextRepeatCount };
   }
 
   const updated = await storage.updateShipment(shipment.id, {
