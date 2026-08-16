@@ -2236,7 +2236,26 @@ export class FedExAdapter implements CarrierAdapter {
       countryRelationships: request.isInternational ? "INTERNATIONAL" : "DOMESTIC",
       ...(request.instructions ? { remarks: request.instructions } : {}),
     };
-    const { data } = await this.makeRequest<any>("/pickup/v1/pickups", "POST", body, 1);
+    let data: any;
+    try {
+      ({ data } = await this.makeRequest<any>("/pickup/v1/pickups", "POST", body, 1));
+    } catch (error) {
+      // FedEx answers a pickup it will not accept with a bare 500 GENERAL FAILURE whose own
+      // {FAILURE_CAUSE} placeholder is never filled in. Verified against the live account: the
+      // availability API reports the same address/date/window as available, and five payload
+      // shapes fail identically, so this is an account entitlement matter rather than a request
+      // we can correct. Say so, instead of passing FedEx's placeholder up to an operator.
+      const message = (error as Error).message || "";
+      if (/SYSTEM\.UNEXPECTED\.ERROR|GENERAL FAILURE/i.test(message)) {
+        throw new CarrierError(
+          "PICKUP_NOT_PERMITTED",
+          "FedEx refused the pickup without giving a reason (500 GENERAL FAILURE). The account is " +
+          "most likely not entitled to schedule pickups for this origin — the shipment's waybill is " +
+          "still valid, so arrange the collection with FedEx directly or drop it off.",
+        );
+      }
+      throw error;
+    }
     const output = (data as any)?.output ?? data;
     const confirmationNumber = String(output?.pickupConfirmationCode ?? output?.confirmationCode ?? "").trim();
     if (!confirmationNumber) {

@@ -1423,6 +1423,17 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   <p className="text-sm font-medium text-destructive">Failed{(selectedShipment as any).pickupError ? `: ${(selectedShipment as any).pickupError}` : ""}</p>
                 </div>
               )}
+              {/* Not a fault: the carrier cannot take this booking through the API, so someone
+                  arranges it by phone. Shown as an instruction, not as an error. */}
+              {(selectedShipment as any).pickupStatus === "manual_required" && !(selectedShipment as any).pickupConfirmationNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Pickup</p>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Arrange manually</p>
+                  {(selectedShipment as any).pickupError && (
+                    <p className="text-xs text-muted-foreground">{(selectedShipment as any).pickupError}</p>
+                  )}
+                </div>
+              )}
               {selectedShipment.status === "payment_pending" && !selectedShipment.carrierTrackingNumber && (
                 <Button
                   variant="outline"

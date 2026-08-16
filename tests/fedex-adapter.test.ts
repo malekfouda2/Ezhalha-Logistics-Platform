@@ -507,4 +507,36 @@ describe("FedExAdapter", () => {
     // "Guangdong" must not become "GU" — FedEx validates the postal code inside the province.
     expect(body.requestedShipment.shipper.address.stateOrProvinceCode).toBeUndefined();
   });
+  it("explains a FedEx pickup refusal instead of forwarding its placeholder", async () => {
+    // FedEx refuses pickups on this account with a bare 500 whose {FAILURE_CAUSE} it never fills
+    // in. Verified live: availability reports the same address/date/window as available, and five
+    // payload shapes fail identically, so the operator needs to be told to arrange it by hand.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 }));
+      }
+      if (u.includes("/availabilities")) {
+        return Promise.resolve(new Response(JSON.stringify({ output: { options: [{ available: true }] } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ errors: [{ code: "SYSTEM.UNEXPECTED.ERROR", message: "GENERAL FAILURE {FAILURE_CAUSE}. Please update and try again." }] }),
+        { status: 500 },
+      ));
+    }));
+
+    const adapter = new FedExAdapter();
+    const request = {
+      shipper: {
+        name: "New Upward SC", streetLine1: "A4-02, Building A", city: "Shenzhen",
+        postalCode: "518115", countryCode: "CN", phone: "+8615789473913",
+      },
+      packages: [{ weight: 1, weightUnit: "KG" as const, packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-17", readyTime: "09:00", closeTime: "17:00", isInternational: true,
+    };
+
+    await expect(adapter.requestPickup(request)).rejects.toThrow("PICKUP_NOT_PERMITTED");
+    // The raw placeholder must not reach an operator.
+    await expect(adapter.requestPickup(request)).rejects.not.toThrow("{FAILURE_CAUSE}");
+  });
 });
