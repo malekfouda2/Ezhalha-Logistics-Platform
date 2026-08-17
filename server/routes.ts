@@ -3374,10 +3374,22 @@ import {
   applicationFormSchema,
   createShipmentSchema,
   TASK_PERMISSION_NAMES,
+  mobileDeviceSchema,
+  mobileTokenRequestSchema,
+  mobileRefreshRequestSchema,
   type BrandingConfig,
   type AdminDashboardStats,
   type ClientDashboardStats,
 } from "@shared/schema";
+import {
+  extractBearerToken,
+  verifyAccessToken,
+  issueAccessToken,
+  generateRefreshToken,
+  hashRefreshToken,
+  refreshTokenExpiry,
+  type AccessTokenClaims,
+} from "./services/mobile-auth";
 import { z } from "zod";
 
 // Password change validation schema
@@ -3484,16 +3496,76 @@ declare module "express-serve-static-core" {
   interface Request {
     currentUser?: User;
     currentClientAccount?: ClientAccount;
+    /** How this request authenticated. Absent on unauthenticated requests. */
+    authVia?: "session" | "bearer";
+    accessTokenClaims?: AccessTokenClaims;
   }
 }
 
 const MemoryStoreSession = MemoryStore(session);
 const PgSessionStore = pgSession(session);
 
+/**
+ * Minimal stand-in for an express-session object, used on bearer-authenticated requests.
+ *
+ * Handlers only ever touch three things on `req.session` — `userId` (255 sites), `destroy`
+ * (2) and `regenerate` (1) — so the stub implements exactly those and no-ops the lifecycle
+ * methods. Nothing is persisted: there is no cookie and no session store row for a token
+ * client, and `destroy()` on a bearer request simply drops the in-memory identity (the
+ * caller revokes the refresh token separately).
+ */
+function installStubSession(req: Request, userId: string) {
+  const stub = {
+    userId,
+    id: `bearer:${userId}`,
+    cookie: {} as any,
+    destroy(cb?: (err?: any) => void) {
+      stub.userId = undefined as any;
+      req.currentUser = undefined;
+      req.currentClientAccount = undefined;
+      cb?.();
+      return stub;
+    },
+    regenerate(cb?: (err?: any) => void) {
+      cb?.();
+      return stub;
+    },
+    save(cb?: (err?: any) => void) {
+      cb?.();
+      return stub;
+    },
+    reload(cb?: (err?: any) => void) {
+      cb?.();
+      return stub;
+    },
+    touch() {
+      return stub;
+    },
+  };
+
+  (req as any).session = stub;
+  (req as any).sessionID = stub.id;
+}
+
 function clearSession(req: Request) {
   req.currentUser = undefined;
   req.currentClientAccount = undefined;
   req.session.destroy(() => {});
+}
+
+/**
+ * Kills every credential issued to a user: bumps tokenVersion so live (stateless) access
+ * tokens stop verifying, and revokes their refresh tokens so no new pair can be minted.
+ * Call on password change/reset and on deactivation.
+ */
+async function invalidateIssuedTokens(userId: string, reason: string): Promise<void> {
+  try {
+    await storage.bumpUserTokenVersion(userId);
+    await storage.revokeMobileRefreshTokensForUser(userId, reason);
+  } catch (error) {
+    // Never block the security action itself on bookkeeping failure — but it must be loud.
+    logError("Failed to invalidate issued mobile tokens", error, { userId, reason });
+  }
 }
 
 async function ensureLegacyClientPrimaryContact(user: User): Promise<User> {
@@ -3545,6 +3617,15 @@ async function ensureAuthenticatedUser(req: Request, res: Response): Promise<Use
   if (!user) {
     clearSession(req);
     res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+
+  // Access tokens are stateless, so a token minted before a deactivation or password change
+  // would otherwise stay valid until it expires. The tokenVersion claim is compared against
+  // the current row to close that window immediately.
+  if (req.authVia === "bearer" && (req.accessTokenClaims?.tv ?? 0) !== (user.tokenVersion ?? 0)) {
+    clearSession(req);
+    res.status(401).json({ error: "Access token is no longer valid", code: "token_revoked" });
     return null;
   }
 
@@ -6355,22 +6436,47 @@ export async function registerRoutes(
 
   app.set("trust proxy", 1);
 
-  app.use(
-    session({
-      secret: process.env.NODE_ENV === "production"
-        ? (process.env.SESSION_SECRET || (() => { throw new Error("SESSION_SECRET is required in production"); })())
-        : (process.env.SESSION_SECRET || "ezhalha-secret-key-dev"),
-      resave: false,
-      saveUninitialized: false,
-      store: sessionStore,
-      cookie: {
-        secure: process.env.NODE_ENV === "production" && process.env.FORCE_HTTPS !== "false",
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: "lax",
-      },
-    })
-  );
+  const sessionMiddleware = session({
+    secret: process.env.NODE_ENV === "production"
+      ? (process.env.SESSION_SECRET || (() => { throw new Error("SESSION_SECRET is required in production"); })())
+      : (process.env.SESSION_SECRET || "ezhalha-secret-key-dev"),
+    resave: false,
+    saveUninitialized: false,
+    store: sessionStore,
+    cookie: {
+      secure: process.env.NODE_ENV === "production" && process.env.FORCE_HTTPS !== "false",
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: "lax",
+    },
+  });
+
+  // Native clients (React Native) authenticate with `Authorization: Bearer <access token>`
+  // instead of a cookie. Rather than rewriting the ~255 handlers that read
+  // `req.session.userId`, a verified bearer token installs a stub session carrying the same
+  // field, and the real cookie-session middleware is skipped entirely. That keeps every
+  // existing route working unchanged for both clients, and — because the stub is never
+  // persisted — a mobile request never writes a row to the `session` table.
+  app.use(async (req, res, next) => {
+    const bearer = extractBearerToken(req.headers.authorization);
+    if (!bearer) {
+      return sessionMiddleware(req, res, next);
+    }
+
+    const result = verifyAccessToken(bearer);
+    if (!result.ok) {
+      // Distinct code so the app knows to run the refresh flow rather than log the user out.
+      return res.status(401).json({
+        error: result.reason === "expired" ? "Access token expired" : "Invalid access token",
+        code: result.reason === "expired" ? "token_expired" : "token_invalid",
+      });
+    }
+
+    installStubSession(req, result.claims.sub);
+    req.authVia = "bearer";
+    req.accessTokenClaims = result.claims;
+    next();
+  });
 
   // General rate limiting
   // Apply this after session middleware so authenticated users are rate-limited individually
@@ -8081,6 +8187,300 @@ export async function registerRoutes(
     }
   });
 
+  // ── Mobile token auth ────────────────────────────────────────────────────────
+  // Native clients cannot rely on cookies, so they exchange credentials for a short-lived
+  // access token plus a rotating refresh token. Everything below funnels through the same
+  // credential and account-state checks the cookie login uses.
+
+  async function issueTokenPair(
+    req: Request,
+    user: User,
+    device: z.infer<typeof mobileDeviceSchema>,
+    familyId?: string,
+  ) {
+    const refreshToken = generateRefreshToken();
+    const family = familyId || randomUUID();
+
+    await storage.createMobileRefreshToken({
+      userId: user.id,
+      tokenHash: hashRefreshToken(refreshToken),
+      familyId: family,
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      platform: device.platform,
+      appVersion: device.appVersion,
+      expiresAt: refreshTokenExpiry(),
+    });
+
+    const { token: accessToken, expiresIn } = issueAccessToken(user);
+    const { password, ...userWithoutPassword } = user;
+
+    return { accessToken, refreshToken, expiresIn, tokenType: "Bearer", user: userWithoutPassword };
+  }
+
+  // Validates account state exactly like establishUserSession, minus the cookie.
+  async function assertUserCanAuthenticate(
+    user: User,
+  ): Promise<{ error: string; status: number } | null> {
+    if (!user.isActive) {
+      return { error: "Account is deactivated", status: 403 };
+    }
+    if (user.userType === "client") {
+      if (!user.clientAccountId) return { error: "Client account not found", status: 404 };
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      if (!clientAccount || !clientAccount.isActive) {
+        return { error: "Client account is deactivated", status: 403 };
+      }
+    }
+    return null;
+  }
+
+  app.post("/api/auth/token", authLimiter, async (req, res) => {
+    try {
+      const data = mobileTokenRequestSchema.parse(req.body || {});
+      const loginInput = data.username.trim();
+      const normalizedLoginInput = loginInput.toLowerCase();
+      const identifier = req.ip || normalizedLoginInput;
+
+      const bruteForceCheck = checkBruteForce(identifier);
+      if (bruteForceCheck.blocked) {
+        await logAudit(undefined, "login_blocked", "security", undefined,
+          `Mobile login blocked for ${identifier} due to brute-force protection`, req.ip);
+        return res.status(429).json({
+          error: `Too many failed attempts. Try again in ${bruteForceCheck.remainingTime} seconds.`,
+        });
+      }
+
+      const phoneDigits = loginInput.replace(/[^\d+]/g, "");
+      const user =
+        (await storage.getUserByEmail(normalizedLoginInput)) ||
+        (await storage.getUserByUsername(loginInput)) ||
+        (phoneDigits.replace(/\D/g, "").length >= 7 ? await storage.getUserByPhone(phoneDigits) : undefined);
+
+      if (!user) {
+        recordFailedLogin(identifier);
+        await logAudit(undefined, "login_failed", "security", undefined,
+          `Failed mobile login attempt for login: ${loginInput}`, req.ip);
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const passwordMatch = await bcrypt.compare(data.password, user.password);
+      if (!passwordMatch) {
+        recordFailedLogin(identifier);
+        await logAudit(user.id, "login_failed", "security", user.id,
+          `Failed mobile login attempt for user: ${user.username}`, req.ip);
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const blocked = await assertUserCanAuthenticate(user);
+      if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
+      clearFailedLogins(identifier);
+      const updatedUser = await storage.updateUser(user.id, {
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const payload = await issueTokenPair(req, updatedUser || user, data);
+      await logAudit(user.id, "login", "user", user.id,
+        `User ${user.username} logged in (mobile_password, ${data.platform})`, req.ip);
+
+      res.json(payload);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Mobile token login failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Exchanges a verified email OTP for tokens instead of a cookie session. Mirrors
+  // /api/auth/otp/verify so the mobile app can use the same passwordless login.
+  app.post("/api/auth/token/otp", otpLimiter, async (req, res) => {
+    try {
+      const parsed = mobileDeviceSchema.extend({
+        email: z.string().email(),
+        code: z.string().regex(/^\d{6}$/, "Enter the 6-digit code"),
+      }).parse(req.body || {});
+      const email = parsed.email.trim().toLowerCase();
+      const identifier = req.ip || email;
+
+      const bf = checkBruteForce(identifier);
+      if (bf.blocked) {
+        return res.status(429).json({ error: `Too many attempts. Try again in ${bf.remainingTime} seconds.` });
+      }
+
+      const otp = await storage.getActiveEmailLoginOtp(email);
+      const invalid = () => {
+        recordFailedLogin(identifier);
+        return res.status(401).json({ error: "Invalid or expired code." });
+      };
+
+      if (!otp) return invalid();
+      if (otp.consumedAt) return invalid();
+      if (new Date(otp.expiresAt).getTime() < Date.now()) return invalid();
+      if ((otp.attempts ?? 0) >= OTP_MAX_ATTEMPTS) return invalid();
+
+      const provided = Buffer.from(hashOtp(parsed.code));
+      const stored = Buffer.from(otp.codeHash);
+      const match = provided.length === stored.length && timingSafeEqual(provided, stored);
+      if (!match) {
+        await storage.updateEmailLoginOtp(otp.id, { attempts: (otp.attempts ?? 0) + 1 });
+        return invalid();
+      }
+
+      await storage.updateEmailLoginOtp(otp.id, { consumedAt: new Date() });
+      const user = await storage.getUserByEmail(email);
+      if (!user) return invalid();
+
+      const blocked = await assertUserCanAuthenticate(user);
+      if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
+      clearFailedLogins(identifier);
+      const updatedUser = await storage.updateUser(user.id, {
+        lastLoginAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const payload = await issueTokenPair(req, updatedUser || user, parsed);
+      await logAudit(user.id, "login", "user", user.id,
+        `User ${user.username} logged in (mobile_email_otp, ${parsed.platform})`, req.ip);
+
+      res.json(payload);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Mobile OTP token exchange failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Rotates the pair. Presenting an already-rotated token means the chain leaked, so the
+  // entire family is revoked rather than just the replayed row.
+  app.post("/api/auth/refresh", otpLimiter, async (req, res) => {
+    try {
+      const { refreshToken } = mobileRefreshRequestSchema.parse(req.body || {});
+      const row = await storage.getMobileRefreshTokenByHash(hashRefreshToken(refreshToken));
+
+      if (!row) {
+        return res.status(401).json({ error: "Invalid refresh token", code: "refresh_invalid" });
+      }
+
+      if (row.revokedAt) {
+        const revokedCount = await storage.revokeMobileRefreshTokenFamily(row.familyId, "reuse_detected");
+        await logAudit(row.userId, "refresh_token_reuse", "security", row.userId,
+          `Refresh token reuse detected; revoked ${revokedCount} sibling token(s)`, req.ip);
+        logError(
+          "Refresh token reuse detected",
+          new Error(`Refresh token replayed after rotation (family ${row.familyId})`),
+          { userId: row.userId, familyId: row.familyId, revokedCount },
+        );
+        return res.status(401).json({ error: "Refresh token has been revoked", code: "refresh_reused" });
+      }
+
+      if (new Date(row.expiresAt).getTime() < Date.now()) {
+        await storage.revokeMobileRefreshToken(row.id, "expired");
+        return res.status(401).json({ error: "Refresh token expired", code: "refresh_expired" });
+      }
+
+      const user = await storage.getUser(row.userId);
+      if (!user) {
+        await storage.revokeMobileRefreshToken(row.id, "user_missing");
+        return res.status(401).json({ error: "Invalid refresh token", code: "refresh_invalid" });
+      }
+
+      const blocked = await assertUserCanAuthenticate(user);
+      if (blocked) {
+        await storage.revokeMobileRefreshTokensForUser(user.id, "account_blocked");
+        return res.status(blocked.status).json({ error: blocked.error });
+      }
+
+      // Rotate: the presented token dies, a sibling in the same family replaces it.
+      await storage.revokeMobileRefreshToken(row.id, "rotated");
+      const payload = await issueTokenPair(
+        req,
+        user,
+        {
+          deviceId: row.deviceId,
+          deviceName: row.deviceName ?? undefined,
+          platform: (row.platform as "ios" | "android" | "unknown") ?? "unknown",
+          appVersion: row.appVersion ?? undefined,
+        },
+        row.familyId,
+      );
+
+      res.json(payload);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Refresh token exchange failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Mobile logout. Unauthenticated on purpose: a client whose access token already expired
+  // must still be able to retire its refresh token.
+  app.post("/api/auth/revoke", async (req, res) => {
+    try {
+      const { refreshToken } = mobileRefreshRequestSchema.parse(req.body || {});
+      const row = await storage.getMobileRefreshTokenByHash(hashRefreshToken(refreshToken));
+
+      if (row && !row.revokedAt) {
+        await storage.revokeMobileRefreshToken(row.id, "logout");
+        await logAudit(row.userId, "logout", "user", row.userId, "Mobile session revoked", req.ip);
+      }
+
+      // Always success — never reveal whether a token existed.
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Refresh token revoke failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Signed-in devices, for a "where am I logged in" screen.
+  app.get("/api/auth/devices", requireAuth, async (req, res) => {
+    try {
+      const rows = await storage.getActiveMobileRefreshTokensForUser(req.session.userId!);
+      res.json({
+        devices: rows.map((row) => ({
+          id: row.id,
+          deviceName: row.deviceName,
+          platform: row.platform,
+          appVersion: row.appVersion,
+          lastUsedAt: row.lastUsedAt,
+          createdAt: row.createdAt,
+        })),
+      });
+    } catch (error) {
+      logError("Listing mobile devices failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/auth/devices/:id", requireAuth, async (req, res) => {
+    try {
+      const rows = await storage.getActiveMobileRefreshTokensForUser(req.session.userId!);
+      const target = rows.find((row) => row.id === req.params.id);
+      if (!target) {
+        return res.status(404).json({ error: "Device not found" });
+      }
+
+      await storage.revokeMobileRefreshTokenFamily(target.familyId, "revoked_by_user");
+      await logAudit(req.session.userId!, "device_revoked", "security", target.id,
+        `Signed out device ${target.deviceName || target.deviceId}`, req.ip);
+
+      res.json({ success: true });
+    } catch (error) {
+      logError("Revoking mobile device failed", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // ── Password set / reset ─────────────────────────────────────────────────────
   app.post("/api/auth/forgot-password", otpLimiter, async (req, res) => {
     try {
@@ -8129,6 +8529,7 @@ export async function registerRoutes(
       const hashedPassword = await bcrypt.hash(parsed.password, SALT_ROUNDS);
       await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false, updatedAt: new Date() });
       await storage.consumePasswordResetToken(row.id);
+      await invalidateIssuedTokens(user.id, "password_reset");
       await logAudit(user.id, "password_reset_completed", "security", user.id, `Password ${row.purpose === "onboard" ? "set" : "reset"} for ${user.email}`, req.ip);
 
       res.json({ success: true });
@@ -8192,7 +8593,8 @@ export async function registerRoutes(
       
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateUser(user.id, { password: hashedPassword, mustChangePassword: false, updatedAt: new Date() });
-      
+      await invalidateIssuedTokens(user.id, "password_changed");
+
       // Clear brute-force tracking for this user on successful password change
       if (user.username) {
         clearFailedLogins(user.username);
@@ -14157,6 +14559,10 @@ export async function registerRoutes(
         isActive: parsed.data.isActive,
         updatedAt: new Date(),
       });
+
+      if (!parsed.data.isActive) {
+        await invalidateIssuedTokens(req.params.id, "user_deactivated");
+      }
 
       await logAudit(
         req.session.userId,
