@@ -3278,14 +3278,42 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Auth limiters key on the account being targeted, not just the source IP.
+//
+// Mobile users reach us through carrier-grade NAT, where an entire city can share one
+// public address. A pure per-IP bucket means one person's five failed logins lock out
+// everybody behind that carrier — which looks exactly like a broken app. Keying on the
+// identifier gives each account its own budget; the coarse per-IP ceiling below still
+// bounds someone spraying many accounts from one host.
+function identifierRateKey(req: Request): string {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const raw = body.username ?? body.email;
+  const identifier = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  const ip = ipKeyGenerator(req.ip || "");
+  return identifier ? `id:${identifier}` : `ip:${ip}`;
+}
+
 // Stricter rate limiter for auth endpoints (brute-force protection)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 login attempts per window
+  max: 5, // 5 failed login attempts per account per window
+  keyGenerator: identifierRateKey,
   message: { error: "Too many login attempts, please try again in 15 minutes." },
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Only count failed attempts
+});
+
+// Coarse per-IP ceiling across all auth endpoints. Deliberately far above what a shared
+// carrier NAT produces, but low enough to stop credential-stuffing from a single host.
+const authIpCeilingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === "test" ? 10000 : Number(process.env.AUTH_IP_CEILING || 200),
+  keyGenerator: (req) => `ip:${ipKeyGenerator(req.ip || "")}`,
+  message: { error: "Too many authentication requests from this network. Try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
 });
 
 const hsLookupLimiter = rateLimit({
@@ -3314,10 +3342,13 @@ const companyExtractionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Email-OTP login: throttle code requests + verifications per IP.
+// Email-OTP login: throttle per email address rather than per IP, for the carrier-NAT
+// reason above. The handler additionally caps codes per email in the database (4 per 10
+// minutes), and authIpCeilingLimiter bounds the whole endpoint per network.
 const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 15,
+  keyGenerator: identifierRateKey,
   message: { error: "Too many attempts. Please wait a few minutes and try again." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -6520,6 +6551,11 @@ export async function registerRoutes(
   // Apply this after session middleware so authenticated users are rate-limited individually
   // instead of multiple operators/admins sharing one IP bucket.
   app.use("/api/", generalLimiter);
+
+  // Coarse per-network ceiling on the auth surface. The per-endpoint limiters key on the
+  // targeted account (see identifierRateKey); this one is the backstop against a single
+  // host spraying many accounts.
+  app.use("/api/auth/", authIpCeilingLimiter);
 
   // ============================================
   // HEALTH CHECK
