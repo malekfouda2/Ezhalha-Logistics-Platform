@@ -1463,49 +1463,6 @@ function shipmentPackages(shipment: Shipment): PackageDetails[] {
 }
 
 /**
- * Whether we should even attempt an API pickup for a carrier.
- *
- * FedEx pickup booking has never once succeeded on the production account: every attempt across
- * three origin countries answered `500 SYSTEM.UNEXPECTED.ERROR: GENERAL FAILURE {FAILURE_CAUSE}`
- * (GB, CN) or `403` (EG), while the availability API reports `available: true` for the very same
- * address, date and window, and DHL books fine on the same code path. Payload shape is not the
- * variable — five different shapes were tried against a live origin and all failed identically —
- * so the account is not entitled to the Schedule Pickup operation and only FedEx can change that.
- *
- * Firing the call anyway achieves nothing except a carrier error on a paid shipment, so it is off
- * by default for FedEx. Set FEDEX_API_PICKUP_ENABLED=true to turn it back on the moment FedEx
- * enables the account — no deploy needed. Carriers that work are unaffected.
- */
-function isApiPickupEnabledForCarrier(carrierCode: string): boolean {
-  if ((carrierCode || "").toUpperCase() !== "FEDEX") return true;
-  return String(process.env.FEDEX_API_PICKUP_ENABLED || "").toLowerCase() === "true";
-}
-
-/**
- * Record that the collection needs to be arranged by hand. This is a normal operational state,
- * not a system fault: it must never surface as a raw carrier error, and never as an ERROR log.
- */
-async function markPickupAsManual(
-  shipment: Shipment,
-  adapter: CarrierAdapter,
-  actorUserId: string | undefined,
-  reason: string,
-): Promise<void> {
-  await storage.updateShipment(shipment.id, {
-    pickupStatus: "manual_required",
-    pickupError: reason,
-  });
-  logInfo(`Pickup for ${shipment.trackingNumber} must be arranged manually (${adapter.carrierCode}): ${reason}`);
-  await logAudit(
-    actorUserId,
-    "pickup_manual_required",
-    "shipment",
-    shipment.id,
-    `Pickup must be arranged manually with ${adapter.carrierCode}: ${reason}`,
-  );
-}
-
-/**
  * If the shipment requested a carrier pickup, book it right after the shipment is booked with
  * the carrier. Non-fatal: a pickup failure never fails the shipment — it records
  * pickupStatus="failed" + the error so ops can retry. Only carriers whose adapter implements
@@ -1520,15 +1477,6 @@ async function bookCarrierPickupIfRequested(
   if (!shipment.pickupRequested || shipment.pickupConfirmationNumber) return;
   if (!adapter.supportsPickup || !adapter.requestPickup) return;
 
-  if (!isApiPickupEnabledForCarrier(adapter.carrierCode)) {
-    await markPickupAsManual(
-      shipment,
-      adapter,
-      actorUserId,
-      `${adapter.carrierCode} API pickup booking is disabled for this account — arrange the collection with ${adapter.carrierCode} directly, or drop the shipment off.`,
-    );
-    return;
-  }
   // Normalize the pickup date at booking time: a missing / past / weekend date (e.g. a quote
   // created days ago, or paid after the cutoff) is bumped to the current cutoff-based default so
   // the carrier never rejects a stale date. The stored window is updated to match what is booked.
@@ -1601,6 +1549,7 @@ async function bookCarrierPickupIfRequested(
     );
     await storage.updateShipment(shipment.id, {
       pickupConfirmationNumber: result.confirmationNumber,
+      pickupLocationCode: result.locationCode ?? null,
       pickupStatus: "confirmed",
       pickupError: null,
     });
@@ -1654,6 +1603,8 @@ async function cancelCarrierPickupIfBooked(
             phone: shipment.senderPhone,
           },
           pickupDate: shipment.pickupDate || undefined,
+          // FedEx Express refuses a cancel without the station code create handed back.
+          locationCode: shipment.pickupLocationCode || undefined,
           instructions: "Shipment cancelled",
         }),
     );
@@ -7312,13 +7263,6 @@ export async function registerRoutes(
       if (!adapter.supportsPickup || !adapter.requestPickup) {
         return res.status(400).json({ error: `${shipment.carrierName || shipment.carrierCode || "This carrier"} does not support API pickup booking.` });
       }
-      // Tell the operator up front rather than letting them click into a carrier error.
-      if (!isApiPickupEnabledForCarrier(adapter.carrierCode)) {
-        return res.status(400).json({
-          error: `${adapter.carrierCode} pickups cannot be booked through the API on this account. Arrange the collection with ${adapter.carrierCode} directly, or drop the shipment off — the waybill is already valid.`,
-        });
-      }
-
       // Replace the pickup preference and clear any prior confirmation so re-booking runs.
       const updated = (await storage.updateShipment(shipment.id, {
         pickupRequested: true,
@@ -7329,6 +7273,7 @@ export async function registerRoutes(
         pickupLocation: parsed.location ?? null,
         pickupInstructions: parsed.instructions ?? null,
         pickupConfirmationNumber: null,
+        pickupLocationCode: null,
         pickupError: null,
       })) || shipment;
 
