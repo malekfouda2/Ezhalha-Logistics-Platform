@@ -1,0 +1,106 @@
+name: CI
+
+# Runs on every pull request into main, and on main itself so the branch's own
+# status is always known. Branch protection should require the `verify` job.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  # A new push to the same branch supersedes the previous run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Type check, build, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: ezhalha
+          POSTGRES_PASSWORD: ezhalha
+          POSTGRES_DB: ezhalha_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ezhalha:ezhalha@localhost:5432/ezhalha_test
+      # Test-only values. Real secrets never belong in CI for this suite — the tests
+      # mock the logger and email, and must not reach any external provider.
+      SESSION_SECRET: ci-session-secret
+      INTEGRATION_CONFIG_SECRET: ci-integration-secret
+      MOBILE_JWT_SECRET: ci-mobile-jwt-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Create schema
+        run: npx drizzle-kit push --force
+
+      # Must run before the suite: initializeDefaults only seeds the default pricing
+      # rules while pricing_rules is empty, and the tests write to that table. Seeding
+      # afterwards leaves `regular`/`mid_level`/`vip` missing, which surfaces as
+      # `400 Invalid profile` on admin client updates. See script/seed-test-db.ts.
+      - name: Seed test database
+        run: npx tsx script/seed-test-db.ts
+
+      # Sequential: the suites share one database and collide on the
+      # client_accounts.account_number sequence when run in parallel.
+      - name: Test
+        run: npx vitest run --no-file-parallelism
+
+      - name: Check generated API docs are up to date
+        run: |
+          npx tsx script/generate-openapi.ts
+          if ! git diff --quiet -- docs/openapi.json API_DOCS.md; then
+            echo "::error::API docs are stale. Run 'npm run openapi' and commit the result."
+            git diff --stat -- docs/openapi.json API_DOCS.md
+            exit 1
+          fi
+
+# ── Not yet enabled: mobile type check ────────────────────────────────────────
+#
+# A second job type-checking mobile/ belongs here, but it would fail today: the Expo
+# app has not been generated yet (`npx create-expo-app` in mobile/), so there is no
+# node_modules, no lockfile, and `expo/tsconfig.base` does not resolve. A check that is
+# red from day one teaches everyone to ignore CI, so it is deliberately left out.
+#
+# Add it once mobile/ has a committed package-lock.json:
+#
+#   mobile:
+#     name: Mobile type check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with: { node-version: 20, cache: npm, cache-dependency-path: mobile/package-lock.json }
+#       - run: npm ci --no-audit --no-fund
+#         working-directory: mobile
+#       - run: npm run check
+#         working-directory: mobile
+#
+# Worth scoping to changes under mobile/ or shared/ so unrelated PRs skip it.
