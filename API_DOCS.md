@@ -1,5 +1,19 @@
 # ezhalha API Documentation
 
+> **⚠️ Outdated — do not use as the API contract.**
+>
+> This file covers ~40 of the ~306 live routes, and its payment sections describe
+> **Moyasar** and **Stripe**, both of which were replaced by **Tap**. It also predates
+> bearer-token auth for native clients.
+>
+> The current, generated contract is **[`docs/openapi.json`](docs/openapi.json)** — every
+> route, its guard, and its rate limit, regenerated with `npm run openapi`. Load it in any
+> OpenAPI viewer.
+>
+> This file is kept only for the prose explanations (idempotency, the shipment creation
+> flow) that have not been ported yet. Treat anything here as historical unless confirmed
+> against the source.
+
 Base URL: `https://your-domain.com/api`
 
 ## Authentication
