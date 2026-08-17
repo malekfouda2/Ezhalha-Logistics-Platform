@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "ezhalha",
+    "slug": "ezhalha",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ezhalha",
+    "userInterfaceStyle": "automatic",
+    "primaryColor": "#fe5200",
+    "extra": {
+      "apiBaseUrl": "https://staging.ezhalha.co"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "co.ezhalha.app"
+    },
+    "android": {
+      "package": "co.ezhalha.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#fe5200"
+      }
+    },
+    "locales": {
+      "ar": "./src/i18n/ios-ar.json"
+    },
+    "plugins": ["expo-router", "expo-secure-store", "expo-localization"]
+  }
+}

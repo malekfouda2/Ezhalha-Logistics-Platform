@@ -1,0 +1,32 @@
+{
+  "name": "ezhalha-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "check": "tsc --noEmit",
+    "lint": "expo lint",
+    "prebuild": "expo prebuild --clean"
+  },
+  "dependencies": {
+    "expo": "*",
+    "expo-constants": "*",
+    "expo-localization": "*",
+    "expo-router": "*",
+    "expo-secure-store": "*",
+    "expo-updates": "*",
+    "react": "*",
+    "react-native": "*",
+    "@tanstack/react-query": "^5.0.0",
+    "i18next": "^23.0.0",
+    "react-i18next": "^14.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/react": "*",
+    "typescript": "^5.6.3"
+  }
+}

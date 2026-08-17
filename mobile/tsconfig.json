@@ -1,0 +1,14 @@
+{
+  "extends": "expo/tsconfig.base",
+  "include": ["src/**/*", "*.ts", "*.tsx", "../shared/**/*"],
+  "exclude": ["node_modules"],
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["../shared/*"]
+    }
+  }
+}
