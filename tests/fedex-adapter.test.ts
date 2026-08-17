@@ -362,10 +362,70 @@ describe("FedExAdapter", () => {
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const booking = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pickup/v1/pickups"))!;
     const body = JSON.parse(String(booking[1].body));
-    expect(body.originDetails.pickupLocation.contact.phoneNumber).toBe("447384968635");
-    expect(body.originDetails.readyDateTimestamp).toBe("2026-08-13T10:00:00+01:00"); // London BST
+    expect(body.originDetail.pickupLocation.contact.phoneNumber).toBe("447384968635");
+    expect(body.originDetail.readyDateTimestamp).toBe("2026-08-13T10:00:00+01:00"); // London BST
     expect(body.packageCount).toBe(2);
     expect(body.totalWeight).toEqual({ units: "KG", value: 35 });
+  });
+
+  it("names the origin field originDetail, singular, as the FedEx schema requires", async () => {
+    // The plural cost us every pickup for months. FedEx drops the unknown key, finds the required
+    // originDetail missing, and answers 500 GENERAL FAILURE with its own {FAILURE_CAUSE}
+    // placeholder unsubstituted — so nothing in the response ever points at the real mistake.
+    // Full_Schema_Create_Pickup.required = [associatedAccountNumber, carrierCode, originDetail].
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 }));
+      }
+      if (u.includes("/availabilities")) {
+        return Promise.resolve(new Response(JSON.stringify({ output: { options: [{ available: true }] } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ output: { pickupConfirmationCode: "3068", location: "SXJA" } }),
+        { status: 200 },
+      ));
+    }));
+
+    const adapter = new FedExAdapter();
+    const result = await adapter.requestPickup({
+      shipper: {
+        name: "New Upward SC", streetLine1: "A4-02, Building A", city: "Shenzhen",
+        postalCode: "518115", countryCode: "CN", phone: "+8615789473913",
+      },
+      packages: [{ weight: 1, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-08-18", readyTime: "09:00", closeTime: "17:00", isInternational: true,
+    });
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pickup/v1/pickups"))![1].body));
+    expect(body.originDetail).toBeDefined();
+    expect(body.originDetails).toBeUndefined();
+    for (const field of ["associatedAccountNumber", "carrierCode", "originDetail"]) {
+      expect(body[field]).toBeDefined();
+    }
+
+    // The station code must survive: FedEx Express will not cancel the pickup without it.
+    expect(result.locationCode).toBe("SXJA");
+  });
+
+  it("sends the station code back when cancelling, which FedEx Express requires", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/oauth/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ output: { pickupConfirmationCode: "3068" } }), { status: 200 }));
+    }));
+
+    const adapter = new FedExAdapter();
+    const ok = await adapter.cancelPickup("3068", { pickupDate: "2026-08-18", locationCode: "SXJA" });
+
+    expect(ok).toBe(true);
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups/cancel"))![1].body));
+    expect(body.location).toBe("SXJA");
+    expect(body.scheduledDate).toBe("2026-08-18");
   });
   it("snaps the pickup window onto a slot FedEx publishes for the origin", async () => {
     // Newport GB: FedEx requires a 4-hour ready→close span and only serves half-hour slots, so a
@@ -405,17 +465,18 @@ describe("FedExAdapter", () => {
     expect(result.confirmationNumber).toBe("7654321");
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 
-    // The availability call must use accountNumber:{value} — associatedAccountNumber:{value}
-    // is rejected 422 by this endpoint, for real and bogus account numbers alike.
+    // This endpoint takes associatedAccountNumber as a bare string — accountNumber:{value} is
+    // not in its schema at all and was silently ignored, making the check account-blind.
     const availability = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).includes("/availabilities"))![1].body));
-    expect(availability.accountNumber).toEqual({ value: "123456789" });
-    expect(availability.associatedAccountNumber).toBeUndefined();
+    expect(availability.associatedAccountNumber).toBe("123456789");
+    expect(availability.accountNumber).toBeUndefined();
+    expect(availability.shipmentAttributes.serviceType).toBeTruthy();
 
     const body = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pickup/v1/pickups"))![1].body));
     // Requested 16:15 is past every published slot → falls back to FedEx's default ready time,
     // and the close time stretches to cover the 4-hour access time.
-    expect(body.originDetails.readyDateTimestamp).toBe("2026-08-13T12:00:00+01:00");
-    expect(body.originDetails.customerCloseTime).toBe("18:00:00");
+    expect(body.originDetail.readyDateTimestamp).toBe("2026-08-13T12:00:00+01:00");
+    expect(body.originDetail.customerCloseTime).toBe("18:00:00");
   });
   it("reports an unknown postal code as invalid instead of throwing", async () => {
     // FedEx answers an unknown code with 400 COUNTRY.POSTALCODEORZIP.INVALID. Shenzhen "518000"
@@ -508,9 +569,8 @@ describe("FedExAdapter", () => {
     expect(body.requestedShipment.shipper.address.stateOrProvinceCode).toBeUndefined();
   });
   it("explains a FedEx pickup refusal instead of forwarding its placeholder", async () => {
-    // FedEx refuses pickups on this account with a bare 500 whose {FAILURE_CAUSE} it never fills
-    // in. Verified live: availability reports the same address/date/window as available, and five
-    // payload shapes fail identically, so the operator needs to be told to arrange it by hand.
+    // A bare 500 whose {FAILURE_CAUSE} FedEx never fills in tells an operator nothing, so the
+    // adapter must translate it rather than forwarding the placeholder.
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       const u = String(url);
       if (u.includes("/oauth/token")) {
@@ -535,7 +595,7 @@ describe("FedExAdapter", () => {
       pickupDate: "2026-08-17", readyTime: "09:00", closeTime: "17:00", isInternational: true,
     };
 
-    await expect(adapter.requestPickup(request)).rejects.toThrow("PICKUP_NOT_PERMITTED");
+    await expect(adapter.requestPickup(request)).rejects.toThrow("PICKUP_FAILED");
     // The raw placeholder must not reach an operator.
     await expect(adapter.requestPickup(request)).rejects.not.toThrow("{FAILURE_CAUSE}");
   });

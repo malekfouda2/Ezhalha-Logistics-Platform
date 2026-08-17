@@ -435,6 +435,9 @@ export const shipments = pgTable("shipments", {
   pickupLocation: text("pickup_location"),
   pickupInstructions: text("pickup_instructions"),
   pickupConfirmationNumber: text("pickup_confirmation_number"),
+  // The carrier station that owns the pickup (FedEx Express returns e.g. "SXJA" from create and
+  // requires it back to cancel). Without it a booked FedEx pickup can only be cancelled by phone.
+  pickupLocationCode: text("pickup_location_code"),
   pickupStatus: text("pickup_status").default("not_requested"),
   pickupError: text("pickup_error"),
   estimatedDelivery: timestamp("estimated_delivery"),

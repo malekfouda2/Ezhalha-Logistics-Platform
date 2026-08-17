@@ -340,10 +340,18 @@ export interface PickupRequest {
   serviceType?: string;
   /** The booked waybill, when the carrier can link the pickup to an existing shipment. */
   trackingNumber?: string;
+  /** The station code returned when the pickup was created. Required to cancel a FedEx Express pickup. */
+  locationCode?: string;
 }
 
 export interface PickupResponse {
   confirmationNumber: string;
+  /**
+   * The carrier station that owns the pickup, when the carrier issues one. FedEx Express returns
+   * it from create (e.g. "SXJA") and REQUIRES it back to cancel, so it has to be persisted with
+   * the confirmation number rather than logged and dropped.
+   */
+  locationCode?: string;
   raw?: unknown;
 }
 
@@ -2123,16 +2131,18 @@ export class FedExAdapter implements CarrierAdapter {
    * Ask FedEx whether a pickup can be served at all for this origin/account/date
    * (POST /pickup/v1/pickups/availabilities) before trying to book one.
    *
-   * POST /pickup/v1/pickups answers an unbookable request with a bare
-   * `500 SYSTEM.UNEXPECTED.ERROR: GENERAL FAILURE {FAILURE_CAUSE}` — FedEx does not even fill in
-   * its own placeholder, so the booking call can never explain itself. The availability call
-   * does: it returns per-option `available` flags plus cut-off/access times, and its own error
-   * codes are specific (unserviced postal code, account not entitled at this origin, …).
+   * It returns per-option `available` flags plus cut-off/access times, and its error codes are
+   * specific about serviceability (unserviced postal code, no option for the date, …), which the
+   * booking call is not.
    *
-   * NOTE the account field: this endpoint takes `accountNumber: { value }`. Sending
-   * `associatedAccountNumber: { value }` (the shape POST /pickups wants) is rejected with a
-   * 422 INVALID.INPUT.EXCEPTION — identically for a real and a bogus account number, i.e. FedEx
-   * never reads the number at all. Verified live against the production account.
+   * NOTE the account field, which differs from POST /pickups: here it is `associatedAccountNumber`
+   * as a bare STRING, not an object. We previously sent `accountNumber: { value }` — not a field
+   * in this schema at all — and FedEx silently ignored it, returning a byte-identical option list
+   * for the real account and for `000000000`. `serviceType` matters too: the spec marks
+   * `shipmentAttributes.serviceType` required for both domestic and international availability.
+   *
+   * Even so, treat `available: true` as "FedEx serves pickups at this address on this date"
+   * rather than proof the booking will be accepted.
    *
    * Returns null when the check itself could not be completed (never blocks a booking on a
    * failure of the diagnostic); returns the reason when FedEx says a pickup is not available.
@@ -2155,9 +2165,13 @@ export class FedExAdapter implements CarrierAdapter {
       customerCloseTime: `${request.closeTime}:00`,
       pickupType: "ON_CALL",
       pickupRequestType: ["FUTURE_DAY"],
+      shipmentAttributes: {
+        serviceType: request.serviceType || (request.isInternational ? "INTERNATIONAL_PRIORITY" : "FEDEX_EXPRESS_SAVER"),
+      },
       carriers: ["FDXE"],
       countryRelationship: request.isInternational ? "INTERNATIONAL" : "DOMESTIC",
-      accountNumber: { value: this.accountNumber },
+      associatedAccountNumber: this.accountNumber,
+      associatedAccountNumberType: "FEDEX_EXPRESS",
     };
     try {
       const { data } = await this.makeRequest<any>("/pickup/v1/pickups/availabilities", "POST", body, 1);
@@ -2213,7 +2227,15 @@ export class FedExAdapter implements CarrierAdapter {
     const totalWeight = request.packages.reduce((sum, p) => sum + (Number(p.weight) || 0), 0);
     const body = {
       associatedAccountNumber: { value: this.accountNumber },
-      originDetails: {
+      // originDetail is SINGULAR, and it is one of the three required fields on this request
+      // (associatedAccountNumber, carrierCode, originDetail). We sent "originDetails" for months:
+      // FedEx drops the unknown key, finds the required one missing, and — because their bean
+      // validation only covers the other two — falls over behind it with a bare
+      // `500 SYSTEM.UNEXPECTED.ERROR: GENERAL FAILURE {FAILURE_CAUSE}`, placeholder unsubstituted.
+      // That is why no pickup ever succeeded and why every payload variant failed identically:
+      // from FedEx's side each one was a request with no origin at all. Do not "fix" this to the
+      // plural again.
+      originDetail: {
         pickupLocation: {
           // The Pickup API validates the phone as digits only (≤ 15) — a "+44…" that /ship
           // accepts is rejected here.
@@ -2221,10 +2243,12 @@ export class FedExAdapter implements CarrierAdapter {
           address: {
             streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
             city: s.city,
+            // The spec marks stateOrProvinceCode required, but a live booking succeeds without it
+            // (confirmation 3069, CN origin), so keep omitting it rather than inventing a value
+            // for the many countries that have none.
             stateOrProvinceCode: s.stateOrProvince || undefined,
             postalCode: s.postalCode || "",
             countryCode: s.countryCode,
-            residential: false,
           },
         },
         readyDateTimestamp: iso,
@@ -2240,18 +2264,16 @@ export class FedExAdapter implements CarrierAdapter {
     try {
       ({ data } = await this.makeRequest<any>("/pickup/v1/pickups", "POST", body, 1));
     } catch (error) {
-      // FedEx answers a pickup it will not accept with a bare 500 GENERAL FAILURE whose own
-      // {FAILURE_CAUSE} placeholder is never filled in. Verified against the live account: the
-      // availability API reports the same address/date/window as available, and five payload
-      // shapes fail identically, so this is an account entitlement matter rather than a request
-      // we can correct. Say so, instead of passing FedEx's placeholder up to an operator.
+      // A bare 500 GENERAL FAILURE here means FedEx fell over behind its own validation rather
+      // than telling us what to correct — the placeholder is never substituted. Historically this
+      // was our own doing (see the originDetail note above); if it reappears, capture the request
+      // and the transactionId before assuming anything about the account.
       const message = (error as Error).message || "";
       if (/SYSTEM\.UNEXPECTED\.ERROR|GENERAL FAILURE/i.test(message)) {
         throw new CarrierError(
-          "PICKUP_NOT_PERMITTED",
-          "FedEx refused the pickup without giving a reason (500 GENERAL FAILURE). The account is " +
-          "most likely not entitled to schedule pickups for this origin — the shipment's waybill is " +
-          "still valid, so arrange the collection with FedEx directly or drop it off.",
+          "PICKUP_FAILED",
+          "FedEx refused the pickup without giving a reason (500 GENERAL FAILURE). The shipment's " +
+          "waybill is still valid, so arrange the collection with FedEx directly or drop it off.",
         );
       }
       throw error;
@@ -2261,7 +2283,8 @@ export class FedExAdapter implements CarrierAdapter {
     if (!confirmationNumber) {
       throw new CarrierError("PICKUP_FAILED", "FedEx pickup booking returned no confirmation code.");
     }
-    return { confirmationNumber, raw: data };
+    const locationCode = String(output?.location ?? "").trim() || undefined;
+    return { confirmationNumber, locationCode, raw: data };
   }
 
   async cancelPickup(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean> {
@@ -2272,6 +2295,9 @@ export class FedExAdapter implements CarrierAdapter {
         pickupConfirmationCode: confirmationNumber,
         carrierCode: "FDXE",
         ...(request?.pickupDate ? { scheduledDate: request.pickupDate } : {}),
+        // FedEx Express cannot cancel without the station code that create returned, so a pickup
+        // booked before we started storing it is only cancellable by phone.
+        ...(request?.locationCode ? { location: request.locationCode } : {}),
         ...(request?.instructions ? { remarks: request.instructions } : {}),
       }, 1);
       return true;
