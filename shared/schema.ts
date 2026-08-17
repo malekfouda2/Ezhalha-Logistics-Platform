@@ -36,6 +36,9 @@ export const users = pgTable("users", {
   isAccountManager: boolean("is_account_manager").notNull().default(false),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  // Bumped on deactivation and password change. Stateless access tokens carry the value
+  // they were minted with, so a bump invalidates every live token for this user at once.
+  tokenVersion: integer("token_version").notNull().default(0),
   lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1058,6 +1061,62 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 
+// Mobile / API refresh tokens. The web app keeps using cookie sessions; native clients
+// (React Native) authenticate with a short-lived access token plus one of these rotating
+// refresh tokens. Only the sha256 hash is stored — the raw token is shown once, at issue.
+export const mobileRefreshTokens = pgTable(
+  "mobile_refresh_tokens",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    // Rotation lineage. Every refresh issues a new row sharing the family; replaying an
+    // already-rotated token revokes the whole family (standard stolen-token signal).
+    familyId: varchar("family_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    deviceName: text("device_name"),
+    platform: text("platform").notNull().default("unknown"),
+    appVersion: text("app_version"),
+    expiresAt: timestamp("expires_at").notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+    revokedAt: timestamp("revoked_at"),
+    revokedReason: text("revoked_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex("ux_mobile_refresh_token_hash").on(table.tokenHash),
+    userIdx: index("ix_mobile_refresh_user").on(table.userId),
+    familyIdx: index("ix_mobile_refresh_family").on(table.familyId),
+  }),
+);
+
+export type MobileRefreshToken = typeof mobileRefreshTokens.$inferSelect;
+export type InsertMobileRefreshToken = typeof mobileRefreshTokens.$inferInsert;
+
+export const MobilePlatform = {
+  IOS: "ios",
+  ANDROID: "android",
+  UNKNOWN: "unknown",
+} as const;
+
+export type MobilePlatformValue = typeof MobilePlatform[keyof typeof MobilePlatform];
+
+// Body accepted by POST /api/auth/token and reused by the OTP token exchange.
+export const mobileDeviceSchema = z.object({
+  deviceId: z.string().min(1, "deviceId is required").max(200),
+  deviceName: z.string().max(200).optional(),
+  platform: z.enum(["ios", "android", "unknown"]).default("unknown"),
+  appVersion: z.string().max(50).optional(),
+});
+
+export const mobileTokenRequestSchema = mobileDeviceSchema.extend({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const mobileRefreshRequestSchema = z.object({
+  refreshToken: z.string().min(20, "refreshToken is required"),
+});
 
 // Application form schema
 export const applicationFormSchema = z.object({

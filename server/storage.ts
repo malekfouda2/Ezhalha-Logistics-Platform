@@ -82,6 +82,8 @@ import {
   type InsertEmailLoginOtp,
   type PasswordResetToken,
   type InsertPasswordResetToken,
+  type MobileRefreshToken,
+  type InsertMobileRefreshToken,
   type CreditInvoice,
   type InsertCreditInvoice,
   type CreditNotificationEvent,
@@ -141,6 +143,7 @@ import {
   salesFeatureAccessRequests,
   emailLoginOtps,
   passwordResetTokens,
+  mobileRefreshTokens,
   creditInvoices,
   creditNotificationEvents,
   creditTransactions,
@@ -182,6 +185,16 @@ export interface IStorage {
   getPasswordResetTokenByHash(tokenHash: string): Promise<PasswordResetToken | undefined>;
   consumePasswordResetToken(id: string): Promise<void>;
   invalidatePasswordResetTokensForUser(userId: string): Promise<void>;
+
+  // Mobile refresh tokens (native clients; the web app uses cookie sessions)
+  createMobileRefreshToken(token: InsertMobileRefreshToken): Promise<MobileRefreshToken>;
+  getMobileRefreshTokenByHash(tokenHash: string): Promise<MobileRefreshToken | undefined>;
+  revokeMobileRefreshToken(id: string, reason: string): Promise<void>;
+  revokeMobileRefreshTokenFamily(familyId: string, reason: string): Promise<number>;
+  revokeMobileRefreshTokensForUser(userId: string, reason: string): Promise<number>;
+  getActiveMobileRefreshTokensForUser(userId: string): Promise<MobileRefreshToken[]>;
+  touchMobileRefreshToken(id: string): Promise<void>;
+  bumpUserTokenVersion(userId: string): Promise<number>;
   getUsersByUserType(userType: string): Promise<User[]>;
   getAccountManagers(): Promise<User[]>;
   getUsersByClientAccount(clientAccountId: string): Promise<User[]>;
@@ -689,6 +702,72 @@ export class DatabaseStorage implements IStorage {
   async invalidatePasswordResetTokensForUser(userId: string): Promise<void> {
     await db.update(passwordResetTokens).set({ consumedAt: new Date() })
       .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.consumedAt)));
+  }
+
+  // Mobile refresh tokens
+  async createMobileRefreshToken(token: InsertMobileRefreshToken): Promise<MobileRefreshToken> {
+    const [created] = await db.insert(mobileRefreshTokens).values(token).returning();
+    return created;
+  }
+
+  async getMobileRefreshTokenByHash(tokenHash: string): Promise<MobileRefreshToken | undefined> {
+    const [row] = await db
+      .select()
+      .from(mobileRefreshTokens)
+      .where(eq(mobileRefreshTokens.tokenHash, tokenHash))
+      .limit(1);
+    return row || undefined;
+  }
+
+  async revokeMobileRefreshToken(id: string, reason: string): Promise<void> {
+    await db
+      .update(mobileRefreshTokens)
+      .set({ revokedAt: new Date(), revokedReason: reason })
+      .where(and(eq(mobileRefreshTokens.id, id), isNull(mobileRefreshTokens.revokedAt)));
+  }
+
+  // Reuse of an already-rotated token means the refresh chain leaked; drop the whole family.
+  async revokeMobileRefreshTokenFamily(familyId: string, reason: string): Promise<number> {
+    const rows = await db
+      .update(mobileRefreshTokens)
+      .set({ revokedAt: new Date(), revokedReason: reason })
+      .where(and(eq(mobileRefreshTokens.familyId, familyId), isNull(mobileRefreshTokens.revokedAt)))
+      .returning({ id: mobileRefreshTokens.id });
+    return rows.length;
+  }
+
+  async revokeMobileRefreshTokensForUser(userId: string, reason: string): Promise<number> {
+    const rows = await db
+      .update(mobileRefreshTokens)
+      .set({ revokedAt: new Date(), revokedReason: reason })
+      .where(and(eq(mobileRefreshTokens.userId, userId), isNull(mobileRefreshTokens.revokedAt)))
+      .returning({ id: mobileRefreshTokens.id });
+    return rows.length;
+  }
+
+  async getActiveMobileRefreshTokensForUser(userId: string): Promise<MobileRefreshToken[]> {
+    return db
+      .select()
+      .from(mobileRefreshTokens)
+      .where(and(eq(mobileRefreshTokens.userId, userId), isNull(mobileRefreshTokens.revokedAt)))
+      .orderBy(desc(mobileRefreshTokens.createdAt));
+  }
+
+  async touchMobileRefreshToken(id: string): Promise<void> {
+    await db
+      .update(mobileRefreshTokens)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(mobileRefreshTokens.id, id));
+  }
+
+  // Invalidates every live access token for a user (deactivation, password change).
+  async bumpUserTokenVersion(userId: string): Promise<number> {
+    const [row] = await db
+      .update(users)
+      .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning({ tokenVersion: users.tokenVersion });
+    return row?.tokenVersion ?? 0;
   }
 
   async getUsersByUserType(userType: string): Promise<User[]> {

@@ -75,6 +75,12 @@ app.use((req, res, next) => {
     );
   }
 
+  if (process.env.NODE_ENV === "production" && !process.env.MOBILE_JWT_SECRET) {
+    console.warn(
+      "[startup] MOBILE_JWT_SECRET is not set. Mobile/native token auth (POST /api/auth/token) will fail until it is configured. The web app is unaffected.",
+    );
+  }
+
   await loadDefaultIntegrationAccountsIntoEnv();
   validateFedExEnvOnStartup();
   validateAramexEnvOnStartup();
