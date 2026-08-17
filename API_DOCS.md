@@ -1,700 +1,908 @@
 # ezhalha API Documentation
 
-> **⚠️ Outdated — do not use as the API contract.**
->
-> This file covers ~40 of the ~306 live routes, and its payment sections describe
-> **Moyasar** and **Stripe**, both of which were replaced by **Tap**. It also predates
-> bearer-token auth for native clients.
->
-> The current, generated contract is **[`docs/openapi.json`](docs/openapi.json)** — every
-> route, its guard, and its rate limit, regenerated with `npm run openapi`. Load it in any
-> OpenAPI viewer.
->
-> This file is kept only for the prose explanations (idempotency, the shipment creation
-> flow) that have not been ported yet. Treat anything here as historical unless confirmed
-> against the source.
+> **Generated file — do not edit by hand.**
+> Produced by `script/generate-openapi.ts` (`npm run openapi`) directly from the Express
+> route table, so it cannot drift from the code. To add detail to an endpoint, edit
+> `DETAILED_OPERATIONS` in that script and regenerate.
+> Machine-readable equivalent: [`docs/openapi.json`](docs/openapi.json).
 
-Base URL: `https://your-domain.com/api`
+Covers **306 routes**.
+
+## Contents
+
+- [Base URLs](#base-urls)
+- [Authentication](#authentication)
+- [Errors](#errors)
+- [Conventions](#conventions)
+- [The shipment flow](#the-shipment-flow)
+- [Endpoints](#endpoints)
+- [Schemas](#schemas)
+
+## Base URLs
+
+| Environment | URL |
+| --- | --- |
+| Staging | `https://staging.ezhalha.co` |
+| Production | `https://app.ezhalha.co` |
+| Local | `http://localhost:5000` |
 
 ## Authentication
 
-All API requests (except public endpoints) require session-based authentication. Login first to establish a session.
+Two mechanisms reach the same routes.
 
-### Login
+**Cookie session — the web SPA.** `POST /api/auth/login` sets an httpOnly,
+`sameSite=lax` session cookie.
+
+**Bearer token — native clients.** `POST /api/auth/token` returns a 15-minute access
+token plus a rotating refresh token. Send `Authorization: Bearer <accessToken>`. A
+bearer request never creates a server session row.
+
 ```http
-POST /api/auth/login
+POST /api/auth/token
 Content-Type: application/json
 
 {
-  "username": "your_username",
-  "password": "your_password"
+  "username": "someone@example.com",
+  "password": "…",
+  "deviceId": "stable-per-install-id",
+  "platform": "ios",
+  "appVersion": "1.0.0"
 }
 ```
 
-**Response:**
+`username` accepts a username, an email, or a phone number. Passwordless login is
+`POST /api/auth/otp/request` then `POST /api/auth/token/otp`.
+
+**Refresh rotation.** `POST /api/auth/refresh` returns a new pair and invalidates the one
+presented. Replaying an already-rotated token is treated as a leaked chain and revokes
+the entire token family. **Clients must single-flight the refresh call** — concurrent
+refreshes will sign the user out.
+
+| Code | Meaning | Client action |
+| --- | --- | --- |
+| `token_expired` | access token past its exp | refresh and replay |
+| `token_invalid` | malformed or bad signature | refresh, then re-login |
+| `token_revoked` | password changed or account deactivated | re-login |
+| `refresh_expired` | refresh token older than 60 days | re-login |
+| `refresh_reused` | replay detected, family revoked | re-login |
+| `refresh_invalid` | unknown token | re-login |
+
+## Errors
+
+Errors return JSON, sometimes with a machine-readable `code`:
+
 ```json
-{
-  "user": {
-    "id": "uuid",
-    "username": "client1",
-    "email": "client@example.com",
-    "userType": "client",
-    "clientAccountId": "uuid"
-  }
-}
+{ "error": "Access token expired", "code": "token_expired" }
 ```
 
-### Logout
-```http
-POST /api/auth/logout
+Some older handlers return `{ "message": … }` instead of `{ "error": … }`. Read
+`error ?? message` until that is normalised.
+
+An unknown `/api/*` path returns `404 { "code": "not_found" }` — never the SPA's HTML.
+
+## Conventions
+
+**Money is a string.** Every decimal column serialises as a string (`"1234.56"`), not a
+number. Do not parse and re-format it; render for display and send the original value
+back. SAR is the accounting truth — non-SAR is a display layer with an FX rate snapshot.
+
+**Idempotency.** Endpoints marked *Accepts `Idempotency-Key`* de-duplicate on that header.
+Reuse the same key when retrying a payment or booking.
+
+**Request bodies cap at 1MB.** Never base64 a file into JSON; use the signed-URL upload
+flow (`POST /api/uploads/request-url`). Oversized bodies return
+`413 { "code": "payload_too_large" }`.
+
+**Authenticated files.** Label and invoice PDFs are streamed behind the auth guard, so a
+plain URL open will 401 on a native client. Fetch with the Authorization header and write
+to a file first.
+
+**Rate limits.** Auth endpoints are limited per targeted account, with a coarse per-IP
+ceiling across `/api/auth`. Other endpoints are limited per authenticated user.
+
+**Permissions.** `client` users are gated by `ClientPermission` values; some actions
+additionally require the account's **primary contact**. `admin` users are gated by
+`resource:action` strings. Both are listed per endpoint below.
+
+## The shipment flow
+
+Express shipments are a four-step flow. Each step is a separate call and the shipment is
+not booked with the carrier until the last one.
+
+```
+1. POST /api/client/shipments/rates      → rate options, each with a quoteId
+2. POST /api/client/shipments/checkout   → pending shipment from a quoteId
+3. POST /api/client/shipments/pay        → charge via Tap   (or …/pay-later for credit)
+4. POST /api/client/shipments/confirm    → book, label, tracking number
 ```
 
-### Get Current User
-```http
-GET /api/auth/me
-```
+Domestic shipments use `/api/client/local/rates` and `/api/client/local/checkout`;
+Door-to-Door Freight uses `/api/client/ddp/rates` and `/api/client/ddp/checkout`.
+
+## Endpoints
+
+### Authentication
+
+15 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/change-password` | — | Guard `requireAuth` |
+| `GET` | `/api/auth/devices` | List the signed-in devices for the current user | Guard `requireAuth` |
+| `DELETE` | `/api/auth/devices/:id` | Sign out one device | Guard `requireAuth` |
+| `POST` | `/api/auth/forgot-password` | — | Rate limit `otpLimiter` |
+| `POST` | `/api/auth/login` | Cookie-session login (web app) | Rate limit `authLimiter` |
+| `POST` | `/api/auth/logout` | — | — |
+| `GET` | `/api/auth/me` | Current authenticated user | — |
+| `POST` | `/api/auth/otp/request` | Send a 6-digit email login code | Rate limit `otpLimiter` |
+| `POST` | `/api/auth/otp/verify` | — | Rate limit `otpLimiter` |
+| `POST` | `/api/auth/refresh` | Rotate a refresh token | Rate limit `otpLimiter` |
+| `POST` | `/api/auth/reset-password` | — | Rate limit `otpLimiter` |
+| `GET` | `/api/auth/reset-password/:token` | — | — |
+| `POST` | `/api/auth/revoke` | Revoke a refresh token (mobile sign-out) | — |
+| `POST` | `/api/auth/token` | Exchange credentials for an access + refresh token pair | Rate limit `authLimiter` |
+| `POST` | `/api/auth/token/otp` | Exchange a verified email login code for a token pair | Rate limit `otpLimiter` |
+
+#### Authentication — details
+
+##### `DELETE /api/auth/devices/:id`
+
+Sign out one device
+
+Revokes the whole token family for that device.
+
+Requirements: Guard `requireAuth`
+
+Source: `server/routes.ts:8539`
+
+##### `POST /api/auth/login`
+
+Cookie-session login (web app)
+
+Used by the web SPA. Native clients should use POST /api/auth/token instead.
+
+Requirements: Rate limit `authLimiter`
+
+Source: `server/routes.ts:8099`
+
+##### `POST /api/auth/otp/request`
+
+Send a 6-digit email login code
+
+Always returns success — never reveals whether the address exists.
+
+Requirements: Rate limit `otpLimiter`
+
+Source: `server/routes.ts:8170`
+
+##### `POST /api/auth/refresh`
+
+Rotate a refresh token
+
+Returns a new pair and invalidates the presented refresh token. Presenting an already-rotated token is treated as a leaked chain: the entire token family is revoked and the response carries code `refresh_reused`. Clients must single-flight this call — concurrent refreshes will sign the user out.
+
+Request body — `RefreshRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `refreshToken` | string | yes | min length 20 |
+
+Requirements: Rate limit `otpLimiter`
+
+Source: `server/routes.ts:8434`
+
+##### `POST /api/auth/revoke`
+
+Revoke a refresh token (mobile sign-out)
+
+Deliberately unauthenticated so a client whose access token already expired can still sign out. Always returns success, even for an unknown token.
+
+Request body — `RefreshRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `refreshToken` | string | yes | min length 20 |
+
+Source: `server/routes.ts:8498`
+
+##### `POST /api/auth/token`
+
+Exchange credentials for an access + refresh token pair
+
+Native-client login. `username` accepts a username, an email address, or a phone number. Sets no cookie. Rate limited to 5 failed attempts per 15 minutes per IP.
+
+Request body — `TokenRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `deviceId` | string | yes | max length 200; Stable per-install id |
+| `deviceName` | string | no | max length 200 |
+| `platform` | enum: `ios`, `android`, `unknown` | no | default `unknown` |
+| `appVersion` | string | no | max length 50 |
+| `username` | string | yes | Username, email, or phone number |
+| `password` | string (password) | yes |  |
+
+Requirements: Rate limit `authLimiter`
+
+Source: `server/routes.ts:8312`
+
+##### `POST /api/auth/token/otp`
+
+Exchange a verified email login code for a token pair
+
+Passwordless equivalent of POST /api/auth/token. Codes come from /api/auth/otp/request.
+
+Request body — `OtpTokenRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `deviceId` | string | yes | max length 200; Stable per-install id |
+| `deviceName` | string | no | max length 200 |
+| `platform` | enum: `ios`, `android`, `unknown` | no | default `unknown` |
+| `appVersion` | string | no | max length 50 |
+| `email` | string (email) | yes |  |
+| `code` | string | yes | pattern `^\d{6}$` |
+
+Requirements: Rate limit `otpLimiter`
+
+Source: `server/routes.ts:8374`
+
+### Client portal
+
+68 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `GET` | `/api/client/abandoned-recovery/offers` | Recovery offers on abandoned shipments | Guard `requireClient`<br>Permission `ClientPermission.VIEW_SHIPMENTS` |
+| `GET` | `/api/client/account` | The signed-in user's client account | Guard `requireClient` |
+| `PATCH` | `/api/client/account` | Update the client account profile | Guard `requireClient`<br>**Primary contact only** |
+| `GET` | `/api/client/address-book` | Saved sender and recipient addresses | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/carrier-rules` | Automatic carrier-assignment rules | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/carrier-rules` | Create a carrier-assignment rule | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `DELETE` | `/api/client/carrier-rules/:id` | Delete a carrier-assignment rule | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `PATCH` | `/api/client/carrier-rules/:id` | Update a carrier-assignment rule | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/credit-access` | Credit status and available balance | Guard `requireClient` |
+| `POST` | `/api/client/credit-access/request` | Request credit access | Guard `requireClient`<br>**Primary contact only** |
+| `GET` | `/api/client/credit-invoices` | Credit (pay-later) invoices, 30-day terms | Guard `requireClient`<br>Permission `ClientPermission.VIEW_INVOICES` |
+| `GET` | `/api/client/credit-invoices/:id` | One credit invoice | Guard `requireClient`<br>Permission `ClientPermission.VIEW_INVOICES` |
+| `POST` | `/api/client/ddp/checkout` | Create a pending DDP shipment from a quote | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/ddp/lanes` | Available Door-to-Door Freight lanes | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/ddp/rates` | Quote a DDP (Door-to-Door Freight) shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/extra-fees` | Extra charges raised against the account | Guard `requireClient`<br>Permission `ClientPermission.VIEW_PAYMENTS` |
+| `GET` | `/api/client/fx-rate` | Display currency and the SAR conversion rate for this account | — |
+| `POST` | `/api/client/hs-code/confirm` | Confirm the HS code chosen for an item | Guard `requireClient` |
+| `GET` | `/api/client/invoices` | Invoices | Guard `requireClient`<br>Permission `ClientPermission.VIEW_INVOICES` |
+| `GET` | `/api/client/invoices/:id/pdf` | Invoice (PDF) | Guard `requireClient`<br>Permission `ClientPermission.VIEW_INVOICES`<br>Returns `text/html` |
+| `POST` | `/api/client/local/checkout` | Create a pending domestic shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS`<br>Accepts `Idempotency-Key` |
+| `POST` | `/api/client/local/rates` | Quote a domestic shipment via local carriers | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/my-permissions` | Effective ClientPermission list for the caller | Guard `requireClient` |
+| `GET` | `/api/client/orders` | Storefront orders awaiting fulfilment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/orders/:id` | One storefront order | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/orders/:id/fulfill` | Fulfil an order as a shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/orders/:id/rates` | Rate options for fulfilling an order | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/payments` | Payment history | Guard `requireClient`<br>Permission `ClientPermission.VIEW_PAYMENTS` |
+| `POST` | `/api/client/payments/create-charge` | Charge an outstanding invoice | Guard `requireClient`<br>Permission `ClientPermission.MAKE_PAYMENTS` |
+| `POST` | `/api/client/payments/create-intent` | Create a payment intent for an invoice | Guard `requireClient`<br>Permission `ClientPermission.MAKE_PAYMENTS` |
+| `GET` | `/api/client/payments/tap/config` | Public Tap config for the checkout SDK | Guard `requireClient` |
+| `GET` | `/api/client/payments/tap/saved-cards` | Saved cards | Guard `requireClient` |
+| `DELETE` | `/api/client/payments/tap/saved-cards/:id` | Delete a saved card | Guard `requireClient` |
+| `POST` | `/api/client/payments/tap/saved-cards/:id/default` | Make a saved card the default | Guard `requireClient` |
+| `POST` | `/api/client/quick-quote` | Indicative price without creating a quote | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/quotations/:id` | An admin-prepared quotation | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `PATCH` | `/api/client/quotations/:id` | Amend a quotation before accepting it | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/quotations/:id/accept-terms` | Accept a quotation's terms | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/sales-channels` | Connected storefronts | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/sales-channels` | Connect a storefront | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `DELETE` | `/api/client/sales-channels/:id` | Disconnect a storefront | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `PATCH` | `/api/client/sales-channels/:id` | Update a storefront connection | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/sales-channels/:id/sync` | Pull orders from the storefront now | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/sales-features` | Sales-feature entitlement status | Guard `requireClient` |
+| `POST` | `/api/client/sales-features/request` | Request sales features | Guard `requireClient`<br>**Primary contact only** |
+| `GET` | `/api/client/shipments` | List shipments | Guard `requireClient`<br>Permission `ClientPermission.VIEW_SHIPMENTS` |
+| `POST` | `/api/client/shipments` | Create a shipment directly (legacy flat form) | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS`<br>Accepts `Idempotency-Key` |
+| `GET` | `/api/client/shipments/:id` | One shipment, with items, documents and tracking | Guard `requireClient`<br>Permission `ClientPermission.VIEW_SHIPMENTS` |
+| `PATCH` | `/api/client/shipments/:id` | Edit a shipment that has not been paid yet | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/shipments/:id/cancel` | Cancel a shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/shipments/:id/checkout-summary` | Priced summary of a pending shipment before payment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/shipments/:id/commercial-invoice.html` | Commercial invoice (HTML) | Guard `requireClient`<br>Returns `text/html` |
+| `GET` | `/api/client/shipments/:id/commercial-invoice.pdf` | Commercial invoice (PDF) | Guard `requireClient`<br>Returns `application/pdf` |
+| `GET` | `/api/client/shipments/:id/label.pdf` | Shipping label (PDF) | Guard `requireClient`<br>Returns `application/pdf` |
+| `POST` | `/api/client/shipments/:id/pay-later` | Place a shipment on credit terms instead of charging a card | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/shipments/:id/track` | Carrier tracking checkpoints | Guard `requireClient` |
+| `POST` | `/api/client/shipments/checkout` | Step 2 — turn a quote into a pending shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS`<br>Accepts `Idempotency-Key` |
+| `POST` | `/api/client/shipments/confirm` | Step 4 — book with the carrier after payment settles | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS`<br>Accepts `Idempotency-Key` |
+| `POST` | `/api/client/shipments/extract-invoice-items` | Extract commercial-invoice line items from an uploaded invoice | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/shipments/extract-package-details` | Extract package dimensions and weight from an uploaded document | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/shipments/pay` | Step 3 — pay for a pending shipment | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `POST` | `/api/client/shipments/rates` | Step 1 — quote carrier rates | Guard `requireClient`<br>Permission `ClientPermission.CREATE_SHIPMENTS` |
+| `GET` | `/api/client/shipments/recent` | Most recent shipments, for the dashboard | Guard `requireClient`<br>Permission `ClientPermission.VIEW_SHIPMENTS` |
+| `GET` | `/api/client/stats` | Dashboard counters for the account | Guard `requireClient` |
+| `GET` | `/api/client/users` | Users on the account | Guard `requireClient`<br>**Primary contact only** |
+| `POST` | `/api/client/users` | Invite a user to the account | Guard `requireClient`<br>**Primary contact only** |
+| `DELETE` | `/api/client/users/:userId` | Remove a user from the account | Guard `requireClient`<br>**Primary contact only** |
+| `PATCH` | `/api/client/users/:userId/permissions` | Set a user's permissions | Guard `requireClient`<br>**Primary contact only** |
+
+#### Client portal — details
+
+##### `PATCH /api/client/account`
+
+Update the client account profile
+
+Primary contact only. Bilingual (EN/AR) fields are accepted.
+
+Requirements: Guard `requireClient` · **Primary contact only**
+
+Source: `server/routes.ts:15649`
+
+##### `GET /api/client/fx-rate`
+
+Display currency and the SAR conversion rate for this account
+
+Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.
+
+Source: `server/routes.ts:15612`
+
+##### `POST /api/client/orders/:id/fulfill`
+
+Fulfil an order as a shipment
+
+409 means the order was already fulfilled.
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:18144`
+
+##### `POST /api/client/quick-quote`
+
+Indicative price without creating a quote
+
+Read-only estimate for a price-check screen. Produces no `quoteId`.
+
+Request body — `QuickQuoteRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `origin` | object | yes |  |
+| `destination` | object | yes |  |
+| `weightKg` | number | yes | > 0 |
+| `length` | number | no | >= 0 |
+| `width` | number | no | >= 0 |
+| `height` | number | no | >= 0 |
+| `pieces` | integer | no | default `1`; > 0 |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:16606`
+
+##### `POST /api/client/shipments`
+
+Create a shipment directly (legacy flat form)
+
+The simple non-carrier path. The express flow is rates → checkout → pay → confirm.
+
+Request body — `LegacyShipmentRequest`:
+
+> Flat legacy create form. Prefer the rates → checkout → pay → confirm flow.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `senderName` | string | yes | min length 2 |
+| `senderAddress` | string | yes | min length 5 |
+| `senderCity` | string | yes | min length 2 |
+| `senderCountry` | string | yes | min length 2 |
+| `senderPhone` | string | yes | min length 8 |
+| `recipientName` | string | yes | min length 2 |
+| `recipientAddress` | string | yes | min length 5 |
+| `recipientCity` | string | yes | min length 2 |
+| `recipientCountry` | string | yes | min length 2 |
+| `recipientPhone` | string | yes | min length 8 |
+| `weight` | string | yes | Decimal as a string |
+| `dimensions` | string | no |  |
+| `packageType` | string | yes | min length 1 |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
+
+Source: `server/routes.ts:18805`
+
+##### `POST /api/client/shipments/:id/cancel`
+
+Cancel a shipment
+
+A still-booked cancellation auto-issues a Tap refund and cancels any carrier pickup. DHL exposes no cancel API, so the carrier-side cancel is a no-op there.
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:18885`
+
+##### `GET /api/client/shipments/:id/label.pdf`
+
+Shipping label (PDF)
+
+Binary behind the auth guard. Native clients must fetch this with the Authorization header and write it to a file — a plain URL open will 401.
+
+Requirements: Guard `requireClient` · Returns `application/pdf`
+
+Source: `server/routes.ts:18991`
+
+##### `POST /api/client/shipments/:id/pay-later`
+
+Place a shipment on credit terms instead of charging a card
+
+Requires an approved credit limit with sufficient available balance.
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:19188`
+
+##### `POST /api/client/shipments/checkout`
+
+Step 2 — turn a quote into a pending shipment
+
+Consumes a `quoteId` from step 1 and creates the shipment in a pending state. Commercial-invoice items and a pickup preference may be attached here.
+
+Request body — `CheckoutRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `quoteId` | string (uuid) | yes | From POST /api/client/shipments/rates |
+| `items` | array of [`ShipmentItem`](#schemas) | no |  |
+| `tradeDocuments` | array of object | no | max 5 item(s) |
+| `pickup` | [`Pickup`](#schemas) | no |  |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
+
+Source: `server/routes.ts:18266`
+
+##### `POST /api/client/shipments/confirm`
+
+Step 4 — book with the carrier after payment settles
+
+Produces the label, tracking number and commercial invoice.
+
+Request body — `ConfirmRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `shipmentId` | string (uuid) | yes |  |
+| `paymentIntentId` | string | no |  |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
+
+Source: `server/routes.ts:18697`
+
+##### `POST /api/client/shipments/extract-invoice-items`
+
+Extract commercial-invoice line items from an uploaded invoice
+
+AI extraction (Gemini). Upload the file through the signed-URL flow first and pass its reference. Returns items shaped for the `items` array on checkout.
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:16376`
+
+##### `POST /api/client/shipments/extract-package-details`
+
+Extract package dimensions and weight from an uploaded document
+
+AI extraction (Gemini). Same upload-first pattern as invoice extraction.
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:16444`
+
+##### `POST /api/client/shipments/pay`
+
+Step 3 — pay for a pending shipment
+
+Charges through Tap. `tapTokenId` comes from the Tap SDK; omit it to charge the account's default saved card. Browser clients are redirected; native clients must use the mobile payment path (Workstream D) rather than following the redirect.
+
+Request body — `ShipmentPaymentRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `shipmentId` | string (uuid) | yes |  |
+| `tapTokenId` | string | no | From the Tap SDK. Omit to use the default saved card. |
+| `saveCardForFuture` | boolean | no |  |
+| `returnPath` | string | no | max length 200; Must start with /client/ |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:18583`
+
+##### `POST /api/client/shipments/rates`
+
+Step 1 — quote carrier rates
+
+Returns rate options, each with a `quoteId` that step 2 consumes. Quotes expire. A 502 means the carrier API failed, not that the request was invalid.
+
+Request body — `ShipmentRateRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `shipmentType` | enum: `domestic`, `inbound`, `outbound` | yes |  |
+| `isDdp` | boolean | no | default `false` |
+| `carrier` | string | no |  |
+| `serviceType` | string | no |  |
+| `shipper` | [`Address`](#schemas) | yes |  |
+| `recipient` | [`Address`](#schemas) | yes |  |
+| `packages` | array of [`Package`](#schemas) | yes | min 1 item(s) |
+| `weightUnit` | enum: `LB`, `KG` | no | default `KG` |
+| `dimensionUnit` | enum: `IN`, `CM` | no | default `CM` |
+| `packageType` | string | no | default `YOUR_PACKAGING` |
+| `currency` | string | no | default `SAR` |
+| `shipDate` | string | no |  |
+| `items` | array of [`ShipmentItem`](#schemas) | no |  |
+| `tradeDocuments` | array of object | no | max 5 item(s) |
+
+Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
+
+Source: `server/routes.ts:17271`
+
+### Operations portal
+
+26 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `GET` | `/api/operations/me/access` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `GET` | `/api/operations/shipments` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `GET` | `/api/operations/shipments/:id` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/attention/resolve` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/charges/custom` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/charges/extra-weight` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/charges/extra-weight/preview` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/client-message` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/eta` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/expenses` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `DELETE` | `/api/operations/shipments/:id/expenses/:expenseId` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/last-mile` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/notes` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/pickup` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/plan` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/reassign` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/special-handling` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/special-handling/resolve` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/status` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/tasks/:taskId/complete` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/tasks/:taskId/metadata` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `POST` | `/api/operations/shipments/:id/tracking-numbers` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `DELETE` | `/api/operations/shipments/:id/tracking-numbers/:tnId` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `PATCH` | `/api/operations/shipments/:id/tracking-numbers/:tnId` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `GET` | `/api/operations/summary` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+| `GET` | `/api/operations/users` | — | Guard `requireOperationsPermission`<br>Permission `operations` |
+
+### Admin portal
+
+154 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `GET` | `/api/admin/account-managers` | — | Guard `requireAdminPermission`<br>Permission `account-managers:read` |
+| `POST` | `/api/admin/account-managers` | — | Guard `requireAdminPermission`<br>Permission `account-managers:create` |
+| `PUT` | `/api/admin/account-managers/:userId/clients` | — | Guard `requireAdminPermission`<br>Permission `account-managers:assign` |
+| `GET` | `/api/admin/account-managers/change-requests` | — | Guard `requireAdminPermission`<br>Permission `account-manager-requests:read` |
+| `POST` | `/api/admin/account-managers/change-requests/:id/approve` | — | Guard `requireAdminPermission`<br>Permission `account-manager-requests:approve` |
+| `POST` | `/api/admin/account-managers/change-requests/:id/reject` | — | Guard `requireAdminPermission`<br>Permission `account-manager-requests:reject` |
+| `GET` | `/api/admin/applications` | — | Guard `requireAdminPermission`<br>Permission `applications:read` |
+| `POST` | `/api/admin/applications/:id/review` | — | Guard `requireAdmin` |
+| `GET` | `/api/admin/applications/pending` | — | Guard `requireAdminPermission`<br>Permission `applications:read` |
+| `GET` | `/api/admin/apps` | — | Guard `requireAdminPermission`<br>Permission `integrations:read` |
+| `DELETE` | `/api/admin/apps/:appKey/logo` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `PUT` | `/api/admin/apps/:appKey/logo` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `POST` | `/api/admin/apps/accounts` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `DELETE` | `/api/admin/apps/accounts/:id` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `PATCH` | `/api/admin/apps/accounts/:id` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `POST` | `/api/admin/apps/accounts/:id/test` | — | Guard `requireAdminPermission`<br>Permission `integrations:configure` |
+| `GET` | `/api/admin/audit-logs` | — | Guard `requireAdminPermission`<br>Permission `audit-logs:read` |
+| `GET` | `/api/admin/audit-logs/stats` | — | Guard `requireAdminPermission`<br>Permission `audit-logs:read` |
+| `GET` | `/api/admin/carrier-payout-batches` | — | Guard `requireAdminPermission`<br>Permission `payments:read` |
+| `POST` | `/api/admin/carrier-payout-batches` | — | Guard `requireAdminPermission`<br>Permission `payments:create` |
+| `POST` | `/api/admin/carrier-payout-batches/:id/mark-paid` | — | Guard `requireAdminPermission`<br>Permission `payments:create` |
+| `GET` | `/api/admin/client-profile-options` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
+| `GET` | `/api/admin/clients` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
+| `POST` | `/api/admin/clients` | — | Guard `requireAdminPermission`<br>Permission `clients:create` |
+| `DELETE` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:delete` |
+| `GET` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
+| `PATCH` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
+| `GET` | `/api/admin/clients/:id/credit` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
+| `PATCH` | `/api/admin/clients/:id/credit-limit` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
+| `PATCH` | `/api/admin/clients/:id/profile` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
+| `PATCH` | `/api/admin/clients/:id/sales-features` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
+| `PATCH` | `/api/admin/clients/:id/status` | — | Guard `requireAdminPermission`<br>Permission `clients:activate` |
+| `GET` | `/api/admin/credit-invoices` | — | Guard `requireAdminPermission`<br>Permission `credit-invoices:read` |
+| `GET` | `/api/admin/credit-invoices/:id` | — | Guard `requireAdminPermission`<br>Permission `credit-invoices:read` |
+| `POST` | `/api/admin/credit-invoices/:id/cancel` | — | Guard `requireAdminPermission`<br>Permission `credit-invoices:cancel` |
+| `POST` | `/api/admin/credit-invoices/:id/mark-paid` | — | Guard `requireAdminPermission`<br>Permission `credit-invoices:update` |
+| `GET` | `/api/admin/credit-requests` | — | Guard `requireAdminPermission`<br>Permission `credit-requests:read` |
+| `POST` | `/api/admin/credit-requests/:id/approve` | — | Guard `requireAdminPermission`<br>Permission `credit-requests:approve` |
+| `POST` | `/api/admin/credit-requests/:id/reject` | — | Guard `requireAdminPermission`<br>Permission `credit-requests:reject` |
+| `POST` | `/api/admin/credit-requests/:id/revoke` | — | Guard `requireAdminPermission`<br>Permission `credit-requests:revoke` |
+| `GET` | `/api/admin/ddp-pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/ddp-pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:create` |
+| `DELETE` | `/api/admin/ddp-pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:delete` |
+| `PATCH` | `/api/admin/ddp-pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `POST` | `/api/admin/ddp/shipments/:id/charges` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `GET` | `/api/admin/departments` | — | Guard `requireAdminPermission`<br>Permission `roles:read` |
+| `POST` | `/api/admin/departments` | — | Guard `requireAdminPermission`<br>Permission `roles:create` |
+| `PATCH` | `/api/admin/departments/:id` | — | Guard `requireAdminPermission`<br>Permission `roles:update` |
+| `GET` | `/api/admin/email-templates` | — | Guard `requireAdminPermission`<br>Permission `email-templates:read` |
+| `GET` | `/api/admin/email-templates/:id` | — | Guard `requireAdminPermission`<br>Permission `email-templates:read` |
+| `PUT` | `/api/admin/email-templates/:id` | — | Guard `requireAdminPermission`<br>Permission `email-templates:update` |
+| `POST` | `/api/admin/email-templates/:id/preview` | — | Guard `requireAdminPermission`<br>Permission `email-templates:read` |
+| `POST` | `/api/admin/email-templates/:id/reset` | — | Guard `requireAdminPermission`<br>Permission `email-templates:update` |
+| `GET` | `/api/admin/financial-statements` | — | Guard `requireAdminPermission`<br>Permission `payments:read` |
+| `POST` | `/api/admin/financial-statements/shipments/:id/cancel-carrier-payment` | — | Guard `requireAdminPermission`<br>Permission `payments:create` |
+| `PATCH` | `/api/admin/financial-statements/shipments/:id/extra-fees` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `POST` | `/api/admin/financial-statements/shipments/:id/mark-carrier-paid` | — | Guard `requireAdminPermission`<br>Permission `payments:create` |
+| `POST` | `/api/admin/financial-statements/shipments/:id/mark-paid` | — | Guard `requireAdminPermission`<br>Permission `payments:create` |
+| `GET` | `/api/admin/integration-logs` | — | Guard `requireAdminPermission`<br>Permission `integrations:read` |
+| `GET` | `/api/admin/invitations` | — | Guard `requireAdminPermission`<br>Permission `users:read` |
+| `POST` | `/api/admin/invitations` | — | Guard `requireAdminPermission`<br>Permission `users:create` |
+| `POST` | `/api/admin/invitations/:id/resend` | — | Guard `requireAdminPermission`<br>Permission `users:update` |
+| `POST` | `/api/admin/invitations/:id/revoke` | — | Guard `requireAdminPermission`<br>Permission `users:update` |
+| `GET` | `/api/admin/invoices` | — | Guard `requireAdminPermission`<br>Permission `invoices:read` |
+| `GET` | `/api/admin/invoices/:id` | — | Guard `requireAdminPermission`<br>Permission `invoices:read` |
+| `GET` | `/api/admin/invoices/:id/pdf` | — | Guard `requireAdminPermission`<br>Permission `invoices:download` |
+| `GET` | `/api/admin/local-pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/local-pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:create` |
+| `DELETE` | `/api/admin/local-pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:delete` |
+| `PATCH` | `/api/admin/local-pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `GET` | `/api/admin/me/access` | — | — |
+| `GET` | `/api/admin/payments` | — | Guard `requireAdminPermission`<br>Permission `payments:read` |
+| `GET` | `/api/admin/permissions` | — | Guard `requireAdminPermission`<br>Permission `permissions:read` |
+| `POST` | `/api/admin/permissions` | — | Guard `requireAdminPermission`<br>Permission `permissions:create` |
+| `DELETE` | `/api/admin/permissions/:id` | — | Guard `requireAdminPermission`<br>Permission `permissions:delete` |
+| `GET` | `/api/admin/policies` | — | Guard `requireAdminPermission`<br>Permission `policies:read` |
+| `POST` | `/api/admin/policies` | — | Guard `requireAdminPermission`<br>Permission `policies:create` |
+| `DELETE` | `/api/admin/policies/:id` | — | Guard `requireAdminPermission`<br>Permission `policies:delete` |
+| `GET` | `/api/admin/policies/:id` | — | Guard `requireAdminPermission`<br>Permission `policies:read` |
+| `PATCH` | `/api/admin/policies/:id` | — | Guard `requireAdminPermission`<br>Permission `policies:update` |
+| `GET` | `/api/admin/policies/:id/versions` | — | Guard `requireAdminPermission`<br>Permission `policies:read` |
+| `GET` | `/api/admin/policies/:id/versions/:versionId` | — | Guard `requireAdminPermission`<br>Permission `policies:read` |
+| `GET` | `/api/admin/pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/pricing` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:create` |
+| `DELETE` | `/api/admin/pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:delete` |
+| `PATCH` | `/api/admin/pricing/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `GET` | `/api/admin/pricing/:id/ddp-tiers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/pricing/:id/ddp-tiers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `GET` | `/api/admin/pricing/:id/tiers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/pricing/:id/tiers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `DELETE` | `/api/admin/pricing/ddp-tiers/:tierId` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `PATCH` | `/api/admin/pricing/ddp-tiers/:tierId` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `POST` | `/api/admin/pricing/preview` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `DELETE` | `/api/admin/pricing/tiers/:tierId` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `PATCH` | `/api/admin/pricing/tiers/:tierId` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `POST` | `/api/admin/quotations` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `GET` | `/api/admin/quotations/client/:clientAccountId` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `GET` | `/api/admin/quotations/client/:clientAccountId/address-book` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `GET` | `/api/admin/quotations/ddp-lanes` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `POST` | `/api/admin/quotations/ddp-rates` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `POST` | `/api/admin/quotations/extract-invoice-items` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `POST` | `/api/admin/quotations/extract-package-details` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `POST` | `/api/admin/quotations/preview` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `POST` | `/api/admin/quotations/rates` | — | Guard `requireAdminPermission`<br>Permission `shipments:create` |
+| `GET` | `/api/admin/refund-requests` | — | Guard `requireAdminPermission`<br>Permission `refund-requests:read` |
+| `POST` | `/api/admin/refund-requests/:id/approve-account-manager` | — | Guard `requireAdminPermission`<br>Permission `refund-requests:approve-account-manager` |
+| `POST` | `/api/admin/refund-requests/:id/approve-finance` | — | Guard `requireAdminPermission`<br>Permission `refund-requests:approve-finance` |
+| `GET` | `/api/admin/roles` | — | Guard `requireAdminPermission`<br>Permission `roles:read` |
+| `POST` | `/api/admin/roles` | — | Guard `requireAdminPermission`<br>Permission `roles:create` |
+| `DELETE` | `/api/admin/roles/:id` | — | Guard `requireAdminPermission`<br>Permission `roles:delete` |
+| `GET` | `/api/admin/roles/:id` | — | Guard `requireAdminPermission`<br>Permission `roles:read` |
+| `PATCH` | `/api/admin/roles/:id` | — | Guard `requireAdminPermission`<br>Permission `roles:update` |
+| `DELETE` | `/api/admin/roles/:roleId/permissions/:permissionId` | — | Guard `requireAdminPermission`<br>Permission `permissions:assign` |
+| `POST` | `/api/admin/roles/:roleId/permissions/:permissionId` | — | Guard `requireAdminPermission`<br>Permission `permissions:assign` |
+| `GET` | `/api/admin/sales-feature-requests` | — | Guard `requireAdminPermission`<br>Permission `sales-feature-requests:read` |
+| `POST` | `/api/admin/sales-feature-requests/:id/approve` | — | Guard `requireAdminPermission`<br>Permission `sales-feature-requests:approve` |
+| `POST` | `/api/admin/sales-feature-requests/:id/reject` | — | Guard `requireAdminPermission`<br>Permission `sales-feature-requests:reject` |
+| `POST` | `/api/admin/sales-feature-requests/:id/revoke` | — | Guard `requireAdminPermission`<br>Permission `sales-feature-requests:revoke` |
+| `GET` | `/api/admin/settings/web-app` | — | Guard `requireAdminPermission`<br>Permission `settings:read` |
+| `PATCH` | `/api/admin/settings/web-app` | — | Guard `requireAdminPermission`<br>Permission `settings:update` |
+| `GET` | `/api/admin/shipments` | — | Guard `requireAdminPermission`<br>Permission `shipments:read` |
+| `PATCH` | `/api/admin/shipments/:id` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `POST` | `/api/admin/shipments/:id/abandoned-recovery/discount` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `POST` | `/api/admin/shipments/:id/abandoned-recovery/dismiss` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `POST` | `/api/admin/shipments/:id/abandoned-recovery/reminder` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `POST` | `/api/admin/shipments/:id/cancel` | — | Guard `requireAdminPermission`<br>Permission `shipments:cancel` |
+| `GET` | `/api/admin/shipments/:id/commercial-invoice.html` | — | Guard `requireAdminPermission`<br>Permission `shipments:read`<br>Returns `text/html` |
+| `GET` | `/api/admin/shipments/:id/commercial-invoice.pdf` | — | Guard `requireAdminPermission`<br>Permission `shipments:read`<br>Returns `application/pdf` |
+| `GET` | `/api/admin/shipments/:id/details` | — | Guard `requireAdminPermission`<br>Permission `shipments:read` |
+| `GET` | `/api/admin/shipments/:id/label.pdf` | — | Guard `requireAdminPermission`<br>Permission `shipments:read`<br>Returns `application/pdf` |
+| `POST` | `/api/admin/shipments/:id/retry-carrier` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `PATCH` | `/api/admin/shipments/:id/status` | — | Guard `requireAdminPermission`<br>Permission `shipments:update` |
+| `GET` | `/api/admin/shipments/recent` | — | Guard `requireAdminPermission`<br>Permission `shipments:read` |
+| `POST` | `/api/admin/shipping/rates` | — | Guard `requireAdminPermission`<br>Permission `shipments:read` |
+| `GET` | `/api/admin/stats` | — | Guard `requireAdminPermission`<br>Permission `dashboard:read` |
+| `GET` | `/api/admin/system-logs` | — | Guard `requireAdminPermission`<br>Permission `system-logs:read` |
+| `PATCH` | `/api/admin/system-logs/:id/resolve` | — | Guard `requireAdminPermission`<br>Permission `system-logs:resolve` |
+| `GET` | `/api/admin/system-logs/stats` | — | Guard `requireAdminPermission`<br>Permission `system-logs:read` |
+| `GET` | `/api/admin/users` | — | Guard `requireAdminPermission`<br>Permission `users:read` |
+| `POST` | `/api/admin/users` | — | Guard `requireAdminPermission`<br>Permission `users:create` |
+| `DELETE` | `/api/admin/users/:id` | — | Guard `requireAdminPermission`<br>Permission `users:delete` |
+| `PATCH` | `/api/admin/users/:id` | — | Guard `requireAdminPermission`<br>Permission `users:update` |
+| `GET` | `/api/admin/users/:id/detail` | — | Guard `requireAdminPermission`<br>Permission `users:read` |
+| `PATCH` | `/api/admin/users/:id/status` | — | Guard `requireAdminPermission`<br>Permission `users:update` |
+| `GET` | `/api/admin/users/:userId/roles` | — | Guard `requireAdminPermission`<br>Permission `roles:read` |
+| `DELETE` | `/api/admin/users/:userId/roles/:roleId` | — | Guard `requireAdminPermission`<br>Permission `roles:assign` |
+| `POST` | `/api/admin/users/:userId/roles/:roleId` | — | Guard `requireAdminPermission`<br>Permission `roles:assign` |
+| `GET` | `/api/admin/virtual-carriers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:read` |
+| `POST` | `/api/admin/virtual-carriers` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:create` |
+| `DELETE` | `/api/admin/virtual-carriers/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:delete` |
+| `PATCH` | `/api/admin/virtual-carriers/:id` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `DELETE` | `/api/admin/virtual-carriers/:id/logo` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `PUT` | `/api/admin/virtual-carriers/:id/logo` | — | Guard `requireAdminPermission`<br>Permission `pricing-rules:update` |
+| `GET` | `/api/admin/webhook-events` | — | Guard `requireAdminPermission`<br>Permission `webhooks:read` |
+
+### Webhooks
+
+4 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `POST` | `/api/webhooks/fedex` | — | — |
+| `POST` | `/api/webhooks/sales-channel/:platform` | — | — |
+| `GET` | `/api/webhooks/status` | — | Guard `requireAdminPermission`<br>Permission `webhooks:read` |
+| `POST` | `/api/webhooks/tap` | — | — |
+
+### Shared and public
+
+39 routes.
+
+| Method | Path | Description | Requirements |
+| --- | --- | --- | --- |
+| `POST` | `/api/applications` | — | Accepts `Idempotency-Key` |
+| `GET` | `/api/carrier-logos` | — | Guard `requireAuth` |
+| `GET` | `/api/config/branding` | — | — |
+| `GET` | `/api/fedex/service-options` | — | Guard `requireAuth`<br>Rate limit `fedexApiLimiter` |
+| `POST` | `/api/fedex/validate-address` | — | Guard `requireAuth`<br>Rate limit `fedexApiLimiter` |
+| `GET` | `/api/fedex/validate-postal` | — | Guard `requireAuth`<br>Rate limit `fedexApiLimiter` |
+| `GET` | `/api/geo/postal-suggest` | — | Guard `requireAuth` |
+| `GET` | `/api/health` | Liveness probe | — |
+| `GET` | `/api/hs-lookup` | — | Guard `requireAuth`<br>Rate limit `hsLookupLimiter` |
+| `GET` | `/api/notifications` | — | Guard `requireAuth` |
+| `POST` | `/api/notifications/:id/read` | — | Guard `requireAuth` |
+| `POST` | `/api/notifications/read-all` | — | Guard `requireAuth` |
+| `GET` | `/api/notifications/unread-count` | — | Guard `requireAuth` |
+| `GET` | `/api/payments/tap/redirect` | — | — |
+| `GET` | `/api/policies` | — | — |
+| `GET` | `/api/policies/:slug` | — | — |
+| `GET` | `/api/policies/:slug/versions` | — | — |
+| `GET` | `/api/policies/:slug/versions/:versionId` | — | — |
+| `GET` | `/api/profile-badges` | — | Guard `requireAuth` |
+| `POST` | `/api/public/applications/extract-company-details` | — | Rate limit `companyExtractionLimiter` |
+| `GET` | `/api/public/invitations/:token` | — | — |
+| `POST` | `/api/public/invitations/:token/accept` | — | — |
+| `POST` | `/api/public/uploads/request-url` | — | Rate limit `fileServeLimiter` |
+| `GET` | `/api/shipments/:id/track` | — | Guard `requireAuth` |
+| `POST` | `/api/shipments/check-service` | — | Guard `requireAuth` |
+| `POST` | `/api/shipments/rates` | — | Guard `requireAuth` |
+| `POST` | `/api/shipments/validate-address` | — | Guard `requireAuth` |
+| `POST` | `/api/shipments/validate-postal-code` | — | Guard `requireAuth` |
+| `GET` | `/api/tasks` | — | Guard `requireTaskPermission` |
+| `POST` | `/api/tasks` | — | Guard `requireTaskPermission` |
+| `GET` | `/api/tasks/:id` | — | Guard `requireTaskPermission` |
+| `PATCH` | `/api/tasks/:id` | — | Guard `requireTaskPermission` |
+| `POST` | `/api/tasks/:id/comments` | — | Guard `requireTaskPermission` |
+| `POST` | `/api/tasks/:id/complete` | — | Guard `requireTaskPermission` |
+| `POST` | `/api/tasks/:id/reopen` | — | Guard `requireTaskPermission` |
+| `GET` | `/api/tasks/summary` | — | Guard `requireTaskPermission` |
+| `GET` | `/api/tasks/users` | — | Guard `requireTaskPermission` |
+| `PUT` | `/api/uploads/direct/:fileName` | — | — |
+| `POST` | `/api/uploads/request-url` | — | Guard `requireAuthenticated`<br>Rate limit `fileServeLimiter` |
+
+## Schemas
+
+### `Address`
+
+Fields — `Address`:
+
+> stateOrProvince becomes required for countries in COUNTRIES_REQUIRING_STATE.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | min length 1 |
+| `company` | string | no |  |
+| `phone` | string | yes | min length 1 |
+| `email` | string (email) | no |  |
+| `countryCode` | string | yes | exactly 2 chars; ISO 3166-1 alpha-2 |
+| `city` | string | yes | min length 1 |
+| `postalCode` | string | yes | min length 1 |
+| `addressLine1` | string | yes | min length 1 |
+| `addressLine2` | string | no |  |
+| `stateOrProvince` | string | no |  |
+| `shortAddress` | string | no | Saudi national short address |
+
+### `Package`
+
+Fields — `Package`:
+
+> Units are set by weightUnit and dimensionUnit on the enclosing request.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `weight` | number | yes | > 0 |
+| `length` | number | yes | > 0 |
+| `width` | number | yes | > 0 |
+| `height` | number | yes | > 0 |
+
+### `ShipmentItem`
+
+Fields — `ShipmentItem`:
+
+> Commercial-invoice line. Required for cross-border shipments.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `itemName` | string | yes | min length 1 |
+| `itemDescription` | string | no |  |
+| `category` | string | yes | min length 1 |
+| `material` | string | no |  |
+| `countryOfOrigin` | string | yes | exactly 2 chars |
+| `hsCode` | string | no |  |
+| `hsCodeSource` | enum: `USER`, `FEDEX`, `HISTORY`, `UNKNOWN` | no |  |
+| `hsCodeConfidence` | enum: `HIGH`, `MEDIUM`, `LOW`, `MISSING` | no |  |
+| `price` | number | yes | >= 0 |
+| `quantity` | integer | yes | > 0 |
+| `currency` | string | no |  |
+
+### `Pickup`
+
+Fields — `Pickup`:
+
+> Carrier pickup preference. Booked after the shipment is booked; a pickup failure sets pickupStatus=failed and never fails the shipment.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `requested` | boolean | no | default `false` |
+| `date` | string | no | pattern `^\d{4}-\d{2}-\d{2}$` |
+| `readyTime` | string | no | default `09:00`; pattern `^\d{2}:\d{2}$` |
+| `closeTime` | string | no | default `17:00`; pattern `^\d{2}:\d{2}$` |
+| `location` | string | no | max length 120 |
+| `instructions` | string | no | max length 500 |
+
+### `TokenPair`
+
+Fields — `TokenPair`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `accessToken` | string | no | JWT (HS256). Send as Authorization: Bearer. |
+| `refreshToken` | string | no | Opaque, rotating. Store in Keychain/Keystore, never AsyncStorage. |
+| `expiresIn` | integer | no | Access-token lifetime in seconds |
+| `tokenType` | enum: `Bearer` | no |  |
+| `user` | [`User`](#schemas) | no |  |
+
+### `User`
+
+Fields — `User`:
+
+> Public user shape. Never includes the password hash.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `id` | string | no |  |
+| `username` | string | no |  |
+| `email` | string (email) | no |  |
+| `phone` | string | no |  |
+| `fullName` | string | no |  |
+| `userType` | enum: `admin`, `client`, `operations` | no |  |
+| `clientAccountId` | string | no |  |
+| `isPrimaryContact` | boolean | no |  |
+| `isAccountManager` | boolean | no |  |
+| `mustChangePassword` | boolean | no |  |
+| `isActive` | boolean | no |  |
+| `lastLoginAt` | string (date-time) | no |  |
+| `createdAt` | string (date-time) | no |  |
+
+### `Error`
+
+Fields — `Error`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `error` | string | no | Human-readable message |
+| `code` | string | no | Machine-readable code. Auth values: token_expired, token_invalid, token_revoked, refresh_invalid, refresh_expired, refresh_reused. |
 
 ---
 
-## Public Endpoints
+Generated from `server/routes.ts` and `server/integrations/storage/routes.ts` by `script/generate-openapi.ts`.
 
-### Branding Configuration
-```http
-GET /api/config/branding
-```
-
-**Response:**
-```json
-{
-  "appName": "ezhalha",
-  "primaryColor": "#fe5200",
-  "logoUrl": "/assets/branding/logo.png"
-}
-```
-
-### Submit Application
-```http
-POST /api/applications
-Content-Type: application/json
-Idempotency-Key: unique-request-id (optional)
-
-{
-  "name": "John Doe",
-  "email": "john@company.com",
-  "phone": "+1234567890",
-  "country": "Saudi Arabia",
-  "companyName": "Company Inc"
-}
-```
-
-### Health Check
-```http
-GET /api/health
-```
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-01-11T12:00:00.000Z",
-  "version": "1.0.0",
-  "service": "ezhalha"
-}
-```
-
----
-
-## Client Endpoints
-
-All client endpoints require authentication with a client user account.
-
-### Dashboard Stats
-```http
-GET /api/client/stats
-```
-
-**Response:**
-```json
-{
-  "totalShipments": 10,
-  "shipmentsInTransit": 3,
-  "shipmentsDelivered": 6,
-  "pendingInvoices": 2,
-  "totalSpent": 1500.00,
-  "accountProfile": "mid_level"
-}
-```
-
-### Account Information
-```http
-GET /api/client/account
-```
-
-### Update Account
-```http
-PATCH /api/client/account
-Content-Type: application/json
-
-{
-  "name": "Updated Name",
-  "phone": "+9876543210"
-}
-```
-
-### Shipments
-
-#### List Shipments
-```http
-GET /api/client/shipments
-```
-
-#### Create Shipment
-```http
-POST /api/client/shipments
-Content-Type: application/json
-Idempotency-Key: unique-request-id (optional)
-
-{
-  "senderName": "Sender Inc",
-  "senderAddress": "123 Sender St",
-  "senderCity": "Riyadh",
-  "senderCountry": "Saudi Arabia",
-  "senderPhone": "+966123456789",
-  "recipientName": "Recipient LLC",
-  "recipientAddress": "456 Recipient Ave",
-  "recipientCity": "Dubai",
-  "recipientCountry": "UAE",
-  "recipientPhone": "+971987654321",
-  "weight": "5.5",
-  "dimensions": "30x20x15",
-  "description": "Electronic equipment",
-  "serviceType": "express"
-}
-```
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "trackingNumber": "EZH-20260111-XXXX",
-  "status": "processing",
-  "finalPrice": "45.50",
-  "createdAt": "2026-01-11T12:00:00.000Z"
-}
-```
-
-#### Get Shipment Details
-```http
-GET /api/client/shipments/:id
-```
-
-#### Cancel Shipment
-```http
-POST /api/client/shipments/:id/cancel
-```
-
-### Invoices
-
-#### List Invoices
-```http
-GET /api/client/invoices
-```
-
-#### Download Invoice PDF
-```http
-GET /api/client/invoices/:id/download
-```
-
-### Payments
-
-#### List Payments
-```http
-GET /api/client/payments
-```
-
----
-
-## Shipment Creation Flow
-
-The shipment creation follows a multi-step flow with integrated Moyasar payment processing.
-
-### Step 1: Rate Discovery
-Get shipping quotes from carriers with final prices (margins applied server-side).
-
-```http
-POST /api/client/shipments/rates
-Content-Type: application/json
-
-{
-  "senderName": "Sender Inc",
-  "senderAddress": "123 Sender St",
-  "senderCity": "Riyadh",
-  "senderPostalCode": "12345",
-  "senderCountry": "SA",
-  "senderPhone": "+966123456789",
-  "recipientName": "Recipient LLC",
-  "recipientAddress": "456 Recipient Ave",
-  "recipientCity": "Dubai",
-  "recipientPostalCode": "54321",
-  "recipientCountry": "AE",
-  "recipientPhone": "+971987654321",
-  "weight": "5.5",
-  "weightUnit": "KG",
-  "length": "30",
-  "width": "20",
-  "height": "15",
-  "dimensionUnit": "CM",
-  "packageType": "YOUR_PACKAGING",
-  "description": "Electronic equipment"
-}
-```
-
-**Response:**
-```json
-{
-  "quotes": [
-    {
-      "id": "uuid",
-      "carrier": "FedEx",
-      "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
-      "serviceName": "FedEx International Priority",
-      "finalPrice": "125.50",
-      "currency": "SAR",
-      "estimatedDays": 3,
-      "expiresAt": "2026-01-11T12:30:00.000Z"
-    }
-  ]
-}
-```
-
-**Note:** Quotes expire after 30 minutes. Base carrier rates are never exposed to clients.
-
-### Step 2: Checkout
-Create a payment intent with the selected quote.
-
-```http
-POST /api/client/shipments/checkout
-Content-Type: application/json
-Idempotency-Key: unique-request-id (optional)
-
-{
-  "quoteId": "uuid"
-}
-```
-
-**Response (Moyasar configured):**
-```json
-{
-  "shipmentId": "uuid",
-  "paymentIntentId": "mpy_abc123",
-  "transactionUrl": "https://api.moyasar.com/v1/payments/mpy_abc123/form",
-  "amount": 12550,
-  "currency": "SAR"
-}
-```
-
-**Response (Demo mode):**
-```json
-{
-  "shipmentId": "uuid",
-  "paymentIntentId": "mpy_mock_abc123",
-  "transactionUrl": null,
-  "amount": 12550,
-  "currency": "SAR",
-  "demoMode": true
-}
-```
-
-### Step 3: Payment
-For production: User is redirected to Moyasar's secure payment page.
-For demo mode: Payment can be confirmed directly.
-
-### Step 4: Confirmation
-After payment, confirm the shipment to create the carrier booking.
-
-```http
-POST /api/client/shipments/confirm
-Content-Type: application/json
-
-{
-  "shipmentId": "uuid",
-  "paymentIntentId": "mpy_abc123"
-}
-```
-
-**Note:** If `paymentIntentId` is omitted, the server uses the stored payment ID from the shipment record.
-
-**Response:**
-```json
-{
-  "shipment": {
-    "id": "uuid",
-    "trackingNumber": "EZH-20260111-XXXX",
-    "carrierTrackingNumber": "FEDEX123456789",
-    "status": "created",
-    "paymentStatus": "paid",
-    "labelUrl": "https://..."
-  }
-}
-```
-
----
-
-## Moyasar Payment Endpoints
-
-### Payment Callback
-Handles redirect after user completes payment on Moyasar's page.
-
-```http
-GET /api/payments/moyasar/callback?id=mpy_abc123&status=paid
-```
-
-This endpoint:
-1. Verifies payment status with Moyasar API (never trusts URL parameters)
-2. Redirects user to appropriate page based on verified status
-
-**Redirect Destinations:**
-- Success: `/client/create-shipment?shipmentId=uuid&paymentStatus=success`
-- Failed: `/client/create-shipment?shipmentId=uuid&paymentStatus=failed&message=...`
-- Pending: `/client/create-shipment?shipmentId=uuid&paymentStatus=pending`
-
-### Moyasar Webhook
-Receives server-to-server payment notifications from Moyasar.
-
-```http
-POST /api/webhooks/moyasar
-X-Moyasar-Signature: <hmac-sha256-signature>
-Content-Type: application/json
-
-{
-  "id": "mpy_abc123",
-  "type": "payment_paid",
-  "data": {
-    "id": "mpy_abc123",
-    "status": "paid",
-    "amount": 12550,
-    "currency": "SAR"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "received": true,
-  "eventId": "uuid"
-}
-```
-
-**Security:** Webhook signature is validated using HMAC-SHA256 with `MOYASAR_WEBHOOK_SECRET`. In development, signature validation is skipped if the secret is not configured.
-
----
-
-## Admin Endpoints
-
-All admin endpoints require authentication with an admin user account.
-
-### Dashboard Stats
-```http
-GET /api/admin/stats
-```
-
-**Response:**
-```json
-{
-  "totalClients": 50,
-  "activeClients": 45,
-  "pendingApplications": 5,
-  "totalShipments": 500,
-  "shipmentsInTransit": 25,
-  "shipmentsDelivered": 450,
-  "totalRevenue": 75000.00,
-  "monthlyRevenue": 15000.00
-}
-```
-
-### Applications
-
-#### List All Applications
-```http
-GET /api/admin/applications
-```
-
-#### List Pending Applications
-```http
-GET /api/admin/applications/pending
-```
-
-#### Review Application
-```http
-POST /api/admin/applications/:id/review
-Content-Type: application/json
-
-{
-  "action": "approve",
-  "profile": "regular",
-  "notes": "Verified business documents"
-}
-```
-
-Or reject:
-```json
-{
-  "action": "reject",
-  "notes": "Incomplete documentation"
-}
-```
-
-### Clients
-
-#### List All Clients
-```http
-GET /api/admin/clients
-```
-
-#### Create Client
-```http
-POST /api/admin/clients
-Content-Type: application/json
-
-{
-  "name": "New Client",
-  "email": "newclient@example.com",
-  "phone": "+1234567890",
-  "country": "Saudi Arabia",
-  "companyName": "New Client Inc",
-  "profile": "regular"
-}
-```
-
-#### Get Client Details
-```http
-GET /api/admin/clients/:id
-```
-
-#### Update Client
-```http
-PATCH /api/admin/clients/:id
-Content-Type: application/json
-
-{
-  "profile": "vip",
-  "isActive": true
-}
-```
-
-#### Activate/Deactivate Client
-```http
-POST /api/admin/clients/:id/activate
-POST /api/admin/clients/:id/deactivate
-```
-
-### Shipments (Admin)
-
-#### List All Shipments
-```http
-GET /api/admin/shipments
-```
-
-#### Update Shipment Status
-```http
-PATCH /api/admin/shipments/:id
-Content-Type: application/json
-
-{
-  "status": "in_transit"
-}
-```
-
-### Pricing Rules
-
-#### List Pricing Rules
-```http
-GET /api/admin/pricing-rules
-```
-
-#### Update Pricing Rule
-```http
-PATCH /api/admin/pricing-rules/:id
-Content-Type: application/json
-
-{
-  "marginPercentage": "25.00"
-}
-```
-
-### Audit Logs
-
-#### List Audit Logs
-```http
-GET /api/admin/audit-logs
-```
-
-**Response:**
-```json
-[
-  {
-    "id": "uuid",
-    "userId": "uuid",
-    "action": "approve_application",
-    "entityType": "client_application",
-    "entityId": "uuid",
-    "details": "Approved application for client@example.com",
-    "ipAddress": "192.168.1.1",
-    "createdAt": "2026-01-11T12:00:00.000Z"
-  }
-]
-```
-
----
-
-## Webhook Endpoints
-
-### FedEx Webhooks
-```http
-POST /api/webhooks/fedex
-X-FedEx-Signature: <hmac-signature>
-Content-Type: application/json
-
-{
-  "eventType": "SHIPMENT_DELIVERED",
-  "trackingNumber": "FEDEX123456",
-  "timestamp": "2026-01-11T12:00:00.000Z"
-}
-```
-
-### Moyasar Webhooks
-```http
-POST /api/webhooks/moyasar
-X-Moyasar-Signature: <hmac-sha256-signature>
-Content-Type: application/json
-
-{
-  "id": "evt_abc123",
-  "type": "payment_paid",
-  "data": {
-    "id": "mpy_abc123",
-    "status": "paid",
-    "amount": 12550,
-    "currency": "SAR",
-    "description": "Shipment payment"
-  }
-}
-```
-
-**Signature Validation:** The webhook handler validates the `X-Moyasar-Signature` header using HMAC-SHA256 with the `MOYASAR_WEBHOOK_SECRET` environment variable.
-
-### Stripe Webhooks (Legacy)
-Kept for backwards compatibility with existing integrations.
-
-```http
-POST /api/webhooks/stripe
-Stripe-Signature: t=timestamp,v1=signature
-Content-Type: application/json
-
-{
-  "type": "payment_intent.succeeded",
-  "data": {
-    "object": {
-      "id": "pi_xxx",
-      "amount": 5000
-    }
-  }
-}
-```
-
----
-
-## Idempotency
-
-For POST requests that create resources, you can include an `Idempotency-Key` header to prevent duplicate operations:
-
-```http
-POST /api/client/shipments
-Idempotency-Key: unique-request-id-123
-Content-Type: application/json
-```
-
-If the same idempotency key is used within 24 hours, the cached response will be returned instead of creating a duplicate resource.
-
----
-
-## Error Responses
-
-All errors follow this format:
-
-```json
-{
-  "error": "Error message description"
-}
-```
-
-Common HTTP status codes:
-- `400` - Bad Request (validation error)
-- `401` - Unauthorized (not logged in)
-- `403` - Forbidden (insufficient permissions)
-- `404` - Not Found
-- `429` - Too Many Requests (rate limited)
-- `500` - Internal Server Error
-
----
-
-## Rate Limiting
-
-- General endpoints: 100 requests per 15 minutes
-- Authentication endpoints: 5 requests per 15 minutes
-
-Rate limit headers are included in responses:
-- `X-RateLimit-Limit`
-- `X-RateLimit-Remaining`
-- `X-RateLimit-Reset`
-
----
-
-## Environment Variables
-
-### Required
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `SESSION_SECRET` | Secret for session encryption |
-
-### Payment Gateway (Moyasar)
-| Variable | Description |
-|----------|-------------|
-| `MOYASAR_SECRET_KEY` | Moyasar API secret key (required for production) |
-| `MOYASAR_PUBLISHABLE_KEY` | Moyasar publishable key (for frontend display) |
-| `MOYASAR_WEBHOOK_SECRET` | Webhook signature secret (required for production) |
-
-**Note:** If Moyasar keys are not configured, the system runs in demo mode with mock payments.
-
-### Email (SMTP)
-| Variable | Description |
-|----------|-------------|
-| `SMTP_HOST` | SMTP server hostname |
-| `SMTP_PORT` | SMTP server port (default: 587) |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASSWORD` | SMTP password |
-| `SMTP_FROM` | From email address |
-
-### Carrier Integrations
-| Variable | Description |
-|----------|-------------|
-| `FEDEX_API_KEY` | FedEx API key |
-| `FEDEX_SECRET_KEY` | FedEx secret key |
-| `FEDEX_ACCOUNT_NUMBER` | FedEx account number |
-| `FEDEX_WEBHOOK_SECRET` | FedEx webhook signature secret |
-
-### Invoice Sync
-| Variable | Description |
-|----------|-------------|
-| `ZOHO_CLIENT_ID` | Zoho Books OAuth client ID |
-| `ZOHO_CLIENT_SECRET` | Zoho Books OAuth client secret |
-| `ZOHO_REFRESH_TOKEN` | Zoho Books OAuth refresh token |
-| `ZOHO_ORGANIZATION_ID` | Zoho Books organization ID |
-
-### Legacy (Backwards Compatibility)
-| Variable | Description |
-|----------|-------------|
-| `STRIPE_SECRET_KEY` | Stripe API secret key |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |
