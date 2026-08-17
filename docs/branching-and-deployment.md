@@ -27,6 +27,37 @@ With tags there is one history. Production simply sits further back along it.
 
 ---
 
+## Repository settings (one-time)
+
+These have to be set in the GitHub UI — **Settings → Rules → Rulesets → New branch ruleset**
+(or the older Settings → Branches → Add rule).
+
+Target branch `main`, then enable:
+
+| Setting | Value | Why |
+|---|---|---|
+| Restrict deletions | on | `main` cannot be deleted |
+| Block force pushes | on | history on `main` is append-only |
+| Require a pull request before merging | on | nothing lands unreviewed |
+| ↳ Required approvals | **0** | you are the only reviewer; 1 would lock you out of your own PRs |
+| ↳ Dismiss stale approvals on push | on | a new commit invalidates the previous read |
+| Require status checks to pass | on, select **`Type check, build, test`** | the CI job from `.github/workflows/ci.yml` |
+| ↳ Require branches to be up to date | on | the check ran against what will actually be on `main` |
+| Require linear history | on | keeps `main` readable; use squash or rebase merges |
+
+Set **required approvals to 0**, not 1. As sole owner you cannot approve your own pull
+request, so requiring one approval would make it impossible to merge anything without
+bypassing your own rule — and a rule that gets bypassed routinely is worse than no rule.
+Zero still forces the PR, the diff view, and the status checks.
+
+Also under **Settings → General → Pull Requests**: enable *Automatically delete head
+branches*, so merged feature branches clean themselves up.
+
+The status check only appears in the dropdown after the workflow has run at least once, so
+open the first PR, let CI run, then come back and add the requirement.
+
+---
+
 ## Everyday flow
 
 ```bash
