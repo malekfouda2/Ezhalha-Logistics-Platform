@@ -6410,6 +6410,44 @@ export async function registerRoutes(
     })
   );
 
+  // CORS. The web SPA is same-origin so it needs none of this; the allowlist exists for
+  // native clients running under Expo web preview and for local mobile tooling. Credentials
+  // are deliberately NOT allowed — token clients send Authorization headers, and permitting
+  // cookies cross-origin would widen the CSRF surface the sameSite=lax cookie currently
+  // closes. Set CORS_ALLOWED_ORIGINS to a comma-separated list to extend it.
+  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const developmentOrigins = process.env.NODE_ENV === "production"
+    ? []
+    : ["http://localhost:8081", "http://localhost:19006", "http://127.0.0.1:8081"];
+
+  const allowedOrigins = new Set([...configuredOrigins, ...developmentOrigins]);
+
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+
+    if (origin && allowedOrigins.has(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type,Authorization,Idempotency-Key,Accept-Language",
+      );
+      res.setHeader("Access-Control-Max-Age", "600");
+    }
+
+    if (req.method === "OPTIONS") {
+      // Answer the preflight only for origins we actually allow.
+      return res.sendStatus(origin && allowedOrigins.has(origin) ? 204 : 403);
+    }
+
+    next();
+  });
+
   // Session middleware - use PostgreSQL session store in production, MemoryStore in development
   if (process.env.NODE_ENV === "production" && process.env.DATABASE_URL) {
     const sessionPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -20931,6 +20969,19 @@ export async function registerRoutes(
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch webhook status" });
     }
+  });
+
+  // Unknown /api/* paths must answer JSON, not fall through to the SPA.
+  //
+  // Both the Vite dev middleware and serveStatic() mount a `*` catch-all that returns
+  // index.html, so without this an unmatched API path replies `200 text/html`. In a browser
+  // that is invisible; for an API client it means a mistyped endpoint looks like a success
+  // whose body will not parse. Registered last, so it only sees genuinely unmatched routes.
+  app.use("/api", (req, res) => {
+    res.status(404).json({
+      error: `Unknown API endpoint: ${req.method} ${req.baseUrl}${req.path}`,
+      code: "not_found",
+    });
   });
 
   return httpServer;

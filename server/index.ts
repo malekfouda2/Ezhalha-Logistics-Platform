@@ -21,15 +21,33 @@ declare module "http" {
   }
 }
 
+// Body limit. express.json() defaults to 100kb, which several legitimate payloads sit
+// uncomfortably close to (commercial invoices with many line items, extracted package
+// manifests). 1mb keeps a sane ceiling while removing the surprise 413. Binary uploads do
+// NOT come through here — they use the signed-URL flow in server/integrations/storage.
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "1mb";
+
 app.use(
   express.json({
+    limit: JSON_BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));
+
+// A payload over the limit otherwise surfaces as Express's HTML error page.
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({
+      error: `Request body too large. The limit is ${JSON_BODY_LIMIT}. Upload files via /api/uploads/request-url instead of embedding them in JSON.`,
+      code: "payload_too_large",
+    });
+  }
+  next(err);
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
