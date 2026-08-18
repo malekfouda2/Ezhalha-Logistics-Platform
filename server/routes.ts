@@ -1749,7 +1749,19 @@ async function finalizePaidShipmentAfterPayment(params: {
     return updatedShipment;
   }
 
-  if (shipment.status === "created" && shipment.carrierTrackingNumber) {
+  // Already booked with the carrier? Never book again, whatever the status says.
+  //
+  // This guard used to read `status === "created" && carrierTrackingNumber`, which quietly made
+  // re-booking possible for any shipment that had MOVED ON from "created". On 2026-08-17 Tap
+  // re-delivered a two-day-old charge.captured for EZH089176079, which by then had been picked
+  // up: the status test failed, execution fell through to the booking path, and FedEx issued a
+  // second waybill that overwrote the one the goods were already travelling on — taking the
+  // stored label with it.
+  //
+  // Whether a shipment is booked is a property of having a carrier tracking number, not of its
+  // status, so that is what we test. Webhook deliveries are inherently repeatable and Tap will
+  // replay days later; every path into here has to be safe to run twice.
+  if (shipment.carrierTrackingNumber) {
     const updatedShipment =
       shipment.paymentStatus !== "paid"
         ? ((await storage.updateShipment(shipment.id, { paymentStatus: "paid" })) || shipment)
