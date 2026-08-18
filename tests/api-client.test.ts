@@ -1133,6 +1133,39 @@ describe("Client - Payments", () => {
     expect(shipmentPayment?.status).toBe("completed");
     expect(shipmentPayment?.paymentMethod).toBe("tap");
     expect(shipmentPayment?.transactionId).toBe(chargeId);
+
+    // A replay must not book a second time. Tap re-delivers: on 2026-08-17 it resent a
+    // two-day-old charge.captured for EZH089176079, which by then had moved past "created",
+    // and the old status-based guard let it through — FedEx issued a second waybill that
+    // overwrote the one the goods were already travelling on. Move the shipment on, then
+    // deliver the very same charge again.
+    const bookedTrackingNumber = updatedShipment!.carrierTrackingNumber;
+    await storage.updateShipment(shipment.id, { status: "in_transit", carrierStatus: "Picked up" });
+
+    const replay = await clientAgent
+      .post("/api/webhooks/tap")
+      .send({
+        id: chargeId,
+        object: "charge",
+        status: "CAPTURED",
+        amount: 120,
+        currency: "SAR",
+        transaction: { created: String(Date.now()) },
+        metadata: {
+          kind: "shipment",
+          shipmentId: shipment.id,
+          clientAccountId: clientUser!.clientAccountId!,
+        },
+      });
+
+    expect(replay.status).toBe(200);
+
+    const afterReplay = await storage.getShipment(shipment.id);
+    expect(afterReplay?.carrierTrackingNumber).toBe(bookedTrackingNumber);
+    expect(afterReplay?.status).toBe("in_transit");
+
+    const paymentsAfterReplay = await storage.getPaymentsByClientAccount(clientUser!.clientAccountId!);
+    expect(paymentsAfterReplay.filter((payment) => payment.transactionId === chargeId)).toHaveLength(1);
   });
 
   it("POST /api/client/shipments/pay should apply active abandoned recovery discounts", async () => {
