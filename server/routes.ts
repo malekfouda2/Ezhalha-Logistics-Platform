@@ -19166,7 +19166,9 @@ export async function registerRoutes(
       }
 
       if (shipment.status !== "payment_pending") {
-        return res.status(400).json({ error: "Shipment is not in a payable state" });
+        return res.status(400).json({
+          error: `This shipment is no longer awaiting payment (it is "${shipment.status}"), so Pay Later cannot be applied to it.`,
+        });
       }
 
       if (shipment.isQuote && shipment.isDdp && !shipment.ddpTermsAcceptedAt) {
@@ -19176,6 +19178,28 @@ export async function registerRoutes(
       const existingCredit = await storage.getCreditInvoiceByShipmentId(shipmentId);
       if (existingCredit) {
         return res.status(400).json({ error: "A credit invoice already exists for this shipment" });
+      }
+
+      // Validate the address BEFORE anything is written. This used to sit after the credit
+      // invoice, the ledger debit and the shipment update, so a rejected address left the client
+      // debited for a shipment that was marked paid, never assigned to operations, and stuck in a
+      // status that made the retry fail with "not in a payable state".
+      //
+      // Only carrier-booked flows are validated: it exists to stop a carrier API rejecting the
+      // booking. ddp_manual and local are fulfilled by operations with no carrier call, and the
+      // card path already skips both, so applying it here only to credit made Pay Later fail on
+      // domestic KSA shipments that Pay Now accepted.
+      if (shipment.fulfillmentType !== "ddp_manual" && shipment.fulfillmentType !== "local") {
+        const payLaterAddrValidation = validateShippingAddresses(
+          { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
+          { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
+        );
+        if (!payLaterAddrValidation.valid) {
+          return res.status(400).json({
+            error: `Address validation failed: ${formatValidationErrors(payLaterAddrValidation.errors)}`,
+            details: payLaterAddrValidation.errors,
+          });
+        }
       }
 
       // Enforce the client's available credit (limit − outstanding unpaid credit invoices).
@@ -19230,16 +19254,6 @@ export async function registerRoutes(
         paymentStatus: isManualFulfillment ? "paid" : "unpaid",
         status: isDdpCredit ? "awaiting_review" : shipment.fulfillmentType === "local" ? "created" : "credit_pending",
       });
-
-      if (shipment.fulfillmentType !== "ddp_manual") {
-        const payLaterAddrValidation = validateShippingAddresses(
-          { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
-          { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
-        );
-        if (!payLaterAddrValidation.valid) {
-          return res.status(400).json({ error: "Address validation failed", details: payLaterAddrValidation.errors });
-        }
-      }
 
       let carrierTrackingNumber = "";
       let labelUrl = "";

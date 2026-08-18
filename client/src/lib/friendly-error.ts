@@ -25,7 +25,10 @@ const RULES: Rule[] = [
       "The postal / ZIP code looks invalid for the selected country. Please review the sender and recipient postal codes and try again.",
   },
   {
-    match: ["state", "province"],
+    // Must stay specific. A bare "state" also matches "Shipment is not in a payable state",
+    // which is how a Pay Later rejection got reported to clients as an address problem and sent
+    // them hunting through a form that was fine.
+    match: ["stateorprovince", "state/province", "state or province", "state / province", "province"],
     message: "The state / province is missing or invalid for the selected country. Please correct it and try again.",
   },
   {

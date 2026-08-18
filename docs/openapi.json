@@ -8960,7 +8960,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/shipping/rates",
-        "description": "Guard `requireAdminPermission` · Permission `shipments:read`\n\nSource: `server/routes.ts:20105`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `shipments:read`\n\nSource: `server/routes.ts:20119`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -9000,7 +9000,7 @@
           "Guard `requireAdminPermission`",
           "Permission `shipments:read`"
         ],
-        "x-source": "server/routes.ts:20105"
+        "x-source": "server/routes.ts:20119"
       }
     },
     "/api/admin/stats": {
@@ -11682,7 +11682,7 @@
           "client"
         ],
         "summary": "Credit (pay-later) invoices, 30-day terms",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19386`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19400`",
         "parameters": [
           {
             "name": "status",
@@ -11732,7 +11732,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:19386"
+        "x-source": "server/routes.ts:19400"
       }
     },
     "/api/client/credit-invoices/{id}": {
@@ -11742,7 +11742,7 @@
           "client"
         ],
         "summary": "One credit invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19432`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19446`",
         "parameters": [
           {
             "name": "id",
@@ -11792,7 +11792,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:19432"
+        "x-source": "server/routes.ts:19446"
       }
     },
     "/api/client/ddp/checkout": {
@@ -11952,7 +11952,7 @@
           "client"
         ],
         "summary": "Extra charges raised against the account",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:19787`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:19801`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12012,7 +12012,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:19787"
+        "x-source": "server/routes.ts:19801"
       }
     },
     "/api/client/fx-rate": {
@@ -12049,7 +12049,7 @@
           "client"
         ],
         "summary": "Confirm the HS code chosen for an item",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:20066`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:20080`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12098,7 +12098,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:20066"
+        "x-source": "server/routes.ts:20080"
       }
     },
     "/api/client/invoices": {
@@ -12108,7 +12108,7 @@
           "client"
         ],
         "summary": "Invoices",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19455`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:19469`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12138,7 +12138,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:19455"
+        "x-source": "server/routes.ts:19469"
       }
     },
     "/api/client/invoices/{id}/pdf": {
@@ -12148,7 +12148,7 @@
           "client"
         ],
         "summary": "Invoice (PDF)",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES` · Returns `text/html`\n\nSource: `server/routes.ts:19468`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES` · Returns `text/html`\n\nSource: `server/routes.ts:19482`",
         "parameters": [
           {
             "name": "id",
@@ -12209,7 +12209,7 @@
           "Permission `ClientPermission.VIEW_INVOICES`",
           "Returns `text/html`"
         ],
-        "x-source": "server/routes.ts:19468"
+        "x-source": "server/routes.ts:19482"
       }
     },
     "/api/client/local/checkout": {
@@ -12675,7 +12675,7 @@
           "client"
         ],
         "summary": "Payment history",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:19639`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:19653`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12705,7 +12705,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:19639"
+        "x-source": "server/routes.ts:19653"
       }
     },
     "/api/client/payments/create-charge": {
@@ -12715,7 +12715,7 @@
           "client"
         ],
         "summary": "Charge an outstanding invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:19941`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:19955`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12735,7 +12735,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.MAKE_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:19941"
+        "x-source": "server/routes.ts:19955"
       }
     },
     "/api/client/payments/create-intent": {
@@ -12745,7 +12745,7 @@
           "client"
         ],
         "summary": "Create a payment intent for an invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:19942`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:19956`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12765,7 +12765,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.MAKE_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:19942"
+        "x-source": "server/routes.ts:19956"
       }
     },
     "/api/client/payments/tap/config": {
@@ -12775,7 +12775,7 @@
           "client"
         ],
         "summary": "Public Tap config for the checkout SDK",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19651`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19665`",
         "parameters": [
           {
             "name": "shipmentId",
@@ -12842,7 +12842,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:19651"
+        "x-source": "server/routes.ts:19665"
       }
     },
     "/api/client/payments/tap/saved-cards": {
@@ -12852,7 +12852,7 @@
           "client"
         ],
         "summary": "Saved cards",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19692`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19706`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12891,7 +12891,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:19692"
+        "x-source": "server/routes.ts:19706"
       }
     },
     "/api/client/payments/tap/saved-cards/{id}": {
@@ -12901,7 +12901,7 @@
           "client"
         ],
         "summary": "Delete a saved card",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19737`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19751`",
         "parameters": [
           {
             "name": "id",
@@ -12950,7 +12950,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:19737"
+        "x-source": "server/routes.ts:19751"
       }
     },
     "/api/client/payments/tap/saved-cards/{id}/default": {
@@ -12960,7 +12960,7 @@
           "client"
         ],
         "summary": "Make a saved card the default",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19707`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19721`",
         "parameters": [
           {
             "name": "id",
@@ -13009,7 +13009,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:19707"
+        "x-source": "server/routes.ts:19721"
       }
     },
     "/api/client/quick-quote": {
@@ -14387,7 +14387,7 @@
           "client"
         ],
         "summary": "Carrier tracking checkpoints",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19945`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:19959`",
         "parameters": [
           {
             "name": "id",
@@ -14456,7 +14456,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:19945"
+        "x-source": "server/routes.ts:19959"
       }
     },
     "/api/client/shipments/checkout": {
@@ -15243,7 +15243,7 @@
           "shared"
         ],
         "summary": "GET /api/fedex/service-options",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20404`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20418`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -15283,7 +15283,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:20404"
+        "x-source": "server/routes.ts:20418"
       }
     },
     "/api/fedex/validate-address": {
@@ -15293,7 +15293,7 @@
           "shared"
         ],
         "summary": "POST /api/fedex/validate-address",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20551`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20565`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -15343,7 +15343,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:20551"
+        "x-source": "server/routes.ts:20565"
       }
     },
     "/api/fedex/validate-postal": {
@@ -15353,7 +15353,7 @@
           "shared"
         ],
         "summary": "GET /api/fedex/validate-postal",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20599`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:20613`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -15403,7 +15403,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:20599"
+        "x-source": "server/routes.ts:20613"
       }
     },
     "/api/geo/postal-suggest": {
@@ -15486,7 +15486,7 @@
           "shared"
         ],
         "summary": "GET /api/hs-lookup",
-        "description": "Guard `requireAuth` · Rate limit `hsLookupLimiter`\n\nSource: `server/routes.ts:20030`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `hsLookupLimiter`\n\nSource: `server/routes.ts:20044`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -15526,7 +15526,7 @@
           "Guard `requireAuth`",
           "Rate limit `hsLookupLimiter`"
         ],
-        "x-source": "server/routes.ts:20030"
+        "x-source": "server/routes.ts:20044"
       }
     },
     "/api/notifications": {
@@ -17466,7 +17466,7 @@
           "shared"
         ],
         "summary": "GET /api/payments/tap/redirect",
-        "description": "Source: `server/routes.ts:20833`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:20847`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tap_id",
@@ -17493,7 +17493,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:20833"
+        "x-source": "server/routes.ts:20847"
       }
     },
     "/api/policies": {
@@ -18004,7 +18004,7 @@
           "shared"
         ],
         "summary": "GET /api/shipments/:id/track",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20328`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20342`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -18063,7 +18063,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:20328"
+        "x-source": "server/routes.ts:20342"
       }
     },
     "/api/shipments/check-service": {
@@ -18073,7 +18073,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/check-service",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20227`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20241`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -18112,7 +18112,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:20227"
+        "x-source": "server/routes.ts:20241"
       }
     },
     "/api/shipments/rates": {
@@ -18122,7 +18122,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/rates",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20267`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20281`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -18161,7 +18161,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:20267"
+        "x-source": "server/routes.ts:20281"
       }
     },
     "/api/shipments/validate-address": {
@@ -18171,7 +18171,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/validate-address",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20166`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20180`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -18210,7 +18210,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:20166"
+        "x-source": "server/routes.ts:20180"
       }
     },
     "/api/shipments/validate-postal-code": {
@@ -18220,7 +18220,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/validate-postal-code",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20198`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:20212`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -18259,7 +18259,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:20198"
+        "x-source": "server/routes.ts:20212"
       }
     },
     "/api/tasks": {
@@ -18847,7 +18847,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/fedex",
-        "description": "Source: `server/routes.ts:20717`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:20731`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -18885,7 +18885,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:20717"
+        "x-source": "server/routes.ts:20731"
       }
     },
     "/api/webhooks/sales-channel/{platform}": {
@@ -18895,7 +18895,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/sales-channel/:platform",
-        "description": "Source: `server/routes.ts:20636`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:20650`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "platform",
@@ -18951,7 +18951,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:20636"
+        "x-source": "server/routes.ts:20650"
       }
     },
     "/api/webhooks/status": {
@@ -18961,7 +18961,7 @@
           "webhooks"
         ],
         "summary": "GET /api/webhooks/status",
-        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:20951`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:20965`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -18992,7 +18992,7 @@
           "Guard `requireAdminPermission`",
           "Permission `webhooks:read`"
         ],
-        "x-source": "server/routes.ts:20951"
+        "x-source": "server/routes.ts:20965"
       }
     },
     "/api/webhooks/tap": {
@@ -19002,7 +19002,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/tap",
-        "description": "Source: `server/routes.ts:20904`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:20918`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -19030,7 +19030,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:20904"
+        "x-source": "server/routes.ts:20918"
       }
     }
   }
