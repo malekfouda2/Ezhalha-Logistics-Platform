@@ -1168,6 +1168,72 @@ describe("Client - Payments", () => {
     expect(paymentsAfterReplay.filter((payment) => payment.transactionId === chargeId)).toHaveLength(1);
   });
 
+  it("pay-later on a domestic local shipment succeeds without a postal code", async () => {
+    // Domestic KSA addresses have no postal code, and local shipments are fulfilled by
+    // operations with no carrier API call. Pay Now already accepted them; Pay Later ran the
+    // carrier-grade validator and rejected every one with "postal code is required for SA".
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    await storage.updateClientAccount(clientUser!.clientAccountId!, { creditEnabled: true, creditLimitSar: "100000" } as any);
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Local Sender", senderAddress: "Jeddah", senderCity: "Jeddah",
+      senderStateOrProvince: "Jeddah", senderCountry: "SA", senderPhone: "+966553788998",
+      recipientName: "Local Recipient", recipientAddress: "Riyadh", recipientCity: "Riyadh",
+      recipientStateOrProvince: "Riyadh", recipientCountry: "SA", recipientPhone: "+966553788998",
+      weight: "5.00", weightUnit: "KG", packageType: "YOUR_PACKAGING",
+      shipmentType: "domestic", fulfillmentType: "local", isDdp: false,
+      status: "payment_pending", baseRate: "20.00", marginAmount: "0.00", margin: "0.00",
+      finalPrice: "23.00", accountingCurrency: "SAR", costAmountSar: "20.00",
+      sellSubtotalAmountSar: "20.00", sellTaxAmountSar: "3.00", clientTotalAmountSar: "23.00",
+      systemCostTotalAmountSar: "20.00", revenueExcludingTaxAmountSar: "0.00", currency: "SAR",
+      carrierCode: "IMILE", carrierName: "iMile", paymentStatus: "pending",
+    });
+
+    const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/pay-later`).send({});
+    expect(res.status).toBe(200);
+
+    const after = await storage.getShipment(shipment.id);
+    expect(after?.paymentStatus).toBe("paid");
+    expect(after?.status).toBe("created");
+    expect(await storage.getCreditInvoiceByShipmentId(shipment.id)).toBeDefined();
+  });
+
+  it("a rejected pay-later leaves no credit invoice, no debit and a still-payable shipment", async () => {
+    // The writes used to happen before validation: a rejected address left the client debited
+    // for a shipment marked paid that operations never saw, and stuck in a status that made the
+    // retry fail with "not in a payable state".
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    await storage.updateClientAccount(clientUser!.clientAccountId!, { creditEnabled: true, creditLimitSar: "100000" } as any);
+
+    const shipment = await storage.createShipment({
+      clientAccountId: clientUser!.clientAccountId!,
+      senderName: "Bad Address Sender", senderAddress: "1 Sender Road", senderCity: "Houston",
+      senderStateOrProvince: "", senderPostalCode: "", senderCountry: "US", senderPhone: "5551110001",
+      recipientName: "Bad Address Recipient", recipientAddress: "2 Recipient Road",
+      recipientCity: "Riyadh", recipientPostalCode: "11564", recipientCountry: "SA",
+      recipientPhone: "5551110002",
+      weight: "3.00", weightUnit: "KG", packageType: "YOUR_PACKAGING",
+      shipmentType: "outbound", isDdp: false,
+      status: "payment_pending", baseRate: "100.00", marginAmount: "20.00", margin: "20.00",
+      finalPrice: "120.00", accountingCurrency: "SAR", costAmountSar: "100.00",
+      sellSubtotalAmountSar: "120.00", sellTaxAmountSar: "0.00", clientTotalAmountSar: "120.00",
+      systemCostTotalAmountSar: "100.00", revenueExcludingTaxAmountSar: "120.00", currency: "SAR",
+      paymentStatus: "pending",
+    });
+
+    const res = await clientAgent.post(`/api/client/shipments/${shipment.id}/pay-later`).send({});
+    expect(res.status).toBe(400);
+
+    const after = await storage.getShipment(shipment.id);
+    expect(after?.status).toBe("payment_pending");
+    expect(after?.paymentStatus).not.toBe("paid");
+    expect(await storage.getCreditInvoiceByShipmentId(shipment.id)).toBeFalsy();
+
+    // And the client can still retry once the address is corrected.
+    expect(res.body.error).not.toMatch(/payable state/i);
+  });
+
   it("POST /api/client/shipments/pay should apply active abandoned recovery discounts", async () => {
     const clientUser = await storage.getUserByUsername(testClientUsername);
     expect(clientUser?.clientAccountId).toBeDefined();
