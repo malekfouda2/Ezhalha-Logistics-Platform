@@ -32,6 +32,7 @@ import AdminIntegrationLogs from "@/pages/admin/integration-logs";
 import AdminApps from "@/pages/admin/apps";
 import AdminWebhookEvents from "@/pages/admin/webhook-events";
 import AdminEditClient from "@/pages/admin/edit-client";
+import AdminClientProfile from "@/pages/admin/client-profile";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 import AdminCreditRequests from "@/pages/admin/credit-requests";
@@ -194,6 +195,14 @@ function Router() {
           component={AdminEditClient}
           requiredUserType="admin"
           requiredAdminPermissionsAllOf={ADMIN_ROUTE_PERMISSIONS.editClient.allOf}
+        />
+      </Route>
+      {/* Declared after :id/edit so the more specific path wins. */}
+      <Route path="/admin/clients/:id">
+        <ProtectedRoute
+          component={AdminClientProfile}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.clientProfile.anyOf}
         />
       </Route>
       <Route path="/admin/applications">

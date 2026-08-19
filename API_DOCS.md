@@ -6,7 +6,7 @@
 > `DETAILED_OPERATIONS` in that script and regenerate.
 > Machine-readable equivalent: [`docs/openapi.json`](docs/openapi.json).
 
-Covers **306 routes**.
+Covers **307 routes**.
 
 ## Contents
 
@@ -332,7 +332,7 @@ Primary contact only. Bilingual (EN/AR) fields are accepted.
 
 Requirements: Guard `requireClient` · **Primary contact only**
 
-Source: `server/routes.ts:15606`
+Source: `server/routes.ts:15785`
 
 ##### `GET /api/client/fx-rate`
 
@@ -340,7 +340,7 @@ Display currency and the SAR conversion rate for this account
 
 Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.
 
-Source: `server/routes.ts:15569`
+Source: `server/routes.ts:15748`
 
 ##### `POST /api/client/orders/:id/fulfill`
 
@@ -350,7 +350,7 @@ Fulfil an order as a shipment
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18101`
+Source: `server/routes.ts:18280`
 
 ##### `POST /api/client/quick-quote`
 
@@ -372,7 +372,7 @@ Request body — `QuickQuoteRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16563`
+Source: `server/routes.ts:16742`
 
 ##### `POST /api/client/shipments`
 
@@ -402,7 +402,7 @@ Request body — `LegacyShipmentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18762`
+Source: `server/routes.ts:18941`
 
 ##### `POST /api/client/shipments/:id/cancel`
 
@@ -412,7 +412,7 @@ A still-booked cancellation auto-issues a Tap refund and cancels any carrier pic
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18842`
+Source: `server/routes.ts:19021`
 
 ##### `GET /api/client/shipments/:id/label.pdf`
 
@@ -422,7 +422,7 @@ Binary behind the auth guard. Native clients must fetch this with the Authorizat
 
 Requirements: Guard `requireClient` · Returns `application/pdf`
 
-Source: `server/routes.ts:18948`
+Source: `server/routes.ts:19127`
 
 ##### `POST /api/client/shipments/:id/pay-later`
 
@@ -432,7 +432,7 @@ Requires an approved credit limit with sufficient available balance.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:19145`
+Source: `server/routes.ts:19324`
 
 ##### `POST /api/client/shipments/checkout`
 
@@ -451,7 +451,7 @@ Request body — `CheckoutRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18223`
+Source: `server/routes.ts:18402`
 
 ##### `POST /api/client/shipments/confirm`
 
@@ -468,7 +468,7 @@ Request body — `ConfirmRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18654`
+Source: `server/routes.ts:18833`
 
 ##### `POST /api/client/shipments/extract-invoice-items`
 
@@ -478,7 +478,7 @@ AI extraction (Gemini). Upload the file through the signed-URL flow first and pa
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16333`
+Source: `server/routes.ts:16512`
 
 ##### `POST /api/client/shipments/extract-package-details`
 
@@ -488,7 +488,7 @@ AI extraction (Gemini). Same upload-first pattern as invoice extraction.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16401`
+Source: `server/routes.ts:16580`
 
 ##### `POST /api/client/shipments/pay`
 
@@ -507,7 +507,7 @@ Request body — `ShipmentPaymentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18540`
+Source: `server/routes.ts:18719`
 
 ##### `POST /api/client/shipments/rates`
 
@@ -536,7 +536,7 @@ Request body — `ShipmentRateRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:17228`
+Source: `server/routes.ts:17407`
 
 ### Operations portal
 
@@ -573,7 +573,7 @@ Source: `server/routes.ts:17228`
 
 ### Admin portal
 
-154 routes.
+155 routes.
 
 | Method | Path | Description | Requirements |
 | --- | --- | --- | --- |
@@ -604,6 +604,7 @@ Source: `server/routes.ts:17228`
 | `DELETE` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:delete` |
 | `GET` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
 | `PATCH` | `/api/admin/clients/:id` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
+| `GET` | `/api/admin/clients/:id/analytics` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
 | `GET` | `/api/admin/clients/:id/credit` | — | Guard `requireAdminPermission`<br>Permission `clients:read` |
 | `PATCH` | `/api/admin/clients/:id/credit-limit` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
 | `PATCH` | `/api/admin/clients/:id/profile` | — | Guard `requireAdminPermission`<br>Permission `clients:update` |
