@@ -5,6 +5,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "ezhalha",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "primaryColor": "#fe5200",
     "extra": {
@@ -15,14 +16,20 @@
       "bundleIdentifier": "co.ezhalha.app"
     },
     "android": {
-      "package": "co.ezhalha.app",
       "adaptiveIcon": {
-        "backgroundColor": "#fe5200"
-      }
+        "backgroundColor": "#fe5200",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "co.ezhalha.app"
     },
-    "locales": {
-      "ar": "./src/i18n/ios-ar.json"
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router", "expo-secure-store", "expo-localization"]
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }
