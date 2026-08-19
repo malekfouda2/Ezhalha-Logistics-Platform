@@ -28,6 +28,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil } from "lucide-react";
+import { CancelShipmentDialog } from "@/components/cancel-shipment-dialog";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { SarAmount, formatCurrencyAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
@@ -671,20 +672,28 @@ export default function ClientShipments() {
               </div>
 
               {canCancelShipment(selectedShipment) && (
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  onClick={() => cancelMutation.mutate(selectedShipment.id)}
-                  disabled={cancelMutation.isPending}
-                  data-testid="button-cancel-shipment"
+                <CancelShipmentDialog
+                  trackingNumber={selectedShipment.trackingNumber}
+                  carrierStatus={selectedShipment.carrierStatus}
+                  carrierName={selectedShipment.carrierName}
+                  hasPickupBooked={Boolean((selectedShipment as any).pickupConfirmationNumber)}
+                  isPending={cancelMutation.isPending}
+                  onConfirm={() => cancelMutation.mutate(selectedShipment.id)}
                 >
-                  {cancelMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Ban className="mr-2 h-4 w-4" />
-                  )}
-                  Cancel Shipment
-                </Button>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={cancelMutation.isPending}
+                    data-testid="button-cancel-shipment"
+                  >
+                    {cancelMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="mr-2 h-4 w-4" />
+                    )}
+                    Cancel Shipment
+                  </Button>
+                </CancelShipmentDialog>
               )}
             </div>
           )}

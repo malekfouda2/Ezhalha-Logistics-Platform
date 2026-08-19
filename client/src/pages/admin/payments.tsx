@@ -25,6 +25,7 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { SarAmount, SarSymbol } from "@/components/sar-symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CancelShipmentDialog } from "@/components/cancel-shipment-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -151,6 +152,8 @@ type FinancialShipment = Omit<
   isExtraWeightPaid: boolean;
   weightValue: number;
   carrierTrackingId: string | null;
+  carrierStatus: string | null;
+  pickupConfirmationNumber: string | null;
   carrierPaymentAmountSar: number;
   carrierPaymentReference: string | null;
   carrierPaymentNote: string | null;
@@ -1164,20 +1167,24 @@ export default function AdminPayments() {
                               </Button>
                             )}
                             {canCancelShipments && shipment.canCancel && (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => {
-                                  if (window.confirm(`Cancel shipment ${shipment.trackingNumber}?`)) {
-                                    cancelShipmentMutation.mutate(shipment.id);
-                                  }
-                                }}
-                                disabled={cancelShipmentMutation.isPending}
-                                data-testid={`button-cancel-financial-shipment-${shipment.id}`}
+                              <CancelShipmentDialog
+                                trackingNumber={shipment.trackingNumber}
+                                carrierStatus={shipment.carrierStatus}
+                                carrierName={shipment.carrierName}
+                                hasPickupBooked={Boolean(shipment.pickupConfirmationNumber)}
+                                isPending={cancelShipmentMutation.isPending}
+                                onConfirm={() => cancelShipmentMutation.mutate(shipment.id)}
                               >
-                                <Ban className="mr-1 h-3 w-3" />
-                                Cancel
-                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={cancelShipmentMutation.isPending}
+                                  data-testid={`button-cancel-financial-shipment-${shipment.id}`}
+                                >
+                                  <Ban className="mr-1 h-3 w-3" />
+                                  Cancel
+                                </Button>
+                              </CancelShipmentDialog>
                             )}
                             {!shipment.canMarkPaid && !shipment.canMarkCarrierPaid && !shipment.canViewCarrierPayment && !shipment.canCancel && (
                               <span className="text-xs text-muted-foreground">No actions</span>
