@@ -19,6 +19,7 @@ import { LoadingScreen } from "@/components/loading-spinner";
 import { SarAmount } from "@/components/sar-symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -46,6 +47,8 @@ interface AdminRefundRequestSummary {
   shipmentId: string;
   shipmentTrackingNumber: string | null;
   carrierTrackingNumber: string | null;
+  carrierCode: string | null;
+  carrierName: string | null;
   shipmentStatus: string | null;
   clientName: string;
   clientAccountNumber: string | null;
@@ -324,8 +327,18 @@ export default function AdminRefundRequests() {
                             <Package className="h-4 w-4 text-muted-foreground" />
                             {request.shipmentTrackingNumber || request.shipmentId}
                           </div>
-                          <div className="text-sm text-muted-foreground">
-                            Carrier: {request.carrierTrackingNumber || "Not available"}
+                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <span>Carrier:</span>
+                            {request.carrierTrackingNumber ? (
+                              <CarrierTrackingLink
+                                trackingNumber={request.carrierTrackingNumber}
+                                carrierCode={request.carrierCode}
+                                carrierName={request.carrierName}
+                                className="text-sm"
+                              />
+                            ) : (
+                              <span>Not available</span>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground">
                             Shipment status: {formatLabel(request.shipmentStatus)}

@@ -7,6 +7,7 @@ import { NoShipments } from "@/components/empty-state";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -1405,7 +1406,12 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
               {selectedShipment.carrierTrackingNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
-                  <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
+                  <CarrierTrackingLink
+                    trackingNumber={selectedShipment.carrierTrackingNumber}
+                    carrierCode={selectedShipment.carrierCode}
+                    carrierName={selectedShipment.carrierName}
+                    className="font-medium"
+                  />
                 </div>
               )}
               {(selectedShipment as any).pickupConfirmationNumber && (

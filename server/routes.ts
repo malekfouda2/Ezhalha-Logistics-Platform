@@ -4340,6 +4340,10 @@ async function ensureShipmentRefundRequestForCancellation(params: {
 type ShipmentRefundRequestSummary = ShipmentRefundRequest & {
   shipmentTrackingNumber: string | null;
   carrierTrackingNumber: string | null;
+  // Carried so the admin UI can turn the carrier tracking number into a link to the carrier's
+  // own tracking page — the URL differs per carrier, so the number alone is not enough.
+  carrierCode: string | null;
+  carrierName: string | null;
   shipmentStatus: string | null;
   clientName: string;
   clientAccountNumber: string | null;
@@ -4367,6 +4371,8 @@ async function serializeShipmentRefundRequestForAdmin(
     ...request,
     shipmentTrackingNumber: shipment?.trackingNumber || null,
     carrierTrackingNumber: shipment?.carrierTrackingNumber || null,
+    carrierCode: shipment?.carrierCode || null,
+    carrierName: shipment?.carrierName || null,
     shipmentStatus: shipment?.status || null,
     clientName: clientAccount?.name || "Unknown Client",
     clientAccountNumber: clientAccount?.accountNumber || null,
@@ -11841,6 +11847,7 @@ export async function registerRoutes(
             shipmentType: shipment.shipmentType,
             serviceType: shipment.serviceType,
             carrierCode: shipment.carrierCode,
+            carrierName: shipment.carrierName,
             senderName: shipment.senderName,
             senderCity: shipment.senderCity,
             senderCountry: shipment.senderCountry,
