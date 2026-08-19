@@ -7,6 +7,13 @@ import { NoShipments } from "@/components/empty-state";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ShipmentFiltersBar, type ShipmentFilterFacets } from "@/components/shipment-filters-bar";
+import {
+  DEFAULT_SHIPMENT_FILTERS,
+  hasActiveShipmentFilters,
+  shipmentFiltersToQueryParams,
+  type ShipmentFilters,
+} from "@shared/shipment-filters";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -87,6 +94,7 @@ interface PaginatedResponse {
     recoveryRate: number;
     discountsSent: number;
   };
+  facets?: ShipmentFilterFacets;
 }
 
 interface AdminShipmentsProps {
@@ -173,6 +181,26 @@ function getAccountingNote(shipment: Shipment) {
 
   return "This shipment was created before the accounting snapshot was introduced.";
 }
+
+const EMPTY_FACETS: ShipmentFilterFacets = { carrierCodes: [], originCountries: [], destinationCountries: [] };
+
+// The admin list shows raw statuses rather than the client portal's lifecycle groupings, because
+// an operator acts on the exact state (a carrier_error is not the same job as an on_hold).
+const ADMIN_STATUS_OPTIONS = [
+  { value: "created", label: "Created" },
+  { value: "processing", label: "Processing" },
+  { value: "awaiting_review", label: "Awaiting Review" },
+  { value: "booked", label: "Booked" },
+  { value: "supplier_pickup", label: "Supplier Pickup" },
+  { value: "in_transit", label: "In Transit" },
+  { value: "customs_clearance", label: "Customs Clearance" },
+  { value: "out_for_delivery", label: "Out for Delivery" },
+  { value: "on_hold", label: "On Hold" },
+  { value: "returned", label: "Returned to Shipper" },
+  { value: "delivered", label: "Delivered" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "carrier_error", label: "Carrier Error" },
+];
 
 function canCancelShipment(shipment: Shipment) {
   const carrierStatus = String((shipment as any).carrierStatus || "")
@@ -288,9 +316,9 @@ function fmtDateTime(value?: string | Date | null): string {
 
 export default function AdminShipments({ abandonedOnly = false }: AdminShipmentsProps = {}) {
   const adminAccess = useAdminAccess();
-  const [searchQuery, setSearchQuery] = useState("");
+  const [filters, setFilters] = useState<ShipmentFilters>({ ...DEFAULT_SHIPMENT_FILTERS });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
@@ -316,26 +344,31 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
+      setDebouncedSearch(filters.search);
       setPage(1);
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [filters.search]);
 
   const buildQueryString = () => {
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     if (abandonedOnly) params.set("abandoned", "true");
-    if (debouncedSearch) params.set("search", debouncedSearch);
-    if (statusFilter !== "all") params.set("status", statusFilter);
+    // The debounced copy of filters.search is what actually hits the API, so a keystroke does not
+    // fire a request per character.
+    for (const [key, value] of Object.entries(
+      shipmentFiltersToQueryParams({ ...filters, search: debouncedSearch }),
+    )) {
+      params.set(key, value);
+    }
     return params.toString();
   };
 
   // See the note in client/shipments.tsx: the global query defaults never refetch, so this list
   // has to opt into polling or a status change lands in the DB and is never shown.
   const { data, isLoading, isFetching, refetch } = useQuery<PaginatedResponse>({
-    queryKey: ["/api/admin/shipments", page, pageSize, debouncedSearch, statusFilter, abandonedOnly],
+    queryKey: ["/api/admin/shipments", page, pageSize, abandonedOnly, debouncedSearch, filters],
     queryFn: async () => {
       const res = await fetch(`/api/admin/shipments?${buildQueryString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch shipments");
@@ -544,12 +577,11 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     onError: (error: Error) => toast({ title: "Could not add Door To Door Freight adjustment", description: error.message, variant: "destructive" }),
   });
 
-  const hasActiveFilters = statusFilter !== "all" || debouncedSearch;
+  const hasActiveFilters = hasActiveShipmentFilters(filters);
 
   const clearFilters = () => {
-    setSearchQuery("");
+    setFilters({ ...DEFAULT_SHIPMENT_FILTERS });
     setDebouncedSearch("");
-    setStatusFilter("all");
     setPage(1);
   };
 
@@ -572,7 +604,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
     const clientName = getClientDisplayName(shipment, clients).toLowerCase();
     const clientPhone = getClientPhone(shipment, clients).toLowerCase();
     const shipmentNumber = String(shipment.trackingNumber || "").toLowerCase();
-    const query = searchQuery.trim().toLowerCase();
+    const query = filters.search.trim().toLowerCase();
     const method = getShipmentMethod(shipment);
     const origin = getOriginFilter(shipment);
     const rowStatus = getAbandonedStatus(shipment, recoveryByShipmentId.get(shipment.id));
@@ -605,7 +637,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
   const discountFinalPrice = Math.max(0, Number(discountShipment?.finalPrice || 0) - discountAmount);
 
   const clearAbandonedFilters = () => {
-    setSearchQuery("");
+    setFilters((prev) => ({ ...prev, search: "" }));
     setDebouncedSearch("");
     setMethodFilter("all");
     setOriginFilter("all");
@@ -691,7 +723,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
 
   if (abandonedOnly) {
     const hasAbandonedFilters =
-      searchQuery || methodFilter !== "all" || originFilter !== "all" || abandonedStatusFilter !== "all" || abandonedTab !== "all";
+      filters.search || methodFilter !== "all" || originFilter !== "all" || abandonedStatusFilter !== "all" || abandonedTab !== "all";
 
     return (
       <AdminLayout>
@@ -797,8 +829,8 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
               <div className="relative min-w-[260px] flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
+                  value={filters.search}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
                   placeholder="Search by name, phone, or shipment ID..."
                   className="bg-background pl-10"
                   data-testid="input-abandoned-search"
@@ -1176,39 +1208,15 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-4">
-              <div className="relative flex-1 min-w-[200px] max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by shipment ID, name, or city..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                  data-testid="input-search"
-                />
-              </div>
-              {!abandonedOnly && <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-                <SelectTrigger className="w-[150px]" data-testid="select-status-filter">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="created">Created</SelectItem>
-                  <SelectItem value="processing">Processing</SelectItem>
-                  <SelectItem value="awaiting_review">Awaiting Review</SelectItem>
-                  <SelectItem value="booked">Booked</SelectItem>
-                  <SelectItem value="supplier_pickup">Supplier Pickup</SelectItem>
-                  <SelectItem value="in_transit">In Transit</SelectItem>
-                  <SelectItem value="customs_clearance">Customs Clearance</SelectItem>
-                  <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
-                  <SelectItem value="on_hold">On Hold</SelectItem>
-                  <SelectItem value="returned">Returned to Shipper</SelectItem>
-                  <SelectItem value="delivered">Delivered</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                  <SelectItem value="carrier_error">Carrier Error</SelectItem>
-                </SelectContent>
-              </Select>}
-            </div>
+            <ShipmentFiltersBar
+              filters={filters}
+              onChange={(next) => { setFilters(next); setPage(1); }}
+              facets={data?.facets ?? EMPTY_FACETS}
+              statusOptions={ADMIN_STATUS_OPTIONS}
+              expanded={filtersExpanded}
+              onExpandedChange={setFiltersExpanded}
+              resultCount={data?.total}
+            />
           </CardContent>
         </Card>
 
