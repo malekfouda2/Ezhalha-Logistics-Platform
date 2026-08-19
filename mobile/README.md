@@ -10,6 +10,30 @@ common to both.
 
 ---
 
+## Which branch to work on
+
+All mobile work happens on the long-lived **`mobile`** branch, never directly on `main`.
+
+```bash
+git checkout mobile && git pull
+git checkout -b feat/mobile-login     # one branch per piece of work
+# … commit …
+git push -u origin feat/mobile-login  # then open a PR into `mobile`
+```
+
+`mobile` merges into `main` at the end of each M1 phase, as a single reviewable PR.
+
+**Once a week, pull `main` into `mobile`** — `git checkout mobile && git merge origin/main`.
+Skipping it is the one thing that makes this branch painful: the server, the web client and
+`shared/` all keep moving, and a month of unmerged drift turns into a very bad afternoon.
+
+If you need a change in `shared/` (a new field, a changed type), raise it as its own small PR
+into `main` and let it reach you via the weekly merge. Do not edit `shared/` on `mobile`.
+
+Full workflow: [`docs/branching-and-deployment.md`](../docs/branching-and-deployment.md).
+
+---
+
 ## First-time setup
 
 ```bash
