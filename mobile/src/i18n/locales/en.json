@@ -1,0 +1,14 @@
+{
+  "common": {
+    "welcome": "Welcome",
+    "login": "Login",
+    "logout": "Logout",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading"
+  },
+  "home": {
+    "title": "Welcome to Ezhalha",
+    "subtitle": "Your logistics platform"
+  }
+}
