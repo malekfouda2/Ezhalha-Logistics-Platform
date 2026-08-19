@@ -7,6 +7,7 @@ import { NoShipments } from "@/components/empty-state";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { carrierBrandName } from "@shared/carriers";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -1242,7 +1243,7 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                           <span className="text-sm">{shipment.recipientCity}, {shipment.recipientCountry}</span>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                          {carrierBrandName(shipment.carrierCode, shipment.carrierName) || <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>

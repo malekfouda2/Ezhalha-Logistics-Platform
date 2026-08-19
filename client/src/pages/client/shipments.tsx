@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
 import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { StatusBadge } from "@/components/status-badge";
+import { carrierBrandName } from "@shared/carriers";
 import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoShipments } from "@/components/empty-state";
@@ -331,7 +332,7 @@ export default function ClientShipments() {
                         {shipment.recipientCity}, {shipment.recipientCountry}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                        {carrierBrandName(shipment.carrierCode, shipment.carrierName) || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>
