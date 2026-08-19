@@ -10420,6 +10420,185 @@ export async function registerRoutes(
   });
 
   // Admin - Client credit ledger (limit, outstanding, available + transactions)
+  /**
+   * Everything worth knowing about one client's history with us: what they have shipped, what we
+   * billed, what we actually made, and where they stand financially.
+   *
+   * Money is computed through getEffectiveShipmentFinancials — the same helper the financial
+   * statements use — rather than summing raw columns. That matters most for two things it already
+   * handles: a cancelled shipment contributes zero to every figure, and a DDP shipment's real
+   * supplier cost replaces the lane sell base so margin is not overstated.
+   */
+  app.get("/api/admin/clients/:id/analytics", requireAdminPermission("clients", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const { id } = req.params;
+      const client = await storage.getClientAccount(id);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      if (!(await ensureAccountManagerClientAccess(adminUser, client.id, res))) return;
+
+      const [shipments, invoices, payments, creditSummary, users] = await Promise.all([
+        storage.getShipmentsByClientAccount(id),
+        storage.getInvoicesByClientAccount(id),
+        storage.getPaymentsByClientAccount(id),
+        storage.getClientCreditSummary(id),
+        storage.getUsersByClientAccount(id),
+      ]);
+
+      const isCancelled = (shipment: Shipment) => shipment.status === "cancelled";
+      const active = shipments.filter((shipment) => !isCancelled(shipment));
+      const cancelled = shipments.filter(isCancelled);
+
+      let grossBilledSar = 0;
+      let revenueExTaxSar = 0;
+      let costSar = 0;
+      let netProfitSar = 0;
+      let collectedSar = 0;
+      let outstandingSar = 0;
+      let totalWeight = 0;
+
+      const byStatus: Record<string, number> = {};
+      const byFulfillment: Record<string, number> = {};
+      const byCarrier: Record<string, { shipments: number; revenueSar: number }> = {};
+      const byDestination: Record<string, number> = {};
+      const byOrigin: Record<string, number> = {};
+      const monthly: Record<string, { month: string; shipments: number; revenueSar: number; profitSar: number }> = {};
+
+      for (const shipment of shipments) {
+        byStatus[shipment.status] = (byStatus[shipment.status] || 0) + 1;
+
+        // Cancelled shipments are counted for volume context but contribute no money, so the
+        // financial roll-up below deliberately skips them.
+        if (isCancelled(shipment)) continue;
+
+        const money = getEffectiveShipmentFinancials(shipment as unknown as Record<string, any>);
+        grossBilledSar += money.clientTotalAmountSar;
+        revenueExTaxSar += money.revenueExcludingTaxAmountSar;
+        costSar += money.realCostAmountSar;
+        netProfitSar += money.realNetProfitAmountSar;
+        totalWeight += money.weightValue;
+
+        if (shipment.paymentStatus === "paid") collectedSar += money.clientTotalAmountSar;
+        else outstandingSar += money.clientTotalAmountSar;
+
+        const fulfillment = shipment.fulfillmentType || "carrier";
+        byFulfillment[fulfillment] = (byFulfillment[fulfillment] || 0) + 1;
+
+        // Shipments still awaiting a carrier are grouped under a null code, which the UI labels
+        // "Not assigned" — "UNKNOWN" reads like a data fault rather than a normal early state.
+        const carrier = shipment.carrierCode || "";
+        byCarrier[carrier] = byCarrier[carrier] || { shipments: 0, revenueSar: 0 };
+        byCarrier[carrier].shipments += 1;
+        byCarrier[carrier].revenueSar = roundMoney(byCarrier[carrier].revenueSar + money.clientTotalAmountSar);
+
+        if (shipment.recipientCountry) byDestination[shipment.recipientCountry] = (byDestination[shipment.recipientCountry] || 0) + 1;
+        if (shipment.senderCountry) byOrigin[shipment.senderCountry] = (byOrigin[shipment.senderCountry] || 0) + 1;
+
+        const created = shipment.createdAt ? new Date(shipment.createdAt) : null;
+        if (created && !Number.isNaN(created.getTime())) {
+          const key = `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, "0")}`;
+          monthly[key] = monthly[key] || { month: key, shipments: 0, revenueSar: 0, profitSar: 0 };
+          monthly[key].shipments += 1;
+          monthly[key].revenueSar = roundMoney(monthly[key].revenueSar + money.clientTotalAmountSar);
+          monthly[key].profitSar = roundMoney(monthly[key].profitSar + money.realNetProfitAmountSar);
+        }
+      }
+
+      const cancelledValueSar = roundMoney(
+        cancelled.reduce((sum, shipment) => sum + parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice), 0),
+      );
+
+      const dates = shipments
+        .map((shipment) => (shipment.createdAt ? new Date(shipment.createdAt).getTime() : NaN))
+        .filter((time) => !Number.isNaN(time));
+      const firstShipmentAt = dates.length ? new Date(Math.min(...dates)).toISOString() : null;
+      const lastShipmentAt = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
+
+      const invoiceTotals = invoices.reduce(
+        (acc, invoice) => {
+          const amount = parseMoneyValue(invoice.amount);
+          acc.count += 1;
+          if (invoice.status === "paid") {
+            acc.paidCount += 1;
+            acc.paidSar = roundMoney(acc.paidSar + amount);
+          } else {
+            acc.openCount += 1;
+            acc.openSar = roundMoney(acc.openSar + amount);
+            // Anything unpaid past its due date is the number that actually needs chasing.
+            if (invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now()) {
+              acc.overdueCount += 1;
+              acc.overdueSar = roundMoney(acc.overdueSar + amount);
+            }
+          }
+          return acc;
+        },
+        { count: 0, paidCount: 0, paidSar: 0, openCount: 0, openSar: 0, overdueCount: 0, overdueSar: 0 },
+      );
+
+      const topN = (record: Record<string, number>, limit = 5) =>
+        Object.entries(record)
+          .map(([key, count]) => ({ key, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit);
+
+      res.json({
+        client: {
+          id: client.id,
+          name: client.name,
+          accountNumber: client.accountNumber,
+          email: client.email,
+          phone: client.phone,
+          country: client.country,
+          city: client.nationalAddressCity,
+          profile: client.profile,
+          isActive: client.isActive,
+          createdAt: client.createdAt,
+        },
+        totals: {
+          shipments: shipments.length,
+          activeShipments: active.length,
+          cancelledShipments: cancelled.length,
+          cancelledValueSar,
+          grossBilledSar: roundMoney(grossBilledSar),
+          revenueExTaxSar: roundMoney(revenueExTaxSar),
+          costSar: roundMoney(costSar),
+          netProfitSar: roundMoney(netProfitSar),
+          marginPct: revenueExTaxSar > 0 ? Math.round((netProfitSar / revenueExTaxSar) * 1000) / 10 : 0,
+          collectedSar: roundMoney(collectedSar),
+          outstandingSar: roundMoney(outstandingSar),
+          avgShipmentValueSar: active.length ? roundMoney(grossBilledSar / active.length) : 0,
+          avgProfitPerShipmentSar: active.length ? roundMoney(netProfitSar / active.length) : 0,
+          totalWeightKg: Math.round(totalWeight * 100) / 100,
+        },
+        history: {
+          firstShipmentAt,
+          lastShipmentAt,
+          userCount: users.length,
+          activeUserCount: users.filter((user) => user.isActive).length,
+        },
+        breakdown: {
+          byStatus,
+          byFulfillment,
+          byCarrier: Object.entries(byCarrier)
+            .map(([carrierCode, value]) => ({ carrierCode, ...value }))
+            .sort((a, b) => b.shipments - a.shipments),
+          topDestinations: topN(byDestination),
+          topOrigins: topN(byOrigin),
+        },
+        monthly: Object.values(monthly).sort((a, b) => a.month.localeCompare(b.month)).slice(-12),
+        credit: {
+          enabled: Boolean(client.creditEnabled),
+          ...creditSummary,
+        },
+        invoices: invoiceTotals,
+        paymentCount: payments.length,
+      });
+    } catch (error) {
+      logError("Error building client analytics", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/admin/clients/:id/credit", requireAdminPermission("clients", "read"), async (req, res) => {
     try {
       const adminUser = req.currentUser!;
