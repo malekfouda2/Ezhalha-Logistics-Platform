@@ -76,6 +76,7 @@ import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
+import { isCarrierStatusStillBooked } from "@shared/domain";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
   calculateShipmentAccounting,
@@ -3114,6 +3115,10 @@ function serializeFinancialShipment(
     realNetProfitAmountSar: effective.realNetProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
+    // Needed by the cancel confirmation, which tells the operator whether cancelling refunds the
+    // client automatically or opens a refund request — a distinction it must not guess at.
+    carrierStatus: shipment.carrierStatus || null,
+    pickupConfirmationNumber: shipment.pickupConfirmationNumber || null,
     carrierPaymentAmountSar,
     carrierPaymentReference: shipment.carrierPaymentReference || null,
     carrierPaymentNote: shipment.carrierPaymentNote || null,
@@ -4120,19 +4125,10 @@ function canShipmentBeCancelled(shipment: Shipment): boolean {
 // Carrier statuses that mean the parcel has left the shipper (collected or moving). A shipment
 // that has NOT reached one of these is "still booked" — its cancellation refund is issued
 // automatically; anything beyond booked routes through the manual approval workflow.
-const COLLECTED_OR_MOVING_CARRIER_STATUSES = new Set([
-  "picked_up",
-  "in_transit",
-  "out_for_delivery",
-  "delivered",
-]);
-
+// The rule itself lives in shared/domain.ts so the web and mobile clients can warn the user with
+// exactly the rule this server will apply when they confirm.
 function isShipmentStillBooked(shipment: Shipment): boolean {
-  const normalizedCarrierStatus = (shipment.carrierStatus || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return !COLLECTED_OR_MOVING_CARRIER_STATUSES.has(normalizedCarrierStatus);
+  return isCarrierStatusStillBooked(shipment.carrierStatus);
 }
 
 function isShipmentRefundApprovalSatisfied(status: string | null | undefined): boolean {
