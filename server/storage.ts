@@ -153,6 +153,7 @@ import {
   systemLogs,
   InvoiceType,
 } from "@shared/schema";
+import { SHIPMENT_FILTER_ALL, expandStatusFilter } from "@shared/shipment-filters";
 import { db } from "./db";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
@@ -237,9 +238,22 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
+  getShipmentFilterFacets(params?: { clientAccountIds?: string[] }): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
   getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
@@ -1000,10 +1014,21 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status, clientAccountIds, abandonedOnly } = params;
+    const {
+      page, limit, search, status, carrierCode, fulfillmentType, paymentStatus, paymentMethod,
+      originCountry, destinationCountry, dateFrom, dateTo, clientAccountIds, abandonedOnly,
+    } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(shipments.deletedAt)];
 
@@ -1024,8 +1049,47 @@ export class DatabaseStorage implements IStorage {
         )!
       );
     }
-    if (status && status !== "all") {
-      conditions.push(eq(shipments.status, status as any));
+    // Each clause below mirrors matchesShipmentFilters in shared/shipment-filters.ts, which is the
+    // reference the client portal filters by. Keep the two in step.
+    if (status && status !== SHIPMENT_FILTER_ALL) {
+      // A status filter may name a lifecycle group ("in_transit" covers picked_up, customs
+      // clearance, out for delivery) rather than a single raw status.
+      const statuses = expandStatusFilter(status);
+      conditions.push(
+        statuses.length === 1
+          ? eq(shipments.status, statuses[0] as any)
+          : inArray(shipments.status, statuses as any),
+      );
+    }
+    if (carrierCode && carrierCode !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.carrierCode, carrierCode));
+    }
+    if (fulfillmentType && fulfillmentType !== SHIPMENT_FILTER_ALL) {
+      // fulfillmentType defaults to "carrier" in the schema, but older rows can be null.
+      conditions.push(
+        fulfillmentType === "carrier"
+          ? sql`coalesce(${shipments.fulfillmentType}, 'carrier') = 'carrier'`
+          : eq(shipments.fulfillmentType, fulfillmentType),
+      );
+    }
+    if (paymentStatus && paymentStatus !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentStatus, paymentStatus));
+    }
+    if (paymentMethod && paymentMethod !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentMethod, paymentMethod));
+    }
+    if (originCountry && originCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.senderCountry, originCountry));
+    }
+    if (destinationCountry && destinationCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.recipientCountry, destinationCountry));
+    }
+    // Inclusive whole days in the server's local zone, matching what the date pickers imply.
+    if (dateFrom) {
+      conditions.push(sql`${shipments.createdAt} >= ${dateFrom}::date`);
+    }
+    if (dateTo) {
+      conditions.push(sql`${shipments.createdAt} < (${dateTo}::date + interval '1 day')`);
     }
     if (abandonedOnly) {
       conditions.push(sql`coalesce(${shipments.paymentStatus}, 'pending') <> 'paid'`);
@@ -1048,6 +1112,42 @@ export class DatabaseStorage implements IStorage {
     const total = totalResult?.count || 0;
     const totalPages = Math.ceil(total / limit);
     return { shipments: results, total, page, totalPages };
+  }
+
+  /**
+   * The distinct carrier / country values that actually occur in the visible shipments, so the
+   * filter dropdowns can offer only those. A full ISO country list would be seventy-odd entries
+   * for the seven origins this business ships from.
+   */
+  async getShipmentFilterFacets(params: { clientAccountIds?: string[] } = {}): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }> {
+    const { clientAccountIds } = params;
+    if (clientAccountIds && clientAccountIds.length === 0) {
+      return { carrierCodes: [], originCountries: [], destinationCountries: [] };
+    }
+    const scope = clientAccountIds
+      ? and(isNull(shipments.deletedAt), inArray(shipments.clientAccountId, clientAccountIds))
+      : isNull(shipments.deletedAt);
+
+    const distinct = async (column: any): Promise<string[]> => {
+      const rows = await db
+        .selectDistinct({ value: column })
+        .from(shipments)
+        .where(and(scope, sql`${column} is not null`, sql`${column} <> ''`));
+      return rows
+        .map((row) => String(row.value))
+        .sort((a, b) => a.localeCompare(b));
+    };
+
+    const [carrierCodes, originCountries, destinationCountries] = await Promise.all([
+      distinct(shipments.carrierCode),
+      distinct(shipments.senderCountry),
+      distinct(shipments.recipientCountry),
+    ]);
+    return { carrierCodes, originCountries, destinationCountries };
   }
 
   async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {

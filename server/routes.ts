@@ -77,6 +77,7 @@ import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempoten
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
 import { isCarrierStatusStillBooked } from "@shared/domain";
+import { SHIPMENT_FILTER_ALL } from "@shared/shipment-filters";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
   calculateShipmentAccounting,
@@ -9131,6 +9132,25 @@ export async function registerRoutes(
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const abandonedOnly = req.query.abandoned === "true";
+      const asFilter = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return text && text !== SHIPMENT_FILTER_ALL ? text : undefined;
+      };
+      // Only accept a real calendar date; anything else is ignored rather than reaching SQL.
+      const asDate = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : undefined;
+      };
+      const listFilters = {
+        carrierCode: asFilter(req.query.carrierCode),
+        fulfillmentType: asFilter(req.query.fulfillmentType),
+        paymentStatus: asFilter(req.query.paymentStatus),
+        paymentMethod: asFilter(req.query.paymentMethod),
+        originCountry: asFilter(req.query.originCountry),
+        destinationCountry: asFilter(req.query.destinationCountry),
+        dateFrom: asDate(req.query.dateFrom),
+        dateTo: asDate(req.query.dateTo),
+      };
       const clientAccountIds = await getScopedClientAccountIds(adminUser);
 
       if (abandonedOnly) {
@@ -9223,8 +9243,15 @@ export async function registerRoutes(
         });
       }
 
-      const result = await storage.getShipmentsPaginated({ page, limit, search, status, clientAccountIds, abandonedOnly });
-      res.json(result);
+      const result = await storage.getShipmentsPaginated({
+        page, limit, search, status, clientAccountIds, abandonedOnly, ...listFilters,
+      });
+      // Facets are the values actually present in the rows this admin may see, so the dropdowns
+      // never offer a carrier or country that would return nothing. Scoped by the same
+      // clientAccountIds as the list, and deliberately NOT narrowed by the current filters —
+      // otherwise choosing one value would empty the other dropdowns.
+      const facets = await storage.getShipmentFilterFacets({ clientAccountIds });
+      res.json({ ...result, facets });
     } catch (error) {
       logError("Error fetching shipments", error);
       res.status(500).json({ error: "Internal server error" });

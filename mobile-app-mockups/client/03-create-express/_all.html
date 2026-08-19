@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --brand:#fe5200; --brand-600:#e64900;
+    --ink:#0f1729; --muted:#64748b; --line:#eef1f5;
+    --bg:#f4f6f8; --card:#ffffff;
+    --green-bg:#dcfce7; --green:#166534;
+    --amber-bg:#fef3c7; --amber:#92700e;
+    --blue-bg:#dbeafe; --blue:#1e40af;
+    --purple-bg:#f3e8ff; --purple:#6b21a8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",system-ui,sans-serif;
+    background:#e9ebf0;
+    padding:60px;
+    -webkit-font-smoothing:antialiased;
+    color:var(--ink);
+  }
+  .row{display:flex;gap:56px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+
+  /* device frame */
+  .device{
+    background:linear-gradient(160deg,#2b2f36,#0c0d0f);
+    padding:13px;border-radius:56px;
+    box-shadow:0 40px 80px -20px rgba(15,23,41,.45), 0 0 0 2px #000, inset 0 0 0 2px #3a3d44;
+  }
+  .screen{
+    width:390px;height:844px;border-radius:44px;overflow:hidden;position:relative;
+    background:var(--bg);display:flex;flex-direction:column;
+  }
+  /* status bar */
+  .status{
+    height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:0 30px 0 34px;font-size:15px;font-weight:600;color:var(--ink);position:relative;z-index:5;
+  }
+  .status.onbrand{color:#fff}
+  .island{
+    position:absolute;top:11px;left:50%;transform:translateX(-50%);
+    width:122px;height:35px;background:#000;border-radius:20px;z-index:6;
+  }
+  .status .sig{display:flex;align-items:center;gap:6px}
+  .bars{display:flex;align-items:flex-end;gap:2px;height:11px}
+  .bars i{width:3px;background:currentColor;border-radius:1px;display:block}
+  .bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}.bars i:nth-child(3){height:9px}.bars i:nth-child(4){height:11px}
+  .batt{width:24px;height:12px;border:1.5px solid currentColor;border-radius:3px;position:relative;opacity:.9}
+  .batt::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:6px;background:currentColor;border-radius:0 1px 1px 0}
+  .batt i{position:absolute;inset:1.5px;width:75%;background:currentColor;border-radius:1px;display:block}
+
+  .body{flex:1;overflow:hidden;padding:6px 20px 0}
+  .body.np{padding:0}
+
+  /* home indicator */
+  .home-ind{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:134px;height:5px;background:rgba(15,23,41,.85);border-radius:3px;z-index:7}
+  .home-ind.light{background:rgba(255,255,255,.85)}
+
+  h1.page{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:6px 0 2px}
+  .sub{color:var(--muted);font-size:14px}
+
+  .toprow{display:flex;align-items:center;justify-content:space-between;padding:2px 0 12px}
+  .company{display:flex;align-items:center;gap:11px}
+  .avatar{width:42px;height:42px;border-radius:14px;background:linear-gradient(150deg,var(--brand),#ff7a3d);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px}
+  .company .nm{font-weight:800;font-size:15px;line-height:1.15}
+  .company .rl{color:var(--muted);font-size:12px}
+  .iconbtn{width:42px;height:42px;border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(15,23,41,.06);position:relative}
+  .dot{position:absolute;top:9px;right:10px;width:8px;height:8px;background:var(--brand);border-radius:50%;border:2px solid #fff}
+
+  .greet{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+  .tier{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600;padding:6px 11px;border-radius:999px;margin-top:10px}
+  .tier b{color:var(--brand)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:16px}
+  .stat{background:var(--card);border-radius:20px;padding:15px 15px 14px;box-shadow:0 1px 2px rgba(15,23,41,.05)}
+  .stat .lbl{color:var(--muted);font-size:12.5px;font-weight:600}
+  .stat .val{font-size:27px;font-weight:800;letter-spacing:-.02em;margin-top:7px;display:flex;align-items:baseline;gap:2px}
+  .stat .val .cur{font-size:16px;font-weight:700;color:var(--brand)}
+  .stat .trd{font-size:12px;font-weight:700;color:var(--green);margin-top:6px;display:flex;align-items:center;gap:3px}
+  .stat .ic{float:right;width:34px;height:34px;border-radius:11px;background:rgba(254,82,0,.1);color:var(--brand);display:flex;align-items:center;justify-content:center;margin-top:-2px}
+
+  .sectionhd{display:flex;align-items:center;justify-content:space-between;margin:22px 2px 12px}
+  .sectionhd h2{font-size:16px;font-weight:800;letter-spacing:-.01em}
+  .sectionhd a{color:var(--brand);font-size:13px;font-weight:700}
+
+  .listcard{background:var(--card);border-radius:20px;box-shadow:0 1px 2px rgba(15,23,41,.05);overflow:hidden}
+  .ship{display:flex;align-items:center;gap:13px;padding:14px 15px;border-bottom:1px solid var(--line)}
+  .ship:last-child{border-bottom:0}
+  .ship .pic{width:44px;height:44px;border-radius:13px;background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--brand);flex:none}
+  .ship .mid{flex:1;min-width:0}
+  .ship .who{font-weight:700;font-size:14.5px}
+  .ship .meta{color:var(--muted);font-size:12.5px;margin-top:2px;display:flex;align-items:center;gap:6px}
+  .ship .rt{text-align:right;flex:none}
+  .ship .amt{font-weight:800;font-size:14px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;margin-top:5px;white-space:nowrap}
+  .p-green{background:var(--green-bg);color:var(--green)}
+  .p-amber{background:var(--amber-bg);color:var(--amber)}
+  .p-blue{background:var(--blue-bg);color:var(--blue)}
+  .p-purple{background:var(--purple-bg);color:var(--purple)}
+  .trk{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted)}
+
+  /* search + chips */
+  .search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:15px;padding:12px 14px;color:var(--muted);font-size:14px;margin-top:8px}
+  .chips{display:flex;gap:9px;margin:14px 0 4px;overflow:hidden}
+  .chip{font-size:13px;font-weight:600;padding:8px 15px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .chip.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+  .scard{background:var(--card);border-radius:20px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:15px;margin-top:13px}
+  .scard .h{display:flex;align-items:center;justify-content:space-between}
+  .scard .trkbig{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600;color:var(--ink)}
+  .scard .route{display:flex;align-items:center;gap:10px;margin-top:14px}
+  .scard .city{font-weight:800;font-size:15px}
+  .scard .cc{color:var(--muted);font-size:12px}
+  .scard .arrow{flex:1;height:2px;background:repeating-linear-gradient(90deg,#cbd5e1 0 6px,transparent 6px 12px);position:relative}
+  .scard .arrow::after{content:"";position:absolute;right:-2px;top:-3px;width:8px;height:8px;border-top:2px solid #cbd5e1;border-right:2px solid #cbd5e1;transform:rotate(45deg)}
+  .scard .plane{width:30px;height:30px;border-radius:50%;background:rgba(254,82,0,.1);color:var(--brand);display:flex;align-items:center;justify-content:center}
+
+  /* map */
+  .map{height:186px;border-radius:20px;margin-top:13px;position:relative;overflow:hidden;
+    background:
+      radial-gradient(120px 80px at 78% 30%, rgba(254,82,0,.12), transparent 70%),
+      linear-gradient(160deg,#eef2f7,#e2e8f0);}
+  .map .grid{position:absolute;inset:0;background-image:linear-gradient(#0f172912 1px,transparent 1px),linear-gradient(90deg,#0f172912 1px,transparent 1px);background-size:34px 34px;opacity:.6}
+  .map svg{position:absolute;inset:0}
+  .map .pin{position:absolute;width:26px;height:26px;background:var(--brand);border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 6px 14px rgba(254,82,0,.5)}
+  .map .pin::after{content:"";position:absolute;inset:7px;background:#fff;border-radius:50%}
+  .map .orig{position:absolute;width:14px;height:14px;background:#0f1729;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+
+  /* timeline */
+  .tl{margin-top:6px;padding:2px 4px}
+  .tstep{display:flex;gap:14px;position:relative;padding-bottom:20px}
+  .tstep:last-child{padding-bottom:0}
+  .tstep .marker{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;z-index:2}
+  .tstep .marker.done{background:var(--brand);color:#fff}
+  .tstep .marker.active{background:#fff;border:3px solid var(--brand);color:var(--brand)}
+  .tstep .marker.todo{background:#fff;border:2px solid var(--line);color:transparent}
+  .tstep::before{content:"";position:absolute;left:12.5px;top:26px;bottom:0;width:2px;background:var(--line)}
+  .tstep.done::before{background:var(--brand)}
+  .tstep:last-child::before{display:none}
+  .tstep .tc .tt{font-weight:700;font-size:14px}
+  .tstep.todo .tc .tt{color:var(--muted)}
+  .tstep .tc .td{color:var(--muted);font-size:12px;margin-top:2px}
+
+  .eta{background:linear-gradient(135deg,var(--brand),#ff7d43);color:#fff;border-radius:20px;padding:16px 18px;margin-top:14px;display:flex;align-items:center;justify-content:space-between}
+  .eta .k{font-size:12px;opacity:.9}
+  .eta .v{font-size:19px;font-weight:800;margin-top:3px}
+
+  /* create choose */
+  .choose{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+  .ct{background:var(--card);border-radius:22px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:18px;display:flex;flex-direction:column;gap:2px;position:relative}
+  .ct .cic{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+  .ct h3{font-size:16px;font-weight:800}
+  .ct p{color:var(--muted);font-size:13px;line-height:1.45;margin-top:2px}
+  .ct .go{color:var(--brand);font-weight:700;font-size:13px;margin-top:12px;display:flex;align-items:center;gap:5px}
+  .ic-orange{background:rgba(254,82,0,.12);color:var(--brand)}
+  .ic-blue{background:rgba(59,130,246,.12);color:#2563eb}
+  .ic-green{background:rgba(16,185,129,.12);color:#059669}
+
+  /* wallet */
+  .wallet{background:linear-gradient(135deg,#1b1f27,#0f1219);color:#fff;border-radius:24px;padding:20px;margin-top:12px;position:relative;overflow:hidden}
+  .wallet::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(254,82,0,.5),transparent 70%)}
+  .wallet .wk{font-size:13px;opacity:.75}
+  .wallet .wv{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:8px;display:flex;align-items:baseline;gap:4px}
+  .wallet .wv .cur{font-size:20px;color:var(--brand)}
+  .wallet .wrow{display:flex;gap:26px;margin-top:18px}
+  .wallet .wrow .k{font-size:11px;opacity:.7}
+  .wallet .wrow .v{font-size:15px;font-weight:700;margin-top:3px}
+  .inv{display:flex;align-items:center;gap:13px;padding:14px 15px;border-bottom:1px solid var(--line)}
+  .inv:last-child{border-bottom:0}
+  .inv .num{font-weight:700;font-size:13.5px}
+  .inv .num .trk{display:block;margin-top:2px}
+  .inv .rt{margin-left:auto;text-align:right}
+  .btnpay{background:var(--brand);color:#fff;font-size:12px;font-weight:700;padding:8px 15px;border-radius:11px;margin-top:6px;display:inline-block}
+
+  /* bottom tab */
+  .tabbar{position:absolute;left:0;right:0;bottom:0;height:92px;background:rgba(255,255,255,.94);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+    display:flex;align-items:flex-start;justify-content:space-around;padding:12px 18px 0;z-index:6}
+  .tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:#94a3b8;font-size:10.5px;font-weight:600;flex:1}
+  .tab.on{color:var(--brand)}
+  .tab .fab{width:54px;height:54px;border-radius:18px;background:linear-gradient(150deg,var(--brand),#ff7a3d);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 20px -6px rgba(254,82,0,.6);margin-top:-16px}
+
+  /* login */
+  .login{flex:1;display:flex;flex-direction:column;padding:0 26px}
+  .login .logo{margin:40px auto 0;height:96px}
+  .login .lt{text-align:center;font-size:24px;font-weight:800;margin-top:26px;letter-spacing:-.02em}
+  .login .ls{text-align:center;color:var(--muted);font-size:14px;margin-top:6px}
+  .field{margin-top:16px}
+  .field label{font-size:13px;font-weight:600;color:var(--ink)}
+  .field .inp{margin-top:7px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 15px;color:var(--muted);font-size:14px}
+  .signin{background:var(--brand);color:#fff;text-align:center;font-weight:700;font-size:15px;padding:16px;border-radius:15px;margin-top:22px;box-shadow:0 10px 20px -8px rgba(254,82,0,.6)}
+  .divider{display:flex;align-items:center;gap:12px;color:#94a3b8;font-size:11px;font-weight:600;margin:22px 0}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+  .apply{border:1px solid var(--line);color:var(--ink);text-align:center;font-weight:700;font-size:14px;padding:15px;border-radius:15px;background:#fff}
+
+  .caption{text-align:center;color:#475569;font-weight:700;font-size:15px;margin-top:22px;letter-spacing:.01em}
+
+  /* ─────────── create-shipment flow additions ─────────── */
+  .stepbar{display:flex;align-items:center;gap:6px;margin:10px 0 4px}
+  .stepbar .sg{flex:1;height:4px;border-radius:3px;background:var(--line)}
+  .stepbar .sg.on{background:var(--brand)}
+  .stepnum{color:var(--muted);font-size:12px;font-weight:700;margin-top:9px;letter-spacing:.02em}
+  .backrow{display:flex;align-items:center;gap:12px;padding-top:2px}
+  .backbtn{width:38px;height:38px;border-radius:13px;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
+
+  .fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .lbl2{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:16px 2px 8px}
+  .inp2{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 14px;font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .inp2 .ph{color:#9aa6b6;font-weight:500}
+  .inp2 .flag{font-size:16px}
+
+  .addrcard{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:14px 15px;margin-top:10px;display:flex;gap:12px;align-items:flex-start}
+  .addrcard .dotic{width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:none}
+  .addrcard .nm2{font-weight:800;font-size:14.5px}
+  .addrcard .ln{color:var(--muted);font-size:12.5px;line-height:1.5;margin-top:3px}
+  .addrcard .edit{margin-left:auto;color:var(--brand);font-size:12px;font-weight:700;flex:none}
+
+  .pkgrow{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:14px 15px;margin-top:11px}
+  .pkgrow .ph2{display:flex;align-items:center;justify-content:space-between;font-weight:800;font-size:14px}
+  .dims{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}
+  .dim{background:var(--bg);border-radius:12px;padding:9px 8px;text-align:center}
+  .dim .dk{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+  .dim .dv{font-size:15px;font-weight:800;margin-top:3px}
+  .addbtn{border:1.5px dashed #cbd5e1;border-radius:16px;padding:13px;text-align:center;color:var(--brand);font-weight:700;font-size:13.5px;margin-top:12px;background:#fff8f5}
+
+  .itemcard{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:14px 15px;margin-top:11px}
+  .itemcard .it{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .itemcard .inm{font-weight:800;font-size:14px}
+  .itemcard .isub{color:var(--muted);font-size:12px;margin-top:3px}
+  .hs{display:inline-flex;align-items:center;gap:5px;background:var(--bg);border-radius:8px;padding:4px 8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;font-weight:600;margin-top:8px}
+  .hs .ok{width:6px;height:6px;border-radius:50%;background:#16a34a}
+  .hs .warn2{width:6px;height:6px;border-radius:50%;background:#f59e0b}
+
+  .rate{background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:15px;margin-top:12px;border:2px solid transparent;position:relative}
+  .rate.sel{border-color:var(--brand);box-shadow:0 8px 22px -10px rgba(254,82,0,.45)}
+  .rate .rh{display:flex;align-items:center;gap:11px}
+  .rate .clogo{width:44px;height:44px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:none;letter-spacing:-.03em}
+  .lg-fedex{background:#4d148c;color:#fff}
+  .lg-dhl{background:#ffcc00;color:#d40511}
+  .lg-aramex{background:#c8102e;color:#fff}
+  .lg-smsa{background:#0b3d91;color:#fff}
+  .rate .cn{font-weight:800;font-size:14.5px}
+  .rate .cs{color:var(--muted);font-size:12px;margin-top:2px}
+  .rate .price{margin-left:auto;text-align:right;flex:none}
+  .rate .price .pv{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .rate .price .pc{color:var(--muted);font-size:11px;margin-top:2px}
+  .rate .tick{position:absolute;top:-9px;right:14px;background:var(--brand);color:#fff;font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px}
+  .cheap{background:var(--green-bg);color:var(--green);font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;margin-left:7px}
+
+  .sumcard{background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:16px;margin-top:12px}
+  .sr{display:flex;justify-content:space-between;font-size:13.5px;padding:7px 0;color:var(--muted)}
+  .sr b{color:var(--ink);font-weight:700}
+  .sr.tot{border-top:1px solid var(--line);margin-top:8px;padding-top:13px;font-size:17px;color:var(--ink);font-weight:800}
+  .sr.tot b{font-size:19px;color:var(--brand)}
+
+  .cta{position:absolute;left:0;right:0;bottom:0;padding:14px 20px 26px;background:linear-gradient(to top,#fff 70%,rgba(255,255,255,0));z-index:8}
+  .cta .btn{background:var(--brand);color:#fff;text-align:center;font-weight:800;font-size:15.5px;padding:16px;border-radius:16px;box-shadow:0 12px 24px -10px rgba(254,82,0,.65);display:flex;align-items:center;justify-content:center;gap:8px}
+  .cta .sm{text-align:center;color:var(--muted);font-size:11.5px;margin-top:9px}
+
+  .toggle{display:flex;align-items:center;justify-content:space-between;background:#fff;border-radius:16px;padding:14px 15px;box-shadow:0 1px 2px rgba(15,23,41,.05);margin-top:12px}
+  .sw{width:48px;height:28px;border-radius:999px;background:var(--brand);position:relative;flex:none}
+  .sw::after{content:"";position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  .sw.off{background:#cbd5e1}
+  .sw.off::after{right:auto;left:3px}
+
+  .slot{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:10px}
+  .slot .s{background:#fff;border:1.5px solid var(--line);border-radius:13px;padding:11px 6px;text-align:center;font-size:12.5px;font-weight:700}
+  .slot .s.on{border-color:var(--brand);background:#fff5f0;color:var(--brand)}
+  .slot .s .sd{display:block;font-size:10.5px;color:var(--muted);font-weight:600;margin-top:2px}
+  .slot .s.on .sd{color:var(--brand);opacity:.8}
+
+  .card3{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:15px;margin-top:11px;display:flex;align-items:center;gap:13px}
+  .brandmark{width:46px;height:32px;border-radius:7px;background:linear-gradient(135deg,#1a1f71,#4b5bbd);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none;letter-spacing:.02em}
+  .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;margin-left:auto;position:relative}
+  .radio.on{border-color:var(--brand)}
+  .radio.on::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--brand)}
+
+  .successwrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 26px;text-align:center}
+  .tickbig{width:92px;height:92px;border-radius:50%;background:var(--green-bg);color:#16a34a;display:flex;align-items:center;justify-content:center;margin-bottom:22px}
+  .successwrap h2{font-size:24px;font-weight:800;letter-spacing:-.02em}
+  .successwrap p{color:var(--muted);font-size:14px;margin-top:8px;line-height:1.5}
+  .trackbox{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:15px 18px;margin-top:22px;width:100%}
+  .trackbox .tk{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em}
+  .trackbox .tv{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:19px;font-weight:700;margin-top:6px;letter-spacing:-.01em}
+  .dlrow{display:flex;gap:10px;margin-top:12px;width:100%}
+  .dl{flex:1;background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:7px}
+
+  .note{background:#fff8f5;border:1px solid #ffd9c7;border-radius:14px;padding:12px 14px;font-size:12.5px;color:#9a4b1e;line-height:1.5;margin-top:12px;display:flex;gap:9px}
+  .note svg{flex:none;margin-top:1px}
+
+  .sar{unicode-bidi:bidi-override;direction:ltr;display:inline-block}
+
+  /* RTL variant */
+  .screen.rtl{direction:rtl}
+  .screen.rtl .stepnum,.screen.rtl .lbl2{letter-spacing:0}
+  .screen.rtl .rate .price{margin-left:0;margin-right:auto;text-align:left}
+  .screen.rtl .addrcard .edit{margin-left:0;margin-right:auto}
+  .screen.rtl .radio{margin-left:0;margin-right:auto}
+  /* ─────────── additional screens ─────────── */
+  .otpbox{display:flex;gap:10px;justify-content:center;margin-top:22px}
+  .otpbox .d{width:52px;height:62px;border:1.5px solid var(--line);border-radius:15px;display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:800;background:#fff}
+  .otpbox .d.on{border-color:var(--brand)}
+  .otpbox .d.cur{border-color:var(--brand);color:#cbd5e1}
+
+  .navlist{background:#fff;border-radius:20px;box-shadow:0 1px 2px rgba(15,23,41,.05);overflow:hidden;margin-top:12px}
+  .nl{display:flex;align-items:center;gap:13px;padding:15px;border-bottom:1px solid var(--line)}
+  .nl:last-child{border-bottom:0}
+  .nl .nic{width:36px;height:36px;border-radius:11px;background:var(--bg);color:var(--brand);display:flex;align-items:center;justify-content:center;flex:none}
+  .nl .nt{font-weight:700;font-size:14px}
+  .nl .ns{color:var(--muted);font-size:12px;margin-top:2px}
+  .nl .chev{margin-left:auto;color:#cbd5e1;flex:none}
+
+  .notif{display:flex;gap:12px;padding:14px 15px;border-bottom:1px solid var(--line);background:#fff}
+  .notif:last-child{border-bottom:0}
+  .notif.unread{background:#fff8f5}
+  .notif .nic2{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:none}
+  .notif .nb{font-weight:700;font-size:13.5px}
+  .notif .nm{color:var(--muted);font-size:12.5px;margin-top:3px;line-height:1.45}
+  .notif .nt2{color:#9aa6b6;font-size:11px;margin-top:5px}
+  .undot{width:8px;height:8px;border-radius:50%;background:var(--brand);flex:none;margin-top:6px}
+
+  .permrow{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line)}
+  .permrow:last-child{border-bottom:0}
+  .permrow .pn{font-weight:600;font-size:13.5px}
+
+  .userrow{display:flex;align-items:center;gap:12px;padding:14px 15px;border-bottom:1px solid var(--line)}
+  .userrow:last-child{border-bottom:0}
+  .uav{width:40px;height:40px;border-radius:13px;background:linear-gradient(150deg,#64748b,#94a3b8);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:none}
+  .uav.pri{background:linear-gradient(150deg,var(--brand),#ff7a3d)}
+
+  .kv{display:flex;justify-content:space-between;padding:9px 0;font-size:13.5px;color:var(--muted)}
+  .kv b{color:var(--ink);font-weight:700}
+  .kv.brd{border-bottom:1px solid var(--line)}
+
+  .docrow{display:flex;align-items:center;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line)}
+  .docrow:last-child{border-bottom:0}
+  .docic{width:36px;height:36px;border-radius:10px;background:rgba(254,82,0,.1);color:var(--brand);display:flex;align-items:center;justify-content:center;flex:none}
+
+  .chan{display:flex;align-items:center;gap:13px;padding:14px 15px;border-bottom:1px solid var(--line)}
+  .chan:last-child{border-bottom:0}
+  .chlogo{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex:none;color:#fff}
+  .lg-shopify{background:#95bf47}
+  .lg-salla{background:#004d5a}
+  .lg-zid{background:#7c3aed}
+  .lg-woo{background:#7f54b3}
+
+  .ordrow{background:#fff;border-radius:18px;box-shadow:0 1px 2px rgba(15,23,41,.05);padding:14px 15px;margin-top:11px}
+
+  .queue{display:flex;gap:9px;overflow:hidden;margin:12px 0 2px}
+  .qtab{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 13px;text-align:center;flex:1}
+  .qtab.on{border-color:var(--brand);background:#fff5f0}
+  .qtab .qn{font-size:19px;font-weight:800;letter-spacing:-.02em}
+  .qtab.on .qn{color:var(--brand)}
+  .qtab .ql{font-size:10.5px;color:var(--muted);font-weight:700;margin-top:2px}
+
+  .flag2{display:inline-flex;align-items:center;gap:5px;background:var(--stop-bg,#fee2e2);color:#b91c1c;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:6px}
+  .p-red{background:#fee2e2;color:#b91c1c}
+  .p-grey{background:#e2e8f0;color:#475569}
+
+  .empty{text-align:center;padding:48px 20px;color:var(--muted)}
+  .empty .eic{width:74px;height:74px;border-radius:24px;background:var(--bg);color:#cbd5e1;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+  .empty h3{font-size:16px;font-weight:800;color:var(--ink)}
+  .empty p{font-size:13px;margin-top:6px;line-height:1.5}
+</style></head><body><div class='row'><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><h1 class="page" style="margin-top:6px">Create a shipment</h1><div class="sub">Choose the type of shipment</div><div class="choose"><div class="ct"><div class="cic ic-orange"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18l-2-7H5zM12 11V4M8 7h8"/></svg></div><h3>Express Shipment</h3><p>International &amp; domestic courier via FedEx, DHL and partners.</p><div class="go">Continue <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div></div><div class="ct"><div class="cic ic-blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></svg></div><h3>Door To Door Freight</h3><p>Import with all duties &amp; taxes prepaid on fixed lane pricing.</p><div class="go">Continue <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div></div><div class="ct"><div class="cic ic-green"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></div><h3>Local Delivery</h3><p>Last-mile delivery within Saudi Arabia via local carriers.</p><div class="go">Continue <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div></div></div></div><div class="tabbar"><div class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>Home</div><div class="tab on"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>Shipments</div><div class="tab"><div class="fab"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div></div><div class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h11l5 5v15H4z"/><path d="M8 12h8M8 16h8M8 8h3"/></svg>Invoices</div><div class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Profile</div></div><div class="home-ind"></div></div></div><div class="caption">Choose type</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Shipment Type</div><div class="stepnum" style="margin-top:1px">Step 1 of 9 · Select the shipment direction</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="lbl2">Direction</div><div class="choose" style="gap:11px;margin-top:0"><div class="card3" style="margin-top:0"><div><div style="font-weight:800;font-size:14.5px">Domestic</div><div style="color:var(--muted);font-size:12.5px;margin-top:2px">Inside Saudi Arabia</div></div><div class="radio on"></div></div><div class="card3" style="margin-top:0"><div><div style="font-weight:800;font-size:14.5px">Import</div><div style="color:var(--muted);font-size:12.5px;margin-top:2px">Into Saudi Arabia (inbound)</div></div><div class="radio"></div></div><div class="card3" style="margin-top:0"><div><div style="font-weight:800;font-size:14.5px">Export</div><div style="color:var(--muted);font-size:12.5px;margin-top:2px">Out of Saudi Arabia (outbound)</div></div><div class="radio"></div></div></div><div class="lbl2">Currency</div><div class="inp2"><span>SAR - Saudi Riyal</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div><div class="note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>Direction decides which customs steps you'll see later.</span></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Continue</div></div><div class="home-ind"></div></div></div><div class="caption">1 · Shipment Type</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Sender Details</div><div class="stepnum" style="margin-top:1px">Step 2 of 9 · Pickup address and contact</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="lbl2">Saved sender addresses</div><div class="addrcard" style="border:2px solid var(--brand)"><div class="dotic" style="background:rgba(254,82,0,.12);color:var(--brand)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></div><div><div class="nm2">Al Rajhi Trading — HQ</div><div class="ln">King Fahd Rd, Al Olaya<br>Riyadh 12333 · 🇸🇦</div></div><span class="edit">Default</span></div><div class="addrcard"><div class="dotic" style="background:var(--bg);color:var(--muted)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 4 3h16l1 6M4 9v12h16V9M9 21v-7h6v7"/></svg></div><div><div class="nm2">Warehouse — Jeddah</div><div class="ln">Al Khumrah Industrial<br>Jeddah 23762 · 🇸🇦</div></div></div><div class="lbl2">Or enter a new address</div><div class="inp2"><span class="ph">Contact name</span></div><div style="height:10px"></div><div class="inp2"><span class="ph">Phone</span></div><div style="height:10px"></div><div class="inp2"><span class="ph">Address line 1</span></div><div style="height:10px"></div><div class="fieldrow"><div class="inp2"><span class="ph">City</span></div><div class="inp2"><span class="ph">Postal code</span></div></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Continue</div></div><div class="home-ind"></div></div></div><div class="caption">2 · Sender Details</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Recipient Details</div><div class="stepnum" style="margin-top:1px">Step 3 of 9 · Delivery address and contact</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="lbl2">Country</div><div class="inp2"><span><span class="flag">🇦🇪</span> &nbsp;United Arab Emirates</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div><div class="lbl2">Saved recipient addresses</div><div class="addrcard"><div class="dotic" style="background:var(--bg);color:var(--muted)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div><div><div class="nm2">Gulf Retail LLC</div><div class="ln">Sheikh Zayed Rd, Al Quoz<br>Dubai · 🇦🇪</div></div><span class="edit">Use</span></div><div class="lbl2">Or enter a new address</div><div class="inp2"><span class="ph">Recipient name</span></div><div style="height:10px"></div><div class="inp2"><span class="ph">Phone</span></div><div style="height:10px"></div><div class="fieldrow"><div class="inp2"><span class="ph">City</span></div><div class="inp2"><span class="ph">Postal code</span></div></div><div class="note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>Some countries also require a state or province.</span></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Continue</div></div><div class="home-ind"></div></div></div><div class="caption">3 · Recipient Details</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Package Details</div><div class="stepnum" style="margin-top:1px">Step 4 of 9 · Weight and dimensions</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="pkgrow"><div class="ph2"><span>Package 1</span><span style="color:var(--muted);font-size:12px;font-weight:600">Remove</span></div><div class="dims"><div class="dim"><div class="dk">Weight</div><div class="dv">4.5</div></div><div class="dim"><div class="dk">L cm</div><div class="dv">40</div></div><div class="dim"><div class="dk">W cm</div><div class="dv">30</div></div><div class="dim"><div class="dk">H cm</div><div class="dv">20</div></div></div></div><div class="pkgrow"><div class="ph2"><span>Package 2</span><span style="color:var(--muted);font-size:12px;font-weight:600">Remove</span></div><div class="dims"><div class="dim"><div class="dk">Weight</div><div class="dv">2.0</div></div><div class="dim"><div class="dk">L cm</div><div class="dv">25</div></div><div class="dim"><div class="dk">W cm</div><div class="dv">20</div></div><div class="dim"><div class="dk">H cm</div><div class="dv">15</div></div></div></div><div class="addbtn">+ &nbsp;Add another package</div><div class="addbtn" style="display:flex;align-items:center;justify-content:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg>Scan a document to fill this in</div><div class="sumcard"><div class="sr brd"><span>Actual weight</span><b>6.5 kg</b></div><div class="sr"><span>Volumetric weight</span><b>6.0 kg</b></div><div class="sr tot"><span>Chargeable weight</span><b>6.5 kg</b></div></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Get rates</div></div><div class="home-ind"></div></div></div><div class="caption">4 · Package Details</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Select Shipping Rate</div><div class="stepnum" style="margin-top:1px">Step 5 of 9 · Riyadh → Dubai · 6.5 kg</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="rate sel"><span class="tick">SELECTED</span><div class="rh"><div class="clogo lg-fedex">FedEx</div><div><div class="cn">International Priority</div><div class="cs">Delivered Tue 19 Aug · 2 days</div></div><div class="price"><div class="pv"><span class="sar">﷼795</span></div><div class="pc">incl. VAT</div></div></div></div><div class="rate"><div class="rh"><div class="clogo lg-dhl">DHL</div><div><div class="cn">Express Worldwide <span class="cheap">CHEAPEST</span></div><div class="cs">Delivered Wed 20 Aug · 3 days</div></div><div class="price"><div class="pv"><span class="sar">﷼712</span></div><div class="pc">incl. VAT</div></div></div></div><div class="rate"><div class="rh"><div class="clogo lg-aramex">ARX</div><div><div class="cn">Priority Document</div><div class="cs">Delivered Wed 20 Aug · 3 days</div></div><div class="price"><div class="pv"><span class="sar">﷼864</span></div><div class="pc">incl. VAT</div></div></div></div><div class="note" style="background:#f8fafc;border-color:var(--line);color:var(--muted)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Prices held for 30 minutes. Re-quote after that.</span></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Continue with FedEx · <span class="sar">﷼795</span></div></div><div class="home-ind"></div></div></div><div class="caption">5 · Select Rate</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Customs Details</div><div class="stepnum" style="margin-top:1px">Step 6 of 9 · International only</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="addbtn" style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg>Scan an invoice to fill this in</div><div class="itemcard"><div class="it"><div><div class="inm">Cotton T-Shirts</div><div class="isub">Apparel · 100% cotton · 🇮🇳 India</div></div><div style="text-align:right;flex:none"><div style="font-weight:800;font-size:14px"><span class="sar">﷼450.00</span></div><div style="color:var(--muted);font-size:11.5px;margin-top:2px">30 × <span class="sar">﷼15.00</span></div></div></div><div class="hs"><span class="ok"></span>HS 6109.10 · high confidence</div></div><div class="itemcard"><div class="it"><div><div class="inm">Leather Wallets</div><div class="isub">Accessories · Genuine leather · 🇮🇹 Italy</div></div><div style="text-align:right;flex:none"><div style="font-weight:800;font-size:14px"><span class="sar">﷼600.00</span></div><div style="color:var(--muted);font-size:11.5px;margin-top:2px">10 × <span class="sar">﷼60.00</span></div></div></div><div class="hs"><span class="warn2"></span>HS 4202.31 · confirm this</div></div><div class="addbtn">+ &nbsp;Add item</div><div class="sumcard"><div class="sr brd"><span>2 items · 40 units</span><b><span class="sar">﷼1,050.00</span></b></div><div class="sr"><span>Declared value</span><b>USD 280.00</b></div></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Continue</div></div><div class="home-ind"></div></div></div><div class="caption">6 · Customs Details</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Carrier Pickup</div><div class="stepnum" style="margin-top:1px">Step 7 of 9 · Optional</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span></div><div class="toggle"><div><div style="font-weight:800;font-size:14.5px">Request a pickup</div><div style="color:var(--muted);font-size:12.5px;margin-top:2px">Otherwise drop off at a branch</div></div><div class="sw"></div></div><div class="lbl2">Pickup date</div><div class="slot"><div class="s">Mon<span class="sd">18 Aug</span></div><div class="s on">Tue<span class="sd">19 Aug</span></div><div class="s">Wed<span class="sd">20 Aug</span></div></div><div class="lbl2">Ready between</div><div class="fieldrow"><div class="inp2"><span>09:00</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div class="inp2"><span>17:00</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div></div><div class="lbl2">Pickup location</div><div class="inp2"><span class="ph">Reception, Gate 2…</span></div><div style="height:10px"></div><div class="inp2"><span class="ph">Instructions (optional)</span></div><div class="note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>Booked after payment. A failed pickup never fails the shipment.</span></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Review order</div></div><div class="home-ind"></div></div></div><div class="caption">7 · Carrier Pickup</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Payment Options</div><div class="stepnum" style="margin-top:1px">Step 8 of 9 · Order Summary</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span></div><div class="sumcard"><div class="sr brd"><span>Shipping</span><b><span class="sar">﷼620.00</span></b></div><div class="sr brd"><span>Fuel surcharge</span><b><span class="sar">﷼58.00</span></b></div><div class="sr brd"><span>Pickup</span><b><span class="sar">﷼25.00</span></b></div><div class="sr"><span>VAT (15%)</span><b><span class="sar">﷼92.00</span></b></div><div class="sr tot"><span>Total</span><b><span class="sar">﷼795.00</span></b></div></div><div class="lbl2">Pay with</div><div class="card3"><div class="brandmark">VISA</div><div><div style="font-weight:800;font-size:14px">•••• 4242</div><div style="color:var(--muted);font-size:12px;margin-top:2px">Expires 09/28</div></div><div class="radio on"></div></div><div class="card3"><div class="brandmark" style="background:var(--bg);color:var(--muted)">+</div><div><div style="font-weight:800;font-size:14px">New card</div><div style="color:var(--muted);font-size:12px;margin-top:2px">Secured by Tap</div></div><div class="radio"></div></div><div class="card3"><div class="brandmark" style="background:rgba(254,82,0,.12);color:var(--brand)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div><div><div style="font-weight:800;font-size:14px">Pay later · 30 days</div><div style="color:var(--muted);font-size:12px;margin-top:2px"><span class="sar">﷼42,300</span> credit available</div></div><div class="radio"></div></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Pay <span class="sar">﷼795.00</span></div><div class="sm">Booked with the carrier after payment</div></div><div class="home-ind"></div></div></div><div class="caption">8 · Payment Options</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="successwrap"><div class="tickbig" style="background:var(--green-bg);color:#16a34a"><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div><h2>Shipment Created Successfully!</h2><p>Your shipment has been booked with the carrier.</p><div class="trackbox"><div class="tk">Shipment ID</div><div class="tv">EZH977158300</div><div style="display:flex;justify-content:space-between;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)"><span style="color:var(--muted);font-size:12.5px">FedEx · 7940 5613 3021</span><span class="pill p-amber" style="margin:0">Processing</span></div></div><div class="dlrow"><div class="dl"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h11l5 5v15H4z"/><path d="M8 12h8M8 16h8M8 8h3"/></svg>Label</div><div class="dl"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2h11l5 5v15H4z"/><path d="M8 12h8M8 16h8M8 8h3"/></svg>Invoice</div></div></div><div class="cta"><div class="btn" style="background:var(--brand)">Track shipment</div></div><div class="home-ind"></div></div></div><div class="caption">9 · Confirmation</div></div><div><div class="device"><div class="screen"><div class="island"></div><div class="status"><span>9:41</span><span class="sig"><span class="bars"><i></i><i></i><i></i><i></i></span><span style="font-size:12px">5G</span><span class="batt"><i></i></span></span></div><div class="body" style="filter:blur(2px);opacity:.4"><div class="backrow"><div class="backbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></div><div><div style="font-weight:800;font-size:16px">Customs Details</div><div class="stepnum" style="margin-top:1px">Step 6 of 9 · International only</div></div></div><div class="stepbar"><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg on"></span><span class="sg"></span><span class="sg"></span><span class="sg"></span></div><div class="addbtn" style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5M5 21h14"/></svg>Scan an invoice to fill this in</div><div class="itemcard"><div class="it"><div><div class="inm">Cotton T-Shirts</div><div class="isub">Apparel · 100% cotton · 🇮🇳 India</div></div><div style="text-align:right;flex:none"><div style="font-weight:800;font-size:14px"><span class="sar">﷼450.00</span></div><div style="color:var(--muted);font-size:11.5px;margin-top:2px">30 × <span class="sar">﷼15.00</span></div></div></div><div class="hs"><span class="ok"></span>HS 6109.10 · high confidence</div></div><div class="itemcard"><div class="it"><div><div class="inm">Leather Wallets</div><div class="isub">Accessories · Genuine leather · 🇮🇹 Italy</div></div><div style="text-align:right;flex:none"><div style="font-weight:800;font-size:14px"><span class="sar">﷼600.00</span></div><div style="color:var(--muted);font-size:11.5px;margin-top:2px">10 × <span class="sar">﷼60.00</span></div></div></div><div class="hs"><span class="warn2"></span>HS 4202.31 · confirm this</div></div><div class="addbtn">+ &nbsp;Add item</div><div class="sumcard"><div class="sr brd"><span>2 items · 40 units</span><b><span class="sar">﷼1,050.00</span></b></div><div class="sr"><span>Declared value</span><b>USD 280.00</b></div></div></div><div style="position:absolute;inset:0;background:rgba(15,23,41,.4);z-index:7"></div><div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:28px 28px 0 0;padding:10px 22px 30px;z-index:8;box-shadow:0 -18px 40px rgba(15,23,41,.18)"><div style="width:42px;height:5px;border-radius:3px;background:#dde3ea;margin:0 auto 18px"></div><div style="font-weight:800;font-size:18px;letter-spacing:-.02em">Confirm the HS code</div><p style="color:var(--muted);font-size:13.5px;margin-top:7px;line-height:1.5">Leather Wallets — pick the code customs should see.</p><div class="card3" style="margin-top:10px"><div><div style="font-weight:800;font-size:14px;font-family:ui-monospace,Menlo,monospace">4202.31</div><div style="color:var(--muted);font-size:12px;margin-top:3px">Articles of leather, pocket-size</div></div><div class="radio on"></div></div><div class="card3" style="margin-top:10px"><div><div style="font-weight:800;font-size:14px;font-family:ui-monospace,Menlo,monospace">4202.32</div><div style="color:var(--muted);font-size:12px;margin-top:3px">With outer surface of plastic sheeting</div></div><div class="radio"></div></div><div class="card3" style="margin-top:10px"><div><div style="font-weight:800;font-size:14px;font-family:ui-monospace,Menlo,monospace">4202.39</div><div style="color:var(--muted);font-size:12px;margin-top:3px">Other similar articles</div></div><div class="radio"></div></div><div style="background:var(--brand);color:#fff;text-align:center;font-weight:800;font-size:15px;padding:16px;border-radius:16px;margin-top:18px">Confirm code</div></div><div class="home-ind"></div></div></div><div class="caption">HS code confirm</div></div></div></body></html>
