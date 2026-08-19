@@ -153,7 +153,7 @@ Revokes the whole token family for that device.
 
 Requirements: Guard `requireAuth`
 
-Source: `server/routes.ts:8497`
+Source: `server/routes.ts:8502`
 
 ##### `POST /api/auth/login`
 
@@ -163,7 +163,7 @@ Used by the web SPA. Native clients should use POST /api/auth/token instead.
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:8057`
+Source: `server/routes.ts:8062`
 
 ##### `POST /api/auth/otp/request`
 
@@ -173,7 +173,7 @@ Always returns success — never reveals whether the address exists.
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8128`
+Source: `server/routes.ts:8133`
 
 ##### `POST /api/auth/refresh`
 
@@ -189,7 +189,7 @@ Request body — `RefreshRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8392`
+Source: `server/routes.ts:8397`
 
 ##### `POST /api/auth/revoke`
 
@@ -203,7 +203,7 @@ Request body — `RefreshRequest`:
 | --- | --- | --- | --- |
 | `refreshToken` | string | yes | min length 20 |
 
-Source: `server/routes.ts:8456`
+Source: `server/routes.ts:8461`
 
 ##### `POST /api/auth/token`
 
@@ -224,7 +224,7 @@ Request body — `TokenRequest`:
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:8270`
+Source: `server/routes.ts:8275`
 
 ##### `POST /api/auth/token/otp`
 
@@ -245,7 +245,7 @@ Request body — `OtpTokenRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8332`
+Source: `server/routes.ts:8337`
 
 ### Client portal
 
@@ -332,7 +332,7 @@ Primary contact only. Bilingual (EN/AR) fields are accepted.
 
 Requirements: Guard `requireClient` · **Primary contact only**
 
-Source: `server/routes.ts:15633`
+Source: `server/routes.ts:15613`
 
 ##### `GET /api/client/fx-rate`
 
@@ -340,7 +340,7 @@ Display currency and the SAR conversion rate for this account
 
 Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.
 
-Source: `server/routes.ts:15596`
+Source: `server/routes.ts:15576`
 
 ##### `POST /api/client/orders/:id/fulfill`
 
@@ -350,7 +350,7 @@ Fulfil an order as a shipment
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18128`
+Source: `server/routes.ts:18108`
 
 ##### `POST /api/client/quick-quote`
 
@@ -372,7 +372,7 @@ Request body — `QuickQuoteRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16590`
+Source: `server/routes.ts:16570`
 
 ##### `POST /api/client/shipments`
 
@@ -402,7 +402,7 @@ Request body — `LegacyShipmentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18789`
+Source: `server/routes.ts:18769`
 
 ##### `POST /api/client/shipments/:id/cancel`
 
@@ -412,7 +412,7 @@ A still-booked cancellation auto-issues a Tap refund and cancels any carrier pic
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18869`
+Source: `server/routes.ts:18849`
 
 ##### `GET /api/client/shipments/:id/label.pdf`
 
@@ -422,7 +422,7 @@ Binary behind the auth guard. Native clients must fetch this with the Authorizat
 
 Requirements: Guard `requireClient` · Returns `application/pdf`
 
-Source: `server/routes.ts:18975`
+Source: `server/routes.ts:18955`
 
 ##### `POST /api/client/shipments/:id/pay-later`
 
@@ -432,7 +432,7 @@ Requires an approved credit limit with sufficient available balance.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:19172`
+Source: `server/routes.ts:19152`
 
 ##### `POST /api/client/shipments/checkout`
 
@@ -451,7 +451,7 @@ Request body — `CheckoutRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18250`
+Source: `server/routes.ts:18230`
 
 ##### `POST /api/client/shipments/confirm`
 
@@ -468,7 +468,7 @@ Request body — `ConfirmRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18681`
+Source: `server/routes.ts:18661`
 
 ##### `POST /api/client/shipments/extract-invoice-items`
 
@@ -478,7 +478,7 @@ AI extraction (Gemini). Upload the file through the signed-URL flow first and pa
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16360`
+Source: `server/routes.ts:16340`
 
 ##### `POST /api/client/shipments/extract-package-details`
 
@@ -488,7 +488,7 @@ AI extraction (Gemini). Same upload-first pattern as invoice extraction.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16428`
+Source: `server/routes.ts:16408`
 
 ##### `POST /api/client/shipments/pay`
 
@@ -507,7 +507,7 @@ Request body — `ShipmentPaymentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18567`
+Source: `server/routes.ts:18547`
 
 ##### `POST /api/client/shipments/rates`
 
@@ -536,7 +536,7 @@ Request body — `ShipmentRateRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:17255`
+Source: `server/routes.ts:17235`
 
 ### Operations portal
 

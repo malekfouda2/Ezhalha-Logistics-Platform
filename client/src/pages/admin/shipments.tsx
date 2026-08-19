@@ -16,6 +16,7 @@ import {
   shipmentFiltersToQueryParams,
   type ShipmentFilters,
 } from "@shared/shipment-filters";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -1415,7 +1416,12 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
               {selectedShipment.carrierTrackingNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Carrier Tracking #</p>
-                  <p className="font-mono font-medium">{selectedShipment.carrierTrackingNumber}</p>
+                  <CarrierTrackingLink
+                    trackingNumber={selectedShipment.carrierTrackingNumber}
+                    carrierCode={selectedShipment.carrierCode}
+                    carrierName={selectedShipment.carrierName}
+                    className="font-medium"
+                  />
                 </div>
               )}
               {(selectedShipment as any).pickupConfirmationNumber && (
