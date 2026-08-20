@@ -10,7 +10,7 @@
     "primaryColor": "#fe5200",
     "supportsRTL": true,
     "extra": {
-      "apiBaseUrl": "https://staging.ezhalha.co"
+      "apiBaseUrl": "https://staging.147-93-122-137.sslip.io"
     },
     "ios": {
       "supportsTablet": false,
@@ -36,6 +36,7 @@
       "ar": "./src/i18n/locales/ar.json"
     },
     "plugins": [
+      "expo-router",
       "expo-asset",
       "expo-secure-store",
       "expo-localization",
@@ -50,7 +51,8 @@
           ]
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-router"
     ]
   }
 }

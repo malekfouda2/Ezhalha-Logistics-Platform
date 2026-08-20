@@ -39,6 +39,7 @@ export default function LoginScreen() {
 
   const onSubmit = async (data: LoginFormValues) => {
     try {
+      setIsSubmitting(true);
       await signInMutation.mutateAsync({
         username: data.identifier,
         password: data.password,
@@ -60,7 +61,10 @@ export default function LoginScreen() {
       });
 
       console.log("Login failed", error);
+    } finally {
+      setIsSubmitting(false);
     }
+  
   };
 
   return (
