@@ -26,11 +26,12 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil, Clock } from "lucide-react";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { SarAmount, formatCurrencyAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { humanizeError } from "@/lib/friendly-error";
 import type { Shipment, ClientAccount, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -141,6 +142,32 @@ export default function ClientShipments() {
       return response.json();
     },
     enabled: Boolean(selectedShipment && canPayShipment(selectedShipment)),
+  });
+
+  // Whether this client may pay on credit. The create-shipment wizard already asks; this list is
+  // the only other place a pending shipment can be paid, so it has to ask too.
+  const { data: creditAccess } = useQuery<{ creditEnabled: boolean; request: { status?: string } | null }>({
+    queryKey: ["/api/client/credit-access"],
+  });
+
+  const payLaterMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      const res = await apiRequest("POST", `/api/client/shipments/${shipmentId}/pay-later`);
+      return res.json();
+    },
+    onSuccess: () => {
+      ["/api/client/shipments", "/api/client/shipments/recent", "/api/client/stats", "/api/client/credit-invoices"].forEach(
+        (key) => queryClient.invalidateQueries({ queryKey: [key] }),
+      );
+      setSelectedShipment(null);
+      toast({
+        title: "Credit invoice created",
+        description: "Your shipment is confirmed with Pay Later. The invoice is due in 30 days.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Pay Later failed", description: humanizeError(error), variant: "destructive" });
+    },
   });
 
   const cancelMutation = useMutation({
@@ -659,6 +686,38 @@ export default function ClientShipments() {
                     <p className="text-sm text-muted-foreground">
                       This shipment is not available for online payment right now.
                     </p>
+                  )}
+
+                  {checkoutSummary?.canPay && creditAccess?.creditEnabled && (
+                    <>
+                      <div className="relative flex items-center py-1">
+                        <div className="flex-grow border-t" />
+                        <span className="px-3 text-xs uppercase text-muted-foreground">or</span>
+                        <div className="flex-grow border-t" />
+                      </div>
+                      <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+                        <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                          <Clock className="h-4 w-4" />
+                          Credit / Pay Later
+                        </div>
+                        <p className="text-sm text-amber-600 dark:text-amber-400">
+                          Confirm this shipment now and receive an invoice with 30-day payment terms.
+                        </p>
+                        <Button
+                          variant="outline"
+                          className="w-full border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                          disabled={payLaterMutation.isPending || payShipmentMutation.isPending}
+                          onClick={() => payLaterMutation.mutate(selectedShipment.id)}
+                          data-testid="button-pay-later-selected-shipment"
+                        >
+                          {payLaterMutation.isPending ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating credit invoice...</>
+                          ) : (
+                            <>Use Credit / Pay Later</>
+                          )}
+                        </Button>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
