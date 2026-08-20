@@ -10,5 +10,25 @@
   "home": {
     "title": "مرحبًا بك في إزهلها",
     "subtitle": "منصة الخدمات اللوجستية الخاصة بك"
+  },
+  "auth": {
+    "logo": "ezhalha",
+    "welcomeBack": "مرحبًا بعودتك",
+    "signInSubtitle": "سجّل الدخول إلى حسابك",
+    "identifierLabel": "البريد الإلكتروني أو اسم المستخدم أو الهاتف",
+    "identifierPlaceholder": "razan@alrajhi-trading.com",
+    "passwordLabel": "كلمة المرور",
+    "forgotPassword": "هل نسيت كلمة المرور؟",
+    "signIn": "تسجيل الدخول",
+    "or": "أو",
+    "emailSignInCode": "أرسل لي رمز الدخول عبر البريد",
+    "newToEzhalha": "جديد على ezhalha؟",
+    "applyForAccount": "قدّم طلب حساب",
+    "errors": {
+      "identifierRequired": "البريد الإلكتروني أو اسم المستخدم أو الهاتف مطلوب",
+      "identifierMin": "يجب أن يتكون من 3 أحرف على الأقل",
+      "passwordRequired": "كلمة المرور مطلوبة",
+      "passwordMin": "يجب أن تتكون كلمة المرور من 6 أحرف على الأقل"
+    }
   }
 }

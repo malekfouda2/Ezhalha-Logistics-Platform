@@ -10,5 +10,25 @@
   "home": {
     "title": "Welcome to Ezhalha",
     "subtitle": "Your logistics platform"
+  },
+  "auth": {
+    "logo": "ezhalha",
+    "welcomeBack": "Welcome back",
+    "signInSubtitle": "Sign in to your account",
+    "identifierLabel": "Email, username or phone",
+    "identifierPlaceholder": "razan@alrajhi-trading.com",
+    "passwordLabel": "Password",
+    "forgotPassword": "Forgot password?",
+    "signIn": "Sign in",
+    "or": "OR",
+    "emailSignInCode": "Email me a sign-in code",
+    "newToEzhalha": "New to ezhalha?",
+    "applyForAccount": "Apply for an account",
+    "errors": {
+      "identifierRequired": "Email, username or phone is required",
+      "identifierMin": "Must be at least 3 characters",
+      "passwordRequired": "Password is required",
+      "passwordMin": "Password must be at least 6 characters"
+    }
   }
 }
