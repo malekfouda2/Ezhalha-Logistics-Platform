@@ -30,5 +30,13 @@
       "passwordRequired": "Password is required",
       "passwordMin": "Password must be at least 6 characters"
     }
+  },
+  "toast": {
+    "login": {
+      "successTitle": "Welcome back!",
+      "successMessage": "You have successfully logged in.",
+      "errorTitle": "Login failed",
+      "invalidCredentials": "Invalid credentials"
+    }
   }
 }

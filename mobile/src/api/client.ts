@@ -210,8 +210,7 @@ export async function apiRequest<T = unknown>(
  * `source={{ uri, headers: { Authorization: ... } }}`, so images need no download step.
  */
 export async function downloadFile(path: string, filename: string): Promise<string> {
-  const FileSystem = await import("expo-file-system");
-
+  const FileSystem = await import("expo-file-system/legacy");
   let token = getAccessToken();
   if (!token && (await getRefreshToken())) {
     token = await refreshAccessToken();

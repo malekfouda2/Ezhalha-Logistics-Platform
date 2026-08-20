@@ -1,14 +1,9 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { User } from "@shared/schema";
-import { api, apiRequest } from "./client";
-import {
-  clearAllTokens,
-  getDeviceId,
-  getRefreshToken,
-  setAccessToken,
-  setRefreshToken,
-} from "./tokens";
+
+import { apiRequest, api } from "@/api/client";
+import { clearAllTokens, getDeviceId, getRefreshToken, setAccessToken, setRefreshToken } from "@/api/tokens";
 
 // Auth calls, bound to the endpoints in server/routes.ts. Types for the user object come
 // straight from @shared/schema, so a column added to the users table shows up here as a

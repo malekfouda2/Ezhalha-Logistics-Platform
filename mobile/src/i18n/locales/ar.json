@@ -30,5 +30,13 @@
       "passwordRequired": "كلمة المرور مطلوبة",
       "passwordMin": "يجب أن تتكون كلمة المرور من 6 أحرف على الأقل"
     }
+  },
+  "toast": {
+    "login": {
+      "successTitle": "مرحبًا بعودتك!",
+      "successMessage": "تم تسجيل الدخول بنجاح.",
+      "errorTitle": "فشل تسجيل الدخول",
+      "invalidCredentials": "بيانات تسجيل الدخول غير صحيحة"
+    }
   }
 }

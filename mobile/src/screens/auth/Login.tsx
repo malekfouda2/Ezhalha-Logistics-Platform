@@ -14,6 +14,8 @@ import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { useLoginSchema, LoginFormValues } from "@/schemas/loginSchema";
+import { useSignIn } from "@/lib/hooks/useAuth";
+import { Toast } from "react-native-toast-message/lib/src/Toast";
 
 export default function LoginScreen() {
   const { t } = useTranslation();
@@ -21,6 +23,7 @@ export default function LoginScreen() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const signInMutation = useSignIn();
 
   const {
     control,
@@ -35,12 +38,28 @@ export default function LoginScreen() {
   });
 
   const onSubmit = async (data: LoginFormValues) => {
-    setIsSubmitting(true);
     try {
-      // TODO: call your sign-in API here
-      console.log(data);
-    } finally {
-      setIsSubmitting(false);
+      await signInMutation.mutateAsync({
+        username: data.identifier,
+        password: data.password,
+      });
+
+      Toast.show({
+        type: "success",
+        text1: t("toast.login.successTitle"),
+        text2: t("toast.login.successMessage"),
+      });
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: t("toast.login.errorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.login.invalidCredentials"),
+      });
+
+      console.log("Login failed", error);
     }
   };
 
@@ -141,7 +160,7 @@ export default function LoginScreen() {
 
       <View style={styles.footer}>
         <Text size="small" dimRate="70%" style={styles.subtitle}>
-          {t("auth.newToEzhalha")}{" "}
+          {t("auth.newToEzhalha")}
         </Text>
         <Pressable
           onPress={() => {
@@ -184,6 +203,7 @@ const styles = StyleSheet.create({
   subtitle: {
     textAlign: "center",
     color: Colors.textSecondary,
+    paddingEnd: rs(6),
   },
   forgotPassword: {
     alignSelf: "flex-end",
