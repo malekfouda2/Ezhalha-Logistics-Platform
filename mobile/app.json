@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "primaryColor": "#fe5200",
     "extra": {
-      "apiBaseUrl": "https://staging.ezhalha.co"
+      "apiBaseUrl": "https://staging.147-93-122-137.sslip.io"
     },
     "ios": {
       "supportsTablet": false,
