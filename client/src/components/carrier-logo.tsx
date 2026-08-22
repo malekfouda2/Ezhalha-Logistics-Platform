@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import dhlLogo from "@/assets/carriers/dhl-logo.png";
+import { carrierBrandName } from "@shared/carriers";
 
 /**
  * Admin-uploaded carrier logos (Apps tab) keyed by upper-case carrier code, e.g.
@@ -14,18 +15,6 @@ export function useCarrierLogos() {
   });
   return data ?? {};
 }
-
-const CARRIER_NAMES: Record<string, string> = {
-  FEDEX: "FedEx",
-  DHL: "DHL",
-  ARAMEX: "Aramex",
-  SMSA: "SMSA Express",
-  NAQEL: "Naqel Express",
-  JT: "J&T Express",
-  REDBOX: "RedBox",
-  ZAJIL: "Zajil Express",
-  IMILE: "iMile",
-};
 
 interface CarrierLogoProps {
   carrierCode: string;
@@ -43,7 +32,9 @@ interface CarrierLogoProps {
 export function CarrierLogo({ carrierCode, carrierName, className }: CarrierLogoProps) {
   const logos = useCarrierLogos();
   const code = (carrierCode || "").trim().toUpperCase();
-  const name = carrierName || CARRIER_NAMES[code] || carrierCode || "Carrier";
+  // Brand first: carrierName can hold the carrier's service level ("EXPRESS WORLDWIDE"), which
+  // is not a label for a logo.
+  const name = carrierBrandName(carrierCode, carrierName) || "Carrier";
   const uploaded = logos[code];
 
   if (uploaded) {

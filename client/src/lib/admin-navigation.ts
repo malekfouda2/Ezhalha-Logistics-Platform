@@ -23,6 +23,7 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   userRoles: { anyOf: ["roles:read", "permissions:read"] },
   userInvites: { anyOf: ["users:read", "users:create", "users:update"] },
   clients: { anyOf: ["clients:read"] },
+  clientProfile: { anyOf: ["clients:read"] },
   editClient: { allOf: ["clients:read", "clients:update"] },
   applications: { anyOf: ["applications:read"] },
   operations: { anyOf: ["operations:read"] },
@@ -91,6 +92,7 @@ export const ADMIN_NAV_ITEMS = [
       { href: "/admin/operations?view=attention", label: "Needs Attention", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=special", label: "Special Handling", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=delivered", label: "Delivered", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=returned", label: "Returned", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
     ],
   },
   {

@@ -1,6 +1,15 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { storage } from "../storage";
+import { getCarrierTrackingEvents } from "./carrier-tracking-events";
+import {
+  carrierContactsSettingKey,
+  firstCarrierContactOfType,
+  legacyCarrierContactKeys,
+  parseCarrierContactChannels,
+  withLegacyCarrierContacts,
+  type CarrierContactChannel,
+} from "@shared/carrier-contact-channels";
 import { sendEmail } from "./email";
 import { getRenderedTemplate } from "./email-templates";
 import { logError, logInfo } from "./logger";
@@ -175,6 +184,25 @@ export type OperationShipmentSummary = {
 
 export type OperationShipmentDetail = OperationShipmentSummary & {
   operationEvents: ShipmentOperationEvent[];
+  /**
+   * The carrier's own scan history, verbatim. Newest first. Distinct from `operationEvents`,
+   * which is OUR internal audit trail — these are the carrier's words and the carrier's clock,
+   * and nothing in this list is authored by us.
+   */
+  carrierTrackingEvents: Array<{
+    id: string;
+    carrierCode: string;
+    eventCode: string | null;
+    description: string;
+    occurredAt: Date;
+    carrierLocalTime: string | null;
+    carrierUtcOffset: string | null;
+    location: string | null;
+    exceptionCode: string | null;
+    exceptionDescription: string | null;
+    signedBy: string | null;
+    remarks: string | null;
+  }>;
   operationTasks: ShipmentOperationTask[];
   operationNotes: Array<ShipmentOperationNote & { authorName: string | null }>;
   operationPlanNotes: string | null;
@@ -215,7 +243,17 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
     attempts: Array<{ at: Date; outcome: "booked" | "failed" | "scheduled"; detail: string | null }>;
   };
   // Carrier contact channels configured on the carrier's integration app (Apps tab).
-  carrierContact: { phone: string | null; email: string | null; whatsapp: string | null } | null;
+  carrierContact: {
+    /** Every labelled channel configured for this carrier, in the admin's own order. */
+    channels: CarrierContactChannel[];
+    /**
+     * First phone / email / WhatsApp from `channels`. Retained so callers written against the
+     * single-value shape keep working; new UI should read `channels` so labels are not lost.
+     */
+    phone: string | null;
+    email: string | null;
+    whatsapp: string | null;
+  } | null;
   ddpChargeConfig?: {
     billingUnit: "KG" | "CBM";
     chargeLabel: string;
@@ -1300,13 +1338,30 @@ async function resolveCarrierContact(shipment: Shipment): Promise<OperationShipm
       ordered.push(acc);
     }
 
+    const legacyKeys = legacyCarrierContactKeys(code);
     for (const acc of ordered) {
       let settings: Record<string, string> = {};
       try { settings = acc.settings ? JSON.parse(acc.settings) : {}; } catch { settings = {}; }
-      const phone = (settings[`${code}_SUPPORT_PHONE`] || "").trim() || null;
-      const email = (settings[`${code}_SUPPORT_EMAIL`] || "").trim() || null;
-      const whatsapp = (settings[`${code}_SUPPORT_WHATSAPP`] || "").trim() || null;
-      if (phone || email || whatsapp) return { phone, email, whatsapp };
+
+      // Labelled channels first; the three pre-split single-value keys fill in any type the
+      // labelled list does not already cover, so accounts configured before the change keep
+      // their contacts without an admin having to re-enter them.
+      const channels = withLegacyCarrierContacts(
+        parseCarrierContactChannels(settings[carrierContactsSettingKey(code)]),
+        {
+          phone: settings[legacyKeys.phone],
+          email: settings[legacyKeys.email],
+          whatsapp: settings[legacyKeys.whatsapp],
+        },
+      );
+      if (channels.length === 0) continue;
+
+      return {
+        channels,
+        phone: firstCarrierContactOfType(channels, "phone"),
+        email: firstCarrierContactOfType(channels, "email"),
+        whatsapp: firstCarrierContactOfType(channels, "whatsapp"),
+      };
     }
     return null;
   } catch (error) {
@@ -1333,6 +1388,7 @@ async function buildShipmentSummary(
     trackingNumbersRows,
     expenseRows,
     pickupAuditLogs,
+    carrierTrackingEventRows,
   ] = await Promise.all([
     storage.getClientAccount(shipment.clientAccountId),
     getAssignedTeamMembersForShipment(shipment.id),
@@ -1349,6 +1405,7 @@ async function buildShipmentSummary(
     storage.listShipmentTrackingNumbers(shipment.id),
     storage.listShipmentExpenses(shipment.id),
     storage.getAuditLogsForEntity("shipment", shipment.id),
+    getCarrierTrackingEvents(shipment.id),
   ]);
 
   // Pickup attempt history is derived from audit logs (pickup_booked / pickup_failed /
@@ -1423,6 +1480,20 @@ async function buildShipmentSummary(
     estimatedDelivery: shipment.estimatedDelivery,
     actualDelivery: shipment.actualDelivery,
     operationEvents: events,
+    carrierTrackingEvents: carrierTrackingEventRows.map((row) => ({
+      id: row.id,
+      carrierCode: row.carrierCode,
+      eventCode: row.eventCode,
+      description: row.description,
+      occurredAt: row.occurredAt,
+      carrierLocalTime: row.carrierLocalTime,
+      carrierUtcOffset: row.carrierUtcOffset,
+      location: row.location,
+      exceptionCode: row.exceptionCode,
+      exceptionDescription: row.exceptionDescription,
+      signedBy: row.signedBy,
+      remarks: row.remarks,
+    })),
     operationTasks: tasks,
     operationNotes: notes.map((row) => ({ ...row.note, authorName: row.author?.username || row.author?.email || null })),
     operationPlanNotes: shipment.operationPlanNotes ?? null,
@@ -1726,6 +1797,14 @@ async function queryOperationsEligibleShipments(params: {
     conditions.push(ne(shipments.status, "delivered"));
   }
 
+  // Returned is an overlay queue, not an exclusive one: a shipment travelling back to the
+  // shipper still needs an operator to close the loop (refund, re-ship, tell the client), so
+  // it stays in its own D2D/Express/Local queue as well. Delivered is the opposite — nothing
+  // is left to do there, which is why that queue subtracts from the active ones.
+  if (params.queue === "returned") {
+    conditions.push(eq(shipments.status, "returned"));
+  }
+
   if (visibleShipmentIds) {
     conditions.push(inArray(shipments.id, Array.from(visibleShipmentIds)));
   }
@@ -1818,6 +1897,7 @@ export async function getOperationSummary(viewer: User) {
   let attentionCount = 0;
   let specialHandlingCount = 0;
   let deliveredCount = 0;
+  let returnedCount = 0;
 
   for (const shipment of activeShipments) {
     const kind = getOperationShipmentKind(shipment);
@@ -1838,6 +1918,10 @@ export async function getOperationSummary(viewer: User) {
     if (specialShipmentIds.has(shipment.id)) {
       specialHandlingCount += 1;
     }
+
+    if (shipment.status === "returned") {
+      returnedCount += 1;
+    }
   }
 
   for (const shipment of deliveredShipments) {
@@ -1853,6 +1937,7 @@ export async function getOperationSummary(viewer: User) {
     attentionCount,
     specialHandlingCount,
     deliveredCount,
+    returnedCount,
     operationsUserCount: usersList.filter((user) => user.isActive).length,
   };
 }

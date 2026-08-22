@@ -153,7 +153,13 @@ import {
   systemLogs,
   InvoiceType,
 } from "@shared/schema";
+import { SHIPMENT_FILTER_ALL, expandStatusFilter } from "@shared/shipment-filters";
 import { db } from "./db";
+import {
+  resolveProfileDefaultDdpMargin,
+  resolveProfileDefaultMargin,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
@@ -237,9 +243,22 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
+  getShipmentFilterFacets(params?: { clientAccountIds?: string[] }): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
   getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
@@ -330,11 +349,11 @@ export interface IStorage {
   deletePricingRule(id: string): Promise<void>;
 
   // Pricing Tiers
-  getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]>;
+  getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]>;
   createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
   updatePricingTier(id: string, updates: Partial<PricingTier>): Promise<PricingTier | undefined>;
   deletePricingTier(id: string): Promise<void>;
-  getMarginForAmount(profileId: string, amount: number): Promise<number>;
+  getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   listLocalCarrierPricingTiers(carrierCode?: string): Promise<LocalCarrierPricingTier[]>;
   createLocalCarrierPricingTier(tier: InsertLocalCarrierPricingTier): Promise<LocalCarrierPricingTier>;
@@ -377,11 +396,11 @@ export interface IStorage {
   deleteCarrierAssignmentRule(id: string): Promise<void>;
 
   // DDP Pricing Tiers
-  getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]>;
+  getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]>;
   createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier>;
   updateDdpPricingTier(id: string, updates: Partial<DdpPricingTier>): Promise<DdpPricingTier | undefined>;
   deleteDdpPricingTier(id: string): Promise<void>;
-  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number>;
+  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   // DDP Pricing Lanes
   getDdpPricingLanes(): Promise<DdpPricingLane[]>;
@@ -1000,10 +1019,21 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status, clientAccountIds, abandonedOnly } = params;
+    const {
+      page, limit, search, status, carrierCode, fulfillmentType, paymentStatus, paymentMethod,
+      originCountry, destinationCountry, dateFrom, dateTo, clientAccountIds, abandonedOnly,
+    } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(shipments.deletedAt)];
 
@@ -1024,8 +1054,47 @@ export class DatabaseStorage implements IStorage {
         )!
       );
     }
-    if (status && status !== "all") {
-      conditions.push(eq(shipments.status, status as any));
+    // Each clause below mirrors matchesShipmentFilters in shared/shipment-filters.ts, which is the
+    // reference the client portal filters by. Keep the two in step.
+    if (status && status !== SHIPMENT_FILTER_ALL) {
+      // A status filter may name a lifecycle group ("in_transit" covers picked_up, customs
+      // clearance, out for delivery) rather than a single raw status.
+      const statuses = expandStatusFilter(status);
+      conditions.push(
+        statuses.length === 1
+          ? eq(shipments.status, statuses[0] as any)
+          : inArray(shipments.status, statuses as any),
+      );
+    }
+    if (carrierCode && carrierCode !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.carrierCode, carrierCode));
+    }
+    if (fulfillmentType && fulfillmentType !== SHIPMENT_FILTER_ALL) {
+      // fulfillmentType defaults to "carrier" in the schema, but older rows can be null.
+      conditions.push(
+        fulfillmentType === "carrier"
+          ? sql`coalesce(${shipments.fulfillmentType}, 'carrier') = 'carrier'`
+          : eq(shipments.fulfillmentType, fulfillmentType),
+      );
+    }
+    if (paymentStatus && paymentStatus !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentStatus, paymentStatus));
+    }
+    if (paymentMethod && paymentMethod !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentMethod, paymentMethod));
+    }
+    if (originCountry && originCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.senderCountry, originCountry));
+    }
+    if (destinationCountry && destinationCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.recipientCountry, destinationCountry));
+    }
+    // Inclusive whole days in the server's local zone, matching what the date pickers imply.
+    if (dateFrom) {
+      conditions.push(sql`${shipments.createdAt} >= ${dateFrom}::date`);
+    }
+    if (dateTo) {
+      conditions.push(sql`${shipments.createdAt} < (${dateTo}::date + interval '1 day')`);
     }
     if (abandonedOnly) {
       conditions.push(sql`coalesce(${shipments.paymentStatus}, 'pending') <> 'paid'`);
@@ -1048,6 +1117,42 @@ export class DatabaseStorage implements IStorage {
     const total = totalResult?.count || 0;
     const totalPages = Math.ceil(total / limit);
     return { shipments: results, total, page, totalPages };
+  }
+
+  /**
+   * The distinct carrier / country values that actually occur in the visible shipments, so the
+   * filter dropdowns can offer only those. A full ISO country list would be seventy-odd entries
+   * for the seven origins this business ships from.
+   */
+  async getShipmentFilterFacets(params: { clientAccountIds?: string[] } = {}): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }> {
+    const { clientAccountIds } = params;
+    if (clientAccountIds && clientAccountIds.length === 0) {
+      return { carrierCodes: [], originCountries: [], destinationCountries: [] };
+    }
+    const scope = clientAccountIds
+      ? and(isNull(shipments.deletedAt), inArray(shipments.clientAccountId, clientAccountIds))
+      : isNull(shipments.deletedAt);
+
+    const distinct = async (column: any): Promise<string[]> => {
+      const rows = await db
+        .selectDistinct({ value: column })
+        .from(shipments)
+        .where(and(scope, sql`${column} is not null`, sql`${column} <> ''`));
+      return rows
+        .map((row) => String(row.value))
+        .sort((a, b) => a.localeCompare(b));
+    };
+
+    const [carrierCodes, originCountries, destinationCountries] = await Promise.all([
+      distinct(shipments.carrierCode),
+      distinct(shipments.senderCountry),
+      distinct(shipments.recipientCountry),
+    ]);
+    return { carrierCodes, originCountries, destinationCountries };
   }
 
   async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {
@@ -1542,10 +1647,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pricing Tiers
-  async getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]> {
+  /** Omit `accountType` to list both sets — the admin pricing screen renders them side by side. */
+  async getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]> {
     return db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
-      .orderBy(pricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(pricingTiers.profileId, profileId), eq(pricingTiers.accountType, accountType))
+        : eq(pricingTiers.profileId, profileId))
+      .orderBy(pricingTiers.accountType, pricingTiers.minAmount);
   }
 
   async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {
@@ -1562,22 +1670,32 @@ export class DatabaseStorage implements IStorage {
     await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
   }
 
-  async getMarginForAmount(profileId: string, amount: number): Promise<number> {
-    // Get all tiers for this profile, ordered by minAmount descending
+  /**
+   * Express margin for one profile + account type at a given base rate.
+   *
+   * `accountType` is required rather than defaulted: a profile prices companies and individuals
+   * separately, and a parameter with a default would let a new call site silently bill an
+   * individual at the company rate.
+   */
+  async getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number> {
+    // Tiers belong to exactly one account type, so this filter is what keeps the two sets apart.
     const tiers = await db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
+      .where(and(
+        eq(pricingTiers.profileId, profileId),
+        eq(pricingTiers.accountType, accountType),
+      ))
       .orderBy(desc(pricingTiers.minAmount));
-    
+
     // Find the applicable tier (highest minAmount that is <= the amount)
     for (const tier of tiers) {
       if (amount >= Number(tier.minAmount)) {
         return Number(tier.marginPercentage);
       }
     }
-    
-    // If no tiers found, fall back to the profile's default marginPercentage
+
+    // No tier matched: fall back to this account type's default margin on the profile.
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
+    return profile ? resolveProfileDefaultMargin(profile, accountType) : 15; // 15% if nothing found
   }
 
   // Local carrier pricing tiers
@@ -1795,10 +1913,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // DDP Pricing Tiers
-  async getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]> {
+  /** Omit `accountType` to list both sets. */
+  async getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]> {
     return db.select().from(ddpPricingTiers)
-      .where(eq(ddpPricingTiers.profileId, profileId))
-      .orderBy(ddpPricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(ddpPricingTiers.profileId, profileId), eq(ddpPricingTiers.accountType, accountType))
+        : eq(ddpPricingTiers.profileId, profileId))
+      .orderBy(ddpPricingTiers.accountType, ddpPricingTiers.minAmount);
   }
 
   async createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier> {
@@ -1815,11 +1936,18 @@ export class DatabaseStorage implements IStorage {
     await db.delete(ddpPricingTiers).where(eq(ddpPricingTiers.id, id));
   }
 
-  async getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number> {
+  /** DDP markup for one profile + account type at a given billable quantity. */
+  async getDdpMarginForQuantity(
+    profileId: string,
+    billingUnit: "KG" | "CBM",
+    quantity: number,
+    accountType: PricingAccountTypeValue,
+  ): Promise<number> {
     const tiers = await db.select().from(ddpPricingTiers)
       .where(and(
         eq(ddpPricingTiers.profileId, profileId),
         eq(ddpPricingTiers.billingUnit, billingUnit),
+        eq(ddpPricingTiers.accountType, accountType),
       ))
       .orderBy(desc(ddpPricingTiers.minAmount));
 
@@ -1830,7 +1958,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.ddpMarginPercentage) : 15;
+    return profile ? resolveProfileDefaultDdpMargin(profile, accountType) : 15;
   }
 
   // DDP Pricing Lanes

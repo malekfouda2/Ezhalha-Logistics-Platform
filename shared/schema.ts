@@ -3,6 +3,7 @@ import { pgTable, text, varchar, timestamp, boolean, integer, decimal, uniqueInd
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { UserInvitationStatus } from "./internal-users";
+import { PricingAccountType } from "./pricing-account-types";
 
 // Domain constants live in ./domain — a dependency-free module so the React Native app
 // can import enum VALUES without pulling drizzle into its bundle. Re-exported here so
@@ -172,8 +173,27 @@ export const pricingRules = pgTable("pricing_rules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   profile: text("profile").notNull().unique(),
   displayName: text("display_name").notNull(),
+  /**
+   * Profile-wide fallback margins, kept as the safety net beneath the per-account-type columns
+   * below. Nothing should read these directly any more — go through
+   * `resolveProfileDefaultMargin` so a company and an individual account never silently share
+   * a rate again.
+   */
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
   ddpMarginPercentage: decimal("ddp_margin_percentage", { precision: 5, scale: 2 }).notNull().default("0"),
+  /**
+   * Per-account-type default margins. A profile prices company and individual accounts
+   * separately, so each gets its own express margin and DDP markup.
+   *
+   * Nullable on purpose: null means "not configured for this account type", and the resolver
+   * falls back to the profile-wide column above. The migration backfills all four from the
+   * profile-wide values, so the split is behaviour-neutral the day it ships — 354 live
+   * individual accounts keep the exact rate they had.
+   */
+  companyMarginPercentage: decimal("company_margin_percentage", { precision: 5, scale: 2 }),
+  companyDdpMarginPercentage: decimal("company_ddp_margin_percentage", { precision: 5, scale: 2 }),
+  individualMarginPercentage: decimal("individual_margin_percentage", { precision: 5, scale: 2 }),
+  individualDdpMarginPercentage: decimal("individual_ddp_margin_percentage", { precision: 5, scale: 2 }),
   badgeColor: text("badge_color"),
   badgeStyle: text("badge_style").notNull().default("solid"),
   badgeGradientFrom: text("badge_gradient_from"),
@@ -251,10 +271,21 @@ export type DdpPricingLane = typeof ddpPricingLanes.$inferSelect;
 export const pricingTiers = pgTable("pricing_tiers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   profileId: varchar("profile_id").notNull(),
+  /**
+   * Which kind of client account this tier prices: "company" or "individual". A tier belongs to
+   * exactly one — there is no shared tier, because a tier that matched both would override the
+   * per-account-type default margin and quietly undo the split.
+   *
+   * Defaults to "company" to match `client_accounts.account_type`; the migration duplicates every
+   * pre-split tier into "individual" so both sides start identical.
+   */
+  accountType: text("account_type").notNull().default(PricingAccountType.COMPANY),
   minAmount: decimal("min_amount", { precision: 10, scale: 2 }).notNull().default("0"),
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  lookup: index("idx_pricing_tiers_profile_account").on(table.profileId, table.accountType),
+}));
 
 export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
   id: true,
@@ -268,6 +299,8 @@ export type PricingTier = typeof pricingTiers.$inferSelect;
 export const ddpPricingTiers = pgTable("ddp_pricing_tiers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   profileId: varchar("profile_id").notNull(),
+  /** See `pricingTiers.accountType` — same rule, same reason. */
+  accountType: text("account_type").notNull().default(PricingAccountType.COMPANY),
   billingUnit: text("billing_unit").notNull().default("KG"),
   // Keep the existing column name for a safe production migration. For DDP,
   // this threshold represents billable quantity rather than a SAR amount.
@@ -1684,6 +1717,61 @@ export const insertShipmentOperationEventSchema = createInsertSchema(shipmentOpe
 
 export type InsertShipmentOperationEvent = z.infer<typeof insertShipmentOperationEventSchema>;
 export type ShipmentOperationEvent = typeof shipmentOperationEvents.$inferSelect;
+
+// Verbatim carrier scan events. The point of this table is fidelity: `description` holds the
+// carrier's OWN wording, never one of our labels, and `carrierLocalTime` holds the wall-clock
+// string the carrier reported so the hub can show "10:23 (-07:00)" the way the carrier's own
+// site does. `occurredAt` is the same moment as an absolute instant, for ordering and queries.
+//
+// Kept separate from shipment_operation_events, which is our internal audit trail (who did what
+// in the hub). Mixing the two would let our own prose masquerade as a carrier scan.
+export const shipmentCarrierTrackingEvents = pgTable("shipment_carrier_tracking_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: varchar("shipment_id").notNull(),
+  carrierCode: text("carrier_code").notNull(),
+  /**
+   * Stable per-event identity, used for the idempotent upsert. Built from the carrier's own
+   * fields (timestamp + code + description + location), because none of FedEx/DHL/Aramex issue
+   * an event id. Without it every 10-minute poll would re-insert the whole scan history.
+   */
+  eventKey: text("event_key").notNull(),
+  /** Carrier's own event code: FedEx `eventType` (PU), DHL `typeCode` (PU), Aramex `UpdateCode`. */
+  eventCode: text("event_code"),
+  /** The carrier's exact text. Never one of our labels, never reworded, never title-cased. */
+  description: text("description").notNull(),
+  /** The event instant. Correct even when the carrier reports a local wall-clock. */
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  /**
+   * The wall-clock the carrier actually printed, with its offset when the carrier supplies one:
+   * "2026-08-15T10:23:00-07:00". Stored as text on purpose — a timestamptz column would
+   * normalise the offset away, and then we could no longer show the carrier's own local time.
+   */
+  carrierLocalTime: text("carrier_local_time"),
+  /** Just the offset, e.g. "-07:00". Null when the carrier does not report one. */
+  carrierUtcOffset: text("carrier_utc_offset"),
+  location: text("location"),
+  /** FedEx exception scans; the "why is it stuck" text operators currently never see. */
+  exceptionCode: text("exception_code"),
+  exceptionDescription: text("exception_description"),
+  /** DHL delivery scans. May be empty by design under GDPR. */
+  signedBy: text("signed_by"),
+  /** DHL `remarks[].value`/`.details`, FedEx `ancillaryDetails[].reasonDescription`. */
+  remarks: text("remarks"),
+  /** The untouched carrier event object, so a future field never needs a backfill. */
+  raw: text("raw"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  shipmentIdx: index("idx_carrier_tracking_events_shipment").on(table.shipmentId, table.occurredAt),
+  uniqueEvent: uniqueIndex("ux_carrier_tracking_events_key").on(table.shipmentId, table.eventKey),
+}));
+
+export const insertShipmentCarrierTrackingEventSchema = createInsertSchema(shipmentCarrierTrackingEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShipmentCarrierTrackingEvent = z.infer<typeof insertShipmentCarrierTrackingEventSchema>;
+export type ShipmentCarrierTrackingEvent = typeof shipmentCarrierTrackingEvents.$inferSelect;
 
 export const shipmentOperationTasks = pgTable("shipment_operation_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
