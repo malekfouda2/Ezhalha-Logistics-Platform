@@ -36,10 +36,10 @@ export default function ForgotPasswordScreen() {
   const onSubmit = async (data: ForgotPasswordFormData) => {
     try {
       await forgotPasswordMutation.mutateAsync(data.email);
-        router.push({
-          pathname: "/(auth)/reset-password",
-          params: { email: data.email },
-        });
+        // router.push({
+        //   pathname: "/(auth)/reset-password",
+        //   params: { email: data.email },
+        // });
       Toast.show({
         type: "success",
         text1: t("toast.forgotPassword.successTitle"),

@@ -66,9 +66,9 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>
-      <View style={styles.topRow}>
+      {/* <View style={styles.topRow}>
         <LanguageSwitch />
-      </View>
+      </View> */}
 
       <Image
         source={require("../../../assets/images/logo.png")}
