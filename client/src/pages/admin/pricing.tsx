@@ -59,6 +59,14 @@ import {
 } from "lucide-react";
 import { SarSymbol, SarAmount, formatSAR } from "@/components/sar-symbol";
 import type { DdpPricingTier, PricingRule, PricingTier } from "@shared/schema";
+import {
+  PRICING_ACCOUNT_TYPE_LABELS,
+  PRICING_ACCOUNT_TYPES,
+  PricingAccountType,
+  resolveProfileDefaultDdpMargin,
+  resolveProfileDefaultMargin,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 
 interface TierFormData {
   minAmount: string;
@@ -67,6 +75,18 @@ interface TierFormData {
 interface DdpTierFormData extends TierFormData {
   billingUnit: "KG" | "CBM";
 }
+
+/**
+ * Door To Door Freight bills in one of two units, and a lane's transport method decides which:
+ * air and domestic are priced per billable KG, sea per billable CBM. A tier only ever applies
+ * to shipments billed in its own unit, so the two sets are edited as separate halves rather
+ * than one list with a unit dropdown — a "500 and above" tier means nothing until you know
+ * whether that is 500 kilograms or 500 cubic metres.
+ */
+const DDP_BILLING_UNITS = [
+  { unit: "KG" as const, title: "Billable KG", subtitle: "Air and domestic lanes" },
+  { unit: "CBM" as const, title: "Billable CBM", subtitle: "Sea lanes" },
+];
 
 type BadgeStyle = "solid" | "gradient";
 
@@ -467,10 +487,19 @@ function ClientMarkupTab() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<PricingRule | null>(null);
   const [expandedProfile, setExpandedProfile] = useState<string | null>(null);
+  // Which half of the profile is being edited. A profile prices companies and individuals
+  // separately, so every tier list and default margin below is scoped to this.
+  const [tierAccountType, setTierAccountType] = useState<PricingAccountTypeValue>(PricingAccountType.COMPANY);
   
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editMargin, setEditMargin] = useState("");
   const [editDdpMargin, setEditDdpMargin] = useState("");
+  // Per-account-type defaults. Stored as strings so an empty box is distinguishable from 0 and
+  // clears the value back to the profile-wide fallback.
+  const [editCompanyMargin, setEditCompanyMargin] = useState("");
+  const [editCompanyDdpMargin, setEditCompanyDdpMargin] = useState("");
+  const [editIndividualMargin, setEditIndividualMargin] = useState("");
+  const [editIndividualDdpMargin, setEditIndividualDdpMargin] = useState("");
   const [editBadgeDesign, setEditBadgeDesign] = useState<BadgeDesignState>(defaultBadgeDesign);
   
   const [newProfile, setNewProfile] = useState("");
@@ -535,22 +564,28 @@ function ClientMarkupTab() {
       return res.json();
     },
     onSuccess: async (newRule) => {
-      // Create initial tiers for the new profile
-      for (const tier of newTiers) {
-        if (tier.minAmount && tier.marginPercentage) {
-          await apiRequest("POST", `/api/admin/pricing/${newRule.id}/tiers`, {
-            minAmount: parseFloat(tier.minAmount),
-            marginPercentage: parseFloat(tier.marginPercentage),
-          });
+      // Seed the same starting tiers for BOTH account types, so a new profile opens with
+      // Company and Individual populated and identical — the same state the migration left
+      // existing profiles in. The admin then edits whichever side should differ.
+      for (const accountType of PRICING_ACCOUNT_TYPES) {
+        for (const tier of newTiers) {
+          if (tier.minAmount && tier.marginPercentage) {
+            await apiRequest("POST", `/api/admin/pricing/${newRule.id}/tiers`, {
+              accountType,
+              minAmount: parseFloat(tier.minAmount),
+              marginPercentage: parseFloat(tier.marginPercentage),
+            });
+          }
         }
-      }
-      for (const tier of newDdpTiers) {
-        if (tier.minAmount && tier.marginPercentage) {
-          await apiRequest("POST", `/api/admin/pricing/${newRule.id}/ddp-tiers`, {
-            billingUnit: tier.billingUnit,
-            minAmount: parseFloat(tier.minAmount),
-            marginPercentage: parseFloat(tier.marginPercentage),
-          });
+        for (const tier of newDdpTiers) {
+          if (tier.minAmount && tier.marginPercentage) {
+            await apiRequest("POST", `/api/admin/pricing/${newRule.id}/ddp-tiers`, {
+              accountType,
+              billingUnit: tier.billingUnit,
+              minAmount: parseFloat(tier.minAmount),
+              marginPercentage: parseFloat(tier.marginPercentage),
+            });
+          }
         }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/pricing"] });
@@ -578,8 +613,27 @@ function ClientMarkupTab() {
   });
 
   const updateProfileMutation = useMutation({
-    mutationFn: async ({ id, displayName, marginPercentage, ddpMarginPercentage, ...badgeDesign }: { id: string; displayName?: string; marginPercentage?: string; ddpMarginPercentage?: string } & Partial<BadgeDesignState>) => {
-      const res = await apiRequest("PATCH", `/api/admin/pricing/${id}`, { displayName, marginPercentage, ddpMarginPercentage, ...badgeDesign });
+    mutationFn: async ({ id, displayName, marginPercentage, ddpMarginPercentage, companyMarginPercentage, companyDdpMarginPercentage, individualMarginPercentage, individualDdpMarginPercentage, ...badgeDesign }: {
+      id: string;
+      displayName?: string;
+      marginPercentage?: string;
+      ddpMarginPercentage?: string;
+      // null clears the override, dropping that account type back to the profile fallback.
+      companyMarginPercentage?: string | null;
+      companyDdpMarginPercentage?: string | null;
+      individualMarginPercentage?: string | null;
+      individualDdpMarginPercentage?: string | null;
+    } & Partial<BadgeDesignState>) => {
+      const res = await apiRequest("PATCH", `/api/admin/pricing/${id}`, {
+        displayName,
+        marginPercentage,
+        ddpMarginPercentage,
+        companyMarginPercentage,
+        companyDdpMarginPercentage,
+        individualMarginPercentage,
+        individualDdpMarginPercentage,
+        ...badgeDesign,
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -627,6 +681,7 @@ function ClientMarkupTab() {
       // Create new tiers
       for (const tier of tiers.filter(t => t.isNew && !t.isDeleted)) {
         await apiRequest("POST", `/api/admin/pricing/${profileId}/tiers`, {
+          accountType: tier.accountType,
           minAmount: parseFloat(tier.minAmount as any),
           marginPercentage: parseFloat(tier.marginPercentage as any),
         });
@@ -659,6 +714,7 @@ function ClientMarkupTab() {
       }
       for (const tier of tiers.filter(t => t.isNew && !t.isDeleted)) {
         await apiRequest("POST", `/api/admin/pricing/${profileId}/ddp-tiers`, {
+          accountType: tier.accountType,
           billingUnit: tier.billingUnit,
           minAmount: parseFloat(tier.minAmount as any),
           marginPercentage: parseFloat(tier.marginPercentage as any),
@@ -690,6 +746,10 @@ function ClientMarkupTab() {
     setEditDisplayName(rule.displayName || rule.profile);
     setEditMargin(String(rule.marginPercentage));
     setEditDdpMargin(String(rule.ddpMarginPercentage));
+    setEditCompanyMargin(rule.companyMarginPercentage == null ? "" : String(rule.companyMarginPercentage));
+    setEditCompanyDdpMargin(rule.companyDdpMarginPercentage == null ? "" : String(rule.companyDdpMarginPercentage));
+    setEditIndividualMargin(rule.individualMarginPercentage == null ? "" : String(rule.individualMarginPercentage));
+    setEditIndividualDdpMargin(rule.individualDdpMarginPercentage == null ? "" : String(rule.individualDdpMarginPercentage));
     setEditBadgeDesign(getRuleBadgeDesign(rule));
     setIsEditOpen(true);
   };
@@ -701,6 +761,10 @@ function ClientMarkupTab() {
         displayName: editDisplayName,
         marginPercentage: editMargin,
         ddpMarginPercentage: editDdpMargin,
+        companyMarginPercentage: editCompanyMargin === "" ? null : editCompanyMargin,
+        companyDdpMarginPercentage: editCompanyDdpMargin === "" ? null : editCompanyDdpMargin,
+        individualMarginPercentage: editIndividualMargin === "" ? null : editIndividualMargin,
+        individualDdpMarginPercentage: editIndividualDdpMargin === "" ? null : editIndividualDdpMargin,
         ...editBadgeDesign,
       });
     }
@@ -727,6 +791,12 @@ function ClientMarkupTab() {
     }
   };
 
+  // Only the selected account type's tiers are shown and edited. `editingTiers` still holds
+  // both sets, because saving diffs the whole list — filtering the state itself would read the
+  // other account type's tiers as deleted and wipe them.
+  const visibleTiers = editingTiers.filter((t) => !t.isDeleted && t.accountType === tierAccountType);
+  const visibleDdpTiers = editingDdpTiers.filter((t) => !t.isDeleted && t.accountType === tierAccountType);
+
   const toggleExpandProfile = (profileId: string) => {
     if (expandedProfile === profileId) {
       setExpandedProfile(null);
@@ -738,10 +808,11 @@ function ClientMarkupTab() {
   };
 
   const addNewTierToEdit = () => {
-    const maxMin = Math.max(...editingTiers.filter(t => !t.isDeleted).map(t => Number(t.minAmount)), 0);
+    const maxMin = Math.max(...visibleTiers.map(t => Number(t.minAmount)), 0);
     setEditingTiers([...editingTiers, {
       id: `new-${Date.now()}`,
       profileId: expandedProfile!,
+      accountType: tierAccountType,
       minAmount: String(maxMin + 100),
       marginPercentage: "10",
       createdAt: new Date(),
@@ -784,12 +855,12 @@ function ClientMarkupTab() {
     }
   };
 
-  const addNewDdpTierToEdit = () => {
-    const billingUnit = "KG";
-    const maxMin = Math.max(...editingDdpTiers.filter(t => !t.isDeleted && t.billingUnit === billingUnit).map(t => Number(t.minAmount)), 0);
+  const addNewDdpTierToEdit = (billingUnit: "KG" | "CBM") => {
+    const maxMin = Math.max(...visibleDdpTiers.filter(t => t.billingUnit === billingUnit).map(t => Number(t.minAmount)), 0);
     setEditingDdpTiers([...editingDdpTiers, {
       id: `new-ddp-${Date.now()}`,
       profileId: expandedProfile!,
+      accountType: tierAccountType,
       billingUnit,
       minAmount: String(maxMin + 100),
       marginPercentage: "10",
@@ -798,7 +869,7 @@ function ClientMarkupTab() {
     }]);
   };
 
-  const updateEditingDdpTier = (index: number, field: "billingUnit" | "minAmount" | "marginPercentage", value: string) => {
+  const updateEditingDdpTier = (index: number, field: "minAmount" | "marginPercentage", value: string) => {
     const updated = [...editingDdpTiers];
     (updated[index] as any)[field] = value;
     setEditingDdpTiers(updated);
@@ -816,23 +887,22 @@ function ClientMarkupTab() {
     }
   };
 
-  const addNewDdpTierToCreate = () => {
-    const maxMin = Math.max(...newDdpTiers.filter(t => t.billingUnit === "KG").map(t => Number(t.minAmount) || 0), 0);
-    setNewDdpTiers([...newDdpTiers, { billingUnit: "KG", minAmount: String(maxMin + 100), marginPercentage: "10" }]);
+  const addNewDdpTierToCreate = (billingUnit: "KG" | "CBM") => {
+    const maxMin = Math.max(...newDdpTiers.filter(t => t.billingUnit === billingUnit).map(t => Number(t.minAmount) || 0), 0);
+    setNewDdpTiers([...newDdpTiers, { billingUnit, minAmount: String(maxMin + 100), marginPercentage: "10" }]);
   };
 
-  const updateNewDdpTier = (index: number, field: keyof DdpTierFormData, value: string) => {
+  const updateNewDdpTier = (index: number, field: "minAmount" | "marginPercentage", value: string) => {
     const updated = [...newDdpTiers];
-    if (field === "billingUnit") {
-      updated[index].billingUnit = value as DdpTierFormData["billingUnit"];
-    } else {
-      updated[index][field] = value;
-    }
+    updated[index][field] = value;
     setNewDdpTiers(updated);
   };
 
   const removeNewDdpTier = (index: number) => {
-    if (newDdpTiers.length > 1) {
+    // Guard per unit, not across the whole list: with the halves split, "more than one tier
+    // left overall" would happily delete the last KG tier while only CBM tiers remained.
+    const unit = newDdpTiers[index]?.billingUnit;
+    if (newDdpTiers.filter((tier) => tier.billingUnit === unit).length > 1) {
       setNewDdpTiers(newDdpTiers.filter((_, i) => i !== index));
     }
   };
@@ -938,10 +1008,54 @@ function ClientMarkupTab() {
               {expandedProfile === rule.id && (
                 <CardContent className="border-t pt-4">
                   <div className="space-y-4">
+                    {/* A profile prices two kinds of account. Everything below this switch —
+                        default margins, express tiers, DDP tiers — belongs to the selected one. */}
+                    <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Account type</p>
+                          <p className="text-xs text-muted-foreground">
+                            {rule.displayName} charges company and individual accounts separately.
+                          </p>
+                        </div>
+                        <div className="flex gap-1 rounded-md border bg-background p-1">
+                          {PRICING_ACCOUNT_TYPES.map((accountType) => (
+                            <Button
+                              key={accountType}
+                              type="button"
+                              size="sm"
+                              variant={tierAccountType === accountType ? "default" : "ghost"}
+                              onClick={() => setTierAccountType(accountType)}
+                              data-testid={`button-account-type-${accountType}`}
+                            >
+                              {PRICING_ACCOUNT_TYPE_LABELS[accountType]}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-md bg-background px-3 py-2">
+                          <p className="text-xs text-muted-foreground">Default express margin</p>
+                          <p className="text-sm font-semibold" data-testid="text-default-express-margin">
+                            {resolveProfileDefaultMargin(rule, tierAccountType)}%
+                          </p>
+                        </div>
+                        <div className="rounded-md bg-background px-3 py-2">
+                          <p className="text-xs text-muted-foreground">Default Door To Door Freight markup</p>
+                          <p className="text-sm font-semibold" data-testid="text-default-ddp-margin">
+                            {resolveProfileDefaultDdpMargin(rule, tierAccountType)}%
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Used when no tier below covers a shipment. Edit these on the profile.
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <h4 className="font-medium flex items-center gap-2">
                         <Settings className="h-4 w-4" />
-                        Pricing Tiers
+                        Pricing Tiers · {PRICING_ACCOUNT_TYPE_LABELS[tierAccountType]}
                       </h4>
                       {canUpdatePricing && (
                         <Button
@@ -962,13 +1076,13 @@ function ClientMarkupTab() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {editingTiers.filter(t => !t.isDeleted).length === 0 ? (
+                        {visibleTiers.length === 0 ? (
                           <div className="text-center py-4 text-muted-foreground">
                             <p className="text-sm">No pricing tiers defined.</p>
-                            <p className="text-xs">Using default markup of {rule.marginPercentage}% for all shipments.</p>
+                            <p className="text-xs">Using the {PRICING_ACCOUNT_TYPE_LABELS[tierAccountType].toLowerCase()} default of {resolveProfileDefaultMargin(rule, tierAccountType)}% for all shipments.</p>
                           </div>
                         ) : (
-                          editingTiers.filter(t => !t.isDeleted).map((tier, index) => {
+                          visibleTiers.map((tier, index) => {
                             const actualIndex = editingTiers.findIndex(t => t.id === tier.id);
                             return (
                               <div key={tier.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
@@ -1035,7 +1149,7 @@ function ClientMarkupTab() {
                     <div className="mt-4 p-4 rounded-lg border bg-background">
                       <p className="text-sm font-medium mb-3">Example Calculations</p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        {editingTiers.filter(t => !t.isDeleted).sort((a, b) => Number(a.minAmount) - Number(b.minAmount)).map((tier, i, arr) => {
+                        {[...visibleTiers].sort((a, b) => Number(a.minAmount) - Number(b.minAmount)).map((tier, i, arr) => {
                           const baseExample = Number(tier.minAmount) + 50;
                           const margin = Number(tier.marginPercentage);
                           const clientPays = baseExample + (baseExample * margin / 100);
@@ -1067,27 +1181,15 @@ function ClientMarkupTab() {
                     </div>
 
                     <div className="border-t pt-5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="font-medium flex items-center gap-2">
-                            <Settings className="h-4 w-4" />
-                            Door To Door Freight Pricing Tiers
-                          </h4>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Applied to manually fulfilled Door To Door Freight lanes using the billable KG for air or billable CBM for sea.
-                          </p>
-                        </div>
-                        {canUpdatePricing && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={addNewDdpTierToEdit}
-                            data-testid="button-add-ddp-tier"
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add Door To Door Freight Tier
-                          </Button>
-                        )}
+                      <div>
+                        <h4 className="font-medium flex items-center gap-2">
+                          <Settings className="h-4 w-4" />
+                          Door To Door Freight Pricing Tiers
+                        </h4>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Applied to manually fulfilled Door To Door Freight lanes. Each half is
+                          priced in its own unit and only applies to lanes billed that way.
+                        </p>
                       </div>
 
                       {ddpTiersLoading ? (
@@ -1095,65 +1197,91 @@ function ClientMarkupTab() {
                           <LoadingSpinner />
                         </div>
                       ) : (
-                        <div className="mt-4 space-y-3">
-                          {editingDdpTiers.filter(t => !t.isDeleted).length === 0 ? (
-                            <div className="text-center py-4 text-muted-foreground">
-                              <p className="text-sm">No Door To Door Freight pricing tiers defined.</p>
-                              <p className="text-xs">Using the Door To Door Freight fallback markup of {rule.ddpMarginPercentage}% for all Door To Door Freight shipments.</p>
-                            </div>
-                          ) : (
-                            editingDdpTiers.filter(t => !t.isDeleted).map((tier, index) => {
-                              const actualIndex = editingDdpTiers.findIndex(t => t.id === tier.id);
-                              return (
-                                <div key={tier.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                                  <div className="flex items-center gap-2 flex-1">
-                                    <span className="text-sm text-muted-foreground whitespace-nowrap">Billable quantity</span>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={tier.minAmount}
-                                      onChange={(e) => updateEditingDdpTier(actualIndex, "minAmount", e.target.value)}
-                                      className="w-24"
-                                      disabled={!canUpdatePricing}
-                                      data-testid={`input-ddp-tier-min-${index}`}
-                                    />
-                                    <Select value={tier.billingUnit} onValueChange={(value) => updateEditingDdpTier(actualIndex, "billingUnit", value)} disabled={!canUpdatePricing}>
-                                      <SelectTrigger className="w-24" data-testid={`select-ddp-tier-unit-${index}`}><SelectValue /></SelectTrigger>
-                                      <SelectContent><SelectItem value="KG">KG</SelectItem><SelectItem value="CBM">CBM</SelectItem></SelectContent>
-                                    </Select>
-                                    <span className="text-sm text-muted-foreground whitespace-nowrap">and above</span>
-                                  </div>
-                                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                  <div className="flex items-center gap-2">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      max="1000"
-                                      step="0.5"
-                                      value={tier.marginPercentage}
-                                      onChange={(e) => updateEditingDdpTier(actualIndex, "marginPercentage", e.target.value)}
-                                      className="w-20"
-                                      disabled={!canUpdatePricing}
-                                      data-testid={`input-ddp-tier-margin-${index}`}
-                                    />
-                                    <Percent className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm text-muted-foreground">markup</span>
+                        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                          {DDP_BILLING_UNITS.map(({ unit, title, subtitle }) => {
+                            const unitTiers = visibleDdpTiers
+                              .filter((tier) => tier.billingUnit === unit)
+                              .sort((a, b) => Number(a.minAmount) - Number(b.minAmount));
+                            return (
+                              <div key={unit} className="rounded-lg border p-3 space-y-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-medium">{title}</p>
+                                    <p className="text-xs text-muted-foreground">{subtitle}</p>
                                   </div>
                                   {canUpdatePricing && (
                                     <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => markDdpTierForDeletion(actualIndex)}
-                                      data-testid={`button-delete-ddp-tier-${index}`}
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => addNewDdpTierToEdit(unit)}
+                                      data-testid={`button-add-ddp-tier-${unit.toLowerCase()}`}
                                     >
-                                      <Trash2 className="h-4 w-4 text-destructive" />
+                                      <Plus className="h-4 w-4 mr-1" />
+                                      Add Tier
                                     </Button>
                                   )}
                                 </div>
-                              );
-                            })
-                          )}
+
+                                {unitTiers.length === 0 ? (
+                                  <div className="text-center py-4 text-muted-foreground">
+                                    <p className="text-sm">No {unit} tiers defined.</p>
+                                    <p className="text-xs">
+                                      Using the {PRICING_ACCOUNT_TYPE_LABELS[tierAccountType].toLowerCase()} fallback markup of{" "}
+                                      {resolveProfileDefaultDdpMargin(rule, tierAccountType)}% for {unit}-billed shipments.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  unitTiers.map((tier, index) => {
+                                    const actualIndex = editingDdpTiers.findIndex(t => t.id === tier.id);
+                                    return (
+                                      <div key={tier.id} className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-muted/50">
+                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            step="1"
+                                            value={tier.minAmount}
+                                            onChange={(e) => updateEditingDdpTier(actualIndex, "minAmount", e.target.value)}
+                                            className="w-24"
+                                            disabled={!canUpdatePricing}
+                                            data-testid={`input-ddp-tier-min-${unit.toLowerCase()}-${index}`}
+                                          />
+                                          {/* The unit is the section, not a per-row choice. */}
+                                          <span className="text-sm text-muted-foreground whitespace-nowrap">{unit} and above</span>
+                                        </div>
+                                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                        <div className="flex items-center gap-2">
+                                          <Input
+                                            type="number"
+                                            min="0"
+                                            max="1000"
+                                            step="0.5"
+                                            value={tier.marginPercentage}
+                                            onChange={(e) => updateEditingDdpTier(actualIndex, "marginPercentage", e.target.value)}
+                                            className="w-20"
+                                            disabled={!canUpdatePricing}
+                                            data-testid={`input-ddp-tier-margin-${unit.toLowerCase()}-${index}`}
+                                          />
+                                          <Percent className="h-4 w-4 text-muted-foreground" />
+                                          <span className="text-sm text-muted-foreground">markup</span>
+                                        </div>
+                                        {canUpdatePricing && (
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => markDdpTierForDeletion(actualIndex)}
+                                            data-testid={`button-delete-ddp-tier-${unit.toLowerCase()}-${index}`}
+                                          >
+                                            <Trash2 className="h-4 w-4 text-destructive" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
 
@@ -1283,6 +1411,56 @@ function ClientMarkupTab() {
                 <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               </div>
               <p className="text-xs text-muted-foreground">Used for manual Door To Door Freight lane pricing when no Door To Door Freight pricing tiers are defined.</p>
+            </div>
+            {/* The rates that actually get charged. The two fallbacks above only apply when an
+                account type is left blank here. */}
+            <div className="rounded-lg border p-3 space-y-4">
+              <div>
+                <p className="text-sm font-medium">Rates by account type</p>
+                <p className="text-xs text-muted-foreground">
+                  Leave a field empty to fall back to the profile default above.
+                </p>
+              </div>
+              {([
+                [PricingAccountType.COMPANY, editCompanyMargin, setEditCompanyMargin, editCompanyDdpMargin, setEditCompanyDdpMargin],
+                [PricingAccountType.INDIVIDUAL, editIndividualMargin, setEditIndividualMargin, editIndividualDdpMargin, setEditIndividualDdpMargin],
+              ] as const).map(([accountType, margin, setMargin, ddp, setDdp]) => (
+                <div key={accountType} className="space-y-2">
+                  <Label>{PRICING_ACCOUNT_TYPE_LABELS[accountType]}</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        placeholder="Express margin"
+                        value={margin}
+                        onChange={(e) => setMargin(e.target.value)}
+                        className="pr-10"
+                        disabled={!canUpdatePricing}
+                        data-testid={`input-edit-${accountType}-margin`}
+                      />
+                      <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        placeholder="Door To Door Freight markup"
+                        value={ddp}
+                        onChange={(e) => setDdp(e.target.value)}
+                        className="pr-10"
+                        disabled={!canUpdatePricing}
+                        data-testid={`input-edit-${accountType}-ddp-margin`}
+                      />
+                      <Percent className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
             <BadgeDesigner
               label="Badge Design"
@@ -1436,62 +1614,77 @@ function ClientMarkupTab() {
             </div>
 
             <div className="border-t pt-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <Label>Door To Door Freight Pricing Tiers</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">Markup formula based on billable KG for air and billable CBM for sea.</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={addNewDdpTierToCreate} data-testid="button-add-new-ddp-tier">
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Door To Door Freight Tier
-                </Button>
+              <div className="mb-3">
+                <Label>Door To Door Freight Pricing Tiers</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Air and domestic lanes bill per KG, sea lanes per CBM. Each half is priced on its own.
+                </p>
               </div>
 
-              <div className="space-y-3">
-                {newDdpTiers.map((tier, index) => (
-                  <div key={index} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 flex-1">
-                      <span className="text-sm text-muted-foreground whitespace-nowrap">Billable quantity</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={tier.minAmount}
-                        onChange={(e) => updateNewDdpTier(index, "minAmount", e.target.value)}
-                        className="w-24"
-                        data-testid={`input-new-ddp-tier-min-${index}`}
-                      />
-                      <Select value={tier.billingUnit} onValueChange={(value) => updateNewDdpTier(index, "billingUnit", value)}>
-                        <SelectTrigger className="w-24" data-testid={`select-new-ddp-tier-unit-${index}`}><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="KG">KG</SelectItem><SelectItem value="CBM">CBM</SelectItem></SelectContent>
-                      </Select>
-                      <span className="text-sm text-muted-foreground whitespace-nowrap">and above</span>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="1000"
-                        step="0.5"
-                        value={tier.marginPercentage}
-                        onChange={(e) => updateNewDdpTier(index, "marginPercentage", e.target.value)}
-                        className="w-20"
-                        data-testid={`input-new-ddp-tier-margin-${index}`}
-                      />
-                      <Percent className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">markup</span>
-                    </div>
-                    {newDdpTiers.length > 1 && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {DDP_BILLING_UNITS.map(({ unit, title, subtitle }) => (
+                  <div key={unit} className="rounded-lg border p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">{title}</p>
+                        <p className="text-xs text-muted-foreground">{subtitle}</p>
+                      </div>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeNewDdpTier(index)}
-                        data-testid={`button-remove-new-ddp-tier-${index}`}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addNewDdpTierToCreate(unit)}
+                        data-testid={`button-add-new-ddp-tier-${unit.toLowerCase()}`}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add Tier
                       </Button>
-                    )}
+                    </div>
+
+                    {newDdpTiers
+                      .map((tier, index) => ({ tier, index }))
+                      .filter(({ tier }) => tier.billingUnit === unit)
+                      .map(({ tier, index }, position, unitRows) => (
+                        <div key={index} className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-muted/50">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={tier.minAmount}
+                              onChange={(e) => updateNewDdpTier(index, "minAmount", e.target.value)}
+                              className="w-24"
+                              data-testid={`input-new-ddp-tier-min-${unit.toLowerCase()}-${position}`}
+                            />
+                            {/* The unit is the section, not a per-row choice. */}
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">{unit} and above</span>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min="0"
+                              max="1000"
+                              step="0.5"
+                              value={tier.marginPercentage}
+                              onChange={(e) => updateNewDdpTier(index, "marginPercentage", e.target.value)}
+                              className="w-20"
+                              data-testid={`input-new-ddp-tier-margin-${unit.toLowerCase()}-${position}`}
+                            />
+                            <Percent className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">markup</span>
+                          </div>
+                          {unitRows.length > 1 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeNewDdpTier(index)}
+                              data-testid={`button-remove-new-ddp-tier-${unit.toLowerCase()}-${position}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
                   </div>
                 ))}
               </div>

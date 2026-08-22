@@ -2375,16 +2375,28 @@ describe("Admin - Pricing Rules", () => {
     });
 
     try {
-      const createRes = await asAdmin
+      // A tier belongs to exactly one account type, so the endpoint refuses to guess.
+      const missingAccountTypeRes = await asAdmin
         .post(`/api/admin/pricing/${rule.id}/ddp-tiers`)
         .send({ billingUnit: "CBM", minAmount: 2.5, marginPercentage: 9 });
+      expect(missingAccountTypeRes.status).toBe(400);
+
+      const createRes = await asAdmin
+        .post(`/api/admin/pricing/${rule.id}/ddp-tiers`)
+        .send({ accountType: "individual", billingUnit: "CBM", minAmount: 2.5, marginPercentage: 9 });
       expect(createRes.status).toBe(201);
+      expect(createRes.body.accountType).toBe("individual");
 
       const listRes = await asAdmin.get(`/api/admin/pricing/${rule.id}/ddp-tiers`);
       expect(listRes.status).toBe(200);
       expect(listRes.body).toHaveLength(1);
       expect(listRes.body[0].billingUnit).toBe("CBM");
       expect(listRes.body[0].marginPercentage).toBe("9.00");
+
+      // Listing can be scoped to one side, which is how the admin screen switches sets.
+      const companyOnlyRes = await asAdmin.get(`/api/admin/pricing/${rule.id}/ddp-tiers?accountType=company`);
+      expect(companyOnlyRes.status).toBe(200);
+      expect(companyOnlyRes.body).toHaveLength(0);
 
       const updateRes = await asAdmin
         .patch(`/api/admin/pricing/ddp-tiers/${createRes.body.id}`)

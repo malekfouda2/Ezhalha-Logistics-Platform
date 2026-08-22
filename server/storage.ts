@@ -154,6 +154,11 @@ import {
   InvoiceType,
 } from "@shared/schema";
 import { db } from "./db";
+import {
+  resolveProfileDefaultDdpMargin,
+  resolveProfileDefaultMargin,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
@@ -330,11 +335,11 @@ export interface IStorage {
   deletePricingRule(id: string): Promise<void>;
 
   // Pricing Tiers
-  getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]>;
+  getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]>;
   createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
   updatePricingTier(id: string, updates: Partial<PricingTier>): Promise<PricingTier | undefined>;
   deletePricingTier(id: string): Promise<void>;
-  getMarginForAmount(profileId: string, amount: number): Promise<number>;
+  getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   listLocalCarrierPricingTiers(carrierCode?: string): Promise<LocalCarrierPricingTier[]>;
   createLocalCarrierPricingTier(tier: InsertLocalCarrierPricingTier): Promise<LocalCarrierPricingTier>;
@@ -377,11 +382,11 @@ export interface IStorage {
   deleteCarrierAssignmentRule(id: string): Promise<void>;
 
   // DDP Pricing Tiers
-  getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]>;
+  getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]>;
   createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier>;
   updateDdpPricingTier(id: string, updates: Partial<DdpPricingTier>): Promise<DdpPricingTier | undefined>;
   deleteDdpPricingTier(id: string): Promise<void>;
-  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number>;
+  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   // DDP Pricing Lanes
   getDdpPricingLanes(): Promise<DdpPricingLane[]>;
@@ -1542,10 +1547,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pricing Tiers
-  async getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]> {
+  /** Omit `accountType` to list both sets — the admin pricing screen renders them side by side. */
+  async getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]> {
     return db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
-      .orderBy(pricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(pricingTiers.profileId, profileId), eq(pricingTiers.accountType, accountType))
+        : eq(pricingTiers.profileId, profileId))
+      .orderBy(pricingTiers.accountType, pricingTiers.minAmount);
   }
 
   async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {
@@ -1562,22 +1570,32 @@ export class DatabaseStorage implements IStorage {
     await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
   }
 
-  async getMarginForAmount(profileId: string, amount: number): Promise<number> {
-    // Get all tiers for this profile, ordered by minAmount descending
+  /**
+   * Express margin for one profile + account type at a given base rate.
+   *
+   * `accountType` is required rather than defaulted: a profile prices companies and individuals
+   * separately, and a parameter with a default would let a new call site silently bill an
+   * individual at the company rate.
+   */
+  async getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number> {
+    // Tiers belong to exactly one account type, so this filter is what keeps the two sets apart.
     const tiers = await db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
+      .where(and(
+        eq(pricingTiers.profileId, profileId),
+        eq(pricingTiers.accountType, accountType),
+      ))
       .orderBy(desc(pricingTiers.minAmount));
-    
+
     // Find the applicable tier (highest minAmount that is <= the amount)
     for (const tier of tiers) {
       if (amount >= Number(tier.minAmount)) {
         return Number(tier.marginPercentage);
       }
     }
-    
-    // If no tiers found, fall back to the profile's default marginPercentage
+
+    // No tier matched: fall back to this account type's default margin on the profile.
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
+    return profile ? resolveProfileDefaultMargin(profile, accountType) : 15; // 15% if nothing found
   }
 
   // Local carrier pricing tiers
@@ -1795,10 +1813,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // DDP Pricing Tiers
-  async getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]> {
+  /** Omit `accountType` to list both sets. */
+  async getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]> {
     return db.select().from(ddpPricingTiers)
-      .where(eq(ddpPricingTiers.profileId, profileId))
-      .orderBy(ddpPricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(ddpPricingTiers.profileId, profileId), eq(ddpPricingTiers.accountType, accountType))
+        : eq(ddpPricingTiers.profileId, profileId))
+      .orderBy(ddpPricingTiers.accountType, ddpPricingTiers.minAmount);
   }
 
   async createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier> {
@@ -1815,11 +1836,18 @@ export class DatabaseStorage implements IStorage {
     await db.delete(ddpPricingTiers).where(eq(ddpPricingTiers.id, id));
   }
 
-  async getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number> {
+  /** DDP markup for one profile + account type at a given billable quantity. */
+  async getDdpMarginForQuantity(
+    profileId: string,
+    billingUnit: "KG" | "CBM",
+    quantity: number,
+    accountType: PricingAccountTypeValue,
+  ): Promise<number> {
     const tiers = await db.select().from(ddpPricingTiers)
       .where(and(
         eq(ddpPricingTiers.profileId, profileId),
         eq(ddpPricingTiers.billingUnit, billingUnit),
+        eq(ddpPricingTiers.accountType, accountType),
       ))
       .orderBy(desc(ddpPricingTiers.minAmount));
 
@@ -1830,7 +1858,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.ddpMarginPercentage) : 15;
+    return profile ? resolveProfileDefaultDdpMargin(profile, accountType) : 15;
   }
 
   // DDP Pricing Lanes

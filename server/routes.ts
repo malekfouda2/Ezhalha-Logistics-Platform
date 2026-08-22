@@ -63,6 +63,11 @@ import {
   UserInvitationStatus,
   type RoleHierarchyLevelValue,
 } from "@shared/internal-users";
+import {
+  normalizePricingAccountType,
+  PRICING_ACCOUNT_TYPES,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 import { logInfo, logWarn, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
@@ -113,6 +118,7 @@ import {
   sanitizeIntegrationCredentials,
   sanitizeIntegrationSettings,
   serializeIntegrationAccount,
+  IntegrationFieldValidationError,
   serializeIntegrationAccountSafely,
 } from "./services/integration-apps";
 import {
@@ -2620,7 +2626,7 @@ async function calculateDdpExtraWeightCharge(params: {
   const account = await storage.getClientAccount(params.shipment.clientAccountId);
   const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
   const markupPercentage = pricingRule
-    ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+    ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
     : 0;
   const pricedQuote = calculateDdpPrice({
     lane,
@@ -12260,7 +12266,7 @@ export async function registerRoutes(
     ...quotationPricingControls,
   });
 
-  const pricingInputFromQuotation = (data: z.infer<typeof quotationCreateSchema>, clientProfile: string | null) => {
+  const pricingInputFromQuotation = (data: z.infer<typeof quotationCreateSchema>, clientProfile: string | null, clientAccountType: string | null) => {
     const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
     const first = data.packages[0];
     return {
@@ -12292,7 +12298,7 @@ export async function registerRoutes(
       const data = quotationCreateSchema.parse(req.body);
       const account = await storage.getClientAccount(data.clientAccountId);
       if (!account) return res.status(404).json({ error: "Client account not found" });
-      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null, account.accountType || null));
       res.json(pricing);
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
@@ -12342,7 +12348,7 @@ export async function registerRoutes(
           const liveFallbackMarginPercent =
             liveBaseRateSar != null && liveBaseRateSar > 0
               ? localPricingRule
-                ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+                ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
                 : 20
               : null;
           const local = await resolveLocalRate({ carrierCode: carrier.code, weightKg: totalWeightKg, clientProfile: profile, liveBaseRateSar, liveFallbackMarginPercent });
@@ -12360,7 +12366,7 @@ export async function registerRoutes(
           for (const transportMethod of methods) {
             try {
               const pricing = await computeQuotationPricing({
-                type: "ddp", clientProfile: profile, originCountryCode: origin, destinationCountryCode: destination,
+                type: "ddp", clientProfile: profile, clientAccountType: account.accountType || null, originCountryCode: origin, destinationCountryCode: destination,
                 destinationCity: data.recipient.city, weightKg: totalWeightKg, pieces: data.packages.length,
                 length: first.length, width: first.width, height: first.height, ddpTransportMethod: transportMethod,
               });
@@ -12394,7 +12400,7 @@ export async function registerRoutes(
             const rates = selectCheapestCarrierAccountPortfolio(results)?.carrierRates || [];
             for (const rate of rates) {
               if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
-              const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate) : 20;
+              const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType)) : 20;
               const snap = calculateShipmentAccounting({ shipmentType: expressShipmentType, isDdp: false, recipientCountryCode: destination, baseRate: rate.baseRate, marginAmount: rate.baseRate * (marginPct / 100) });
               options.push({ carrierCode: adapter.carrierCode, carrierName: adapter.name, serviceType: rate.serviceType, serviceName: rate.serviceName, baseRate: rate.baseRate, clientTotal: snap.clientTotalAmountSar, transitDays: rate.transitDays ?? null });
             }
@@ -12463,7 +12469,7 @@ export async function registerRoutes(
       if (!lane) return res.status(404).json({ error: "Door To Door Freight pricing is not configured for this origin and destination yet." });
       const pricingRule = account.profile ? await storage.getPricingRuleByProfile(account.profile) : undefined;
       const base = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage: 0 });
-      const markupPercentage = pricingRule ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity) : 0;
+      const markupPercentage = pricingRule ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity, normalizePricingAccountType(account?.accountType)) : 0;
       const pricing = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage });
       // With-VAT total (margin VAT) — matches what the created quote charges the client.
       const snapshot = calculateShipmentAccounting({ shipmentType: "inbound", isDdp: true, recipientCountryCode: lane.destinationCountryCode || "SA", baseRate: pricing.baseRateSar, marginAmount: pricing.markupAmountSar });
@@ -12525,7 +12531,7 @@ export async function registerRoutes(
       const account = await storage.getClientAccount(data.clientAccountId);
       if (!account) return res.status(404).json({ error: "Client account not found" });
 
-      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null, account.accountType || null));
       const snapshot = calculateShipmentAccounting({
         shipmentType: pricing.shipmentType,
         isDdp: pricing.isDdp,
@@ -12719,7 +12725,7 @@ export async function registerRoutes(
         const recipientCountryCode = String(body.recipientCountryCode || "SA").trim().toUpperCase() || "SA";
         const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
         const marginPercentage = rule
-          ? await storage.getMarginForAmount(rule.id, baseRate)
+          ? await storage.getMarginForAmount(rule.id, baseRate, normalizePricingAccountType(typeof body.accountType === "string" ? body.accountType : null))
           : 15;
         const markup = round2(baseRate * (marginPercentage / 100));
         const snapshot = calculateShipmentAccounting({
@@ -12762,7 +12768,7 @@ export async function registerRoutes(
         const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
         const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
         const markupPercentage = rule
-          ? await storage.getDdpMarginForQuantity(rule.id, basePricing.billingUnit, basePricing.billableQuantity)
+          ? await storage.getDdpMarginForQuantity(rule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(typeof body.accountType === "string" ? body.accountType : null))
           : 0;
         // Pass 2: final quote with the resolved markup.
         const quote = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
@@ -12867,11 +12873,33 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid badge gradient colors" });
       }
 
+      // A new profile starts with both account types set to the headline margins the admin
+      // entered, so Company and Individual are explicitly populated and equal rather than
+      // leaning on the fallback. The admin then edits whichever side should differ.
+      const accountTypeMargins: Record<string, string | null> = {};
+      for (const [field, label] of [
+        ["companyMarginPercentage", "company margin percentage"],
+        ["companyDdpMarginPercentage", "company Door To Door Freight markup"],
+        ["individualMarginPercentage", "individual margin percentage"],
+        ["individualDdpMarginPercentage", "individual Door To Door Freight markup"],
+      ] as const) {
+        const isDdp = field.includes("Ddp");
+        const provided = (req.body as Record<string, unknown>)[field];
+        const parsed = provided === undefined
+          ? (isDdp ? ddpMargin.toFixed(2) : margin.toFixed(2))
+          : parseAccountTypeMargin(provided, label);
+        if (parsed instanceof Error) {
+          return res.status(400).json({ error: parsed.message });
+        }
+        accountTypeMargins[field] = parsed;
+      }
+
       const newRule = await storage.createPricingRule({
         profile: profileKey,
         displayName: displayName.trim(),
         marginPercentage: margin.toFixed(2),
         ddpMarginPercentage: ddpMargin.toFixed(2),
+        ...accountTypeMargins,
         badgeColor: normalizedBadgeColor || "#6B7280",
         badgeStyle: normalizedBadgeStyle,
         badgeGradientFrom: normalizedGradientFrom,
@@ -12891,6 +12919,20 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * Validate one per-account-type margin field. Returns the stored string, `null` to clear it,
+   * or an Error to reject with. Kept separate from the profile-wide fields because these are
+   * nullable: clearing one drops that account type back onto the profile-wide fallback.
+   */
+  const parseAccountTypeMargin = (value: unknown, label: string): string | null | Error => {
+    if (value === null || value === "") return null;
+    const parsed = parseFloat(String(value));
+    if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+      return new Error(`Invalid ${label}`);
+    }
+    return parsed.toFixed(2);
+  };
+
   // Admin - Update Pricing Rule
   app.patch("/api/admin/pricing/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
@@ -12898,6 +12940,10 @@ export async function registerRoutes(
       const {
         marginPercentage,
         ddpMarginPercentage,
+        companyMarginPercentage,
+        companyDdpMarginPercentage,
+        individualMarginPercentage,
+        individualDdpMarginPercentage,
         displayName,
         isActive,
         badgeColor,
@@ -12911,6 +12957,10 @@ export async function registerRoutes(
       const updates: {
         marginPercentage?: string;
         ddpMarginPercentage?: string;
+        companyMarginPercentage?: string | null;
+        companyDdpMarginPercentage?: string | null;
+        individualMarginPercentage?: string | null;
+        individualDdpMarginPercentage?: string | null;
         displayName?: string;
         isActive?: boolean;
         badgeColor?: string | null;
@@ -12934,6 +12984,20 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Invalid Door To Door Freight markup percentage" });
         }
         updates.ddpMarginPercentage = ddpMargin.toFixed(2);
+      }
+
+      for (const [field, value, label] of [
+        ["companyMarginPercentage", companyMarginPercentage, "company margin percentage"],
+        ["companyDdpMarginPercentage", companyDdpMarginPercentage, "company Door To Door Freight markup"],
+        ["individualMarginPercentage", individualMarginPercentage, "individual margin percentage"],
+        ["individualDdpMarginPercentage", individualDdpMarginPercentage, "individual Door To Door Freight markup"],
+      ] as const) {
+        if (value === undefined) continue;
+        const parsed = parseAccountTypeMargin(value, label);
+        if (parsed instanceof Error) {
+          return res.status(400).json({ error: parsed.message });
+        }
+        (updates as Record<string, string | null>)[field] = parsed;
       }
 
       if (displayName !== undefined) {
@@ -12995,6 +13059,12 @@ export async function registerRoutes(
       const changeDetails = [];
       if (updates.marginPercentage) changeDetails.push(`margin to ${updates.marginPercentage}%`);
       if (updates.ddpMarginPercentage) changeDetails.push(`DDP markup to ${updates.ddpMarginPercentage}%`);
+      // Pricing changes are audited per account type — "margin to 18%" alone would not say
+      // whether companies, individuals, or both were re-rated.
+      if (updates.companyMarginPercentage !== undefined) changeDetails.push(`company margin to ${updates.companyMarginPercentage ?? "profile default"}%`);
+      if (updates.companyDdpMarginPercentage !== undefined) changeDetails.push(`company DDP markup to ${updates.companyDdpMarginPercentage ?? "profile default"}%`);
+      if (updates.individualMarginPercentage !== undefined) changeDetails.push(`individual margin to ${updates.individualMarginPercentage ?? "profile default"}%`);
+      if (updates.individualDdpMarginPercentage !== undefined) changeDetails.push(`individual DDP markup to ${updates.individualDdpMarginPercentage ?? "profile default"}%`);
       if (updates.displayName) changeDetails.push(`name to "${updates.displayName}"`);
       if (updates.isActive !== undefined) changeDetails.push(`active to ${updates.isActive}`);
       if (updates.badgeColor) changeDetails.push(`badge color to ${updates.badgeColor}`);
@@ -13048,7 +13118,12 @@ export async function registerRoutes(
   app.get("/api/admin/pricing/:id/tiers", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
     try {
       const { id } = req.params;
-      const tiers = await storage.getPricingTiersByProfileId(id);
+      // No accountType filters to a single set; omitting it returns both, which is what the
+      // admin screen wants so it can render Company and Individual side by side.
+      const accountType = typeof req.query.accountType === "string"
+        ? normalizePricingAccountType(req.query.accountType)
+        : undefined;
+      const tiers = await storage.getPricingTiersByProfileId(id, accountType);
       res.json(tiers);
     } catch (error) {
       logError("Error fetching pricing tiers", error);
@@ -13058,6 +13133,9 @@ export async function registerRoutes(
 
   // Admin - Create Pricing Tier
   const pricingTierSchema = z.object({
+    // Required, not defaulted: a tier saved without an account type would land in "company" and
+    // silently price the wrong set.
+    accountType: z.enum(PRICING_ACCOUNT_TYPES as [PricingAccountTypeValue, ...PricingAccountTypeValue[]]),
     minAmount: z.number().min(0, "Minimum amount must be 0 or greater"),
     marginPercentage: z.number().min(0, "Margin must be 0 or greater").max(1000, "Margin cannot exceed 1000%"),
   });
@@ -13066,7 +13144,7 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       
-      const { minAmount, marginPercentage } = pricingTierSchema.parse(req.body);
+      const { accountType, minAmount, marginPercentage } = pricingTierSchema.parse(req.body);
 
       // Verify profile exists
       const profile = await storage.getPricingRuleById(id);
@@ -13076,12 +13154,13 @@ export async function registerRoutes(
 
       const tier = await storage.createPricingTier({
         profileId: id,
+        accountType,
         minAmount: String(minAmount),
         marginPercentage: String(marginPercentage),
       });
 
       await logAudit(req.session.userId, "create_pricing_tier", "pricing_tier", tier.id,
-        `Created pricing tier for ${profile.displayName}: SAR ${minAmount}+ at ${marginPercentage}%`, req.ip);
+        `Created ${accountType} pricing tier for ${profile.displayName}: SAR ${minAmount}+ at ${marginPercentage}%`, req.ip);
 
       res.status(201).json(tier);
     } catch (error) {
@@ -13152,7 +13231,12 @@ export async function registerRoutes(
   // Admin - DDP Pricing Tiers
   app.get("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
     try {
-      res.json(await storage.getDdpPricingTiersByProfileId(req.params.id));
+      // No accountType filters to a single set; omitting it returns both, which is what the
+      // admin screen wants so it can render Company and Individual side by side.
+      const accountType = typeof req.query.accountType === "string"
+        ? normalizePricingAccountType(req.query.accountType)
+        : undefined;
+      res.json(await storage.getDdpPricingTiersByProfileId(req.params.id, accountType));
     } catch (error) {
       logError("Error fetching DDP pricing tiers", error);
       res.status(500).json({ error: "Internal server error" });
@@ -13161,7 +13245,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
-      const { billingUnit, minAmount, marginPercentage } = ddpPricingTierSchema.parse(req.body);
+      const { accountType, billingUnit, minAmount, marginPercentage } = ddpPricingTierSchema.parse(req.body);
       const profile = await storage.getPricingRuleById(req.params.id);
       if (!profile) {
         return res.status(404).json({ error: "Pricing profile not found" });
@@ -13169,12 +13253,13 @@ export async function registerRoutes(
 
       const tier = await storage.createDdpPricingTier({
         profileId: profile.id,
+        accountType,
         billingUnit,
         minAmount: String(minAmount),
         marginPercentage: String(marginPercentage),
       });
       await logAudit(req.session.userId, "create_ddp_pricing_tier", "ddp_pricing_tier", tier.id,
-        `Created DDP pricing tier for ${profile.displayName}: ${minAmount}+ ${billingUnit} at ${marginPercentage}%`, req.ip);
+        `Created ${accountType} DDP pricing tier for ${profile.displayName}: ${minAmount}+ ${billingUnit} at ${marginPercentage}%`, req.ip);
       res.status(201).json(tier);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -13601,6 +13686,10 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
+      // A field the admin can correct in the form — answer with the message, not a generic 500.
+      if (error instanceof IntegrationFieldValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       if (error instanceof Error && (
         error.message.startsWith("Missing required credentials") ||
         error.message.startsWith("Unsupported integration field") ||
@@ -13685,6 +13774,10 @@ export async function registerRoutes(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
+      }
+      // A field the admin can correct in the form — answer with the message, not a generic 500.
+      if (error instanceof IntegrationFieldValidationError) {
+        return res.status(400).json({ error: error.message });
       }
       if (error instanceof Error && (
         error.message.startsWith("Missing required credentials") ||
@@ -16499,7 +16592,7 @@ export async function registerRoutes(
         markupPercentage: 0,
       });
       const markupPercentage = pricingRule
-        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
         : 0;
       const pricing = calculateDdpPrice({
         lane,
@@ -16642,7 +16735,7 @@ export async function registerRoutes(
           try {
             const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
             const markupPercentage = pricingRule
-              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
               : 0;
             const pricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
             const snapshot = calculateShipmentAccounting({
@@ -16739,7 +16832,7 @@ export async function registerRoutes(
               // SELECT / FREIGHT WORLDWIDE come back at 0 on unsupported lanes).
               if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
               const marginPercentage = pricingRule
-                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType))
                 : defaultMarginPercentage;
               const marginAmount = rate.baseRate * (marginPercentage / 100);
               const snapshot = calculateShipmentAccounting({
@@ -16938,6 +17031,7 @@ export async function registerRoutes(
     const pricing = await computeQuotationPricing({
       type,
       clientProfile: account?.profile || null,
+      clientAccountType: account?.accountType || null,
       originCountryCode: shipper.countryCode,
       destinationCountryCode: recipient.countryCode,
       destinationCity: recipient.city,
@@ -17120,7 +17214,7 @@ export async function registerRoutes(
         markupPercentage: 0,
       });
       const markupPercentage = pricingRule
-        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
         : 0;
       const pricing = calculateDdpPrice({
         lane,
@@ -17393,7 +17487,7 @@ export async function registerRoutes(
       for (const { carrierAdapter, carrierRates, integrationAccountId } of carrierRateResults) {
         for (const rate of carrierRates) {
           const marginPercentage = pricingRule
-            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType))
             : defaultMarginPercentage;
 
           const marginAmount = rate.baseRate * (marginPercentage / 100);
@@ -17523,7 +17617,7 @@ export async function registerRoutes(
         const liveFallbackMarginPercent =
           liveBaseRateSar != null && liveBaseRateSar > 0
             ? localPricingRule
-              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
               : 20
             : null;
         const local = await resolveLocalRate({
@@ -18061,7 +18155,7 @@ export async function registerRoutes(
         const liveFallbackMarginPercent =
           liveBaseRateSar != null && liveBaseRateSar > 0
             ? localPricingRule
-              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
               : 20
             : null;
         const local = await resolveLocalRate({
@@ -18306,7 +18400,7 @@ export async function registerRoutes(
       // Re-derive the margin server-side (never trust the quoted amount) using the
       // profile margin tiers. (Local shipments use their own /local/checkout.)
       const marginPercentage = pricingRule
-        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate, normalizePricingAccountType(account?.accountType))
         : defaultMarginPercentage;
       const recalculatedMargin = baseRate * (marginPercentage / 100);
 
@@ -18792,7 +18886,7 @@ export async function registerRoutes(
       
       // Get tiered margin based on the base rate amount
       const marginPercentage = pricingRule 
-        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate, normalizePricingAccountType(account?.accountType))
         : defaultMarginPercentage;
       
       const margin = baseRate * (marginPercentage / 100);

@@ -1,6 +1,7 @@
 import { getCarrierAdapter } from "../integrations/carriers";
 import type { CarrierAdapter, TrackingResponse } from "../integrations/fedex";
 import { storage } from "../storage";
+import { recordCarrierTrackingEvents } from "./carrier-tracking-events";
 import { withBoundIntegrationAccount } from "./integration-runtime";
 import { logError, logInfo } from "./logger";
 import {
@@ -125,6 +126,16 @@ export async function applyCarrierTrackingToShipment(
   tracking: TrackingResponse,
   source: string,
 ): Promise<Shipment> {
+  // Persist the carrier's scan history FIRST and unconditionally. It is the only record of what
+  // the carrier actually said, and it has to survive the early return below — a poll where
+  // nothing about the shipment changed can still be the poll that carried a new scan, because
+  // `carrierStatus` only ever holds the single latest milestone.
+  await recordCarrierTrackingEvents({
+    shipmentId: shipment.id,
+    carrierCode: resolveCarrierCode(shipment.carrierCode || shipment.carrierName),
+    events: tracking.events || [],
+  });
+
   const mappedStatus = mapCarrierTrackingStatusToShipmentStatus(tracking);
   const previousStatus = shipment.status;
   // Never regress a delivered/cancelled shipment, and never overwrite a real status with a

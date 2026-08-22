@@ -259,6 +259,52 @@ describe("Operations Hub", () => {
     expect(summaryRes.body.deliveredCount).toBeGreaterThanOrEqual(beforeDeliveredCount + 2);
   });
 
+  it("collects returned shipments in the returned queue without pulling them out of the active queues", async () => {
+    const beforeSummaryRes = await withCookies(request.get("/api/operations/summary"), adminCookies);
+    expect(beforeSummaryRes.status).toBe(200);
+    const beforeReturnedCount = Number(beforeSummaryRes.body.returnedCount || 0);
+
+    const { clientAccount } = await createClientWithUser();
+    const returnedExpress = await createPaidExpressShipment(clientAccount.id, {
+      status: "returned",
+      carrierStatus: "returned",
+    });
+    const { shipment: returnedDdp } = await createPaidDdpShipment(clientAccount.id);
+    await storage.updateShipment(returnedDdp.id, {
+      status: "returned",
+      carrierStatus: "returned",
+    });
+    const movingExpress = await createPaidExpressShipment(clientAccount.id, {
+      status: "in_transit",
+      carrierStatus: "in_transit",
+    });
+
+    const returnedQueueRes = await withCookies(request.get("/api/operations/shipments?queue=returned&limit=500"), adminCookies);
+    expect(returnedQueueRes.status).toBe(200);
+    expect(returnedQueueRes.body.some((shipment: { id: string }) => shipment.id === returnedExpress.id)).toBe(true);
+    expect(returnedQueueRes.body.some((shipment: { id: string }) => shipment.id === returnedDdp.id)).toBe(true);
+    // Only returns — anything still moving forward belongs to the working queues alone.
+    expect(returnedQueueRes.body.some((shipment: { id: string }) => shipment.id === movingExpress.id)).toBe(false);
+
+    // A return is unfinished work, so it stays in the queue the operator works out of.
+    const expressQueueRes = await withCookies(request.get("/api/operations/shipments?queue=express&limit=500"), adminCookies);
+    expect(expressQueueRes.status).toBe(200);
+    expect(expressQueueRes.body.some((shipment: { id: string }) => shipment.id === returnedExpress.id)).toBe(true);
+
+    const ddpQueueRes = await withCookies(request.get("/api/operations/shipments?queue=ddp&limit=500"), adminCookies);
+    expect(ddpQueueRes.status).toBe(200);
+    expect(ddpQueueRes.body.some((shipment: { id: string }) => shipment.id === returnedDdp.id)).toBe(true);
+
+    // ...and never in Delivered, which is the page for shipments that actually arrived.
+    const deliveredQueueRes = await withCookies(request.get("/api/operations/shipments?queue=delivered&limit=500"), adminCookies);
+    expect(deliveredQueueRes.status).toBe(200);
+    expect(deliveredQueueRes.body.some((shipment: { id: string }) => shipment.id === returnedExpress.id)).toBe(false);
+
+    const summaryRes = await withCookies(request.get("/api/operations/summary"), adminCookies);
+    expect(summaryRes.status).toBe(200);
+    expect(summaryRes.body.returnedCount).toBeGreaterThanOrEqual(beforeReturnedCount + 2);
+  });
+
   it("assigns paid shipments, scopes agent visibility, and hides financials from operations users", async () => {
     const agentA = await createOperationsUser("agent");
     const agentB = await createOperationsUser("agent");

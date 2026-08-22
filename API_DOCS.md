@@ -130,15 +130,15 @@ Door-to-Door Freight uses `/api/client/ddp/rates` and `/api/client/ddp/checkout`
 | `POST` | `/api/auth/change-password` | — | Guard `requireAuth` |
 | `GET` | `/api/auth/devices` | List the signed-in devices for the current user | Guard `requireAuth` |
 | `DELETE` | `/api/auth/devices/:id` | Sign out one device | Guard `requireAuth` |
-| `POST` | `/api/auth/forgot-password` | — | Rate limit `otpLimiter` |
+| `POST` | `/api/auth/forgot-password` | Email a password-reset link | Rate limit `otpLimiter` |
 | `POST` | `/api/auth/login` | Cookie-session login (web app) | Rate limit `authLimiter` |
 | `POST` | `/api/auth/logout` | — | — |
 | `GET` | `/api/auth/me` | Current authenticated user | — |
 | `POST` | `/api/auth/otp/request` | Send a 6-digit email login code | Rate limit `otpLimiter` |
 | `POST` | `/api/auth/otp/verify` | — | Rate limit `otpLimiter` |
 | `POST` | `/api/auth/refresh` | Rotate a refresh token | Rate limit `otpLimiter` |
-| `POST` | `/api/auth/reset-password` | — | Rate limit `otpLimiter` |
-| `GET` | `/api/auth/reset-password/:token` | — | — |
+| `POST` | `/api/auth/reset-password` | Set a new password using an emailed token | Rate limit `otpLimiter` |
+| `GET` | `/api/auth/reset-password/:token` | Check whether a reset token is still usable | — |
 | `POST` | `/api/auth/revoke` | Revoke a refresh token (mobile sign-out) | — |
 | `POST` | `/api/auth/token` | Exchange credentials for an access + refresh token pair | Rate limit `authLimiter` |
 | `POST` | `/api/auth/token/otp` | Exchange a verified email login code for a token pair | Rate limit `otpLimiter` |
@@ -153,7 +153,25 @@ Revokes the whole token family for that device.
 
 Requirements: Guard `requireAuth`
 
-Source: `server/routes.ts:8496`
+Source: `server/routes.ts:8501`
+
+##### `POST /api/auth/forgot-password`
+
+Email a password-reset link
+
+Sends `{APP_BASE_URL}/reset-password?token=<token>` to the address, if an active user has it. **Always responds 200 `{ success: true }`, even for an address with no account** — the response deliberately reveals nothing about who is registered, so it cannot confirm success. The token exists only in that email.
+
+Note for native clients: `APP_BASE_URL` points at the web app, so the emailed link opens a browser. Handling it in-app requires universal links / app links plus a server-side change to the email — it does not work out of the box.
+
+Request body — `ForgotPasswordRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `email` | string (email) | yes | Address to send the reset link to. No token is returned in the response. |
+
+Requirements: Rate limit `otpLimiter`
+
+Source: `server/routes.ts:8521`
 
 ##### `POST /api/auth/login`
 
@@ -163,7 +181,7 @@ Used by the web SPA. Native clients should use POST /api/auth/token instead.
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:8056`
+Source: `server/routes.ts:8061`
 
 ##### `POST /api/auth/otp/request`
 
@@ -173,7 +191,7 @@ Always returns success — never reveals whether the address exists.
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8127`
+Source: `server/routes.ts:8132`
 
 ##### `POST /api/auth/refresh`
 
@@ -189,7 +207,34 @@ Request body — `RefreshRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8391`
+Source: `server/routes.ts:8396`
+
+##### `POST /api/auth/reset-password`
+
+Set a new password using an emailed token
+
+Consumes the token — a second call with the same one fails. On success **every issued bearer and refresh token for that user is revoked**, so other devices get 401 on their next call; native clients must route to login rather than attempting a refresh.
+
+Wrong, expired and already-used tokens all return the same 400 message on purpose, so the response cannot be used to probe which tokens exist.
+
+Request body — `ResetPasswordRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `token` | [`PasswordResetToken`](#schemas) | yes |  |
+| `password` | string (password) | yes | min length 8; The new password. Minimum 8 characters. |
+
+Requirements: Rate limit `otpLimiter`
+
+Source: `server/routes.ts:8551`
+
+##### `GET /api/auth/reset-password/:token`
+
+Check whether a reset token is still usable
+
+Lets the reset screen show "this link has expired" before the user types a password. Consumes nothing and never errors on a bad token — an unknown token simply returns `valid: false`. Use `mode` to choose between "Set your password" (onboard) and "Reset your password" (reset).
+
+Source: `server/routes.ts:8540`
 
 ##### `POST /api/auth/revoke`
 
@@ -203,7 +248,7 @@ Request body — `RefreshRequest`:
 | --- | --- | --- | --- |
 | `refreshToken` | string | yes | min length 20 |
 
-Source: `server/routes.ts:8455`
+Source: `server/routes.ts:8460`
 
 ##### `POST /api/auth/token`
 
@@ -224,7 +269,7 @@ Request body — `TokenRequest`:
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:8269`
+Source: `server/routes.ts:8274`
 
 ##### `POST /api/auth/token/otp`
 
@@ -245,7 +290,7 @@ Request body — `OtpTokenRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8331`
+Source: `server/routes.ts:8336`
 
 ### Client portal
 
@@ -332,7 +377,7 @@ Primary contact only. Bilingual (EN/AR) fields are accepted.
 
 Requirements: Guard `requireClient` · **Primary contact only**
 
-Source: `server/routes.ts:15606`
+Source: `server/routes.ts:15690`
 
 ##### `GET /api/client/fx-rate`
 
@@ -340,7 +385,7 @@ Display currency and the SAR conversion rate for this account
 
 Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.
 
-Source: `server/routes.ts:15569`
+Source: `server/routes.ts:15653`
 
 ##### `POST /api/client/orders/:id/fulfill`
 
@@ -350,7 +395,7 @@ Fulfil an order as a shipment
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18101`
+Source: `server/routes.ts:18186`
 
 ##### `POST /api/client/quick-quote`
 
@@ -372,7 +417,7 @@ Request body — `QuickQuoteRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16563`
+Source: `server/routes.ts:16647`
 
 ##### `POST /api/client/shipments`
 
@@ -402,7 +447,7 @@ Request body — `LegacyShipmentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18762`
+Source: `server/routes.ts:18847`
 
 ##### `POST /api/client/shipments/:id/cancel`
 
@@ -412,7 +457,7 @@ A still-booked cancellation auto-issues a Tap refund and cancels any carrier pic
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18842`
+Source: `server/routes.ts:18927`
 
 ##### `GET /api/client/shipments/:id/label.pdf`
 
@@ -422,7 +467,7 @@ Binary behind the auth guard. Native clients must fetch this with the Authorizat
 
 Requirements: Guard `requireClient` · Returns `application/pdf`
 
-Source: `server/routes.ts:18948`
+Source: `server/routes.ts:19033`
 
 ##### `POST /api/client/shipments/:id/pay-later`
 
@@ -432,7 +477,7 @@ Requires an approved credit limit with sufficient available balance.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:19145`
+Source: `server/routes.ts:19230`
 
 ##### `POST /api/client/shipments/checkout`
 
@@ -451,7 +496,7 @@ Request body — `CheckoutRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18223`
+Source: `server/routes.ts:18308`
 
 ##### `POST /api/client/shipments/confirm`
 
@@ -468,7 +513,7 @@ Request body — `ConfirmRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:18654`
+Source: `server/routes.ts:18739`
 
 ##### `POST /api/client/shipments/extract-invoice-items`
 
@@ -478,7 +523,7 @@ AI extraction (Gemini). Upload the file through the signed-URL flow first and pa
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16333`
+Source: `server/routes.ts:16417`
 
 ##### `POST /api/client/shipments/extract-package-details`
 
@@ -488,7 +533,7 @@ AI extraction (Gemini). Same upload-first pattern as invoice extraction.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:16401`
+Source: `server/routes.ts:16485`
 
 ##### `POST /api/client/shipments/pay`
 
@@ -507,7 +552,7 @@ Request body — `ShipmentPaymentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18540`
+Source: `server/routes.ts:18625`
 
 ##### `POST /api/client/shipments/rates`
 
@@ -536,7 +581,7 @@ Request body — `ShipmentRateRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:17228`
+Source: `server/routes.ts:17313`
 
 ### Operations portal
 
@@ -892,6 +937,24 @@ Fields — `User`:
 | `isActive` | boolean | no |  |
 | `lastLoginAt` | string (date-time) | no |  |
 | `createdAt` | string (date-time) | no |  |
+
+### `ResetTokenStatus`
+
+Fields — `ResetTokenStatus`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `valid` | boolean | no | False when the token is unknown, expired, or already used. Advisory only — POST /api/auth/reset-password re-checks, so never treat true as a guarantee. |
+| `mode` | enum: `reset`, `onboard` | no | `onboard` = a new user setting their first password (link valid 7 days). `reset` = forgot-password (link valid 1 hour). Both use the same POST; this only changes the wording you show. |
+
+### `ResetPasswordRequest`
+
+Fields — `ResetPasswordRequest`:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `token` | [`PasswordResetToken`](#schemas) | yes |  |
+| `password` | string (password) | yes | min length 8; The new password. Minimum 8 characters. |
 
 ### `Error`
 

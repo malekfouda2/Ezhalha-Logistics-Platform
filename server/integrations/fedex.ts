@@ -314,10 +314,30 @@ export interface CreateShipmentResponse {
 }
 
 export interface TrackingEvent {
+  /** The event instant. Correct even when the carrier reports a bare local wall-clock. */
   timestamp: Date;
+  /** Carrier's own event code (FedEx `eventType`, DHL `typeCode`, Aramex `UpdateCode`). */
   status: string;
+  /** The carrier's exact wording. Adapters must not reword, title-case, or substitute here. */
   description: string;
   location?: string;
+  /**
+   * The wall-clock string the carrier actually reported, offset included when it supplies one:
+   * "2026-08-15T10:23:00-07:00". Kept verbatim because rendering `timestamp` in the viewer's
+   * timezone shows a different clock time than the carrier's own tracking page does.
+   */
+  localTime?: string;
+  /** Just the offset portion, e.g. "-07:00". Absent when the carrier reports none. */
+  utcOffset?: string;
+  /** Exception detail (FedEx `exceptionCode`/`exceptionDescription`) — why it stopped moving. */
+  exceptionCode?: string;
+  exceptionDescription?: string;
+  /** DHL delivery scans. Legitimately empty under GDPR. */
+  signedBy?: string;
+  /** Carrier's own longer explanation: DHL `remarks[]`, FedEx status `ancillaryDetails[]`. */
+  remarks?: string;
+  /** The untouched carrier event object. */
+  raw?: unknown;
 }
 
 // Carrier pickup request. Fired after a shipment is booked with the carrier (so the pickup
@@ -395,6 +415,64 @@ export interface CarrierAdapter {
   supportsPickup?: boolean;
   requestPickup?(request: PickupRequest): Promise<PickupResponse>;
   cancelPickup?(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean>;
+}
+
+/**
+ * Build a display location from a FedEx `scanLocation` (Track API `AddressVO1`).
+ *
+ * The previous version emitted `` `${city}, ${stateOrProvinceCode}` `` unconditionally, so every
+ * scan outside the US/CA — where FedEx sends no state code — rendered as "DUBAI, undefined".
+ * FedEx also fills only `countryCode`/`countryName` for some international facilities, so fall
+ * back through the fields it actually populates.
+ */
+export function formatFedexScanLocation(location: any): string | undefined {
+  if (!location) return undefined;
+  const parts = [
+    location.city,
+    location.stateOrProvinceCode,
+    // Only add a country when there is no state — "SEATTLE, WA, US" is noise, "DUBAI, AE" is not.
+    location.stateOrProvinceCode ? undefined : (location.countryName || location.countryCode),
+  ].filter((part: unknown): part is string => typeof part === "string" && part.trim().length > 0);
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+/**
+ * FedEx Track API v1 `ScanEvent` -> TrackingEvent.
+ *
+ * `date` is ISO 8601 carrying the offset of the scan LOCATION, e.g. "2018-02-02T12:01:00-07:00"
+ * (per the published schema example). `new Date()` keeps the instant but discards the offset, and
+ * the hub then renders the scan in the viewer's timezone — a different clock time than the one on
+ * fedex.com. Keep the raw string so the carrier's own local time can be shown verbatim.
+ */
+export function parseFedexScanEvent(event: any): TrackingEvent {
+  const rawDate = typeof event?.date === "string" ? event.date : undefined;
+  const timestamp = rawDate ? new Date(rawDate) : new Date();
+  return {
+    timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
+    status: event?.eventType || event?.derivedStatusCode || "",
+    // eventDescription is FedEx's own wording ("Picked up", "At local FedEx facility").
+    // derivedStatus is the rolled-up milestone; use it only when the scan text is missing.
+    description: event?.eventDescription || event?.derivedStatus || "",
+    location: formatFedexScanLocation(event?.scanLocation),
+    localTime: rawDate,
+    utcOffset: extractUtcOffset(rawDate),
+    exceptionCode: event?.exceptionCode || undefined,
+    exceptionDescription: event?.exceptionDescription || undefined,
+    raw: event,
+  };
+}
+
+/**
+ * Pull the trailing offset out of an ISO 8601 string: "-07:00", "+03:00", or "Z" -> "+00:00".
+ * Returns undefined for a bare local timestamp ("2020-06-10T13:06:00"), which is exactly what
+ * DHL sends unless GMT offsets are requested.
+ */
+export function extractUtcOffset(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const match = /(?:Z|([+-])(\d{2}):?(\d{2}))$/.exec(value.trim());
+  if (!match) return undefined;
+  if (!match[1]) return "+00:00";
+  return `${match[1]}${match[2]}:${match[3]}`;
 }
 
 const MAX_RETRIES = 3;
@@ -2044,21 +2122,16 @@ export class FedExAdapter implements CarrierAdapter {
 
       return {
         trackingNumber,
-        status: trackResult.latestStatusDetail.statusByLocale,
+        status: trackResult.latestStatusDetail?.statusByLocale
+          || trackResult.latestStatusDetail?.description
+          || "",
         estimatedDelivery: trackResult.estimatedDeliveryTimeWindow?.window?.begins
           ? new Date(trackResult.estimatedDeliveryTimeWindow.window.begins)
           : undefined,
         actualDelivery: trackResult.actualDeliveryDetail?.actualDeliveryDate
           ? new Date(trackResult.actualDeliveryDetail.actualDeliveryDate)
           : undefined,
-        events: (trackResult.scanEvents || []).map((event: any) => ({
-          timestamp: new Date(event.date),
-          status: event.eventType,
-          description: event.eventDescription,
-          location: event.scanLocation?.city 
-            ? `${event.scanLocation.city}, ${event.scanLocation.stateOrProvinceCode}`
-            : undefined,
-        })),
+        events: (trackResult.scanEvents || []).map((event: any) => parseFedexScanEvent(event)),
       };
     } catch (error) {
       logError("FedEx tracking error", error);
