@@ -31,12 +31,50 @@
       "passwordMin": "Password must be at least 6 characters"
     }
   },
+  "otp": {
+    "request": {
+      "title": "Sign in with a code",
+      "subtitle": "We'll email you a 6-digit code",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "you@example.com",
+      "sendCode": "Send code",
+      "sending": "Sending...",
+      "infoText": "No password needed. The code expires in 10 minutes."
+    },
+    "verify": {
+      "title": "Check your email",
+      "codeSentTo": "Code sent to",
+      "expiresIn": "Expires in",
+      "verify": "Verify and sign in",
+      "verifying": "Verifying...",
+      "didntGetIt": "Didn't get it? ",
+      "resend": "Resend"
+    },
+    "errors": {
+      "emailRequired": "Email is required",
+      "emailInvalid": "Enter a valid email address",
+      "codeIncomplete": "Enter the full 6-digit code",
+      "codeInvalid": "Code must be numeric"
+    }
+  },
   "toast": {
     "login": {
       "successTitle": "Welcome back!",
       "successMessage": "You have successfully logged in.",
       "errorTitle": "Login failed",
       "invalidCredentials": "Invalid credentials"
+    },
+    "otp": {
+      "request": {
+        "errorTitle": "Failed to send verification code",
+        "errorMessage": "Unable to send the verification code. Please try again."
+      },
+      "verify": {
+        "errorTitle": "Verification failed",
+        "invalidCode": "Invalid verification code",
+        "expiredCode": "Verification code has expired",
+        "errorMessage": "Unable to verify the code. Please try again."
+      }
     }
   }
 }

@@ -5,7 +5,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
-
+import { router } from "expo-router";
 import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -15,7 +15,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { useLoginSchema, LoginFormValues } from "@/schemas/loginSchema";
 import { useSignIn } from "@/lib/hooks/useAuth";
-import { Toast } from "react-native-toast-message/lib/src/Toast";
+import Toast from "react-native-toast-message";
 
 export default function LoginScreen() {
   const { t } = useTranslation();
@@ -59,8 +59,6 @@ export default function LoginScreen() {
             ? error.message
             : t("toast.login.invalidCredentials"),
       });
-
-      console.log("Login failed", error);
     } finally {
       setIsSubmitting(false);
     }
@@ -68,9 +66,9 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>
-      {/* <View style={styles.topRow}>
+      <View style={styles.topRow}>
         <LanguageSwitch />
-      </View> */}
+      </View>
 
       <Image
         source={require("../../../assets/images/logo.png")}
@@ -161,7 +159,7 @@ export default function LoginScreen() {
         title={t("auth.emailSignInCode")}
         variant="outline"
         onPress={() => {
-          // TODO: send sign-in code
+          router.push("/otp-request");
         }}
       />
 
@@ -241,7 +239,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginTop: rvs(20),
-    // borderWidth: 1,
   },
 
   applyText: {
