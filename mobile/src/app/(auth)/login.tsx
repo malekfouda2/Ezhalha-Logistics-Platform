@@ -185,6 +185,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: rs(24),
     paddingTop: rvs(24),
+    paddingBottom: rvs(24),
   },
   topRow: {
     alignItems: "flex-end",
