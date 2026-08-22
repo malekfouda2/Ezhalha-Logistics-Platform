@@ -53,7 +53,7 @@ import { useAdminAccess } from "@/hooks/use-admin-access";
 import { COUNTRY_NAME_SELECT_OPTIONS } from "@/lib/countries";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { parseApplicationDocumentReference } from "@shared/application-documents";
-import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2, Upload, X, RefreshCw, Users, Filter } from "lucide-react";
+import { Search, MoreVertical, Eye, Edit, Power, FileText, Download, Mail, Phone, MapPin, Building, Calendar, Plus, Trash2, Upload, X, RefreshCw, Users, Filter, TrendingUp } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useUpload } from "@/hooks/use-upload";
 import {
@@ -539,6 +539,13 @@ export default function AdminClients() {
                                 View Documents {client.documents?.length ? `(${client.documents.length})` : ''}
                               </DropdownMenuItem>
                               {(canUpdateClients || canActivateClients || canDeleteClients) && <DropdownMenuSeparator />}
+                              <DropdownMenuItem
+                                onClick={() => setLocation(`/admin/clients/${client.id}`)}
+                                data-testid={`button-view-client-profile-${client.id}`}
+                              >
+                                <TrendingUp className="mr-2 h-4 w-4" />
+                                View Profile &amp; Analytics
+                              </DropdownMenuItem>
                               {canManageProfiles && (
                                 <DropdownMenuItem onClick={() => handleEditProfile(client)}>
                                   <Edit className="mr-2 h-4 w-4" />

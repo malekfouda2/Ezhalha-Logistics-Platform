@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
 import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { StatusBadge } from "@/components/status-badge";
+import { carrierBrandName } from "@shared/carriers";
+import { ShipmentFiltersBar, type ShipmentFilterFacets } from "@/components/shipment-filters-bar";
+import {
+  DEFAULT_SHIPMENT_FILTERS,
+  matchesShipmentFilters,
+  SHIPMENT_FILTER_ALL,
+  type ShipmentFilters,
+} from "@shared/shipment-filters";
 import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoShipments } from "@/components/empty-state";
@@ -27,6 +35,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil, Clock } from "lucide-react";
+import { CancelShipmentDialog } from "@/components/cancel-shipment-dialog";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { SarAmount, formatCurrencyAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
@@ -107,8 +116,8 @@ type ShipmentCheckoutSummary = {
 
 export default function ClientShipments() {
   const [location, navigate] = useLocation();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [filters, setFilters] = useState<ShipmentFilters>({ ...DEFAULT_SHIPMENT_FILTERS });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [editShipment, setEditShipment] = useState<Shipment | null>(null);
   const [resumedShipmentId, setResumedShipmentId] = useState<string | null>(null);
@@ -234,15 +243,20 @@ export default function ClientShipments() {
     },
   });
 
-  const filteredShipments = shipments?.filter((shipment) => {
-    const matchesSearch =
-      shipment.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shipment.recipientName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilterGroups[statusFilter] ?? [statusFilter]).includes(shipment.status);
-    return matchesSearch && matchesStatus;
-  });
+  const filteredShipments = shipments?.filter((shipment) =>
+    matchesShipmentFilters(shipment as any, filters),
+  );
+
+  // Options come from the client's own shipments, so a filter can never select an empty set.
+  const facets = useMemo<ShipmentFilterFacets>(() => {
+    const distinct = (pick: (s: Shipment) => string | null | undefined) =>
+      Array.from(new Set((shipments ?? []).map(pick).filter((v): v is string => Boolean(v)))).sort();
+    return {
+      carrierCodes: distinct((s) => (s as any).carrierCode),
+      originCountries: distinct((s) => (s as any).senderCountry),
+      destinationCountries: distinct((s) => (s as any).recipientCountry),
+    };
+  }, [shipments]);
 
   useEffect(() => {
     if (!shipments?.length) {
@@ -259,7 +273,7 @@ export default function ClientShipments() {
       return;
     }
 
-    setStatusFilter("all");
+    setFilters((prev: ShipmentFilters) => ({ ...prev, status: SHIPMENT_FILTER_ALL }));
     setResumedShipmentId(resumeShipmentId);
     setSelectedShipment(shipmentToResume);
     window.history.replaceState(null, "", "/client/shipments");
@@ -293,18 +307,11 @@ export default function ClientShipments() {
         {/* Filters */}
         <Card>
           <CardContent className="py-4">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by shipment ID or recipient..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                  data-testid="input-search"
-                />
-              </div>
-              <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+            <div className="space-y-4">
+              <Tabs
+                value={filters.status}
+                onValueChange={(value) => setFilters((prev: ShipmentFilters) => ({ ...prev, status: value }))}
+              >
                 <TabsList>
                   <TabsTrigger value="all" data-testid="tab-all">
                     All
@@ -323,6 +330,18 @@ export default function ClientShipments() {
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
+
+              <ShipmentFiltersBar
+                filters={filters}
+                onChange={setFilters}
+                facets={facets}
+                statusOptions={[]}
+                showStatusSelect={false}
+                expanded={filtersExpanded}
+                onExpandedChange={setFiltersExpanded}
+                resultCount={filteredShipments?.length}
+                searchPlaceholder="Search by shipment ID, recipient, city, or sender..."
+              />
             </div>
           </CardContent>
         </Card>
@@ -358,7 +377,7 @@ export default function ClientShipments() {
                         {shipment.recipientCity}, {shipment.recipientCountry}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                        {carrierBrandName(shipment.carrierCode, shipment.carrierName) || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>
@@ -729,20 +748,28 @@ export default function ClientShipments() {
               </div>
 
               {canCancelShipment(selectedShipment) && (
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  onClick={() => cancelMutation.mutate(selectedShipment.id)}
-                  disabled={cancelMutation.isPending}
-                  data-testid="button-cancel-shipment"
+                <CancelShipmentDialog
+                  trackingNumber={selectedShipment.trackingNumber}
+                  carrierStatus={selectedShipment.carrierStatus}
+                  carrierName={selectedShipment.carrierName}
+                  hasPickupBooked={Boolean((selectedShipment as any).pickupConfirmationNumber)}
+                  isPending={cancelMutation.isPending}
+                  onConfirm={() => cancelMutation.mutate(selectedShipment.id)}
                 >
-                  {cancelMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Ban className="mr-2 h-4 w-4" />
-                  )}
-                  Cancel Shipment
-                </Button>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={cancelMutation.isPending}
+                    data-testid="button-cancel-shipment"
+                  >
+                    {cancelMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="mr-2 h-4 w-4" />
+                    )}
+                    Cancel Shipment
+                  </Button>
+                </CancelShipmentDialog>
               )}
             </div>
           )}

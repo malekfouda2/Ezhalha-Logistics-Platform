@@ -23,6 +23,7 @@ export const ADMIN_ROUTE_PERMISSIONS = {
   userRoles: { anyOf: ["roles:read", "permissions:read"] },
   userInvites: { anyOf: ["users:read", "users:create", "users:update"] },
   clients: { anyOf: ["clients:read"] },
+  clientProfile: { anyOf: ["clients:read"] },
   editClient: { allOf: ["clients:read", "clients:update"] },
   applications: { anyOf: ["applications:read"] },
   operations: { anyOf: ["operations:read"] },

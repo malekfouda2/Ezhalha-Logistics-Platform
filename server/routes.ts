@@ -76,6 +76,8 @@ import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
+import { isCarrierStatusStillBooked } from "@shared/domain";
+import { SHIPMENT_FILTER_ALL } from "@shared/shipment-filters";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
   calculateShipmentAccounting,
@@ -3114,6 +3116,10 @@ function serializeFinancialShipment(
     realNetProfitAmountSar: effective.realNetProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
+    // Needed by the cancel confirmation, which tells the operator whether cancelling refunds the
+    // client automatically or opens a refund request — a distinction it must not guess at.
+    carrierStatus: shipment.carrierStatus || null,
+    pickupConfirmationNumber: shipment.pickupConfirmationNumber || null,
     carrierPaymentAmountSar,
     carrierPaymentReference: shipment.carrierPaymentReference || null,
     carrierPaymentNote: shipment.carrierPaymentNote || null,
@@ -4120,19 +4126,10 @@ function canShipmentBeCancelled(shipment: Shipment): boolean {
 // Carrier statuses that mean the parcel has left the shipper (collected or moving). A shipment
 // that has NOT reached one of these is "still booked" — its cancellation refund is issued
 // automatically; anything beyond booked routes through the manual approval workflow.
-const COLLECTED_OR_MOVING_CARRIER_STATUSES = new Set([
-  "picked_up",
-  "in_transit",
-  "out_for_delivery",
-  "delivered",
-]);
-
+// The rule itself lives in shared/domain.ts so the web and mobile clients can warn the user with
+// exactly the rule this server will apply when they confirm.
 function isShipmentStillBooked(shipment: Shipment): boolean {
-  const normalizedCarrierStatus = (shipment.carrierStatus || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return !COLLECTED_OR_MOVING_CARRIER_STATUSES.has(normalizedCarrierStatus);
+  return isCarrierStatusStillBooked(shipment.carrierStatus);
 }
 
 function isShipmentRefundApprovalSatisfied(status: string | null | undefined): boolean {
@@ -4340,6 +4337,10 @@ async function ensureShipmentRefundRequestForCancellation(params: {
 type ShipmentRefundRequestSummary = ShipmentRefundRequest & {
   shipmentTrackingNumber: string | null;
   carrierTrackingNumber: string | null;
+  // Carried so the admin UI can turn the carrier tracking number into a link to the carrier's
+  // own tracking page — the URL differs per carrier, so the number alone is not enough.
+  carrierCode: string | null;
+  carrierName: string | null;
   shipmentStatus: string | null;
   clientName: string;
   clientAccountNumber: string | null;
@@ -4367,6 +4368,8 @@ async function serializeShipmentRefundRequestForAdmin(
     ...request,
     shipmentTrackingNumber: shipment?.trackingNumber || null,
     carrierTrackingNumber: shipment?.carrierTrackingNumber || null,
+    carrierCode: shipment?.carrierCode || null,
+    carrierName: shipment?.carrierName || null,
     shipmentStatus: shipment?.status || null,
     clientName: clientAccount?.name || "Unknown Client",
     clientAccountNumber: clientAccount?.accountNumber || null,
@@ -9135,6 +9138,25 @@ export async function registerRoutes(
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const abandonedOnly = req.query.abandoned === "true";
+      const asFilter = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return text && text !== SHIPMENT_FILTER_ALL ? text : undefined;
+      };
+      // Only accept a real calendar date; anything else is ignored rather than reaching SQL.
+      const asDate = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : undefined;
+      };
+      const listFilters = {
+        carrierCode: asFilter(req.query.carrierCode),
+        fulfillmentType: asFilter(req.query.fulfillmentType),
+        paymentStatus: asFilter(req.query.paymentStatus),
+        paymentMethod: asFilter(req.query.paymentMethod),
+        originCountry: asFilter(req.query.originCountry),
+        destinationCountry: asFilter(req.query.destinationCountry),
+        dateFrom: asDate(req.query.dateFrom),
+        dateTo: asDate(req.query.dateTo),
+      };
       const clientAccountIds = await getScopedClientAccountIds(adminUser);
 
       if (abandonedOnly) {
@@ -9227,8 +9249,15 @@ export async function registerRoutes(
         });
       }
 
-      const result = await storage.getShipmentsPaginated({ page, limit, search, status, clientAccountIds, abandonedOnly });
-      res.json(result);
+      const result = await storage.getShipmentsPaginated({
+        page, limit, search, status, clientAccountIds, abandonedOnly, ...listFilters,
+      });
+      // Facets are the values actually present in the rows this admin may see, so the dropdowns
+      // never offer a carrier or country that would return nothing. Scoped by the same
+      // clientAccountIds as the list, and deliberately NOT narrowed by the current filters —
+      // otherwise choosing one value would empty the other dropdowns.
+      const facets = await storage.getShipmentFilterFacets({ clientAccountIds });
+      res.json({ ...result, facets });
     } catch (error) {
       logError("Error fetching shipments", error);
       res.status(500).json({ error: "Internal server error" });
@@ -10391,6 +10420,185 @@ export async function registerRoutes(
   });
 
   // Admin - Client credit ledger (limit, outstanding, available + transactions)
+  /**
+   * Everything worth knowing about one client's history with us: what they have shipped, what we
+   * billed, what we actually made, and where they stand financially.
+   *
+   * Money is computed through getEffectiveShipmentFinancials — the same helper the financial
+   * statements use — rather than summing raw columns. That matters most for two things it already
+   * handles: a cancelled shipment contributes zero to every figure, and a DDP shipment's real
+   * supplier cost replaces the lane sell base so margin is not overstated.
+   */
+  app.get("/api/admin/clients/:id/analytics", requireAdminPermission("clients", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const { id } = req.params;
+      const client = await storage.getClientAccount(id);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      if (!(await ensureAccountManagerClientAccess(adminUser, client.id, res))) return;
+
+      const [shipments, invoices, payments, creditSummary, users] = await Promise.all([
+        storage.getShipmentsByClientAccount(id),
+        storage.getInvoicesByClientAccount(id),
+        storage.getPaymentsByClientAccount(id),
+        storage.getClientCreditSummary(id),
+        storage.getUsersByClientAccount(id),
+      ]);
+
+      const isCancelled = (shipment: Shipment) => shipment.status === "cancelled";
+      const active = shipments.filter((shipment) => !isCancelled(shipment));
+      const cancelled = shipments.filter(isCancelled);
+
+      let grossBilledSar = 0;
+      let revenueExTaxSar = 0;
+      let costSar = 0;
+      let netProfitSar = 0;
+      let collectedSar = 0;
+      let outstandingSar = 0;
+      let totalWeight = 0;
+
+      const byStatus: Record<string, number> = {};
+      const byFulfillment: Record<string, number> = {};
+      const byCarrier: Record<string, { shipments: number; revenueSar: number }> = {};
+      const byDestination: Record<string, number> = {};
+      const byOrigin: Record<string, number> = {};
+      const monthly: Record<string, { month: string; shipments: number; revenueSar: number; profitSar: number }> = {};
+
+      for (const shipment of shipments) {
+        byStatus[shipment.status] = (byStatus[shipment.status] || 0) + 1;
+
+        // Cancelled shipments are counted for volume context but contribute no money, so the
+        // financial roll-up below deliberately skips them.
+        if (isCancelled(shipment)) continue;
+
+        const money = getEffectiveShipmentFinancials(shipment as unknown as Record<string, any>);
+        grossBilledSar += money.clientTotalAmountSar;
+        revenueExTaxSar += money.revenueExcludingTaxAmountSar;
+        costSar += money.realCostAmountSar;
+        netProfitSar += money.realNetProfitAmountSar;
+        totalWeight += money.weightValue;
+
+        if (shipment.paymentStatus === "paid") collectedSar += money.clientTotalAmountSar;
+        else outstandingSar += money.clientTotalAmountSar;
+
+        const fulfillment = shipment.fulfillmentType || "carrier";
+        byFulfillment[fulfillment] = (byFulfillment[fulfillment] || 0) + 1;
+
+        // Shipments still awaiting a carrier are grouped under a null code, which the UI labels
+        // "Not assigned" — "UNKNOWN" reads like a data fault rather than a normal early state.
+        const carrier = shipment.carrierCode || "";
+        byCarrier[carrier] = byCarrier[carrier] || { shipments: 0, revenueSar: 0 };
+        byCarrier[carrier].shipments += 1;
+        byCarrier[carrier].revenueSar = roundMoney(byCarrier[carrier].revenueSar + money.clientTotalAmountSar);
+
+        if (shipment.recipientCountry) byDestination[shipment.recipientCountry] = (byDestination[shipment.recipientCountry] || 0) + 1;
+        if (shipment.senderCountry) byOrigin[shipment.senderCountry] = (byOrigin[shipment.senderCountry] || 0) + 1;
+
+        const created = shipment.createdAt ? new Date(shipment.createdAt) : null;
+        if (created && !Number.isNaN(created.getTime())) {
+          const key = `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, "0")}`;
+          monthly[key] = monthly[key] || { month: key, shipments: 0, revenueSar: 0, profitSar: 0 };
+          monthly[key].shipments += 1;
+          monthly[key].revenueSar = roundMoney(monthly[key].revenueSar + money.clientTotalAmountSar);
+          monthly[key].profitSar = roundMoney(monthly[key].profitSar + money.realNetProfitAmountSar);
+        }
+      }
+
+      const cancelledValueSar = roundMoney(
+        cancelled.reduce((sum, shipment) => sum + parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice), 0),
+      );
+
+      const dates = shipments
+        .map((shipment) => (shipment.createdAt ? new Date(shipment.createdAt).getTime() : NaN))
+        .filter((time) => !Number.isNaN(time));
+      const firstShipmentAt = dates.length ? new Date(Math.min(...dates)).toISOString() : null;
+      const lastShipmentAt = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
+
+      const invoiceTotals = invoices.reduce(
+        (acc, invoice) => {
+          const amount = parseMoneyValue(invoice.amount);
+          acc.count += 1;
+          if (invoice.status === "paid") {
+            acc.paidCount += 1;
+            acc.paidSar = roundMoney(acc.paidSar + amount);
+          } else {
+            acc.openCount += 1;
+            acc.openSar = roundMoney(acc.openSar + amount);
+            // Anything unpaid past its due date is the number that actually needs chasing.
+            if (invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now()) {
+              acc.overdueCount += 1;
+              acc.overdueSar = roundMoney(acc.overdueSar + amount);
+            }
+          }
+          return acc;
+        },
+        { count: 0, paidCount: 0, paidSar: 0, openCount: 0, openSar: 0, overdueCount: 0, overdueSar: 0 },
+      );
+
+      const topN = (record: Record<string, number>, limit = 5) =>
+        Object.entries(record)
+          .map(([key, count]) => ({ key, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit);
+
+      res.json({
+        client: {
+          id: client.id,
+          name: client.name,
+          accountNumber: client.accountNumber,
+          email: client.email,
+          phone: client.phone,
+          country: client.country,
+          city: client.nationalAddressCity,
+          profile: client.profile,
+          isActive: client.isActive,
+          createdAt: client.createdAt,
+        },
+        totals: {
+          shipments: shipments.length,
+          activeShipments: active.length,
+          cancelledShipments: cancelled.length,
+          cancelledValueSar,
+          grossBilledSar: roundMoney(grossBilledSar),
+          revenueExTaxSar: roundMoney(revenueExTaxSar),
+          costSar: roundMoney(costSar),
+          netProfitSar: roundMoney(netProfitSar),
+          marginPct: revenueExTaxSar > 0 ? Math.round((netProfitSar / revenueExTaxSar) * 1000) / 10 : 0,
+          collectedSar: roundMoney(collectedSar),
+          outstandingSar: roundMoney(outstandingSar),
+          avgShipmentValueSar: active.length ? roundMoney(grossBilledSar / active.length) : 0,
+          avgProfitPerShipmentSar: active.length ? roundMoney(netProfitSar / active.length) : 0,
+          totalWeightKg: Math.round(totalWeight * 100) / 100,
+        },
+        history: {
+          firstShipmentAt,
+          lastShipmentAt,
+          userCount: users.length,
+          activeUserCount: users.filter((user) => user.isActive).length,
+        },
+        breakdown: {
+          byStatus,
+          byFulfillment,
+          byCarrier: Object.entries(byCarrier)
+            .map(([carrierCode, value]) => ({ carrierCode, ...value }))
+            .sort((a, b) => b.shipments - a.shipments),
+          topDestinations: topN(byDestination),
+          topOrigins: topN(byOrigin),
+        },
+        monthly: Object.values(monthly).sort((a, b) => a.month.localeCompare(b.month)).slice(-12),
+        credit: {
+          enabled: Boolean(client.creditEnabled),
+          ...creditSummary,
+        },
+        invoices: invoiceTotals,
+        paymentCount: payments.length,
+      });
+    } catch (error) {
+      logError("Error building client analytics", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/admin/clients/:id/credit", requireAdminPermission("clients", "read"), async (req, res) => {
     try {
       const adminUser = req.currentUser!;
@@ -11841,6 +12049,7 @@ export async function registerRoutes(
             shipmentType: shipment.shipmentType,
             serviceType: shipment.serviceType,
             carrierCode: shipment.carrierCode,
+            carrierName: shipment.carrierName,
             senderName: shipment.senderName,
             senderCity: shipment.senderCity,
             senderCountry: shipment.senderCountry,
