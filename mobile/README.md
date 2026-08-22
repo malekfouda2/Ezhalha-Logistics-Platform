@@ -46,6 +46,25 @@ npx expo install expo-secure-store expo-constants expo-localization expo-router 
 `create-expo-app` will not overwrite the files already committed here (`metro.config.js`,
 `tsconfig.json`, `src/api/*`). If it asks, keep the existing ones.
 
+### API base URL
+
+```
+https://staging.147-93-122-137.sslip.io
+```
+
+Real HTTPS with a Let's Encrypt certificate, so no iOS ATS or Android cleartext exception is
+needed. sslip.io resolves the IP embedded in the hostname straight back to the server, which is
+how this works without owning a domain — nothing to configure, and no DNS record to wait for.
+
+Staging runs the tip of `main` against its own database with sandbox carrier credentials, so
+nothing here charges a real card or books a real courier. Sign in with `staging.client`.
+
+`https://staging.ezhalha.co` will point at the same server once that A record is added; both will
+work, so switching later is a one-line change.
+
+Never point the app at `https://app.ezhalha.co` while developing — that is production, with live
+payments and real carriers.
+
 Then point the app at an API:
 
 ```bash
