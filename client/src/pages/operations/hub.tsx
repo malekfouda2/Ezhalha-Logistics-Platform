@@ -32,6 +32,7 @@ import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { PhoneInput } from "@/components/phone-input";
 import { getCarrierContact } from "@/lib/carrier-contacts";
+import { carrierBrandName } from "@shared/carriers";
 import type { CarrierContactChannel, CarrierContactType } from "@shared/carrier-contact-channels";
 
 type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered" | "returned";
@@ -3593,7 +3594,9 @@ const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "S
 
 function CarrierScanFeed({ shipment }: { shipment: OperationShipmentDetail }) {
   const events = shipment.carrierTrackingEvents || [];
-  const carrier = shipment.carrierName || shipment.carrierCode || "the carrier";
+  // Brand only — "DHL", not "EXPRESS WORLDWIDE". Now that shared/carriers.ts is on the same
+  // branch, the scan feed uses the same naming as the rest of the admin surfaces.
+  const carrier = carrierBrandName(shipment.carrierCode, shipment.carrierName) || "the carrier";
 
   if (events.length === 0) {
     return (
