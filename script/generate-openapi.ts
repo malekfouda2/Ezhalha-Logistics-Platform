@@ -260,6 +260,57 @@ const DETAILED_OPERATIONS: Record<string, Record<string, unknown>> = {
       },
     },
   },
+  "POST /api/auth/forgot-password": {
+    summary: "Email a password-reset link",
+    description:
+      "Sends `{APP_BASE_URL}/reset-password?token=<token>` to the address, if an active user "
+      + "has it. **Always responds 200 `{ success: true }`, even for an address with no "
+      + "account** — the response deliberately reveals nothing about who is registered, so it "
+      + "cannot confirm success. The token exists only in that email.\n\n"
+      + "Note for native clients: `APP_BASE_URL` points at the web app, so the emailed link "
+      + "opens a browser. Handling it in-app requires universal links / app links plus a "
+      + "server-side change to the email — it does not work out of the box.",
+    requestBody: { required: true, ...json(ref("ForgotPasswordRequest")) },
+    responses: {
+      "200": { description: "Accepted (sent only if the address matches an active user)", ...json(ref("Success")) },
+      "400": { description: "Malformed email", ...json(ref("Error")) },
+      "429": { description: "Too many requests", ...json(ref("Error")) },
+    },
+  },
+  "GET /api/auth/reset-password/:token": {
+    summary: "Check whether a reset token is still usable",
+    parameters: [
+      { name: "token", in: "path", required: true, schema: ref("PasswordResetToken") },
+    ],
+    description:
+      "Lets the reset screen show \"this link has expired\" before the user types a password. "
+      + "Consumes nothing and never errors on a bad token — an unknown token simply returns "
+      + "`valid: false`. Use `mode` to choose between \"Set your password\" (onboard) and "
+      + "\"Reset your password\" (reset).",
+    responses: {
+      "200": { description: "Token status", ...json(ref("ResetTokenStatus")) },
+    },
+  },
+  "POST /api/auth/reset-password": {
+    summary: "Set a new password using an emailed token",
+    description:
+      "Consumes the token — a second call with the same one fails. On success **every issued "
+      + "bearer and refresh token for that user is revoked**, so other devices get 401 on their "
+      + "next call; native clients must route to login rather than attempting a refresh.\n\n"
+      + "Wrong, expired and already-used tokens all return the same 400 message on purpose, so "
+      + "the response cannot be used to probe which tokens exist.",
+    requestBody: { required: true, ...json(ref("ResetPasswordRequest")) },
+    responses: {
+      "200": { description: "Password set; all sessions and tokens revoked", ...json(ref("Success")) },
+      "400": {
+        description:
+          "\"Password must be at least 8 characters\" — or \"This link is invalid or has "
+          + "expired. Please request a new one.\" for an unknown, expired or consumed token.",
+        ...json(ref("Error")),
+      },
+      "429": { description: "Too many requests", ...json(ref("Error")) },
+    },
+  },
   "POST /api/auth/revoke": {
     summary: "Revoke a refresh token (mobile sign-out)",
     description:
@@ -522,6 +573,60 @@ const COMPONENT_SCHEMAS = {
     type: "object",
     required: ["refreshToken"],
     properties: { refreshToken: { type: "string", minLength: 20 } },
+  },
+  ForgotPasswordRequest: {
+    type: "object",
+    required: ["email"],
+    properties: {
+      email: {
+        type: "string",
+        format: "email",
+        description: "Address to send the reset link to. No token is returned in the response.",
+      },
+    },
+  },
+  PasswordResetToken: {
+    type: "string",
+    minLength: 10,
+    example: "8f14e45f-ea2b-4c1d-9a3e-5b7c2d1e0f66a1b2c3d4e5f6",
+    description:
+      "Single-use 48-character secret. It is delivered ONLY by email, inside the link "
+      + "`{APP_BASE_URL}/reset-password?token=<token>` — read it from that URL's query string. "
+      + "No endpoint ever returns it, and the server stores only its SHA-256 hash, so it cannot "
+      + "be looked up after sending. Requesting a new one invalidates every earlier token for "
+      + "that user.",
+  },
+  ResetPasswordRequest: {
+    type: "object",
+    required: ["token", "password"],
+    properties: {
+      token: ref("PasswordResetToken"),
+      password: {
+        type: "string",
+        format: "password",
+        minLength: 8,
+        description: "The new password. Minimum 8 characters.",
+      },
+    },
+  },
+  ResetTokenStatus: {
+    type: "object",
+    properties: {
+      valid: {
+        type: "boolean",
+        description:
+          "False when the token is unknown, expired, or already used. Advisory only — "
+          + "POST /api/auth/reset-password re-checks, so never treat true as a guarantee.",
+      },
+      mode: {
+        type: "string",
+        enum: ["reset", "onboard"],
+        description:
+          "`onboard` = a new user setting their first password (link valid 7 days). "
+          + "`reset` = forgot-password (link valid 1 hour). Both use the same POST; this only "
+          + "changes the wording you show.",
+      },
+    },
   },
   TokenPair: {
     type: "object",
@@ -1045,6 +1150,8 @@ function writeMarkdown(
     "Pickup",
     "TokenPair",
     "User",
+    "ResetTokenStatus",
+    "ResetPasswordRequest",
     "Error",
   ]) {
     push(`### \`${name}\``, "", ...renderSchemaTable(name, "Fields"));
@@ -1117,7 +1224,23 @@ function build() {
       required: false,
       schema: { type: "string" as const },
     }));
-    const parameters = [...pathParameters(route.path), ...queryParameters];
+    // Derived parameters carry only a name and `type: string`, because that is all the route
+    // string reveals. A DETAILED_OPERATIONS entry may describe any of them — merge by
+    // (name, in) so the hand-authored version wins without having to restate the rest.
+    const derivedParameters = [...pathParameters(route.path), ...queryParameters];
+    const authoredParameters = (detail?.parameters as Array<Record<string, unknown>> | undefined) ?? [];
+    const parameters = derivedParameters.map((derived) => {
+      const authored = authoredParameters.find(
+        (candidate) => candidate.name === derived.name && candidate.in === derived.in,
+      );
+      return authored ? { ...derived, ...authored } : derived;
+    });
+    // Anything authored that the extractor never saw (e.g. a header) still gets through.
+    for (const authored of authoredParameters) {
+      if (!parameters.some((existing) => existing.name === authored.name && existing.in === authored.in)) {
+        parameters.push(authored as never);
+      }
+    }
 
     paths[openApiPath][route.method] = {
       operationId: toOperationId(route.method, route.path),
