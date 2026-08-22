@@ -4,15 +4,11 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   NativeSyntheticEvent,
   TextInputKeyPressEventData,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
@@ -26,6 +22,7 @@ import { OtpVerifyFormData, otpVerifySchema } from "@/schemas/otp";
 import { BackButton } from "@/components/ui/BackButton";
 import { useRequestLoginCode, useSignInWithCode } from "@/lib/hooks/useAuth";
 import Toast from "react-native-toast-message";
+import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 
 const CODE_LENGTH = 6;
 const EXPIRY_SECONDS = 10 * 60;
@@ -120,7 +117,7 @@ export default function OtpVerifyScreen() {
             ? error.message
             : t("toast.otp.verify.errorMessage"),
       });
-        } finally {
+    } finally {
       setVerifying(false);
     }
   };
@@ -147,120 +144,105 @@ export default function OtpVerifyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+    <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>
+      <BackButton style={{ marginBottom: rvs(40) }} />
+
+      <View style={styles.header}>
+        <Text size="title" weight="bold" style={styles.centerText}>
+          {t("otp.verify.title")}
+        </Text>
+        <Text
+          size="medium"
+          weight="regular"
+          dimRate="70%"
+          style={[styles.centerText, { marginTop: rvs(8) }]}
         >
-          <BackButton style={{ marginBottom: rvs(40) }} />
+          {t("otp.verify.codeSentTo")}
+        </Text>
+        <Text size="medium" weight="bold" style={styles.centerText}>
+          {email}
+        </Text>
+      </View>
 
-          <View style={styles.header}>
-            <Text size="title" weight="bold" style={styles.centerText}>
-              {t("otp.verify.title")}
-            </Text>
-            <Text
-              size="medium"
-              weight="regular"
-              dimRate="70%"
-              style={[styles.centerText, { marginTop: rvs(8) }]}
-            >
-              {t("otp.verify.codeSentTo")}
-            </Text>
-            <Text size="medium" weight="bold" style={styles.centerText}>
-              {email}
-            </Text>
-          </View>
+      <Controller
+        control={control}
+        name="code"
+        render={() => (
+          <>
+            <View style={styles.otpRow}>
+              {digits.map((digit, index) => (
+                <TextInput
+                  key={index}
+                  ref={(ref) => {
+                    inputRefs.current[index] = ref;
+                  }}
+                  style={[
+                    styles.otpBox,
+                    digit ? styles.otpBoxFilled : styles.otpBoxEmpty,
+                    errors.code && styles.otpBoxError,
+                  ]}
+                  value={digit}
+                  onChangeText={(text) => handleDigitChange(text, index)}
+                  onKeyPress={(e) => handleKeyPress(e, index)}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  textAlign="center"
+                  selectTextOnFocus
+                />
+              ))}
+            </View>
+            {errors.code ? (
+              <Text
+                size="xs"
+                weight="medium"
+                style={[styles.centerText, styles.errorText]}
+              >
+                {errors.code.message}
+              </Text>
+            ) : null}
+          </>
+        )}
+      />
 
-          <Controller
-            control={control}
-            name="code"
-            render={() => (
-              <>
-                <View style={styles.otpRow}>
-                  {digits.map((digit, index) => (
-                    <TextInput
-                      key={index}
-                      ref={(ref) => {
-                        inputRefs.current[index] = ref;
-                      }}
-                      style={[
-                        styles.otpBox,
-                        digit ? styles.otpBoxFilled : styles.otpBoxEmpty,
-                        errors.code && styles.otpBoxError,
-                      ]}
-                      value={digit}
-                      onChangeText={(text) => handleDigitChange(text, index)}
-                      onKeyPress={(e) => handleKeyPress(e, index)}
-                      keyboardType="number-pad"
-                      maxLength={1}
-                      textAlign="center"
-                      selectTextOnFocus
-                    />
-                  ))}
-                </View>
-                {errors.code ? (
-                  <Text
-                    size="xs"
-                    weight="medium"
-                    style={[styles.centerText, styles.errorText]}
-                  >
-                    {errors.code.message}
-                  </Text>
-                ) : null}
-              </>
-            )}
-          />
+      <Text
+        size="medium"
+        weight="regular"
+        dimRate="70%"
+        style={[styles.centerText, styles.expiryText]}
+      >
+        {t("otp.verify.expiresIn")}{" "}
+        <Text size="medium" weight="bold">
+          {formatTime(secondsLeft)}
+        </Text>
+      </Text>
 
+      <Button
+        title={verifying ? t("otp.verify.verifying") : t("otp.verify.verify")}
+        onPress={handleSubmit(onSubmit)}
+        loading={verifying}
+        disabled={!isComplete || verifying}
+      />
+
+      <TouchableOpacity
+        onPress={handleResend}
+        disabled={secondsLeft > 0}
+        style={[styles.resendWrap, secondsLeft > 0 && styles.resendDisabled]}
+      >
+        <Text size="medium" weight="regular" dimRate="70%">
+          {t("otp.verify.didntGetIt")}
           <Text
             size="medium"
-            weight="regular"
-            dimRate="70%"
-            style={[styles.centerText, styles.expiryText]}
+            weight="bold"
+            style={{
+              color: Colors.primary,
+              opacity: secondsLeft > 0 ? 0.4 : 1,
+            }}
           >
-            {t("otp.verify.expiresIn")}{" "}
-            <Text size="medium" weight="bold">
-              {formatTime(secondsLeft)}
-            </Text>
+            {t("otp.verify.resend")}
           </Text>
-
-          <Button
-            title={
-              verifying ? t("otp.verify.verifying") : t("otp.verify.verify")
-            }
-            onPress={handleSubmit(onSubmit)}
-            loading={verifying}
-            disabled={!isComplete || verifying}
-          />
-
-          <TouchableOpacity
-            onPress={handleResend}
-            disabled={secondsLeft > 0}
-            style={[
-              styles.resendWrap,
-              secondsLeft > 0 && styles.resendDisabled,
-            ]}
-          >
-            <Text size="medium" weight="regular" dimRate="70%">
-              {t("otp.verify.didntGetIt")}
-              <Text
-                size="medium"
-                weight="bold"
-                style={{
-                  color: Colors.primary,
-                  opacity: secondsLeft > 0 ? 0.4 : 1,
-                }}
-              >
-                {t("otp.verify.resend")}
-              </Text>
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        </Text>
+      </TouchableOpacity>
+    </KeyboardAwareScreen>
   );
 }
 

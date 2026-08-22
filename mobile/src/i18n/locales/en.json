@@ -57,6 +57,34 @@
       "codeInvalid": "Code must be numeric"
     }
   },
+  "forgotPassword": {
+    "title": "Reset your password",
+    "subtitle": "We'll send you a reset link",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "sendResetLink": "Send reset link",
+    "sending": "Sending...",
+    "infoText": "For security we always say the email was sent, whether or not the address exists."
+  },
+  "resetPassword": {
+    "title": "Set a new password",
+    "subtitle": "At least 8 characters",
+    "newPasswordLabel": "New password",
+    "confirmPasswordLabel": "Confirm password",
+    "saveAndSignIn": "Save and sign in",
+    "saving": "Saving...",
+    "infoText": "Changing your password signs you out on every other device.",
+    "strength": {
+      "weak": "Weak",
+      "medium": "Medium",
+      "strong": "Strong"
+    },
+    "errors": {
+      "passwordMin": "Password must be at least 8 characters",
+      "confirmRequired": "Please confirm your password",
+      "passwordMismatch": "Passwords do not match"
+    }
+  },
   "toast": {
     "login": {
       "successTitle": "Welcome back!",
@@ -75,6 +103,19 @@
         "expiredCode": "Verification code has expired",
         "errorMessage": "Unable to verify the code. Please try again."
       }
+    },
+    "forgotPassword": {
+      "successTitle": "Reset link sent",
+      "successMessage": "A password reset link has been sent to your email.",
+      "errorTitle": "Password reset failed",
+      "errorMessage": "Unable to send the password reset link. Please try again."
+    },
+    "resetPassword": {
+      "successTitle": "Password changed",
+      "successMessage": "Your password has been changed successfully. You can now sign in.",
+      "errorTitle": "Password change failed",
+      "invalidToken": "This password reset link is invalid or has expired.",
+      "errorMessage": "Unable to change your password. Please try again."
     }
   }
 }

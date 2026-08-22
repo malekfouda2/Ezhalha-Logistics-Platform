@@ -1,7 +1,6 @@
 // components/ui/KeyboardAwareScreen.tsx
 import { ReactNode } from "react";
 import {
-  SafeAreaView,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -9,7 +8,7 @@ import {
   ScrollViewProps,
   ViewStyle,
 } from "react-native";
-
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "@/constants/colors";
 
 export interface KeyboardAwareScreenProps {

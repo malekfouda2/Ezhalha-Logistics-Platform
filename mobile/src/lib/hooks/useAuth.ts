@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { fetchCurrentUser, requestLoginCode, signIn, signInWithCode, signOut } from "../services/auth";
+import { fetchCurrentUser, forgotPassword, requestLoginCode, resetPassword, signIn, signInWithCode, signOut } from "../services/auth";
 
 
 
@@ -72,5 +72,23 @@ export function useSignOut() {
         queryKey: authKeys.all,
       });
     },
+  });
+}
+
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: (email: string) => forgotPassword(email),
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: ({
+      token,
+      password,
+    }: {
+      token: string;
+      password: string;
+    }) => resetPassword(token, password),
   });
 }

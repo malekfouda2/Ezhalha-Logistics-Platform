@@ -109,3 +109,28 @@ export async function listDevices(): Promise<SignedInDevice[]> {
 export async function revokeDevice(id: string): Promise<void> {
   await api.delete(`/api/auth/devices/${id}`);
 }
+
+/** Request a password reset email. */
+export async function forgotPassword(email: string): Promise<void> {
+  await apiRequest("/api/auth/forgot-password", {
+    method: "POST",
+    anonymous: true,
+    body: {
+      email: email.trim(),
+    },
+  });
+}
+
+export async function resetPassword(
+  token: string,
+  password: string
+): Promise<void> {
+  await apiRequest("/api/auth/reset-password", {
+    method: "POST",
+    anonymous: true,
+    body: {
+      token,
+      password,
+    },
+  });
+}

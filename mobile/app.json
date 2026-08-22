@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "co.ezhalha.app",
+      "associatedDomains": ["applinks:app.ezhalha.co"],
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true
       }
@@ -27,7 +28,21 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "co.ezhalha.app"
+      "package": "co.ezhalha.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.ezhalha.co",
+              "pathPrefix": "/reset-password"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

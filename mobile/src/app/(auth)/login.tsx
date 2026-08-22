@@ -13,7 +13,7 @@ import { LanguageSwitch } from "@/components/ui/LanguageSwitch";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { useLoginSchema, LoginFormValues } from "@/schemas/loginSchema";
+import { useLoginSchema, LoginFormValues } from "@/schemas/login";
 import { useSignIn } from "@/lib/hooks/useAuth";
 import Toast from "react-native-toast-message";
 
@@ -132,7 +132,7 @@ export default function LoginScreen() {
       <Pressable
         style={styles.forgotPassword}
         onPress={() => {
-          // TODO: navigate to forgot password
+          router.push("/forgot-password");
         }}
       >
         <Text size="medium" weight="semibold" style={styles.forgotPasswordText}>
@@ -185,15 +185,14 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: rs(24),
     paddingTop: rvs(24),
-    paddingBottom: rvs(24),
   },
   topRow: {
     alignItems: "flex-end",
     marginBottom: rvs(16),
   },
   logo: {
-    height: rvs(200),
-    width: rvs(200),
+    height: rvs(150),
+    width: rvs(150),
     alignSelf: "center",
     marginBottom: rvs(10),
   },
@@ -240,7 +239,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: rvs(20),
   },
-
   applyText: {
     color: Colors.primary,
   },
