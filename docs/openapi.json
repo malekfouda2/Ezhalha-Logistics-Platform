@@ -172,6 +172,60 @@
           }
         }
       },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Address to send the reset link to. No token is returned in the response."
+          }
+        }
+      },
+      "PasswordResetToken": {
+        "type": "string",
+        "minLength": 10,
+        "example": "8f14e45f-ea2b-4c1d-9a3e-5b7c2d1e0f66a1b2c3d4e5f6",
+        "description": "Single-use 48-character secret. It is delivered ONLY by email, inside the link `{APP_BASE_URL}/reset-password?token=<token>` — read it from that URL's query string. No endpoint ever returns it, and the server stores only its SHA-256 hash, so it cannot be looked up after sending. Requesting a new one invalidates every earlier token for that user."
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/PasswordResetToken"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 8,
+            "description": "The new password. Minimum 8 characters."
+          }
+        }
+      },
+      "ResetTokenStatus": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "False when the token is unknown, expired, or already used. Advisory only — POST /api/auth/reset-password re-checks, so never treat true as a guarantee."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "reset",
+              "onboard"
+            ],
+            "description": "`onboard` = a new user setting their first password (link valid 7 days). `reset` = forgot-password (link valid 1 hour). Both use the same POST; this only changes the wording you show."
+          }
+        }
+      },
       "TokenPair": {
         "type": "object",
         "properties": {
@@ -10490,15 +10544,41 @@
         "tags": [
           "auth"
         ],
-        "summary": "POST /api/auth/forgot-password",
-        "description": "Rate limit `otpLimiter`\n\nSource: `server/routes.ts:8516`\n\n_Body schema not documented yet — see source._",
-        "security": [],
+        "summary": "Email a password-reset link",
+        "description": "Sends `{APP_BASE_URL}/reset-password?token=<token>` to the address, if an active user has it. **Always responds 200 `{ success: true }`, even for an address with no account** — the response deliberately reveals nothing about who is registered, so it cannot confirm success. The token exists only in that email.\n\nNote for native clients: `APP_BASE_URL` points at the web app, so the emailed link opens a browser. Handling it in-app requires universal links / app links plus a server-side change to the email — it does not work out of the box.\n\nRate limit `otpLimiter`\n\nSource: `server/routes.ts:8516`",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Accepted (sent only if the address matches an active user)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Malformed email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
             "content": {
               "application/json": {
                 "schema": {
@@ -10518,6 +10598,7 @@
             }
           }
         },
+        "security": [],
         "x-requirements": [
           "Rate limit `otpLimiter`"
         ],
@@ -10833,15 +10914,41 @@
         "tags": [
           "auth"
         ],
-        "summary": "POST /api/auth/reset-password",
-        "description": "Rate limit `otpLimiter`\n\nSource: `server/routes.ts:8546`\n\n_Body schema not documented yet — see source._",
-        "security": [],
+        "summary": "Set a new password using an emailed token",
+        "description": "Consumes the token — a second call with the same one fails. On success **every issued bearer and refresh token for that user is revoked**, so other devices get 401 on their next call; native clients must route to login rather than attempting a refresh.\n\nWrong, expired and already-used tokens all return the same 400 message on purpose, so the response cannot be used to probe which tokens exist.\n\nRate limit `otpLimiter`\n\nSource: `server/routes.ts:8546`",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Password set; all sessions and tokens revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Validation error",
+            "description": "\"Password must be at least 8 characters\" — or \"This link is invalid or has expired. Please request a new one.\" for an unknown, expired or consumed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
             "content": {
               "application/json": {
                 "schema": {
@@ -10861,6 +10968,7 @@
             }
           }
         },
+        "security": [],
         "x-requirements": [
           "Rate limit `otpLimiter`"
         ],
@@ -10873,24 +10981,31 @@
         "tags": [
           "auth"
         ],
-        "summary": "GET /api/auth/reset-password/:token",
-        "description": "Source: `server/routes.ts:8535`\n\n_Body schema not documented yet — see source._",
+        "summary": "Check whether a reset token is still usable",
         "parameters": [
           {
             "name": "token",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/PasswordResetToken"
             }
           }
         ],
-        "security": [],
+        "description": "Lets the reset screen show \"this link has expired\" before the user types a password. Consumes nothing and never errors on a bad token — an unknown token simply returns `valid: false`. Use `mode` to choose between \"Set your password\" (onboard) and \"Reset your password\" (reset).\n\nSource: `server/routes.ts:8535`",
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Token status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetTokenStatus"
+                }
+              }
+            }
           }
         },
+        "security": [],
         "x-requirements": [],
         "x-source": "server/routes.ts:8535"
       }
