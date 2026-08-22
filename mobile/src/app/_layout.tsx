@@ -27,7 +27,6 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }} />
         </AppLayout>
       </SafeAreaProvider>
-
       <Toast />
     </QueryClientProvider>
   );

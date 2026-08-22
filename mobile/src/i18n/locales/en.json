@@ -23,7 +23,7 @@
     "or": "OR",
     "emailSignInCode": "Email me a sign-in code",
     "newToEzhalha": "New to ezhalha?",
-    "applyForAccount": "Apply for an account",
+    "applyForAccount": " Apply for an account",
     "errors": {
       "identifierRequired": "Email, username or phone is required",
       "identifierMin": "Must be at least 3 characters",

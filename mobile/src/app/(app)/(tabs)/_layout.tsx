@@ -1,8 +1,8 @@
 import { Tabs, router } from "expo-router";
 import { View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-
-const ORANGE = "#F5641E";
+import { rs, rvs } from "@/utils/responsive";
+import { Colors } from "@/constants/colors";
 
 function AddButton() {
   return (
@@ -17,10 +17,8 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-
-        tabBarActiveTintColor: ORANGE,
-        tabBarInactiveTintColor: "#8A8F98",
-
+        tabBarActiveTintColor: Colors.primary,
+        tabBarInactiveTintColor: Colors.secondary,
         tabBarStyle: {
           height: 88,
           paddingTop: 8,
@@ -90,20 +88,20 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   fab: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: ORANGE,
+    width: rs(56),
+    height: rvs(56),
+    borderRadius: rs(16),
+    backgroundColor: Colors.primaryDark,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: -20,
+    marginTop: rvs(-20),
 
-    shadowColor: ORANGE,
+    shadowColor: Colors.primary,
     shadowOpacity: 0.4,
-    shadowRadius: 8,
+    shadowRadius: rs(8),
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: rvs(4),
     },
 
     elevation: 5,

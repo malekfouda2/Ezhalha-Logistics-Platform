@@ -1,3 +1,4 @@
+import { rs, rvs } from "@/utils/responsive";
 import { useTranslation } from "react-i18next";
 import {
   I18nManager,
@@ -36,8 +37,8 @@ export default function Home() {
       <View
         style={{
           flexDirection: "row",
-          gap: 20,
-          marginTop: 30,
+          gap: rs(20),
+          marginTop: rvs(30),
         }}
       >
         <View style={styles.box}>
@@ -61,15 +62,15 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginStart: 20,
+    marginStart: rs(20),
     justifyContent: "center",
   },
 
   box: {
-    width: 50,
-    height: 50,
+    width: rs(50),
+    height: rvs(50),
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
+    borderWidth: rs(1),
   },
 });

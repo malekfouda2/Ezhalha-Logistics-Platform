@@ -1,6 +1,6 @@
 // app/(auth)/login.tsx
 import { useState } from "react";
-import { View, StyleSheet, Pressable } from "react-native";
+import { View, StyleSheet, Pressable, Image } from "react-native";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Ionicons } from "@expo/vector-icons";
@@ -64,7 +64,6 @@ export default function LoginScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  
   };
 
   return (
@@ -73,9 +72,13 @@ export default function LoginScreen() {
         <LanguageSwitch />
       </View> */}
 
-      <Text size="title" weight="bold" style={styles.logo}>
-        {t("auth.logo")}
-      </Text>
+      <Image
+        source={require("../../../assets/images/logo.png")}
+        style={styles.logo}
+        resizeMode="contain"
+        height={rvs(200)}
+        width={rs(200)}
+      />
 
       <View style={styles.header}>
         <Text size="xxl" weight="bold" style={styles.title}>
@@ -191,10 +194,10 @@ const styles = StyleSheet.create({
     marginBottom: rvs(16),
   },
   logo: {
-    textAlign: "center",
-    color: Colors.text,
-    marginTop: rvs(16),
-    marginBottom: rvs(40),
+    height: rvs(200),
+    width: rvs(200),
+    alignSelf: "center",
+    marginBottom: rvs(10),
   },
   header: {
     marginBottom: rvs(32),
@@ -207,7 +210,6 @@ const styles = StyleSheet.create({
   subtitle: {
     textAlign: "center",
     color: Colors.textSecondary,
-    paddingEnd: rs(6),
   },
   forgotPassword: {
     alignSelf: "flex-end",
@@ -239,7 +241,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginTop: rvs(20),
+    // borderWidth: 1,
   },
+
   applyText: {
     color: Colors.primary,
   },
