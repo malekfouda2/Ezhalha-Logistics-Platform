@@ -171,7 +171,7 @@ Request body — `ForgotPasswordRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8516`
+Source: `server/routes.ts:8519`
 
 ##### `POST /api/auth/login`
 
@@ -226,7 +226,7 @@ Request body — `ResetPasswordRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:8546`
+Source: `server/routes.ts:8549`
 
 ##### `GET /api/auth/reset-password/:token`
 
@@ -234,7 +234,7 @@ Check whether a reset token is still usable
 
 Lets the reset screen show "this link has expired" before the user types a password. Consumes nothing and never errors on a bad token — an unknown token simply returns `valid: false`. Use `mode` to choose between "Set your password" (onboard) and "Reset your password" (reset).
 
-Source: `server/routes.ts:8535`
+Source: `server/routes.ts:8538`
 
 ##### `POST /api/auth/revoke`
 
