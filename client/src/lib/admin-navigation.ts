@@ -92,6 +92,7 @@ export const ADMIN_NAV_ITEMS = [
       { href: "/admin/operations?view=attention", label: "Needs Attention", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=special", label: "Special Handling", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
       { href: "/admin/operations?view=delivered", label: "Delivered", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
+      { href: "/admin/operations?view=returned", label: "Returned", permissions: ADMIN_ROUTE_PERMISSIONS.operations },
     ],
   },
   {

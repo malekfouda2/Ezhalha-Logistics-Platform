@@ -361,4 +361,78 @@ describe("DhlAdapter", () => {
     expect(tracking.status).toBe("Shipment has departed from a DHL facility");
     expect(tracking.events).toHaveLength(3);
   });
+
+  it("asks DHL for per-event GMT offsets and the checkpoint remarks", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      calls.push(String(url));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            shipments: [{
+              shipmentTrackingNumber: "1234567890",
+              status: "Success",
+              events: [{
+                date: "2026-08-15", time: "13:06:00", GMTOffset: "+09:00",
+                typeCode: "PU", description: "Shipment picked up",
+                serviceArea: [{ code: "BNE", description: "Brisbane-AU" }],
+                remarks: [{ value: "On its way." }],
+              }],
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    // Without requestGMTOffsetPerEvent DHL sends a bare local time with no zone, and the scan
+    // cannot be placed on a real timeline.
+    expect(calls[0]).toContain("requestGMTOffsetPerEvent=true");
+    expect(calls[0]).toContain("trackingView=all-checkpoints-with-remarks");
+    expect(calls).toHaveLength(1);
+    expect(result.events[0].description).toBe("Shipment picked up");
+    expect(result.events[0].utcOffset).toBe("+09:00");
+    expect(result.events[0].remarks).toBe("On its way.");
+  });
+
+  it("falls through to the proven trackingView when a variant answers 200 with no checkpoints", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      calls.push(String(url));
+      // This is the failure mode the candidate list exists for: HTTP 200, zero scans.
+      const body = String(url).includes("all-checkpoints-with-remarks")
+        ? { shipments: [{ shipmentTrackingNumber: "1234567890", status: "Success", events: [] }] }
+        : {
+            shipments: [{
+              shipmentTrackingNumber: "1234567890",
+              status: "Success",
+              events: [{ date: "2026-08-15", time: "13:06:00", GMTOffset: "+03:00", typeCode: "PU", description: "Shipment picked up" }],
+            }],
+          };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    expect(result.events).toHaveLength(1);
+    expect(calls[1]).toContain("trackingView=all-checkpoints&");
+  });
+
+  it("stops after two calls when a waybill genuinely has no scans yet", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ shipments: [{ shipmentTrackingNumber: "1234567890", status: "Success", events: [] }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    // A pre-transit shipment is polled every 10 minutes; walking every candidate on empty would
+    // multiply our DHL call volume for every shipment that has not moved yet.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.events).toHaveLength(0);
+  });
 });

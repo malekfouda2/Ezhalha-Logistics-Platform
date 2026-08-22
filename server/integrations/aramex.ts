@@ -2,6 +2,7 @@ import "../load-env";
 import { calculateChargeableWeight } from "@shared/chargeable-weight";
 import {
   CarrierError,
+  extractUtcOffset,
   parseMoney,
   type AddressValidationRequest,
   type AddressValidationResponse,
@@ -14,6 +15,7 @@ import {
   type RateResponse,
   type ServiceAvailabilityRequest,
   type ServiceAvailabilityResponse,
+  type TrackingEvent,
   type TrackingResponse,
   type PickupRequest,
   type PickupResponse,
@@ -127,6 +129,110 @@ export function validateAramexEnvOnStartup(): void {
       { source: "aramex" },
     );
   }
+}
+
+/**
+ * Aramex's tracking response is a .NET WCF dictionary, and WCF has two JSON shapes for one:
+ * a plain object keyed by waybill (`{"1234": [...]}`) and the serialized KeyValuePair array
+ * (`[{ "Key": "1234", "Value": [...] }]`). Which one arrives depends on the account's service
+ * version, and the previous code only understood the first — against the second it fell through
+ * to `data.TrackingResults`, mapped the *wrappers* instead of the events, and produced one
+ * placeholder scan reading "Aramex tracking update" stamped with the time of the poll.
+ */
+export function extractAramexTrackingResults(data: any, trackingNumber: string): any[] {
+  const results = data?.TrackingResults;
+  if (!results) return [];
+
+  // Shape 1: plain object keyed by waybill.
+  if (!Array.isArray(results)) {
+    const byNumber = results?.[trackingNumber];
+    if (Array.isArray(byNumber)) return byNumber;
+    if (byNumber) return [byNumber];
+    // Single-shipment request: take whatever the one key holds rather than guessing the key.
+    const values = Object.values(results).filter(Boolean);
+    return values.flatMap((value) => (Array.isArray(value) ? value : [value]));
+  }
+
+  // Shape 2: KeyValuePair array. Entries carrying a `Value` are wrappers; anything else is
+  // already a bare TrackingResult (some accounts return the flat array directly).
+  return results.flatMap((entry: any) => {
+    if (entry && Object.prototype.hasOwnProperty.call(entry, "Value")) {
+      const value = entry.Value;
+      return Array.isArray(value) ? value : value ? [value] : [];
+    }
+    return entry ? [entry] : [];
+  });
+}
+
+/**
+ * Parse an Aramex `UpdateDateTime`.
+ *
+ * The JSON endpoints of Aramex's WCF services serialize DateTime in Microsoft's format,
+ * `/Date(1591790760000+0300)/`, which `new Date()` cannot parse at all — it yields Invalid Date,
+ * and every scan then fell back to "now". The SOAP/XML face of the same service uses plain ISO
+ * ("2015-07-13T13:08:00"), so both have to be handled; Aramex's own published manual is behind a
+ * CDN that refuses non-browser clients, so this accepts either rather than betting on one.
+ *
+ * Returns the instant plus the carrier's own local string, so the hub can show Aramex's clock.
+ */
+export function parseAramexUpdateDateTime(value: unknown): { timestamp: Date; localTime?: string; utcOffset?: string } | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+
+  const wcf = /^\/Date\((-?\d+)([+-]\d{4})?\)\/$/.exec(raw);
+  if (wcf) {
+    const timestamp = new Date(Number(wcf[1]));
+    if (Number.isNaN(timestamp.getTime())) return null;
+    const offset = wcf[2] ? `${wcf[2].slice(0, 3)}:${wcf[2].slice(3)}` : undefined;
+    return {
+      timestamp,
+      // Re-render the epoch in the offset Aramex reported, so the stored local string is the
+      // wall-clock the scan actually happened at rather than this server's idea of it.
+      localTime: offset ? shiftIsoToOffset(timestamp, offset) : timestamp.toISOString(),
+      utcOffset: offset,
+    };
+  }
+
+  const timestamp = new Date(raw);
+  if (Number.isNaN(timestamp.getTime())) return null;
+  return { timestamp, localTime: raw, utcOffset: extractUtcOffset(raw) };
+}
+
+/** Render an instant as an ISO string in a fixed "+HH:MM" offset. */
+function shiftIsoToOffset(instant: Date, offset: string): string {
+  const sign = offset.startsWith("-") ? -1 : 1;
+  const [hours, minutes] = offset.slice(1).split(":").map(Number);
+  const shifted = new Date(instant.getTime() + sign * ((hours * 60 + minutes) * 60_000));
+  return `${shifted.toISOString().slice(0, 19)}${offset}`;
+}
+
+export function extractAramexTrackingEvents(data: any, trackingNumber: string): TrackingEvent[] {
+  return extractAramexTrackingResults(data, trackingNumber)
+    .filter(Boolean)
+    .map((event: any): TrackingEvent | null => {
+      const parsedDate = parseAramexUpdateDateTime(event?.UpdateDateTime);
+      // Aramex's own text. No placeholder fallback: an event with no description is a parse
+      // problem, and inventing "Aramex tracking update" only hid it behind plausible-looking copy.
+      const description = event?.UpdateDescription || event?.TrackingUpdateDescription || "";
+      if (!parsedDate || !description) return null;
+
+      const problemCode = event?.ProblemCode ? String(event.ProblemCode).trim() : "";
+      return {
+        timestamp: parsedDate.timestamp,
+        status: event?.UpdateCode || event?.TrackingUpdateCode || "",
+        description,
+        location: [event?.UpdateLocation, event?.UpdateCountryCode].filter(Boolean).join(", ") || undefined,
+        localTime: parsedDate.localTime,
+        utcOffset: parsedDate.utcOffset,
+        exceptionCode: problemCode || undefined,
+        // Aramex puts the operator-facing detail in Comments, which we were dropping entirely.
+        remarks: typeof event?.Comments === "string" && event.Comments.trim() ? event.Comments.trim() : undefined,
+        raw: event,
+      } satisfies TrackingEvent;
+    })
+    .filter((event: TrackingEvent | null): event is TrackingEvent => event !== null)
+    // Aramex returns scans oldest-first; the rest of the system reads events[0] as the latest.
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
 export class AramexAdapter implements CarrierAdapter {
@@ -606,19 +712,14 @@ export class AramexAdapter implements CarrierAdapter {
       GetLastTrackingUpdateOnly: false,
     };
     const data = await this.makeRequest<any>("/shippingapi.v2/tracking/service_1_0.svc/json/TrackShipments", payload);
-    const eventSource = data?.TrackingResults?.[trackingNumber] || data?.TrackingResults || [];
-    const events = (Array.isArray(eventSource) ? eventSource : [eventSource])
-      .filter(Boolean)
-      .map((event: any) => ({
-        timestamp: event?.UpdateDateTime ? new Date(event.UpdateDateTime) : new Date(),
-        status: event?.UpdateCode || event?.TrackingUpdateCode || "UNKNOWN",
-        description: event?.UpdateDescription || event?.TrackingUpdateDescription || "Aramex tracking update",
-        location: [event?.UpdateLocation, event?.UpdateCountryCode].filter(Boolean).join(", ") || undefined,
-      }));
+    const events = extractAramexTrackingEvents(data, trackingNumber);
 
     return {
       trackingNumber,
-      status: events[0]?.status || "UNKNOWN",
+      // Aramex's own wording for the newest scan, NOT the UpdateCode. The code ("SH014") is
+      // meaningless to an operator and, being unmappable, used to leave the shipment's status
+      // frozen wherever the previous carrier sync left it.
+      status: events[0]?.description || "",
       events,
     };
   }

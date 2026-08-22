@@ -15,6 +15,7 @@ import {
   Package,
   RefreshCw,
   Search,
+  Undo2,
   Send,
   ShieldCheck,
   Sparkles,
@@ -31,8 +32,9 @@ import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { PhoneInput } from "@/components/phone-input";
 import { getCarrierContact } from "@/lib/carrier-contacts";
+import type { CarrierContactChannel, CarrierContactType } from "@shared/carrier-contact-channels";
 
-type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered";
+type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered" | "returned";
 type NoteVisibility = "INTERNAL" | "CLIENT";
 type CommunicationChannel = "whatsapp" | "sms" | "email";
 type OpsSelectOption = {
@@ -47,6 +49,7 @@ interface OperationSummary {
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
+  returnedCount: number;
   operationsUserCount: number;
 }
 
@@ -199,7 +202,23 @@ interface ShipmentDetails {
   shipDate?: string | null;
 }
 
+interface CarrierTrackingEvent {
+  id: string;
+  carrierCode: string;
+  eventCode: string | null;
+  description: string;
+  occurredAt: string;
+  carrierLocalTime: string | null;
+  carrierUtcOffset: string | null;
+  location: string | null;
+  exceptionCode: string | null;
+  exceptionDescription: string | null;
+  signedBy: string | null;
+  remarks: string | null;
+}
+
 interface OperationShipmentDetail extends OperationShipmentSummary {
+  carrierTrackingEvents: CarrierTrackingEvent[];
   operationTasks: OperationTask[];
   operationEvents: OperationEvent[];
   operationNotes: OperationNote[];
@@ -223,7 +242,12 @@ interface OperationShipmentDetail extends OperationShipmentSummary {
     totalAdjustmentsAmountSar: string;
   };
   financialBreakdown?: Record<string, string | null>;
-  carrierContact?: { phone: string | null; email: string | null; whatsapp: string | null } | null;
+  carrierContact?: {
+    channels: CarrierContactChannel[];
+    phone: string | null;
+    email: string | null;
+    whatsapp: string | null;
+  } | null;
   pickup?: {
     requested: boolean;
     status: string | null;
@@ -326,6 +350,14 @@ const views: Record<ViewKey, {
     queue: "delivered",
     countKey: "deliveredCount",
     icon: CheckCircle2,
+  },
+  returned: {
+    title: "Operations - Returned Shipments",
+    sub: "Shipments the carrier is sending back to the shipper - close the loop with the client and settle the charges",
+    short: "Returned",
+    queue: "returned",
+    countKey: "returnedCount",
+    icon: Undo2,
   },
 };
 
@@ -712,8 +744,14 @@ const operationsCss = `
 .ops-ref .progress-step-dot svg{width:18px;height:18px}
 `;
 
+const CONTACT_TYPE_FALLBACK_LABELS: Record<CarrierContactType, string> = {
+  phone: "Call carrier",
+  whatsapp: "WhatsApp carrier",
+  email: "Email carrier",
+};
+
 function isViewKey(value: string | null): value is ViewKey {
-  return value === "d2d" || value === "express" || value === "local" || value === "attention" || value === "special" || value === "delivered";
+  return value === "d2d" || value === "express" || value === "local" || value === "attention" || value === "special" || value === "delivered" || value === "returned";
 }
 
 function listPath(queue: string) {
@@ -723,6 +761,11 @@ function listPath(queue: string) {
 function getShipmentView(shipment: OperationShipmentSummary | OperationShipmentDetail): ViewKey {
   if (shipment.status?.toLowerCase() === "delivered") {
     return "delivered";
+  }
+  // A return outranks special handling / attention for deep links: the returned queue is the
+  // one page that explains why the shipment stopped moving forward.
+  if (shipment.status?.toLowerCase() === "returned") {
+    return "returned";
   }
   if (shipment.specialHandling && shipment.specialHandling.status?.toLowerCase() === "open") {
     return "special";
@@ -798,32 +841,12 @@ function getExpressTab(shipment: OperationShipmentSummary): "received" | "transi
   return "received";
 }
 
-// Maps the real (carrier-synced) shipment status to the active step index (0-based) in the
-// 9-step express timeline. Pre-pickup statuses stay at step 0 so the timeline never marks
-// "Picked up" / "Received at facility" as done before the carrier actually moves the shipment.
-function getExpressStepIndex(status?: string | null): number {
-  switch ((status || "").toLowerCase()) {
-    case "delivered":
-      return 8;
-    case "out_for_delivery":
-      return 7;
-    case "customs_clearance":
-    case "carrier_error":
-      return 6;
-    case "in_transit":
-    case "on_hold":
-    case "returned":
-      return 4;
-    case "picked_up":
-      return 1;
-    default:
-      // created / booked / awaiting_review / processing / awaiting_payment — not yet picked up
-      return 0;
-  }
-}
-
 function isShipmentDelivered(shipment: Pick<OperationShipmentSummary, "status"> | Pick<OperationShipmentDetail, "status">) {
   return shipment.status?.toLowerCase() === "delivered";
+}
+
+function isShipmentReturned(shipment: Pick<OperationShipmentSummary, "status"> | Pick<OperationShipmentDetail, "status">) {
+  return shipment.status?.toLowerCase() === "returned";
 }
 
 function priorityClass(priority?: string | null) {
@@ -910,10 +933,12 @@ function OperationsHubContent() {
     attention: requestedShipmentId || null,
     special: requestedShipmentId || null,
     delivered: requestedShipmentId || null,
+    returned: requestedShipmentId || null,
   });
   const [d2dTab, setD2dTab] = useState<number | "all">("all");
   const [expressTab, setExpressTab] = useState<(typeof expressTabs)[number]["key"]>("all");
   const [deliveredTab, setDeliveredTab] = useState<"all" | "d2d" | "express">("all");
+  const [returnedTab, setReturnedTab] = useState<"all" | "d2d" | "express" | "local">("all");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [noteBody, setNoteBody] = useState("");
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>("INTERNAL");
@@ -976,6 +1001,7 @@ function OperationsHubContent() {
       attention: view === "attention" ? activeListQuery.data || [] : [],
       special: view === "special" ? activeListQuery.data || [] : [],
       delivered: view === "delivered" ? activeListQuery.data || [] : [],
+      returned: view === "returned" ? activeListQuery.data || [] : [],
     }),
     [activeListQuery.data, view],
   );
@@ -1042,9 +1068,16 @@ function OperationsHubContent() {
         if (deliveredTab === "d2d" && shipment.shipmentKind !== "DDP") return false;
         if (deliveredTab === "express" && shipment.shipmentKind !== "EXPRESS") return false;
       }
+      if (view === "returned") {
+        if (!isShipmentReturned(shipment)) return false;
+        if (returnedTab === "d2d" && shipment.shipmentKind !== "DDP") return false;
+        if (returnedTab === "express" && shipment.shipmentKind !== "EXPRESS") return false;
+        if (returnedTab === "local" && shipment.shipmentKind !== "LOCAL") return false;
+        if (filters.carrier && shipment.carrierName !== filters.carrier) return false;
+      }
       return true;
     });
-  }, [d2dTab, deliveredTab, expressTab, filters, lists, search, view]);
+  }, [d2dTab, deliveredTab, expressTab, filters, lists, returnedTab, search, view]);
 
   useEffect(() => {
     const ids = new Set(viewShipments.map((shipment) => shipment.id));
@@ -1193,6 +1226,10 @@ function OperationsHubContent() {
       if (selectedId && nextStatus.toLowerCase() === "delivered") {
         setSelectedIds((current) => ({ ...current, delivered: selectedId }));
         navigateToView("delivered", selectedId);
+      }
+      if (selectedId && nextStatus.toLowerCase() === "returned") {
+        setSelectedIds((current) => ({ ...current, returned: selectedId }));
+        navigateToView("returned", selectedId);
       }
       notify("Shipment status updated", "Client notification was queued successfully.");
       invalidateOperations();
@@ -1602,6 +1639,8 @@ function OperationsHubContent() {
             setExpressTab={setExpressTab}
             deliveredTab={deliveredTab}
             setDeliveredTab={setDeliveredTab}
+            returnedTab={returnedTab}
+            setReturnedTab={setReturnedTab}
             filters={filters}
             setFilter={setFilter}
             shipments={lists[view]}
@@ -1633,7 +1672,7 @@ function OperationsHubContent() {
             <>
               <DetailHeader shipment={detail} onMessage={openMessageModal} onSpecial={() => setSpecialModal(true)} />
               <div className="dp-body">
-                {(view === "d2d" || (view === "delivered" && detail.shipmentKind === "DDP")) && (
+                {(view === "d2d" || ((view === "delivered" || view === "returned") && detail.shipmentKind === "DDP")) && (
                   <D2DDetail
                     shipment={detail}
                     actions={opsActions}
@@ -1667,7 +1706,7 @@ function OperationsHubContent() {
                     />}
                   />
                 )}
-                {(view === "express" || view === "local" || (view === "delivered" && (detail.shipmentKind === "EXPRESS" || detail.shipmentKind === "LOCAL"))) && (
+                {(view === "express" || view === "local" || ((view === "delivered" || view === "returned") && (detail.shipmentKind === "EXPRESS" || detail.shipmentKind === "LOCAL"))) && (
                   <ExpressDetail
                     shipment={detail}
                     actions={opsActions}
@@ -1854,6 +1893,8 @@ function ListHeader(props: {
   setExpressTab: (value: any) => void;
   deliveredTab: "all" | "d2d" | "express";
   setDeliveredTab: (value: "all" | "d2d" | "express") => void;
+  returnedTab: "all" | "d2d" | "express" | "local";
+  setReturnedTab: (value: "all" | "d2d" | "express" | "local") => void;
   filters: Record<string, string>;
   setFilter: (key: string, value: string) => void;
   shipments: OperationShipmentSummary[];
@@ -1867,7 +1908,7 @@ function ListHeader(props: {
   return (
     <div className="lp-head">
       <div className="lp-title">
-        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "local" ? "Local Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : "Delivered Shipments"}{" "}
+        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "local" ? "Local Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : props.view === "returned" ? "Returned Shipments" : "Delivered Shipments"}{" "}
         <span className="view-count">({props.count})</span>
       </div>
       <div className="lp-search">
@@ -1941,6 +1982,21 @@ function ListHeader(props: {
           <button className={`chip ${props.deliveredTab === "express" ? "active" : ""}`} onClick={() => props.setDeliveredTab("express")}>Express</button>
         </div>
       )}
+
+      {props.view === "returned" && (
+        <>
+          <div className="chip-row">
+            <button className={`chip ${props.returnedTab === "all" ? "active" : ""}`} onClick={() => props.setReturnedTab("all")}>All</button>
+            <button className={`chip ${props.returnedTab === "d2d" ? "active" : ""}`} onClick={() => props.setReturnedTab("d2d")}>Door to Door</button>
+            <button className={`chip ${props.returnedTab === "express" ? "active" : ""}`} onClick={() => props.setReturnedTab("express")}>Express</button>
+            <button className={`chip ${props.returnedTab === "local" ? "active" : ""}`} onClick={() => props.setReturnedTab("local")}>Local</button>
+          </div>
+          <div className="filter-bar">
+            <PillSelect value={props.filters.carrier || ""} onChange={(value) => props.setFilter("carrier", value)} placeholder="Carrier" options={carriers} />
+            <button className="chip" onClick={() => props.setFilter("carrier", "")}>Clear</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1976,6 +2032,8 @@ function ShipmentListItem({ shipment, view, active, onClick }: {
   const flag = shipment.attentionFlags?.[0];
   const stageBadge = view === "delivered"
     ? <span className="badge b-green">Delivered</span>
+    : view === "returned"
+    ? <span className="badge b-amber">Returned to shipper</span>
     : view === "d2d"
     ? <span className="badge b-pr">Stage {stage}: {d2dStages[stage - 1]}</span>
     : view === "express"
@@ -2006,7 +2064,9 @@ function DetailHeader({ shipment, onMessage, onSpecial }: {
   onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
   onSpecial: () => void;
 }) {
-  const badge = shipment.shipmentKind === "DDP"
+  const badge = isShipmentReturned(shipment)
+    ? <span className="badge b-amber">Returned to shipper</span>
+    : shipment.shipmentKind === "DDP"
     ? isShipmentDelivered(shipment)
       ? <span className="badge b-green">Delivered</span>
       : <span className="badge b-pr">Stage {getD2DStage(shipment)} · {d2dStages[getD2DStage(shipment) - 1]}</span>
@@ -3142,10 +3202,16 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
   // Carrier contact channels — configured per carrier in the Apps tab, with a built-in fallback.
   const fallback = getCarrierContact(shipment.carrierCode);
   const carrierName = shipment.carrierName || fallback?.name || shipment.carrierCode || "carrier";
-  const contactPhone = shipment.carrierContact?.phone || fallback?.phone || null;
-  const contactEmail = shipment.carrierContact?.email || null;
-  const contactWhatsapp = shipment.carrierContact?.whatsapp || null;
-  const hasContact = Boolean(contactPhone || contactEmail || contactWhatsapp);
+  // Every labelled channel the admin configured, in their order. The built-in customer-service
+  // number is appended only when nothing is configured, so it never shadows a real account
+  // manager the carrier gave us.
+  const configuredChannels = shipment.carrierContact?.channels || [];
+  const contactChannels: CarrierContactChannel[] = configuredChannels.length > 0
+    ? configuredChannels
+    : fallback?.phone
+      ? [{ label: `${fallback.name} customer service`, type: "phone", value: fallback.phone }]
+      : [];
+  const hasContact = contactChannels.length > 0;
   return (
     <>
     <div className="dp-grid">
@@ -3187,21 +3253,30 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
         <div className="modal-title">Contact {carrierName}</div>
         <div className="modal-sub">Choose a channel to reach the carrier</div>
         <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {contactPhone && (
-            <a className="btn btn-blue btn-sm" href={`tel:${contactPhone}`} style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Phone /> Call — {contactPhone}
-            </a>
-          )}
-          {contactWhatsapp && (
-            <a className="btn btn-green btn-sm" href={`https://wa.me/${contactWhatsapp.replace(/[^\d]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Smartphone /> WhatsApp — {contactWhatsapp}
-            </a>
-          )}
-          {contactEmail && (
-            <a className="btn btn-gh btn-sm" href={`mailto:${contactEmail}`} style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Mail /> Email — {contactEmail}
-            </a>
-          )}
+          {contactChannels.map((channel, index) => {
+            const href = channel.type === "email"
+              ? `mailto:${channel.value}`
+              : channel.type === "whatsapp"
+                ? `https://wa.me/${channel.value.replace(/[^\d]/g, "")}`
+                : `tel:${channel.value}`;
+            const external = channel.type === "whatsapp";
+            return (
+              <a
+                key={`${channel.type}-${channel.value}-${index}`}
+                className={`btn btn-sm ${channel.type === "email" ? "btn-gh" : channel.type === "whatsapp" ? "btn-green" : "btn-blue"}`}
+                href={href}
+                {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                style={{ justifyContent: "flex-start", gap: 10, textAlign: "left" }}
+              >
+                {channel.type === "email" ? <Mail /> : channel.type === "whatsapp" ? <Smartphone /> : <Phone />}
+                <span style={{ minWidth: 0 }}>
+                  {/* Label first: an operator picks who to reach, not which digits to dial. */}
+                  <span style={{ display: "block", fontWeight: 600 }}>{channel.label || CONTACT_TYPE_FALLBACK_LABELS[channel.type]}</span>
+                  <span style={{ display: "block", fontSize: 11, opacity: 0.85 }}>{channel.value}</span>
+                </span>
+              </a>
+            );
+          })}
           {!hasContact && <div className="empty">No contact channels configured. Add them on the carrier's account in the Apps tab.</div>}
         </div>
         <div className="modal-foot">
@@ -3460,10 +3535,18 @@ function TimelineCard({ shipment, compact = false }: { shipment: OperationShipme
 }
 
 function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetail; variant: "d2d" | "express" }) {
-  const labels = variant === "d2d"
-    ? ["Received at origin warehouse", "Customs clearance - origin", "Departed origin", "In transit", "Arrived destination", "Customs clearance - destination", "Last-mile delivery"]
-    : ["Order created and booked", "Picked up from sender", "Received at carrier origin facility", "Departed origin", "In transit", "Arrived destination facility", "Customs clearance", "Out for delivery", "Delivered"];
-  const activeIndex = variant === "d2d" ? getD2DStage(shipment) : getExpressStepIndex(shipment.status);
+  // Express shipments are tracked BY the carrier, so the carrier's own scans are the timeline.
+  // The fixed nine-step ladder that used to live here was ours, not theirs: it inferred a step
+  // index from our mapped status and then printed our wording ("Received at carrier origin
+  // facility") next to it, so an operator reading the hub never saw what DHL or FedEx actually
+  // said, and every scan carried our render time instead of the carrier's.
+  if (variant === "express") {
+    return <CarrierScanFeed shipment={shipment} />;
+  }
+
+  // D2D is different: those stages are OUR warehouse workflow, which no carrier reports on.
+  const labels = ["Received at origin warehouse", "Customs clearance - origin", "Departed origin", "In transit", "Arrived destination", "Customs clearance - destination", "Last-mile delivery"];
+  const activeIndex = getD2DStage(shipment);
   return (
     <div className="track-wrap">
       {labels.map((label, index) => {
@@ -3476,6 +3559,77 @@ function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetai
             <div className="track-info">
               <div className="track-title">{label}</div>
               <div className="track-sub">{state === "done" ? "Completed" : state === "active-step" ? "In progress" : "Pending"}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Format a carrier scan time WITHOUT moving it into the viewer's timezone.
+ *
+ * `carrierLocalTime` is the wall-clock the carrier printed, offset included when it sent one
+ * ("2026-08-15T10:23:00-07:00"). Passing that through `new Date()` and toLocaleString would
+ * re-render it in the operator's zone — a Riyadh operator would see a Memphis scan at a time
+ * that appears nowhere on fedex.com. So the components are read out of the string as text.
+ *
+ * Falls back to `occurredAt` (a real instant) only for a carrier that reported no local time.
+ */
+function formatCarrierScanTime(event: CarrierTrackingEvent): string {
+  const local = event.carrierLocalTime?.trim();
+  const match = local ? /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(local) : null;
+  if (match) {
+    const [, year, month, day, hour, minute] = match;
+    const monthLabel = MONTH_LABELS[Number(month) - 1] || month;
+    const offset = event.carrierUtcOffset ? ` (UTC${event.carrierUtcOffset})` : "";
+    return `${monthLabel} ${Number(day)}, ${year} · ${hour}:${minute}${offset}`;
+  }
+  return formatDate(event.occurredAt);
+}
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function CarrierScanFeed({ shipment }: { shipment: OperationShipmentDetail }) {
+  const events = shipment.carrierTrackingEvents || [];
+  const carrier = shipment.carrierName || shipment.carrierCode || "the carrier";
+
+  if (events.length === 0) {
+    return (
+      <div className="empty">
+        {shipment.carrierTrackingNumber
+          ? `No scans from ${carrier} yet. Press "Sync now" to poll, or wait for the next automatic refresh.`
+          : "This shipment has no carrier tracking number, so there is nothing for the carrier to report on yet."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="track-wrap">
+      {events.map((event, index) => {
+        const isException = Boolean(event.exceptionCode || event.exceptionDescription);
+        return (
+          <div className="track-step" key={event.id}>
+            <div className={`track-check ${isException ? "" : index === 0 ? "active-step" : "done"}`}>
+              {isException ? <AlertTriangle /> : index === 0 ? null : <CheckCircle2 />}
+            </div>
+            <div className="track-info">
+              {/* The carrier's exact wording. Never reformatted, never title-cased. */}
+              <div className="track-title">{event.description}</div>
+              <div className="track-sub">
+                {formatCarrierScanTime(event)}
+                {event.location ? ` · ${event.location}` : ""}
+                {event.eventCode ? ` · ${event.eventCode}` : ""}
+              </div>
+              {event.exceptionDescription && (
+                <div className="track-sub" style={{ color: "var(--red)" }}>
+                  {event.exceptionDescription}
+                  {event.exceptionCode ? ` (${event.exceptionCode})` : ""}
+                </div>
+              )}
+              {event.remarks && <div className="track-sub">{event.remarks}</div>}
+              {event.signedBy && <div className="track-sub">Signed by {event.signedBy}</div>}
             </div>
           </div>
         );
