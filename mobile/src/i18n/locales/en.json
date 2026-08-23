@@ -85,6 +85,87 @@
       "passwordMismatch": "Passwords do not match"
     }
   },
+  "phoneInput": {
+    "searchPlaceholder": "Search countries..."
+  },
+  "countryPicker": {
+    "title": "Select country",
+    "searchPlaceholder": "Search countries..."
+  },
+  "documents": {
+    "sectionLabel": "Upload company documents",
+    "description": "Upload all required company documents to complete your application. We'll read them automatically and fill in your company details for you.",
+    "hint": "PDF, DOC, DOCX, JPG, PNG. One file is required for each document type below.",
+    "requiredNote": "Required for company applications",
+    "taxCertificate": "Tax Certificate",
+    "commercialRegistration": "Commercial Registration",
+    "memorandumOfAssociation": "Memorandum of Association",
+    "directorId": "Director ID",
+    "upload": "Upload",
+    "replace": "Replace",
+    "noFile": "No file uploaded yet.",
+    "readingScan": "Reading..."
+  },
+  "rescan": {
+    "banner": "Company details are filled from your documents. Review before submitting.",
+    "button": "Re-scan documents",
+    "scanning": "Scanning..."
+  },
+  "apply": {
+    "title": "Apply for an account",
+    "subtitle": "We'll review and get back within one business day",
+    "accountType": {
+      "label": "Account type",
+      "company": "Company",
+      "individual": "Individual"
+    },
+
+    "company": {
+      "sectionLabel": "Company",
+      "companyName": "Company name",
+      "commercialRegistrationNo": "Commercial registration no."
+    },
+    "contact": {
+      "sectionLabel": "Contact",
+      "fullName": "Full name",
+      "email": "Email Address",
+      "phone": "Phone"
+    },
+    "shipping": {
+      "sectionLabel": "Default shipping address",
+      "description": "This address will be used as the default for your shipments. For inbound shipments, it will be the recipient address. For outbound shipments, it will be the sender address.",
+      "selectCountry": "Select country",
+      "contactPersonName": "Contact person name",
+      "contactPhone": "Phone",
+      "addressLine1": "Street address, building number",
+      "addressLine2": "Suite, unit, floor, etc. (optional)",
+      "stateProvince": "State or Province",
+      "city": "City",
+      "postalCode": "Postal/ZIP code"
+    },
+
+    "submit": "Submit application",
+    "errors": {
+      "fullNameRequired": "Full name is required",
+      "emailRequired": "Email is required",
+      "emailInvalid": "Enter a valid email",
+      "phoneRequired": "Phone number is required",
+      "phoneInvalid": "Enter a valid phone number",
+      "dialCodeRequired": "Dial code is required",
+      "countryRequired": "Country is required",
+      "addressLine1Required": "Address line 1 is required",
+      "stateProvinceRequired": "State/Province is required",
+      "cityRequired": "City is required",
+      "postalCodeRequired": "Postal code is required",
+      "companyNameRequired": "Company name is required",
+      "contactNameRequired": "Contact name is required",
+      "contactPhoneRequired": "Contact phone is required",
+      "taxCertificateRequired": "Tax certificate is required",
+      "commercialRegistrationRequired": "Commercial registration is required",
+      "memorandumOfAssociationRequired": "Memorandum of association is required",
+      "directorIdRequired": "Director ID is required"
+    }
+  },
   "toast": {
     "login": {
       "successTitle": "Welcome back!",

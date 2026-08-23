@@ -85,6 +85,87 @@
       "passwordMismatch": "كلمتا المرور غير متطابقتين"
     }
   },
+  "phoneInput": {
+    "searchPlaceholder": "ابحث عن الدول..."
+  },
+  "countryPicker": {
+    "title": "اختر الدولة",
+    "searchPlaceholder": "ابحث عن الدول..."
+  },
+  "documents": {
+    "sectionLabel": "رفع مستندات الشركة",
+    "description": "قم برفع جميع مستندات الشركة المطلوبة لإكمال طلبك. سنقرأها تلقائيًا ونعبئ بيانات شركتك نيابة عنك.",
+    "hint": "PDF، DOC، DOCX، JPG، PNG. مطلوب ملف واحد لكل نوع مستند أدناه.",
+    "requiredNote": "مطلوب لطلبات الشركات",
+    "taxCertificate": "الشهادة الضريبية",
+    "commercialRegistration": "السجل التجاري",
+    "memorandumOfAssociation": "عقد التأسيس",
+    "directorId": "هوية المدير",
+    "upload": "رفع",
+    "replace": "استبدال",
+    "noFile": "لم يتم رفع أي ملف بعد.",
+    "readingScan": "جارٍ القراءة..."
+  },
+  "rescan": {
+    "banner": "تم تعبئة بيانات الشركة من مستنداتك. يرجى المراجعة قبل الإرسال.",
+    "button": "إعادة مسح المستندات",
+    "scanning": "جارٍ المسح..."
+  },
+  "apply": {
+    "title": "قدّم طلب حساب",
+    "subtitle": "سنراجع طلبك ونرد خلال يوم عمل واحد",
+    "accountType": {
+      "label": "نوع الحساب",
+      "company": "شركة",
+      "individual": "فرد"
+    },
+
+    "company": {
+      "sectionLabel": "الشركة",
+      "companyName": "اسم الشركة",
+      "commercialRegistrationNo": "رقم السجل التجاري"
+    },
+    "contact": {
+      "sectionLabel": "بيانات التواصل",
+      "fullName": "الاسم الكامل",
+      "email": "البريد الإلكتروني",
+      "phone": "رقم الهاتف"
+    },
+    "shipping": {
+      "sectionLabel": "عنوان الشحن الافتراضي",
+      "description": "سيُستخدم هذا العنوان كعنوان افتراضي لشحناتك. بالنسبة للشحنات الواردة، سيكون عنوان المستلم. أما للشحنات الصادرة، فسيكون عنوان المُرسِل.",
+      "selectCountry": "اختر الدولة",
+      "contactPersonName": "اسم جهة الاتصال",
+      "contactPhone": "رقم الهاتف",
+      "addressLine1": "عنوان الشارع، رقم المبنى",
+      "addressLine2": "الشقة، الوحدة، الطابق، إلخ (اختياري)",
+      "stateProvince": "المنطقة أو المحافظة",
+      "city": "المدينة",
+      "postalCode": "الرمز البريدي"
+    },
+
+    "submit": "إرسال الطلب",
+    "errors": {
+      "fullNameRequired": "الاسم الكامل مطلوب",
+      "emailRequired": "البريد الإلكتروني مطلوب",
+      "emailInvalid": "أدخل بريدًا إلكترونيًا صحيحًا",
+      "phoneRequired": "رقم الهاتف مطلوب",
+      "phoneInvalid": "أدخل رقم هاتف صحيح",
+      "dialCodeRequired": "رمز الاتصال مطلوب",
+      "countryRequired": "الدولة مطلوبة",
+      "addressLine1Required": "عنوان الشارع مطلوب",
+      "stateProvinceRequired": "المنطقة أو المحافظة مطلوبة",
+      "cityRequired": "المدينة مطلوبة",
+      "postalCodeRequired": "الرمز البريدي مطلوب",
+      "companyNameRequired": "اسم الشركة مطلوب",
+      "contactNameRequired": "اسم جهة الاتصال مطلوب",
+      "contactPhoneRequired": "هاتف جهة الاتصال مطلوب",
+      "taxCertificateRequired": "الشهادة الضريبية مطلوبة",
+      "commercialRegistrationRequired": "السجل التجاري مطلوب",
+      "memorandumOfAssociationRequired": "عقد التأسيس مطلوب",
+      "directorIdRequired": "هوية المدير مطلوبة"
+    }
+  },
   "toast": {
     "login": {
       "successTitle": "مرحبًا بعودتك!",
