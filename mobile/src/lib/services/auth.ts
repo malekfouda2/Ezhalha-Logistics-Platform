@@ -1,9 +1,10 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { User } from "@shared/schema";
-
+import type { ApplicationFormData } from "@shared/schema";
 import { apiRequest, api } from "@/api/client";
 import { clearAllTokens, getDeviceId, getRefreshToken, setAccessToken, setRefreshToken } from "@/api/tokens";
+import { CompanyApplicationDocumentType } from "@shared/application-documents";
 
 // Auth calls, bound to the endpoints in server/routes.ts. Types for the user object come
 // straight from @shared/schema, so a column added to the users table shows up here as a
@@ -132,5 +133,52 @@ export async function resetPassword(
       token,
       password,
     },
+  });
+}
+
+
+
+export interface UploadedDocument {
+  type: CompanyApplicationDocumentType;
+  label: string;
+  name: string;
+  path: string;
+  contentType: string;
+}
+
+export interface ExtractCompanyDetailsResponse {
+  details: Record<string, string>;
+}
+
+export interface CreateApplicationResponse {
+  status?: string;
+}
+
+export async function extractCompanyDetails(
+  documents: UploadedDocument[],
+): Promise<ExtractCompanyDetailsResponse> {
+  return apiRequest<ExtractCompanyDetailsResponse>(
+    "/api/public/applications/extract-company-details",
+    {
+      method: "POST",
+      anonymous: true,
+      body: {
+        documents: documents.map((doc) => ({
+          objectPath: doc.path,
+          fileName: doc.name,
+          contentType: doc.contentType,
+          label: doc.label,
+        })),
+      },
+    },
+  );
+}
+
+export async function createApplication(
+  data: ApplicationFormData,
+): Promise<CreateApplicationResponse> {
+  return apiRequest<CreateApplicationResponse>("/api/applications", {
+    method: "POST",
+    body: data,
   });
 }

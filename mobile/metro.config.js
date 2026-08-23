@@ -16,15 +16,20 @@ const repoRoot = path.resolve(projectRoot, "..");
 
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [path.resolve(repoRoot, "shared")];
-
+config.watchFolders = [
+  path.resolve(repoRoot, "shared"),
+  path.resolve(repoRoot, "node_modules"),
+];
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   "@shared": path.resolve(repoRoot, "shared"),
 };
 
 // mobile/ keeps its own node_modules; the root install is for the web app and API.
-config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
-config.resolver.disableHierarchicalLookup = true;
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, "node_modules"),
+  path.resolve(repoRoot, "node_modules"),
+];
+config.resolver.disableHierarchicalLookup = false;
 
 module.exports = config;

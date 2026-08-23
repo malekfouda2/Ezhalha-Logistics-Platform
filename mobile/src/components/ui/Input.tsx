@@ -70,7 +70,6 @@ export const Input = forwardRef<TextInput, InputProps>(
               otherProps.onBlur?.(e);
             }}
             placeholderTextColor={Colors.placeholder}
-            textAlign={isRTL ? "right" : "left"}
             style={[
               styles.input,
               {

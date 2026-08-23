@@ -7,6 +7,7 @@ import Toast from "react-native-toast-message";
 import { queryClient } from "@/lib/queryClient";
 import { useLanguageStore } from "@/store/useLanguageStore";
 import AppLayout from "@/components/layout/AppLayout";
+import toastConfig from "@/components/ui/AppToast";
 
 export default function RootLayout() {
   const init = useLanguageStore((state) => state.init);
@@ -27,7 +28,7 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }} />
         </AppLayout>
       </SafeAreaProvider>
-      <Toast />
+     <Toast config={toastConfig} />
     </QueryClientProvider>
   );
 }

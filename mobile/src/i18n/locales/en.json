@@ -173,6 +173,12 @@
       "errorTitle": "Login failed",
       "invalidCredentials": "Invalid credentials"
     },
+    "apply": {
+      "successTitle": "Application submitted",
+      "successMessage": "Your application has been submitted successfully. We'll review it and get back to you within one business day.",
+      "errorTitle": "Application failed",
+      "errorMessage": "We couldn't submit your application. Please check your information and try again."
+    },
     "otp": {
       "request": {
         "errorTitle": "Failed to send verification code",

@@ -10,6 +10,7 @@ export const Colors = {
   white: "#FFFFFF",
   black: "#000000",
   placeholder: "#9AA3B2",
+  error: "#FF4D4F",
 };
 
 export const setOpacity = (hex: string, alpha: number) =>
