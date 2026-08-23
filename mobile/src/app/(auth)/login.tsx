@@ -13,13 +13,12 @@ import { LanguageSwitch } from "@/components/ui/LanguageSwitch";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { useLoginSchema, LoginFormValues } from "@/schemas/login";
+import { loginSchema, type LoginData } from "@shared/schema";
 import { useSignIn } from "@/lib/hooks/useAuth";
 import Toast from "react-native-toast-message";
 
 export default function LoginScreen() {
   const { t } = useTranslation();
-  const loginSchema = useLoginSchema();
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,19 +28,19 @@ export default function LoginScreen() {
     control,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginFormValues>({
+  } = useForm<LoginData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      identifier: "",
+      username: "",
       password: "",
     },
   });
 
-  const onSubmit = async (data: LoginFormValues) => {
+  const onSubmit = async (data: LoginData) => {
     try {
       setIsSubmitting(true);
       await signInMutation.mutateAsync({
-        username: data.identifier,
+        username: data.username,
         password: data.password,
       });
 
@@ -66,16 +65,14 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>
-      <View style={styles.topRow}>
+      {/* <View style={styles.topRow}>
         <LanguageSwitch />
-      </View>
+      </View> */}
 
       <Image
         source={require("../../../assets/images/logo.png")}
         style={styles.logo}
         resizeMode="contain"
-        height={rvs(200)}
-        width={rs(200)}
       />
 
       <View style={styles.header}>
@@ -89,7 +86,7 @@ export default function LoginScreen() {
 
       <Controller
         control={control}
-        name="identifier"
+        name="username"
         render={({ field: { onChange, onBlur, value } }) => (
           <Input
             label={t("auth.identifierLabel")}
@@ -99,7 +96,7 @@ export default function LoginScreen() {
             value={value}
             onChangeText={onChange}
             onBlur={onBlur}
-            error={errors.identifier?.message}
+            error={errors.username?.message}
           />
         )}
       />
@@ -131,9 +128,7 @@ export default function LoginScreen() {
 
       <Pressable
         style={styles.forgotPassword}
-        onPress={() => {
-          router.push("/forgot-password");
-        }}
+        onPress={() => router.push("/forgot-password")}
       >
         <Text size="medium" weight="semibold" style={styles.forgotPasswordText}>
           {t("auth.forgotPassword")}
@@ -158,20 +153,14 @@ export default function LoginScreen() {
       <Button
         title={t("auth.emailSignInCode")}
         variant="outline"
-        onPress={() => {
-          router.push("/otp-request");
-        }}
+        onPress={() => router.push("/otp-request")}
       />
 
       <View style={styles.footer}>
         <Text size="small" dimRate="70%" style={styles.subtitle}>
           {t("auth.newToEzhalha")}
         </Text>
-        <Pressable
-          onPress={() => {
-            router.push("/apply");
-          }}
-        >
+        <Pressable onPress={() => router.push("/apply")}>
           <Text size="small" weight="bold" style={styles.applyText}>
             {t("auth.applyForAccount")}
           </Text>

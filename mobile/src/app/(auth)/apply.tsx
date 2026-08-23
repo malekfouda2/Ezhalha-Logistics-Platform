@@ -85,17 +85,6 @@ export default function ApplyScreen() {
   const [isScanning, setIsScanning] = useState(false);
 
   /*
-   * UI-only phone state.
-   * The actual phone number is stored in react-hook-form.
-   */
-  const [phoneDialCode, setPhoneDialCode] = useState("+966");
-  const [phoneFlag, setPhoneFlag] = useState("🇸🇦");
-
-  const [contactPhoneDialCode, setContactPhoneDialCode] = useState("+966");
-
-  const [contactPhoneFlag, setContactPhoneFlag] = useState("🇸🇦");
-
-  /*
    * Store the complete uploaded document objects.
    *
    * This is separate from the form's `documents` field because
@@ -381,22 +370,6 @@ export default function ApplyScreen() {
       const payload: ApplicationFormData = {
         ...data,
 
-        /*
-         * Add selected country dial code to phone.
-         */
-        phone: data.phone ? `${phoneDialCode}${data.phone}` : data.phone,
-
-        /*
-         * Add selected country dial code to shipping contact phone.
-         */
-        shippingContactPhone: data.shippingContactPhone
-          ? `${contactPhoneDialCode}${data.shippingContactPhone}`
-          : data.shippingContactPhone,
-
-        /*
-         * Serialize documents in the same format
-         * expected by the backend.
-         */
         documents: documents.map((doc) =>
           serializeApplicationDocumentReference({
             path: doc.path,
@@ -594,16 +567,11 @@ export default function ApplyScreen() {
         name="phone"
         render={({ field: { onChange, value } }) => (
           <PhoneInput
-            value={value}
+            value={value ?? ""}
             onChangeValue={onChange}
-            dialCode={phoneDialCode}
-            onChangeDialCode={setPhoneDialCode}
-            countryFlag={phoneFlag}
-            onChangeCountryFlag={setPhoneFlag}
-            placeholder={t("apply.contact.phone")}
             searchPlaceholder={t("phoneInput.searchPlaceholder")}
-            pickerLang={i18n.language}
-            error={errors.phone?.message}
+            placeholder={t("apply.shipping.contactPhone")}
+            error={errors.shippingContactPhone?.message}
           />
         )}
       />
@@ -644,7 +612,6 @@ export default function ApplyScreen() {
             placeholder={t("apply.shipping.selectCountry")}
             title={t("countryPicker.title")}
             searchPlaceholder={t("countryPicker.searchPlaceholder")}
-            pickerLang={i18n.language}
             error={errors.shippingCountryCode?.message}
           />
         )}
@@ -671,15 +638,10 @@ export default function ApplyScreen() {
         name="shippingContactPhone"
         render={({ field: { onChange, value } }) => (
           <PhoneInput
-            value={value}
+            value={value ?? ""}
             onChangeValue={onChange}
-            dialCode={contactPhoneDialCode}
-            onChangeDialCode={setContactPhoneDialCode}
-            countryFlag={contactPhoneFlag}
-            onChangeCountryFlag={setContactPhoneFlag}
             searchPlaceholder={t("phoneInput.searchPlaceholder")}
             placeholder={t("apply.shipping.contactPhone")}
-            pickerLang={i18n.language}
             error={errors.shippingContactPhone?.message}
           />
         )}
