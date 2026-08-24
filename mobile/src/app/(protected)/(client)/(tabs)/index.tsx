@@ -36,7 +36,6 @@ export default function ClientDashboard() {
   >({
     queryKey: ["/api/client/shipments/recent"],
   });
-  console.log({ account, stats, recentShipments });
 
   const displayName = account?.companyName || account?.name || "";
   const initials =
@@ -94,7 +93,7 @@ export default function ClientDashboard() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        <LanguageSwitch />
+        {/* <LanguageSwitch /> */}
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.userInfo}>
