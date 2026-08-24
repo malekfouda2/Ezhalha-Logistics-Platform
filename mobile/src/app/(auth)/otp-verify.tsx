@@ -107,7 +107,7 @@ export default function OtpVerifyScreen() {
         code: data.code,
       });
 
-      router.replace("/(tabs)");
+      router.replace("/(protected)/(client)/(tabs)/");
     } catch (error) {
       Toast.show({
         type: "error",

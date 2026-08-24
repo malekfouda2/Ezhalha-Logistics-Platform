@@ -11,7 +11,7 @@ export default function AuthLayout() {
 
   // Already logged in → don't allow access to auth screens
   if (user) {
-    return <Redirect href="/(app)/(tabs)" />;
+    return <Redirect href="/(protected)/(client)/(tabs)/" />;
   }
 
   return (

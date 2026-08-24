@@ -10,7 +10,7 @@ export default function Index() {
   }
 
   if (user) {
-    return <Redirect href="/(app)/(tabs)" />;
+    return <Redirect href="/(protected)/(client)/(tabs)/" />;
   }
 
   return <Redirect href="/(auth)/login" />;

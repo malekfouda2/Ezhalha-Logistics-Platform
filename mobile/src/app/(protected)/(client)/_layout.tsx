@@ -2,7 +2,7 @@ import { Redirect, Stack } from "expo-router";
 
 import { useCurrentUser } from "@/lib/hooks/useAuth";
 
-export default function AppLayout() {
+export default function ClientLayout() {
   const { data: user, isLoading } = useCurrentUser();
 
   if (isLoading) {
