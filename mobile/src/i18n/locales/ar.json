@@ -166,6 +166,69 @@
       "directorIdRequired": "هوية المدير مطلوبة"
     }
   },
+  "dashboard": {
+    "welcomeBack": "مرحبًا بعودتك!",
+    "pricingTier": "فئة التسعير",
+
+    "stats": {
+      "totalShipments": "إجمالي الشحنات",
+      "inTransit": "قيد الشحن",
+      "outstanding": "المستحق",
+      "invoicesDue": "فواتير مستحقة",
+      "spent30d": "الإنفاق (30 يومًا)",
+      "delivered": "تم تسليمها",
+      "increase": "زيادة"
+    },
+
+    "shipmentActivity": "نشاط الشحنات (آخر 6 أشهر)",
+
+    "recentShipments": {
+      "title": "الشحنات الأخيرة",
+      "seeAll": "عرض الكل",
+      "empty": "لا توجد شحنات بعد"
+    },
+
+    "shipmentStatus": {
+      "draft": "مسودة",
+      "pending": "قيد الانتظار",
+      "processing": "قيد المعالجة",
+      "inTransit": "قيد الشحن",
+      "outForDelivery": "خرجت للتوصيل",
+      "delivered": "تم التسليم",
+      "cancelled": "ملغاة"
+    }
+  },
+    "months": {
+    "jan": "يناير",
+    "feb": "فبراير",
+    "mar": "مارس",
+    "apr": "أبريل",
+    "may": "مايو",
+    "jun": "يونيو",
+    "jul": "يوليو",
+    "aug": "أغسطس",
+    "sep": "سبتمبر",
+    "oct": "أكتوبر",
+    "nov": "نوفمبر",
+    "dec": "ديسمبر"
+  },
+
+  "notifications": {
+    "title": "الإشعارات",
+    "markAllRead": "تحديد الكل كمقروء",
+    "marking": "جارٍ التحديد...",
+    "empty": {
+      "title": "لا توجد إشعارات",
+      "description": "أنت على اطلاع بكل شيء."
+    },
+    "time": {
+      "justNow": "الآن",
+      "minutesAgo": "منذ {{count}} دقيقة",
+      "hoursAgo": "منذ {{count}} ساعة",
+      "yesterday": "أمس",
+      "daysAgo": "منذ {{count}} أيام"
+    }
+  },
   "toast": {
     "login": {
       "successTitle": "مرحبًا بعودتك!",

@@ -8,46 +8,52 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 import { SaudiRiyal } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 
-const statusStyles: Record<
-  string,
-  { backgroundColor: string; color: string; label: string }
-> = {
-  draft: { backgroundColor: "#F1F2F4", color: "#65748B", label: "Draft" },
-  pending: { backgroundColor: "#FFF3D6", color: "#9A7410", label: "Pending" },
-  processing: {
-    backgroundColor: "#FFF3D6",
-    color: "#9A7410",
-    label: "Processing",
-  },
-  in_transit: {
-    backgroundColor: "#E4EEFF",
-    color: "#2454B8",
-    label: "In Transit",
-  },
-  out_for_delivery: {
-    backgroundColor: "#E4EEFF",
-    color: "#2454B8",
-    label: "Out for Delivery",
-  },
-  delivered: {
-    backgroundColor: "#E1F5E9",
-    color: "#16713B",
-    label: "Delivered",
-  },
-  cancelled: {
-    backgroundColor: "#FBE3E3",
-    color: "#B3261E",
-    label: "Cancelled",
-  },
-};
-
-const getStatusStyle = (status: string) =>
-  statusStyles[status] ?? {
-    backgroundColor: "#F1F2F4",
-    color: "#65748B",
-    label: status,
+const statusStyles: Record<string, { backgroundColor: string; color: string }> =
+  {
+    draft: {
+      backgroundColor: "#F1F2F4",
+      color: "#65748B",
+    },
+    pending: {
+      backgroundColor: "#FFF3D6",
+      color: "#9A7410",
+    },
+    processing: {
+      backgroundColor: "#FFF3D6",
+      color: "#9A7410",
+    },
+    in_transit: {
+      backgroundColor: "#E4EEFF",
+      color: "#2454B8",
+    },
+    out_for_delivery: {
+      backgroundColor: "#E4EEFF",
+      color: "#2454B8",
+    },
+    delivered: {
+      backgroundColor: "#E1F5E9",
+      color: "#16713B",
+    },
+    cancelled: {
+      backgroundColor: "#FBE3E3",
+      color: "#B3261E",
+    },
   };
+const getStatusLabel = (status: string, t: any) => {
+  const labels: Record<string, string> = {
+    draft: t("dashboard.shipmentStatus.draft"),
+    pending: t("dashboard.shipmentStatus.pending"),
+    processing: t("dashboard.shipmentStatus.processing"),
+    in_transit: t("dashboard.shipmentStatus.inTransit"),
+    out_for_delivery: t("dashboard.shipmentStatus.outForDelivery"),
+    delivered: t("dashboard.shipmentStatus.delivered"),
+    cancelled: t("dashboard.shipmentStatus.cancelled"),
+  };
+
+  return labels[status] ?? status;
+};
 
 type RecentShipmentsProps = {
   shipments?: Shipment[];
@@ -62,16 +68,18 @@ export const RecentShipments = ({
   onShipmentPress,
   seeAllHref = "/shipments",
 }: RecentShipmentsProps) => {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text size="large" weight="bold" style={styles.sectionTitle}>
-          Recent Shipments
+          {t("dashboard.recentShipments.title")}
         </Text>
 
         <Pressable onPress={() => router.push(seeAllHref)}>
           <Text size="small" weight="bold" style={styles.seeAll}>
-            See all
+            {t("dashboard.recentShipments.seeAll")}
           </Text>
         </Pressable>
       </View>
@@ -89,8 +97,12 @@ export const RecentShipments = ({
           </View>
         ) : (
           shipments.map((shipment, index) => {
-            const statusStyle = getStatusStyle(shipment.status);
+            const statusStyle = statusStyles[shipment.status] ?? {
+              backgroundColor: "#F1F2F4",
+              color: "#65748B",
+            };
 
+            const statusLabel = getStatusLabel(shipment.status, t);
             return (
               <Pressable
                 key={shipment.id}
@@ -129,15 +141,11 @@ export const RecentShipments = ({
 
                 <View style={styles.shipmentRight}>
                   <View style={styles.priceContainer}>
-                    <SaudiRiyal
-                      size={rs(14)}
-                      style={styles.currencyIcon}
-                    />
+                    <SaudiRiyal size={rs(14)} style={styles.currencyIcon} />
                     <Text size="small" weight="bold" style={styles.price}>
                       {shipment.finalPrice}
                     </Text>
                   </View>
-
                   <View
                     style={[
                       styles.status,
@@ -149,7 +157,7 @@ export const RecentShipments = ({
                       weight="semibold"
                       style={{ color: statusStyle.color }}
                     >
-                      {statusStyle.label}
+                      {statusLabel}
                     </Text>
                   </View>
                 </View>
@@ -229,7 +237,7 @@ const styles = StyleSheet.create({
   },
   priceContainer: {
     flexDirection: "row",
-    alignItems:"center"
+    alignItems: "center",
   },
   price: {
     color: Colors.text,

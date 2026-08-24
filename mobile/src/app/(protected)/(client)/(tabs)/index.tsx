@@ -17,8 +17,11 @@ import { StatCard } from "@/components/sections/dashboard/StatCard";
 import { RecentShipments } from "@/components/sections/dashboard/RecentShipments";
 import { ClientAccount, ClientDashboardStats, Shipment } from "@shared/schema";
 import { router } from "expo-router";
+import { LanguageSwitch } from "@/components/ui/LanguageSwitch";
+import { useTranslation } from "react-i18next";
 
 export default function ClientDashboard() {
+  const { t } = useTranslation();
   const { data: account, isLoading: accountLoading } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
   });
@@ -44,12 +47,54 @@ export default function ClientDashboard() {
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
 
+  const translateMonth = (label: string) => {
+    const monthMap: Record<string, string> = {
+      jan: t("months.jan"),
+      january: t("months.jan"),
+
+      feb: t("months.feb"),
+      february: t("months.feb"),
+
+      mar: t("months.mar"),
+      march: t("months.mar"),
+
+      apr: t("months.apr"),
+      april: t("months.apr"),
+
+      may: t("months.may"),
+
+      jun: t("months.jun"),
+      june: t("months.jun"),
+
+      jul: t("months.jul"),
+      july: t("months.jul"),
+
+      aug: t("months.aug"),
+      august: t("months.aug"),
+
+      sep: t("months.sep"),
+      september: t("months.sep"),
+
+      oct: t("months.oct"),
+      october: t("months.oct"),
+
+      nov: t("months.nov"),
+      november: t("months.nov"),
+
+      dec: t("months.dec"),
+      december: t("months.dec"),
+    };
+
+    return monthMap[label.trim().toLowerCase()] ?? label;
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
+        <LanguageSwitch />
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.userInfo}>
@@ -75,7 +120,10 @@ export default function ClientDashboard() {
             </View>
           </View>
 
-          <Pressable style={styles.notificationButton} onPress={() => router.push("/notifications")}>
+          <Pressable
+            style={styles.notificationButton}
+            onPress={() => router.push("/notifications")}
+          >
             <Ionicons
               name="notifications-outline"
               size={rs(19)}
@@ -89,12 +137,12 @@ export default function ClientDashboard() {
         {/* Welcome */}
         <View style={styles.welcomeSection}>
           <Text size="xxl" weight="bold" style={styles.welcome}>
-            Welcome back!
+            {t("dashboard.welcomeBack")}
           </Text>
 
           <View style={styles.pricingBadge}>
             <Text size="small" weight="semibold" style={styles.pricingText}>
-              Pricing tier
+              {t("dashboard.pricingTier")}
             </Text>
 
             <Text size="small" weight="bold" style={styles.vip}>
@@ -111,32 +159,36 @@ export default function ClientDashboard() {
         ) : (
           <View style={styles.statsGrid}>
             <StatCard
-              title="Total shipments"
+              title={t("dashboard.stats.totalShipments")}
               value={String(stats?.totalShipments ?? 0)}
               icon="hexagon"
-              subtitle={`▲ ${stats?.trends.shipments.value ?? 0}% ${stats?.trends.shipments.label ?? ""}`}
+              subtitle={`▲ ${stats?.trends.shipments.value ?? 0}%`}
               subtitleColor="#16713B"
             />
+
             <StatCard
-              title="In transit"
+              title={t("dashboard.stats.inTransit")}
               value={String(stats?.shipmentsInTransit ?? 0)}
               icon="truck"
-              subtitle={`${stats?.shipmentsDelivered ?? 0} delivered`}
+              subtitle={`${stats?.shipmentsDelivered ?? 0} ${t(
+                "dashboard.stats.delivered",
+              )}`}
             />
+
             <StatCard
-              title="Outstanding"
+              title={t("dashboard.stats.outstanding")}
               value={String(stats?.pendingInvoices ?? 0)}
               icon="file-text"
-              subtitle="invoices due"
+              subtitle={t("dashboard.stats.invoicesDue")}
               subtitleColor="#9A7410"
             />
 
             <StatCard
-              title="Spent (30d)"
+              title={t("dashboard.stats.spent30d")}
               value={(stats?.totalSpent ?? 0).toLocaleString(undefined, {
                 maximumFractionDigits: 2,
               })}
-              valuePrefix={true}
+              valuePrefix
               icon="trending-up"
               subtitle={`▲ ${stats?.trends.spent.value ?? 0}%`}
               subtitleColor="#16713B"
@@ -147,7 +199,7 @@ export default function ClientDashboard() {
         {/* Shipment Activity */}
         <View style={styles.section}>
           <Text size="large" weight="bold" style={styles.sectionTitle}>
-            Shipment Activity (Last 6 Months)
+            {t("dashboard.shipmentActivity")}
           </Text>
 
           <View style={styles.chartCard}>
@@ -207,7 +259,7 @@ export default function ClientDashboard() {
                               weight="semibold"
                               style={styles.month}
                             >
-                              {item.label}
+                              {translateMonth(item.label)}
                             </Text>
                           </View>
                         ),
@@ -261,7 +313,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   userText: {
-    marginLeft: rs(9),
+    marginStart: rs(9),
     flex: 1,
   },
   companyName: {
@@ -319,7 +371,7 @@ const styles = StyleSheet.create({
   },
   vip: {
     color: Colors.primary,
-    marginLeft: rs(6),
+    marginStart: rs(6),
   },
   statsGrid: {
     flexDirection: "row",

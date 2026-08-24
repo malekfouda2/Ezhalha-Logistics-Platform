@@ -16,6 +16,7 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { apiRequest } from "@/lib/queryClient";
+import { useTranslation } from "react-i18next";
 
 interface AppNotification {
   id: string;
@@ -100,41 +101,49 @@ const DEFAULT_NOTIFICATION_CONFIG = {
   iconColor: Colors.textSecondary,
 };
 
-const formatNotificationTime = (dateString: string) => {
+const formatNotificationTime = (
+  dateString: string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) => {
   const date = new Date(dateString);
   const now = new Date();
 
   const diffMs = now.getTime() - date.getTime();
 
-  // Prevent negative values for future dates
   if (diffMs < 0) {
-    return "Just now";
+    return t("notifications.time.justNow");
   }
 
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
 
   if (diffMinutes < 1) {
-    return "Just now";
+    return t("notifications.time.justNow");
   }
 
   if (diffMinutes < 60) {
-    return `${diffMinutes} min ago`;
+    return t("notifications.time.minutesAgo", {
+      count: diffMinutes,
+    });
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
 
   if (diffHours < 24) {
-    return `${diffHours} h ago`;
+    return t("notifications.time.hoursAgo", {
+      count: diffHours,
+    });
   }
 
   const diffDays = Math.floor(diffHours / 24);
 
   if (diffDays === 1) {
-    return "Yesterday";
+    return t("notifications.time.yesterday");
   }
 
   if (diffDays < 7) {
-    return `${diffDays} days ago`;
+    return t("notifications.time.daysAgo", {
+      count: diffDays,
+    });
   }
 
   return date.toLocaleDateString();
@@ -142,10 +151,7 @@ const formatNotificationTime = (dateString: string) => {
 
 export default function NotificationsScreen() {
   const queryClient = useQueryClient();
-
-  /*
-   * Fetch notifications
-   */
+  const { t } = useTranslation();
   const {
     data: notifications = [],
     isLoading,
@@ -317,7 +323,7 @@ export default function NotificationsScreen() {
           </Text>
 
           <Text size="small" dimRate="55%" style={styles.time}>
-            {formatNotificationTime(item.createdAt)}
+            {formatNotificationTime(item.createdAt, t)}
           </Text>
         </View>
 
@@ -333,7 +339,7 @@ export default function NotificationsScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text size="xxl" weight="bold">
-            Notifications
+            {t("notifications.title")}
           </Text>
 
           <Pressable
@@ -349,7 +355,9 @@ export default function NotificationsScreen() {
                 unreadCount === 0 && styles.markAllDisabled,
               ]}
             >
-              {markAllReadMutation.isPending ? "Marking..." : "Mark all read"}
+              {markAllReadMutation.isPending
+                ? t("notifications.marking")
+                : t("notifications.markAllRead")}{" "}
             </Text>
           </Pressable>
         </View>
@@ -376,13 +384,12 @@ export default function NotificationsScreen() {
                       color={Colors.textSecondary}
                     />
                   </View>
-
                   <Text
                     size="medium"
                     weight="semibold"
                     style={styles.emptyTitle}
                   >
-                    No notifications
+                    {t("notifications.empty.title")}
                   </Text>
 
                   <Text
@@ -390,7 +397,7 @@ export default function NotificationsScreen() {
                     dimRate="55%"
                     style={styles.emptyDescription}
                   >
-                    You're all caught up.
+                    {t("notifications.empty.description")}
                   </Text>
                 </View>
               }
@@ -436,6 +443,7 @@ const styles = StyleSheet.create({
     flex: 1,
 
     marginHorizontal: rs(25),
+    marginBottom: rs(25),
 
     borderRadius: rs(24),
 
