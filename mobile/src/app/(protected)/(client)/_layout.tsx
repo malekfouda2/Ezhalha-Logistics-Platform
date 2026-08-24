@@ -21,7 +21,7 @@ export default function ClientLayout() {
       <Stack.Screen
         name="shipment/[id]"
         options={{
-          headerShown: true,
+          headerShown: false,
           title: "Shipment Details",
         }}
       />
@@ -29,7 +29,7 @@ export default function ClientLayout() {
       <Stack.Screen
         name="invoice/[id]"
         options={{
-          headerShown: true,
+          headerShown: false,
           title: "Invoice",
         }}
       />
@@ -37,7 +37,7 @@ export default function ClientLayout() {
       <Stack.Screen
         name="notifications"
         options={{
-          headerShown: true,
+          headerShown: false,
           title: "Notifications",
         }}
       />
@@ -45,7 +45,7 @@ export default function ClientLayout() {
       <Stack.Screen
         name="edit-profile"
         options={{
-          headerShown: true,
+          headerShown: false,
           title: "Edit Profile",
         }}
       />
@@ -54,7 +54,7 @@ export default function ClientLayout() {
         name="add-shipment"
         options={{
           presentation: "modal",
-          headerShown: true,
+          headerShown: false,
           title: "New Shipment",
         }}
       />

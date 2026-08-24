@@ -1,27 +1,46 @@
 import { Tabs, router } from "expo-router";
 import { View, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { rs, rvs } from "@/utils/responsive";
-import { Colors } from "@/constants/colors";
+import { Feather, Ionicons, Octicons } from "@expo/vector-icons";
 
-function AddButton() {
+import { Colors } from "@/constants/colors";
+import { rs, rvs } from "@/utils/responsive";
+
+function CreateShipmentButton() {
   return (
-    <View style={styles.fab}>
-      <Ionicons name="add" size={28} color="#fff" />
+    <View style={styles.addButtonContainer}>
+      <View style={styles.fab}>
+        <Ionicons name="add" size={32} color={Colors.white} />
+      </View>
     </View>
   );
 }
 
-export default function TabsLayout() {
+export default function ClientTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+
         tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.secondary,
+        tabBarInactiveTintColor: "#94A3B8",
+
+        tabBarLabelStyle: {
+          fontFamily: "Inter-SemiBold",
+          fontSize: rs(11),
+          marginBottom: rvs(4),
+        },
         tabBarStyle: {
-          height: 88,
-          paddingTop: 8,
+          height: rvs(70),
+          paddingTop: rvs(6),
+          paddingBottom: rvs(6),
+          backgroundColor: Colors.white,
+          borderTopWidth: 1,
+          borderTopColor: "#ECEEF1",
+          elevation: 10,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 8,
         },
       }}
     >
@@ -29,8 +48,9 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+
+          tabBarIcon: ({ color, size, focused }) => (
+            <Feather name={"home"} size={rs(size)} color={color} />
           ),
         }}
       />
@@ -39,23 +59,18 @@ export default function TabsLayout() {
         name="shipments"
         options={{
           title: "Shipments",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube-outline" size={size} color={color} />
+
+          tabBarIcon: ({ color, size, focused }) => (
+            <Feather name={"hexagon"} size={rs(size)} color={color} />
           ),
         }}
       />
 
       <Tabs.Screen
-        name="add"
+        name="createShipment"
         options={{
           title: "",
-          tabBarIcon: () => <AddButton />,
-        }}
-        listeners={{
-          tabPress: (e) => {
-            e.preventDefault();
-            router.push("/(app)/add-shipment");
-          },
+          tabBarIcon: () => <CreateShipmentButton />,
         }}
       />
 
@@ -63,12 +78,9 @@ export default function TabsLayout() {
         name="invoices"
         options={{
           title: "Invoices",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons
-              name="document-text-outline"
-              size={size}
-              color={color}
-            />
+
+          tabBarIcon: ({ color, size, focused }) => (
+            <Feather name={"file-text"} size={rs(size)} color={color} />
           ),
         }}
       />
@@ -77,8 +89,9 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" size={size} color={color} />
+
+          tabBarIcon: ({ color, size, focused }) => (
+            <Octicons name={"person"} size={rs(size)} color={color} />
           ),
         }}
       />
@@ -87,23 +100,34 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  fab: {
-    width: rs(56),
-    height: rvs(56),
-    borderRadius: rs(16),
-    backgroundColor: Colors.primaryDark,
+  addButtonContainer: {
+    width: rs(72),
+    height: rvs(64),
+
     justifyContent: "center",
     alignItems: "center",
+
     marginTop: rvs(-20),
+  },
+
+  fab: {
+    width: rs(48),
+    height: rs(48),
+    borderRadius: rs(15),
+
+    backgroundColor: Colors.primary,
+
+    alignItems: "center",
+    justifyContent: "center",
 
     shadowColor: Colors.primary,
-    shadowOpacity: 0.4,
-    shadowRadius: rs(8),
     shadowOffset: {
       width: 0,
-      height: rvs(4),
+      height: rvs(8),
     },
+    shadowOpacity: 0.35,
+    shadowRadius: rs(12),
 
-    elevation: 5,
+    elevation: 8,
   },
 });
