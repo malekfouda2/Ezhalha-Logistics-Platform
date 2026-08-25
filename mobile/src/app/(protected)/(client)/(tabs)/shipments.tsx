@@ -79,7 +79,9 @@ export default function ShipmentsScreen() {
       list = list.filter(
         (s) =>
           s.trackingNumber.toLowerCase().includes(q) ||
-          s.recipientName.toLowerCase().includes(q),
+          s.recipientName.toLowerCase().includes(q) ||
+          s.recipientCity.toLowerCase().includes(q) ||
+          s.senderName.toLowerCase().includes(q),
       );
     }
 
