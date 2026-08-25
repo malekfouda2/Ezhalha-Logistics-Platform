@@ -58,14 +58,12 @@ const getStatusLabel = (status: string, t: any) => {
 type RecentShipmentsProps = {
   shipments?: Shipment[];
   isLoading?: boolean;
-  onShipmentPress?: (shipment: Shipment) => void;
   seeAllHref?: string;
 };
 
 export const RecentShipments = ({
   shipments,
   isLoading,
-  onShipmentPress,
   seeAllHref = "/shipments",
 }: RecentShipmentsProps) => {
   const { t } = useTranslation();
@@ -106,7 +104,7 @@ export const RecentShipments = ({
             return (
               <Pressable
                 key={shipment.id}
-                onPress={() => onShipmentPress?.(shipment)}
+                onPress={() => router.push(`/shipments/${shipment.id}` as any)}
                 style={[
                   styles.shipmentRow,
                   index !== shipments.length - 1 && styles.shipmentBorder,

@@ -53,9 +53,9 @@ export const BackButton = ({
 
 const styles = StyleSheet.create({
   button: {
-    width: rs(44),
-    height: rs(44),
-    borderRadius: rs(14),
+    width: rs(40),
+    height: rs(40),
+    borderRadius: rs(12),
     backgroundColor: Colors.white,
     alignItems: "center",
     justifyContent: "center",

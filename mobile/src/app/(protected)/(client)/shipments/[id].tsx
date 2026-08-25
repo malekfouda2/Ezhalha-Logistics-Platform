@@ -1,0 +1,623 @@
+// app/shipments/[id].tsx
+
+import { useState } from "react";
+import {
+  View,
+  ScrollView,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  Linking,
+} from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Ionicons, Feather } from "@expo/vector-icons";
+import { SaudiRiyal } from "lucide-react-native";
+
+import { Text } from "@/components/ui/Text";
+import { Button } from "@/components/ui/Button";
+import { Colors, setOpacity } from "@/constants/colors";
+import { rs, rvs } from "@/utils/responsive";
+import { Shipment } from "@shared/schema";
+import { BackButton } from "@/components/ui/BackButton";
+import { API_BASE_URL, apiRequest } from "@/api/client";
+import { CancelShipmentModal } from "@/components/sections/shipments/CancelShipmentModal";
+import Toast from "react-native-toast-message";
+import { LinearGradient } from "expo-linear-gradient";
+
+function getStatusMeta(status: string): {
+  label: string;
+  bg: string;
+  color: string;
+} {
+  const s = status.toLowerCase();
+  if (s === "delivered") {
+    return { label: "Delivered", bg: "#DCFCE7", color: "#15803D" };
+  }
+  if (["on_hold", "returned", "carrier_error"].includes(s)) {
+    return { label: "Attention", bg: "#FEE2E2", color: "#B91C1C" };
+  }
+  if (["draft", "payment_pending", "created", "processing"].includes(s)) {
+    return { label: "Processing", bg: "#FEF3C7", color: "#92400E" };
+  }
+  return { label: "In Transit", bg: "#DBEAFE", color: "#1D4ED8" };
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
+  const day = d.getDate();
+  const month = d.toLocaleDateString("en-US", { month: "short" });
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${weekday}, ${day} ${month} · ${time}`;
+}
+
+function formatPickupWindow(shipment: Shipment): string {
+  if (!shipment.pickupDate) return "—";
+  const d = new Date(shipment.pickupDate);
+  const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
+  const day = d.getDate();
+  const month = d.toLocaleDateString("en-US", { month: "short" });
+  const ready = shipment.pickupReadyTime ?? "";
+  const close = shipment.pickupCloseTime ?? "";
+  const window = ready && close ? `${ready}–${close}` : ready || close;
+  return window
+    ? `${weekday} ${day} ${month} · ${window}`
+    : `${weekday} ${day} ${month}`;
+}
+
+export default function ShipmentDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const [cancelling, setCancelling] = useState(false);
+
+  const {
+    data: shipment,
+    isLoading,
+    isError,
+  } = useQuery<Shipment>({
+    queryKey: [`/api/client/shipments/${id}`],
+    enabled: !!id,
+  });
+
+  const queryClient = useQueryClient();
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+
+  const cancelMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      return apiRequest<{ refundRequest?: boolean }>(
+        `/api/client/shipments/${shipmentId}/cancel`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/client/shipments/recent"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
+      setCancelModalVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Shipment Cancelled",
+        text2: data?.refundRequest
+          ? "Your shipment was cancelled and a refund request was submitted for approval."
+          : "Your shipment has been cancelled successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: error.message,
+      });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <View style={styles.centerScreen}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+      </View>
+    );
+  }
+
+  if (isError || !shipment) {
+    return (
+      <View style={styles.centerScreen}>
+        <Text size="medium" dimRate="60%">
+          Couldn't load this shipment.
+        </Text>
+      </View>
+    );
+  }
+
+  const statusMeta = getStatusMeta(shipment.status);
+  const packagesCount = shipment.numberOfPackages ?? 1;
+  const weightDisplay = shipment.chargeableWeight
+    ? `${shipment.chargeableWeight} ${shipment.chargeableWeightUnit ?? "KG"}`
+    : `${shipment.weight} ${shipment.weightUnit ?? "LB"}`;
+
+  const handleDownload = (url?: string | null) => {
+    if (url) Linking.openURL(url);
+  };
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.headerRow}>
+          <BackButton />
+
+          <View style={styles.headerTitleBlock}>
+            <Text size="medium" weight="bold">
+              {shipment.trackingNumber}
+            </Text>
+            <Text size="small" weight="semibold" dimRate="60%">
+              {shipment.carrierName ?? "Carrier"}
+              {shipment.carrierServiceType
+                ? ` ${shipment.carrierServiceType}`
+                : ""}
+            </Text>
+          </View>
+
+          <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
+            <Text
+              size="xs"
+              weight="semibold"
+              style={{ color: statusMeta.color }}
+            >
+              {statusMeta.label}
+            </Text>
+          </View>
+        </View>
+
+        {/* Estimated delivery banner */}
+        <LinearGradient
+          colors={[Colors.primaryDark, Colors.primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.deliveryBanner}
+        >
+          <View style={{ flex: 1 }}>
+            <Text size="small" style={styles.deliveryLabel}>
+              Estimated delivery
+            </Text>
+            <Text size="large" weight="bold" style={styles.deliveryValue}>
+              {formatDate(shipment.estimatedDelivery as any)}
+            </Text>
+          </View>
+          <Feather name="truck" size={rs(30)} color={Colors.white} />
+        </LinearGradient>
+
+        {/* Documents */}
+        {(shipment.carrierLabelBase64 || shipment.itemsData) && (
+          <>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              style={styles.sectionLabel}
+            >
+              DOCUMENTS
+            </Text>
+            <View style={styles.card}>
+              {shipment.carrierLabelBase64 && (
+                <>
+                  <View style={styles.docRow}>
+                    <View style={styles.docIconWrap}>
+                      <Feather
+                        name="file-text"
+                        size={rs(18)}
+                        color={Colors.primary}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text size="small" weight="bold">
+                        Shipping label
+                      </Text>
+                      <Text size="xs" dimRate="55%">
+                        {(shipment.carrierLabelFormat ?? "PDF").toUpperCase()}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() =>
+                        handleDownload(
+                          `${API_BASE_URL}/api/client/shipments/${shipment.id}/label.pdf`,
+                        )
+                      }
+                      hitSlop={8}
+                    >
+                      <Text
+                        size="small"
+                        weight="bold"
+                        style={{ color: Colors.primary }}
+                      >
+                        Download
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {shipment.itemsData && <View style={styles.rowDivider} />}
+                </>
+              )}
+
+              {shipment.itemsData && (
+                <View style={styles.docRow}>
+                  <View style={styles.docIconWrap}>
+                    <Feather
+                      name="file-text"
+                      size={rs(18)}
+                      color={Colors.primary}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text size="small" weight="bold">
+                      Commercial invoice
+                    </Text>
+                    <Text size="xs" dimRate="55%">
+                      PDF
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() =>
+                      handleDownload(
+                        `${API_BASE_URL}/api/client/shipments/${shipment.id}/commercial-invoice.pdf`,
+                      )
+                    }
+                    hitSlop={8}
+                  >
+                    <Text
+                      size="small"
+                      weight="bold"
+                      style={{ color: Colors.primary }}
+                    >
+                      Download
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {/* From / To */}
+        <View style={styles.addressSection}>
+          {/* From */}
+          <View>
+            <View style={styles.addressHeader}>
+              <Ionicons
+                name="location-outline"
+                size={rs(15)}
+                color={Colors.textSecondary}
+              />
+              <Text size="small" weight="semibold" dimRate="55%">
+                FROM
+              </Text>
+            </View>
+            <View style={styles.addressCard}>
+              <Text size="small" weight="bold" style={styles.addressName}>
+                {shipment.senderName}
+              </Text>
+
+              <Text size="small" dimRate="60%">
+                {shipment.senderAddress}
+              </Text>
+
+              <Text size="small" dimRate="60%">
+                {shipment.senderCity}, {shipment.senderCountry}
+              </Text>
+
+              {shipment.senderPhone && (
+                <Text size="small" dimRate="60%">
+                  {shipment.senderPhone}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* To */}
+          <View>
+            <View style={styles.addressHeader}>
+              <Ionicons
+                name="location-outline"
+                size={rs(15)}
+                color={Colors.primary}
+              />
+              <Text size="small" weight="semibold" dimRate="55%">
+                TO
+              </Text>
+            </View>
+            <View style={styles.addressCard}>
+              <Text size="small" weight="bold" style={styles.addressName}>
+                {shipment.recipientName}
+              </Text>
+
+              <Text size="small" dimRate="60%">
+                {shipment.recipientAddress}
+              </Text>
+
+              <Text size="small" dimRate="60%">
+                {shipment.recipientCity}, {shipment.recipientCountry}
+              </Text>
+
+              {shipment.recipientPhone && (
+                <Text size="small" dimRate="60%">
+                  {shipment.recipientPhone}
+                </Text>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* Details */}
+        <Text
+          size="xs"
+          weight="semibold"
+          dimRate="55%"
+          style={styles.sectionLabel}
+        >
+          DETAILS
+        </Text>
+        <View style={styles.card}>
+          <DetailRow
+            label="Carrier tracking"
+            value={shipment.carrierTrackingNumber ?? "—"}
+          />
+          <View style={styles.rowDivider} />
+          <DetailRow
+            label="Packages"
+            value={`${packagesCount} · ${weightDisplay}`}
+          />
+          <View style={styles.rowDivider} />
+          <DetailRow label="Pickup" value={formatPickupWindow(shipment)} />
+          <View style={styles.rowDivider} />
+          <View style={styles.detailRow}>
+            <Text size="small" dimRate="65%">
+              Paid
+            </Text>
+            <View style={styles.paidValueRow}>
+              <SaudiRiyal
+                size={rs(14)}
+                color={Colors.text}
+                style={{ marginRight: rs(3) }}
+              />
+              <Text size="medium" weight="bold">
+                {shipment.finalPrice}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Need something changed */}
+        {shipment.status.toLowerCase() === "processing" ? (
+          <>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              style={styles.sectionLabel}
+            >
+              NEED SOMETHING CHANGED?
+            </Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.cancelCard,
+                pressed && { opacity: 0.9 },
+              ]}
+              onPress={() => setCancelModalVisible(true)}
+              disabled={cancelling}
+            >
+              <View style={styles.cancelIconWrap}>
+                <Ionicons name="close" size={rs(18)} color={Colors.error} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text size="small" weight="bold">
+                  Cancel shipment
+                </Text>
+                <Text size="xs" dimRate="55%">
+                  Refunded if not yet collected
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={rs(18)}
+                color={Colors.placeholder}
+              />
+            </Pressable>
+          </>
+        ) : null}
+
+        <View style={{ height: rvs(90) }} />
+      </ScrollView>
+
+      {/* Track live button */}
+      <View style={styles.footer}>
+        <Button title="Track live" onPress={() => {}} />
+      </View>
+      <CancelShipmentModal
+        visible={cancelModalVisible}
+        shipment={shipment}
+        isPending={cancelMutation.isPending}
+        onConfirm={() => cancelMutation.mutate(shipment.id)}
+        onClose={() => setCancelModalVisible(false)}
+      />
+    </View>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text size="small" dimRate="65%">
+        {label}
+      </Text>
+      <Text size="medium" weight="bold">
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+
+  centerScreen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.background,
+  },
+
+  scrollContent: {
+    paddingHorizontal: rs(16),
+    paddingTop: rvs(16),
+  },
+
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: rvs(16),
+  },
+
+  backButton: {
+    width: rs(38),
+    height: rs(38),
+    borderRadius: rs(12),
+    backgroundColor: Colors.white,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: rs(10),
+  },
+
+  headerTitleBlock: {
+    flex: 1,
+    paddingStart: rs(10),
+  },
+
+  statusPill: {
+    paddingHorizontal: rs(10),
+    paddingVertical: rvs(5),
+    borderRadius: rs(10),
+  },
+
+  deliveryBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.primary,
+    borderRadius: rs(20),
+    padding: rs(16),
+    marginBottom: rvs(20),
+  },
+
+  deliveryLabel: {
+    color: setOpacity(Colors.white, 0.85),
+    marginBottom: rvs(4),
+  },
+
+  deliveryValue: {
+    color: Colors.white,
+  },
+
+  sectionLabel: {
+    marginBottom: rvs(8),
+    letterSpacing: 0.5,
+  },
+  addressSection: {
+    gap: rvs(12),
+    marginBottom: rvs(20),
+  },
+
+  addressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: rs(6),
+    marginBottom: rvs(10),
+  },
+  addressCard: {
+    backgroundColor: Colors.white,
+    borderRadius: rs(14),
+    padding: rs(14),
+    // marginBottom: rvs(10)
+  },
+  addressName: {
+    marginBottom: rvs(2),
+  },
+  card: {
+    backgroundColor: Colors.white,
+    borderRadius: rs(14),
+    paddingHorizontal: rs(14),
+    marginBottom: rvs(10),
+  },
+
+  docRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: rvs(12),
+    gap: rs(10),
+  },
+
+  docIconWrap: {
+    width: rs(36),
+    height: rs(36),
+    borderRadius: rs(10),
+    backgroundColor: setOpacity(Colors.primary, 0.12),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  rowDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: rvs(12),
+  },
+
+  paidValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  cancelCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.white,
+    borderRadius: rs(14),
+    padding: rs(14),
+    gap: rs(10),
+  },
+
+  cancelIconWrap: {
+    width: rs(36),
+    height: rs(36),
+    borderRadius: rs(10),
+    backgroundColor: Colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: rs(16),
+    paddingTop: rvs(10),
+    paddingBottom: rvs(20),
+    backgroundColor: Colors.background,
+  },
+});

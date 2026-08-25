@@ -18,6 +18,8 @@ import { rs, rvs } from "@/utils/responsive";
 export interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
+  leftElement?: React.ReactNode;
+  onLeftElementPress?: () => void;
   rightElement?: React.ReactNode;
   onRightElementPress?: () => void;
 }
@@ -27,6 +29,8 @@ export const Input = forwardRef<TextInput, InputProps>(
     const {
       label,
       error,
+      leftElement,
+      onLeftElementPress,
       rightElement,
       onRightElementPress,
       style,
@@ -58,6 +62,18 @@ export const Input = forwardRef<TextInput, InputProps>(
             error && styles.inputWrapperError,
           ]}
         >
+          {/* Left Element */}
+          {leftElement ? (
+            <Pressable
+              onPress={onLeftElementPress}
+              hitSlop={10}
+              disabled={!onLeftElementPress}
+              style={styles.leftElement}
+            >
+              {leftElement}
+            </Pressable>
+          ) : null}
+
           <TextInput
             ref={ref}
             {...otherProps}
@@ -84,6 +100,7 @@ export const Input = forwardRef<TextInput, InputProps>(
             <Pressable
               onPress={onRightElementPress}
               hitSlop={10}
+              disabled={!onRightElementPress}
               style={styles.rightElement}
             >
               {rightElement}
@@ -150,12 +167,13 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
 
+  leftElement: {
+    paddingVertical: rs(8),
+    marginEnd: rs(5),
+  },
+
   rightElement: {
     paddingVertical: rs(8),
-
-    // Automatically:
-    // LTR -> margin-left
-    // RTL -> margin-right
     marginStart: rs(8),
   },
 

@@ -19,7 +19,7 @@ export default function ClientLayout() {
       <Stack.Screen name="(tabs)" />
       
       <Stack.Screen
-        name="shipment/[id]"
+        name="shipments/[id]"
         options={{
           headerShown: false,
           title: "Shipment Details",
