@@ -38,5 +38,7 @@ export async function fetchShipmentTracking(
   const res = api.get<ShipmentTrackingResponse>(
     `/api/client/shipments/${id}/track`,
   );
+  console.log({res});
+  
   return res;
 }

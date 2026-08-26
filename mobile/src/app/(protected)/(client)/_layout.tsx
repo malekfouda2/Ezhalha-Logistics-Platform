@@ -35,6 +35,14 @@ export default function ClientLayout() {
       />
 
       <Stack.Screen
+        name="shipments/[id]/quotation"
+        options={{
+          headerShown: false,
+          title: "Quotation",
+        }}
+      />
+
+      <Stack.Screen
         name="notifications"
         options={{
           headerShown: false,

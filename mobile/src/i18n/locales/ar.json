@@ -282,9 +282,54 @@
         "delivered": "تم التسليم"
       }
     },
+    "quotation": {
+      "details": {
+        "title": "عرض السعر {{number}}",
+        "preparedBy": "تم إعداده من قبل مدير حسابك",
+        "shipmentDetails": "تفاصيل الشحنة",
+        "route": "المسار",
+        "service": "الخدمة",
+        "packages": "الطرود",
+        "ready": "جاهز في",
+        "customsAndDocuments": "الجمارك والمستندات",
+        "commercialInvoice": "الفاتورة التجارية",
+        "attached": "مرفقة",
+        "download": "تنزيل",
+        "customsDeclaration": "الإقرار الجمركي",
+        "items": "الأصناف",
+        "units_one": "{{count}} وحدة",
+        "units_other": "{{count}} وحدة",
+        "declaredValue": "القيمة المصرح بها",
+        "incoterm": "شرط التسليم",
+        "price": "السعر",
+        "shipping": "الشحن",
+        "discount": "الخصم",
+        "vat": "ضريبة القيمة المضافة ({{rate}}%)",
+        "total": "الإجمالي",
+        "acceptQuotation": "قبول عرض السعر",
+        "errors": {
+          "loadFailed": "تعذر تحميل تفاصيل عرض السعر.",
+          "acceptFailedTitle": "تعذر قبول عرض السعر"
+        }
+      },
+      "accept": {
+        "title": "قبول الشروط",
+        "description": "بقبولك فإنك تؤكد القيمة المصرح بها وتوافق على شروط الشحن.",
+        "total": "الإجمالي",
+        "acceptTerms": "أوافق على الشروط والأحكام",
+        "confirm": "قبول ومتابعة"
+      },
+      "accepted": {
+        "title": "تم قبول عرض السعر",
+        "subtitle": "جاري إنشاء شحنتك من عرض السعر هذا.",
+        "quotation": "عرض السعر",
+        "continueToPayment": "متابعة إلى الدفع"
+      }
+    },
     "title": "الشحنات",
     "subtitle": "تتبّع جميع شحناتك",
     "searchPlaceholder": "ابحث برقم الشحنة أو اسم المستلم...",
+    "quotationBadge": "عرض السعر",
 
     "filters": {
       "all": "الكل",
@@ -354,6 +399,7 @@
       "keep": "الاحتفاظ بها"
     }
   },
+
   "datePicker": {
     "placeholder": "يوم/شهر/سنة",
     "today": "اليوم",

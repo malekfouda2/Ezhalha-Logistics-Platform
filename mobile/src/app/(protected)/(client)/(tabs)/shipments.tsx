@@ -300,12 +300,20 @@ export default function ShipmentsScreen() {
           activeFilter === "attention" ? (
             <AttentionShipmentCard
               shipment={item}
-              onPress={() => router.push(`/shipments/${item.id}` as any)}
+              onPress={() =>
+                item.isQuote
+                  ? router.push(`/shipments/${item.id}/quotation`)
+                  : router.push(`/shipments/${item.id}`)
+              }
             />
           ) : (
             <ShipmentCard
               shipment={item}
-              onPress={() => router.push(`/shipments/${item.id}` as any)}
+              onPress={() =>
+                item.isQuote
+                  ? router.push(`/shipments/${item.id}/quotation`)
+                  : router.push(`/shipments/${item.id}`)
+              }
             />
           )
         }

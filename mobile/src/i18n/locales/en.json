@@ -281,9 +281,54 @@
         "delivered": "Delivered"
       }
     },
+    "quotation": {
+      "details": {
+        "title": "Quotation {{number}}",
+        "preparedBy": "Prepared by your account manager",
+        "shipmentDetails": "Shipment Details",
+        "route": "Route",
+        "service": "Service",
+        "packages": "Packages",
+        "ready": "Ready",
+        "customsAndDocuments": "Customs & Documents",
+        "commercialInvoice": "Commercial invoice",
+        "attached": "Attached",
+        "download": "Download",
+        "customsDeclaration": "Customs Declaration",
+        "items": "Items",
+        "units_one": "{{count}} unit",
+        "units_other": "{{count}} units",
+        "declaredValue": "Declared value",
+        "incoterm": "Incoterm",
+        "price": "Price",
+        "shipping": "Shipping",
+        "discount": "Discount",
+        "vat": "VAT ({{rate}}%)",
+        "total": "Total",
+        "acceptQuotation": "Accept quotation",
+        "errors": {
+          "loadFailed": "Failed to load quotation details.",
+          "acceptFailedTitle": "Couldn't accept quotation"
+        }
+      },
+      "accept": {
+        "title": "Accept the terms",
+        "description": "By accepting you confirm the declared value and agree to the shipping terms.",
+        "total": "Total",
+        "acceptTerms": "I accept the terms & conditions",
+        "confirm": "Accept and continue"
+      },
+      "accepted": {
+        "title": "Quotation accepted",
+        "subtitle": "Your shipment is being created from this quotation.",
+        "quotation": "Quotation",
+        "continueToPayment": "Continue to payment"
+      }
+    },
     "title": "Shipments",
     "subtitle": "Track all your shipments",
     "searchPlaceholder": "Search by ID or recipient...",
+    "quotationBadge": "Quotation",
     "filters": {
       "all": "All",
       "processing": "Processing",
@@ -352,6 +397,7 @@
       "keep": "Keep it"
     }
   },
+
   "datePicker": {
     "placeholder": "dd/mm/yyyy",
     "today": "Today",

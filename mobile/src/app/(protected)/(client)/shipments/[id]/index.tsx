@@ -16,12 +16,13 @@ import { SaudiRiyal } from "lucide-react-native";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
+import { SectionLabel, InfoCard, InfoRow } from "@/components/ui/InfoCard";
 import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 import { BackButton } from "@/components/ui/BackButton";
 import { API_BASE_URL, apiRequest } from "@/api/client";
-import { CancelShipmentModal } from "@/components/sections/shipments/CancelShipmentModal";
+import { CancelShipmentModal } from "@/components/sections/shipments/details/CancelShipmentModal";
 import Toast from "react-native-toast-message";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTranslation } from "react-i18next";
@@ -222,18 +223,12 @@ export default function ShipmentDetailScreen() {
           <Feather name="truck" size={rs(30)} color={Colors.white} />
         </LinearGradient>
 
+        {/* Documents */}
         {(shipment.carrierLabelBase64 || shipment.itemsData) && (
           <>
-            <Text
-              size="xs"
-              weight="semibold"
-              dimRate="55%"
-              style={styles.sectionLabel}
-            >
-              {t("shipments.details.documents")}
-            </Text>
+            <SectionLabel>{t("shipments.details.documents")}</SectionLabel>
 
-            <View style={styles.card}>
+            <View style={styles.docCard}>
               {shipment.carrierLabelBase64 && (
                 <>
                   <View style={styles.docRow}>
@@ -392,66 +387,39 @@ export default function ShipmentDetailScreen() {
         </View>
 
         {/* Details */}
-        <Text
-          size="xs"
-          weight="semibold"
-          dimRate="55%"
-          style={styles.sectionLabel}
-        >
-          {t("shipments.details.details")}
-        </Text>
-        <View style={styles.card}>
-          <DetailRow
+        <SectionLabel>{t("shipments.details.details")}</SectionLabel>
+        <InfoCard>
+          <InfoRow
             label={t("shipments.details.carrierTracking")}
             value={shipment.carrierTrackingNumber ?? "—"}
           />
-
-          <View style={styles.rowDivider} />
-
-          <DetailRow
+          <InfoRow
             label={t("shipments.details.packages")}
             value={`${packagesCount} · ${weightDisplay}`}
           />
-
-          <View style={styles.rowDivider} />
-
-          <DetailRow
+          <InfoRow
             label={t("shipments.details.pickup")}
             value={formatPickupWindow(shipment)}
           />
-
-          <View style={styles.rowDivider} />
-
-          <View style={styles.detailRow}>
-            <Text size="small" dimRate="65%">
-              {t("shipments.details.paid")}
-            </Text>
-
-            <View style={styles.paidValueRow}>
+          <InfoRow
+            label={t("shipments.details.paid")}
+            value={shipment.finalPrice}
+            icon={
               <SaudiRiyal
                 size={rs(14)}
                 color={Colors.text}
-                style={{ marginRight: rs(3) }}
+                style={styles.riyalIcon}
               />
-
-              <Text size="medium" weight="bold">
-                {shipment.finalPrice}
-              </Text>
-            </View>
-          </View>
-        </View>
+            }
+          />
+        </InfoCard>
 
         {/* Need something changed */}
         {shipment.status.toLowerCase() === "processing" ? (
           <>
-            <Text
-              size="xs"
-              weight="semibold"
-              dimRate="55%"
-              style={styles.sectionLabel}
-            >
+            <SectionLabel>
               {t("shipments.details.needSomethingChanged")}
-            </Text>
+            </SectionLabel>
 
             <Pressable
               style={({ pressed }) => [
@@ -489,7 +457,12 @@ export default function ShipmentDetailScreen() {
 
       {/* Track live button */}
       <View style={styles.footer}>
-        <Button title={t("shipments.details.trackLive")} onPress={() => {router.push(`/shipments/${id}/tracking`);}} />
+        <Button
+          title={t("shipments.details.trackLive")}
+          onPress={() => {
+            router.push(`/shipments/${id}/tracking`);
+          }}
+        />
       </View>
       <CancelShipmentModal
         visible={cancelModalVisible}
@@ -498,19 +471,6 @@ export default function ShipmentDetailScreen() {
         onConfirm={() => cancelMutation.mutate(shipment.id)}
         onClose={() => setCancelModalVisible(false)}
       />
-    </View>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.detailRow}>
-      <Text size="small" dimRate="65%">
-        {label}
-      </Text>
-      <Text size="medium" weight="bold">
-        {value}
-      </Text>
     </View>
   );
 }
@@ -537,16 +497,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: rvs(16),
-  },
-
-  backButton: {
-    width: rs(38),
-    height: rs(38),
-    borderRadius: rs(12),
-    backgroundColor: Colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: rs(10),
   },
 
   headerTitleBlock: {
@@ -578,35 +528,11 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
 
-  sectionLabel: {
-    marginBottom: rvs(8),
-    letterSpacing: 0.5,
-  },
-  addressSection: {
-    gap: rvs(12),
-    marginBottom: rvs(20),
-  },
-
-  addressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: rs(6),
-    marginBottom: rvs(10),
-  },
-  addressCard: {
-    backgroundColor: Colors.white,
-    borderRadius: rs(14),
-    padding: rs(14),
-    // marginBottom: rvs(10)
-  },
-  addressName: {
-    marginBottom: rvs(2),
-  },
-  card: {
+  docCard: {
     backgroundColor: Colors.white,
     borderRadius: rs(14),
     paddingHorizontal: rs(14),
-    marginBottom: rvs(10),
+    marginBottom: rvs(20),
   },
 
   docRow: {
@@ -630,16 +556,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
 
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: rvs(12),
+  riyalIcon: {
+    marginRight: rs(3),
   },
 
-  paidValueRow: {
+  addressSection: {
+    gap: rvs(12),
+    marginBottom: rvs(20),
+  },
+
+  addressHeader: {
     flexDirection: "row",
     alignItems: "center",
+    gap: rs(6),
+    marginBottom: rvs(10),
+  },
+  addressCard: {
+    backgroundColor: Colors.white,
+    borderRadius: rs(14),
+    padding: rs(14),
+  },
+  addressName: {
+    marginBottom: rvs(2),
   },
 
   cancelCard: {

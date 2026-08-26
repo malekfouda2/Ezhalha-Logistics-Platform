@@ -10,6 +10,7 @@ import { DatePickerField } from "@/components/ui/DatePickerField";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { useTranslation } from "react-i18next";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 
 export interface ShipmentFilters {
   carrier: string | null;
@@ -189,32 +190,45 @@ function OptionPickerSheet({
   const config = FIELD_CONFIG[field];
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.pickerOverlay} onPress={onClose}>
+    <BottomSheet visible={true} onClose={onClose}>
+      <Text size="large" weight="bold" style={styles.pickerTitle}>
+        {t(config.label)}
+      </Text>
+
+      <ScrollView>
         <Pressable
-          style={styles.pickerSheet}
-          onPress={(e) => e.stopPropagation()}
+          style={styles.pickerOption}
+          onPress={() => {
+            onSelect(field, null);
+            onClose();
+          }}
         >
-          <Text size="large" weight="bold" style={styles.pickerTitle}>
-            {t(config.label)}
+          <Text size="medium" weight={!currentValue ? "semibold" : "regular"}>
+            {t(config.placeholder)}
           </Text>
 
-          <ScrollView>
+          {!currentValue && (
+            <Ionicons name="checkmark" size={rs(18)} color={Colors.primary} />
+          )}
+        </Pressable>
+
+        {config.options.map((option) => {
+          const isSelected = currentValue === option.value;
+
+          return (
             <Pressable
+              key={option.value}
               style={styles.pickerOption}
               onPress={() => {
-                onSelect(field, null);
+                onSelect(field, option.value);
                 onClose();
               }}
             >
-              <Text
-                size="medium"
-                weight={!currentValue ? "semibold" : "regular"}
-              >
-                {t(config.placeholder)}
+              <Text size="medium" weight={isSelected ? "semibold" : "regular"}>
+                {t(option.label)}
               </Text>
 
-              {!currentValue && (
+              {isSelected && (
                 <Ionicons
                   name="checkmark"
                   size={rs(18)}
@@ -222,40 +236,10 @@ function OptionPickerSheet({
                 />
               )}
             </Pressable>
-
-            {config.options.map((option) => {
-              const isSelected = currentValue === option.value;
-
-              return (
-                <Pressable
-                  key={option.value}
-                  style={styles.pickerOption}
-                  onPress={() => {
-                    onSelect(field, option.value);
-                    onClose();
-                  }}
-                >
-                  <Text
-                    size="medium"
-                    weight={isSelected ? "semibold" : "regular"}
-                  >
-                    {t(option.label)}
-                  </Text>
-
-                  {isSelected && (
-                    <Ionicons
-                      name="checkmark"
-                      size={rs(18)}
-                      color={Colors.primary}
-                    />
-                  )}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+          );
+        })}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 

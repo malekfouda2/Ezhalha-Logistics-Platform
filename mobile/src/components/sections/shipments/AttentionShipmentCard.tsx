@@ -4,7 +4,7 @@ import { Pressable, View, StyleSheet } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
-import { Colors } from "@/constants/colors";
+import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 
@@ -28,7 +28,9 @@ function getAttentionMeta(shipment: Shipment): AttentionMeta {
       bg: "#FEE2E2",
       color: "#B91C1C",
       accentColor: "#B91C1C",
-      reason: shipment.carrierErrorMessage ?? "Awaiting an updated commercial invoice",
+      reason:
+        shipment.carrierErrorMessage ??
+        "Awaiting an updated commercial invoice",
       actionLabel: "Fix it",
     };
   }
@@ -39,7 +41,8 @@ function getAttentionMeta(shipment: Shipment): AttentionMeta {
       bg: "#FEF3C7",
       color: "#92400E",
       accentColor: "#F59E0B",
-      reason: shipment.pickupError ?? "Driver could not collect — rebook a slot",
+      reason:
+        shipment.pickupError ?? "Driver could not collect — rebook a slot",
       actionLabel: "Rebook",
     };
   }
@@ -94,7 +97,7 @@ export function AttentionShipmentCard({
 }: AttentionShipmentCardProps) {
   const meta = getAttentionMeta(shipment);
   const timeAgo = formatRelativeTime(
-    shipment.statusChangedAt ?? shipment.updatedAt
+    shipment.statusChangedAt ?? shipment.updatedAt,
   );
 
   return (
@@ -106,9 +109,30 @@ export function AttentionShipmentCard({
 
       <View style={styles.content}>
         <View style={styles.topRow}>
-          <Text size="small" weight="bold">
-            {shipment.trackingNumber}
-          </Text>
+          <View style={styles.trackingRow}>
+               {shipment.isQuote && (
+              <View style={styles.quoteBadge}>
+                <Feather
+                  name="file-text"
+                  size={rs(11)}
+                  color={Colors.primary}
+                />
+                <Text
+                  size="xs"
+                  weight="semibold"
+                  style={{ color: Colors.primary }}
+                >
+                  Quotation
+                </Text>
+              </View>
+            )}
+            <Text size="small" weight="bold">
+              {shipment.trackingNumber}
+            </Text>
+
+         
+          </View>
+
           <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
             <Text size="xs" weight="semibold" style={{ color: meta.color }}>
               {meta.label}
@@ -132,11 +156,7 @@ export function AttentionShipmentCard({
             hitSlop={8}
             style={styles.actionRow}
           >
-            <Text
-              size="small"
-              weight="bold"
-              style={{ color: Colors.primary }}
-            >
+            <Text size="small" weight="bold" style={{ color: Colors.primary }}>
               {meta.actionLabel}
             </Text>
             <Feather
@@ -181,7 +201,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: rvs(8),
   },
+  trackingRow: {
+    gap: rs(7),
+  },
 
+  quoteBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: rs(4),
+    paddingHorizontal: rs(7),
+    paddingVertical: rvs(3),
+    borderRadius: rs(8),
+    backgroundColor: setOpacity(Colors.primary, 0.1),
+  },
   statusPill: {
     paddingHorizontal: rs(9),
     paddingVertical: rvs(4),

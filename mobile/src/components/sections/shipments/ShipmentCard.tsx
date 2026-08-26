@@ -51,11 +51,15 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
   const recipientCountryCode =
     normalizeCountryCode(shipment.recipientCountry) ??
     shipment.recipientCountry;
+  const { t } = useTranslation();
 
   const handleMiddleLayout = (e: LayoutChangeEvent) => {
     const { width } = e.nativeEvent.layout;
     const availableForDashes = width - RESERVED_WIDTH;
-    const count = Math.max(1, Math.floor(availableForDashes / (DASH_SIZE + DASH_GAP)));
+    const count = Math.max(
+      1,
+      Math.floor(availableForDashes / (DASH_SIZE + DASH_GAP)),
+    );
     if (count !== dashCount) {
       setDashCount(count);
     }
@@ -67,9 +71,25 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]}
     >
       <View style={styles.cardTopRow}>
-        <Text size="small" weight="bold">
-          {shipment.trackingNumber}
-        </Text>
+        <View style={styles.trackingRow}>
+          {shipment.isQuote && (
+            <View style={styles.quoteBadge}>
+              <Feather name="file-text" size={rs(11)} color={Colors.primary} />
+              <Text
+                size="xs"
+                weight="semibold"
+                style={{ color: Colors.primary }}
+              >
+                {t("shipments.quotationBadge")}
+                
+              </Text>
+            </View>
+          )}
+          <Text size="small" weight="bold">
+            {shipment.trackingNumber}
+          </Text>
+        </View>
+
         <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
           <Text size="xs" weight="semibold" style={{ color: statusMeta.color }}>
             {statusMeta.label}
@@ -89,7 +109,12 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
 
         <View style={styles.routeMiddle} onLayout={handleMiddleLayout}>
           {Array.from({ length: dashCount }).map((_, i) => (
-            <AntDesign key={i} name="dash" size={DASH_SIZE} color={Colors.border} />
+            <AntDesign
+              key={i}
+              name="dash"
+              size={DASH_SIZE}
+              color={Colors.border}
+            />
           ))}
 
           <MaterialIcons
@@ -147,6 +172,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: rvs(12),
+  },
+  trackingRow: {
+    gap: rs(7),
+  },
+
+  quoteBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: rs(4),
+    paddingHorizontal: rs(7),
+    paddingVertical: rvs(3),
+    borderRadius: rs(8),
+    backgroundColor: setOpacity(Colors.primary, 0.1),
   },
   statusPill: {
     paddingHorizontal: rs(9),
