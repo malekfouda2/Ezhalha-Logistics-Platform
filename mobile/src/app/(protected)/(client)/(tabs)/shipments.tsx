@@ -26,6 +26,7 @@ import {
   EMPTY_FILTERS,
   countActiveFilters,
 } from "@/components/sections/shipments/FiltersModal";
+import { useTranslation } from "react-i18next";
 
 type FilterKey =
   | "all"
@@ -34,12 +35,12 @@ type FilterKey =
   | "delivered"
   | "in_transit";
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "processing", label: "Processing" },
-  { key: "attention", label: "Attention" },
-  { key: "delivered", label: "Delivered" },
-  { key: "in_transit", label: "In Transit" },
+const FILTERS: { key: FilterKey; labelKey: string }[] = [
+  { key: "all", labelKey: "shipments.filters.all" },
+  { key: "processing", labelKey: "shipments.filters.processing" },
+  { key: "attention", labelKey: "shipments.filters.attention" },
+  { key: "delivered", labelKey: "shipments.filters.delivered" },
+  { key: "in_transit", labelKey: "shipments.filters.inTransit" },
 ];
 
 const STATUS_MAP: Record<FilterKey, string[]> = {
@@ -95,6 +96,7 @@ export default function ShipmentsScreen() {
   const [filtersModalVisible, setFiltersModalVisible] = useState(false);
   const [appliedFilters, setAppliedFilters] =
     useState<ShipmentFilters>(EMPTY_FILTERS);
+  const { t } = useTranslation();
 
   const {
     data: shipments,
@@ -182,15 +184,16 @@ export default function ShipmentsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text size="xl" weight="bold">
-          Shipments
+          {t("shipments.title")}
         </Text>
+
         <Text size="small" dimRate="70%" style={styles.subtitle}>
-          Track all your shipments
+          {t("shipments.subtitle")}
         </Text>
         <View style={styles.searchRow}>
           <View style={styles.searchInputContainer}>
             <Input
-              placeholder="Search by ID or recipient..."
+              placeholder={t("shipments.searchPlaceholder")}
               value={search}
               onChangeText={setSearch}
               leftElement={
@@ -236,6 +239,7 @@ export default function ShipmentsScreen() {
         >
           {FILTERS.map((f) => {
             const active = f.key === activeFilter;
+
             return (
               <Pressable
                 key={f.key}
@@ -247,7 +251,7 @@ export default function ShipmentsScreen() {
                   weight="semibold"
                   style={{ color: active ? Colors.white : Colors.text }}
                 >
-                  {f.label}
+                  {t(f.labelKey)}
                 </Text>
               </Pressable>
             );
@@ -277,16 +281,15 @@ export default function ShipmentsScreen() {
               />
 
               <Text size="medium" weight="bold" style={styles.emptyTitle}>
-                No shipments yet
+                {t("shipments.empty.title")}
               </Text>
 
               <Text size="small" dimRate="60%" style={styles.emptyDescription}>
-                Create your first shipment and it will show up here with live
-                tracking.
+                {t("shipments.empty.description")}
               </Text>
 
               <Button
-                title="Create a shipment"
+                title={t("shipments.empty.create")}
                 style={styles.createButton}
                 onPress={() => router.push("createShipment")}
               />

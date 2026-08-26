@@ -4,6 +4,7 @@ import { Feather, Ionicons, Octicons } from "@expo/vector-icons";
 
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { useTranslation } from "react-i18next";
 
 function CreateShipmentButton() {
   return (
@@ -16,6 +17,8 @@ function CreateShipmentButton() {
 }
 
 export default function ClientTabsLayout() {
+  const { t } = useTranslation();
+
   return (
     <Tabs
       screenOptions={{
@@ -47,8 +50,7 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-
+          title: t("tabs.home"),
           tabBarIcon: ({ color, size, focused }) => (
             <Feather name={"home"} size={rs(size)} color={color} />
           ),
@@ -58,7 +60,7 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="shipments"
         options={{
-          title: "Shipments",
+          title: t("tabs.shipments"),
 
           tabBarIcon: ({ color, size, focused }) => (
             <Feather name={"hexagon"} size={rs(size)} color={color} />
@@ -77,7 +79,7 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="invoices"
         options={{
-          title: "Invoices",
+          title: t("tabs.invoices"),
 
           tabBarIcon: ({ color, size, focused }) => (
             <Feather name={"file-text"} size={rs(size)} color={color} />
@@ -88,7 +90,7 @@ export default function ClientTabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
+          title: t("tabs.profile"),
 
           tabBarIcon: ({ color, size, focused }) => (
             <Octicons name={"person"} size={rs(size)} color={color} />

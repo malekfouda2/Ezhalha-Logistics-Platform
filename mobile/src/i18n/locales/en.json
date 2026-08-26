@@ -1,15 +1,9 @@
 {
-  "common": {
-    "welcome": "Welcome",
-    "login": "Login",
-    "logout": "Logout",
-    "cancel": "Cancel",
-    "confirm": "Confirm",
-    "loading": "Loading"
-  },
-  "home": {
-    "title": "Welcome to Ezhalha",
-    "subtitle": "Your logistics platform"
+  "tabs": {
+    "home": "Home",
+    "shipments": "Shipments",
+    "invoices": "Invoices",
+    "profile": "Profile"
   },
   "auth": {
     "logo": "ezhalha",
@@ -226,6 +220,149 @@
       "hoursAgo": "{{count}} h ago",
       "yesterday": "Yesterday",
       "daysAgo": "{{count}} days ago"
+    }
+  },
+  "shipments": {
+    "details": {
+      "carrier": "Carrier",
+      "estimatedDelivery": "Estimated delivery",
+
+      "documents": "DOCUMENTS",
+      "shippingLabel": "Shipping label",
+      "commercialInvoice": "Commercial invoice",
+      "download": "Download",
+      "pdf": "PDF",
+
+      "from": "FROM",
+      "to": "TO",
+
+      "details": "DETAILS",
+      "carrierTracking": "Carrier tracking",
+      "packages": "Packages",
+      "pickup": "Pickup",
+      "paid": "Paid",
+
+      "needSomethingChanged": "NEED SOMETHING CHANGED?",
+      "cancelShipment": "Cancel shipment",
+      "refundedIfNotYetCollected": "Refunded if not yet collected",
+
+      "trackLive": "Track live",
+
+      "status": {
+        "delivered": "Delivered",
+        "attention": "Attention",
+        "processing": "Processing",
+        "inTransit": "In Transit"
+      },
+
+      "errors": {
+        "loadFailed": "Couldn't load this shipment."
+      },
+
+      "cancel": {
+        "successTitle": "Shipment Cancelled",
+        "refundSubmitted": "Your shipment was cancelled and a refund request was submitted for approval.",
+        "success": "Your shipment has been cancelled successfully.",
+        "errorTitle": "Error"
+      }
+    },
+    "title": "Shipments",
+    "subtitle": "Track all your shipments",
+    "searchPlaceholder": "Search by ID or recipient...",
+    "filters": {
+      "all": "All",
+      "processing": "Processing",
+      "attention": "Attention",
+      "delivered": "Delivered",
+      "inTransit": "In Transit",
+
+      "title": "Filters",
+      "carrier": "Carrier",
+      "anyCarrier": "Any carrier",
+      "payment": "Payment",
+      "anyPaymentStatus": "Any payment status",
+      "method": "Method",
+      "anyMethod": "Any method",
+      "origin": "Origin",
+      "anyOrigin": "Any origin",
+      "destination": "Destination",
+      "anyDestination": "Any destination",
+
+      "paymentOptions": {
+        "paid": "Paid",
+        "pending": "Pending",
+        "unpaid": "Unpaid"
+      },
+
+      "methodOptions": {
+        "air": "Air freight",
+        "sea": "Sea freight",
+        "domestic": "Domestic",
+        "expressImport": "Express import",
+        "expressExport": "Express export"
+      },
+
+      "locationOptions": {
+        "china": "China",
+        "uae": "UAE",
+        "saudiArabia": "Saudi Arabia",
+        "other": "Other"
+      },
+
+      "createdFrom": "Created from",
+      "createdTo": "Created to",
+
+      "applied": "{{count}} filter applied",
+      "applied_plural": "{{count}} filters applied",
+      "matches": "{{count}} matches",
+      "clearAll": "Clear all",
+      "apply": "Apply filters"
+    },
+
+    "empty": {
+      "title": "No shipments yet",
+      "description": "Create your first shipment and it will show up here with live tracking.",
+      "create": "Create a shipment"
+    },
+
+    "cancel": {
+      "title": "Cancel this shipment?",
+      "subtitle": "The carrier booking and your pickup will both be cancelled.",
+      "paid": "Paid",
+      "cancellationFee": "Cancellation fee",
+      "refund": "Refund",
+      "refundInfo": "Refunded to card •••• {{last4}} within 5–10 business days.",
+      "cancelling": "Cancelling...",
+      "confirm": "Yes, cancel shipment",
+      "keep": "Keep it"
+    }
+  },
+  "datePicker": {
+    "placeholder": "dd/mm/yyyy",
+    "today": "Today",
+    "done": "Done",
+    "weekdays": {
+      "sun": "S",
+      "mon": "M",
+      "tue": "T",
+      "wed": "W",
+      "thu": "T",
+      "fri": "F",
+      "sat": "S"
+    },
+    "months": {
+      "january": "January",
+      "february": "February",
+      "march": "March",
+      "april": "April",
+      "may": "May",
+      "june": "June",
+      "july": "July",
+      "august": "August",
+      "september": "September",
+      "october": "October",
+      "november": "November",
+      "december": "December"
     }
   },
   "toast": {

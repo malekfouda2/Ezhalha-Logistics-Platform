@@ -1,18 +1,13 @@
 // components/ui/DatePickerField.tsx
 import { useState } from "react";
-import {
-  View,
-  StyleSheet,
-  Pressable,
-  Modal,
-  ScrollView,
-} from "react-native";
+import { View, StyleSheet, Pressable, Modal, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { useTranslation } from "react-i18next";
 
 export interface DatePickerFieldProps {
   label: string;
@@ -23,23 +18,6 @@ export interface DatePickerFieldProps {
   maximumDate?: Date | null;
   placeholder?: string;
 }
-
-const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
-
-const MONTH_LABELS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 
 function formatDate(date: Date | null) {
   if (!date) return "dd/mm/yyyy";
@@ -114,11 +92,36 @@ function CalendarModal({
 
   const currentYear = new Date().getFullYear();
   const startYear = 1900;
+  const { t, i18n } = useTranslation();
+  const isRTL = i18n.dir() === "rtl";
+  const WEEKDAY_LABELS = [
+    t("datePicker.weekdays.sun"),
+    t("datePicker.weekdays.mon"),
+    t("datePicker.weekdays.tue"),
+    t("datePicker.weekdays.wed"),
+    t("datePicker.weekdays.thu"),
+    t("datePicker.weekdays.fri"),
+    t("datePicker.weekdays.sat"),
+  ];
 
+  const MONTH_LABELS = [
+    t("datePicker.months.january"),
+    t("datePicker.months.february"),
+    t("datePicker.months.march"),
+    t("datePicker.months.april"),
+    t("datePicker.months.may"),
+    t("datePicker.months.june"),
+    t("datePicker.months.july"),
+    t("datePicker.months.august"),
+    t("datePicker.months.september"),
+    t("datePicker.months.october"),
+    t("datePicker.months.november"),
+    t("datePicker.months.december"),
+  ];
   // 1900 -> current year
   const years = Array.from(
     { length: currentYear - startYear + 1 },
-    (_, index) => startYear + index
+    (_, index) => startYear + index,
   );
 
   const goToPrevMonth = () => {
@@ -169,22 +172,13 @@ function CalendarModal({
   };
 
   return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable
           style={styles.sheet}
           onPress={(event) => event.stopPropagation()}
         >
-          <Text
-            size="large"
-            weight="bold"
-            style={styles.sheetTitle}
-          >
+          <Text size="large" weight="bold" style={styles.sheetTitle}>
             {title}
           </Text>
 
@@ -197,7 +191,7 @@ function CalendarModal({
               hitSlop={8}
             >
               <Ionicons
-                name="chevron-back"
+                name={isRTL ? "chevron-forward" : "chevron-back"}
                 size={rs(20)}
                 color={Colors.text}
               />
@@ -213,11 +207,7 @@ function CalendarModal({
               </Text>
 
               <Ionicons
-                name={
-                  showYearPicker
-                    ? "chevron-up"
-                    : "chevron-down"
-                }
+                name={showYearPicker ? "chevron-up" : "chevron-down"}
                 size={rs(16)}
                 color={Colors.text}
               />
@@ -230,7 +220,7 @@ function CalendarModal({
               hitSlop={8}
             >
               <Ionicons
-                name="chevron-forward"
+                name={isRTL ? "chevron-back" : "chevron-forward"}
                 size={rs(20)}
                 color={Colors.text}
               />
@@ -261,13 +251,9 @@ function CalendarModal({
                     >
                       <Text
                         size="small"
-                        weight={
-                          selected ? "bold" : "regular"
-                        }
+                        weight={selected ? "bold" : "regular"}
                         style={{
-                          color: selected
-                            ? Colors.white
-                            : Colors.text,
+                          color: selected ? Colors.white : Colors.text,
                         }}
                       >
                         {year}
@@ -283,15 +269,8 @@ function CalendarModal({
               {/* Weekdays */}
               <View style={styles.weekdayRow}>
                 {WEEKDAY_LABELS.map((wd, index) => (
-                  <View
-                    key={`${wd}-${index}`}
-                    style={styles.cell}
-                  >
-                    <Text
-                      size="xs"
-                      weight="semibold"
-                      dimRate="60%"
-                    >
+                  <View key={`${wd}-${index}`} style={styles.cell}>
+                    <Text size="xs" weight="semibold" dimRate="60%">
                       {wd}
                     </Text>
                   </View>
@@ -302,17 +281,10 @@ function CalendarModal({
               <View style={styles.grid}>
                 {cells.map((date, index) => {
                   if (!date) {
-                    return (
-                      <View
-                        key={`empty-${index}`}
-                        style={styles.cell}
-                      />
-                    );
+                    return <View key={`empty-${index}`} style={styles.cell} />;
                   }
 
-                  const selected = value
-                    ? isSameDay(date, value)
-                    : false;
+                  const selected = value ? isSameDay(date, value) : false;
 
                   const today = isSameDay(date, new Date());
 
@@ -329,24 +301,18 @@ function CalendarModal({
                         style={[
                           styles.dayCircle,
                           selected && styles.daySelected,
-                          today &&
-                            !selected &&
-                            styles.dayToday,
+                          today && !selected && styles.dayToday,
                         ]}
                       >
                         <Text
                           size="small"
-                          weight={
-                            selected
-                              ? "bold"
-                              : "regular"
-                          }
+                          weight={selected ? "bold" : "regular"}
                           style={{
                             color: disabled
                               ? Colors.placeholder
                               : selected
-                              ? Colors.white
-                              : Colors.text,
+                                ? Colors.white
+                                : Colors.text,
                           }}
                         >
                           {date.getDate()}
@@ -361,10 +327,7 @@ function CalendarModal({
 
           {/* Today */}
           <View style={styles.footerRow}>
-            <Pressable
-              style={styles.todayButton}
-              onPress={handleToday}
-            >
+            <Pressable style={styles.todayButton} onPress={handleToday}>
               <Text
                 size="medium"
                 weight="semibold"
@@ -372,16 +335,13 @@ function CalendarModal({
                   color: Colors.primary,
                 }}
               >
-                Today
+                {t("datePicker.today")}
               </Text>
             </Pressable>
           </View>
 
           {/* Done */}
-          <Button
-            title="Done"
-            onPress={onClose}
-          />
+          <Button title={t("datePicker.done")} onPress={onClose} />
         </Pressable>
       </Pressable>
     </Modal>
@@ -398,6 +358,7 @@ export function DatePickerField({
   placeholder,
 }: DatePickerFieldProps) {
   const [visible, setVisible] = useState(false);
+  const { t } = useTranslation();
 
   return (
     <View style={styles.fieldWrapper}>
@@ -410,21 +371,16 @@ export function DatePickerField({
         {label}
       </Text>
 
-      <Pressable
-        onPress={() => setVisible(true)}
-        style={styles.selectBox}
-      >
+      <Pressable onPress={() => setVisible(true)} style={styles.selectBox}>
         <Text
           size="medium"
           style={{
-            color: value
-              ? Colors.text
-              : Colors.placeholder,
+            color: value ? Colors.text : Colors.placeholder,
           }}
         >
           {value
             ? formatDate(value)
-            : placeholder ?? "dd/mm/yyyy"}
+            : (placeholder ?? t("datePicker.placeholder"))}
         </Text>
 
         {value && onClear ? (

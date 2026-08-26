@@ -1,15 +1,9 @@
 {
-  "common": {
-    "welcome": "مرحبًا",
-    "login": "تسجيل الدخول",
-    "logout": "تسجيل الخروج",
-    "cancel": "إلغاء",
-    "confirm": "تأكيد",
-    "loading": "جاري التحميل"
-  },
-  "home": {
-    "title": "مرحبًا بك في إزهلها",
-    "subtitle": "منصة الخدمات اللوجستية الخاصة بك"
+  "tabs": {
+    "home": "الرئيسية",
+    "shipments": "الشحنات",
+    "invoices": "الفواتير",
+    "profile": "الملف الشخصي"
   },
   "auth": {
     "logo": "ezhalha",
@@ -198,7 +192,7 @@
       "cancelled": "ملغاة"
     }
   },
-    "months": {
+  "months": {
     "jan": "يناير",
     "feb": "فبراير",
     "mar": "مارس",
@@ -227,6 +221,150 @@
       "hoursAgo": "منذ {{count}} ساعة",
       "yesterday": "أمس",
       "daysAgo": "منذ {{count}} أيام"
+    }
+  },
+  "shipments": {
+    "details": {
+      "carrier": "شركة الشحن",
+      "estimatedDelivery": "موعد التسليم المتوقع",
+
+      "documents": "المستندات",
+      "shippingLabel": "ملصق الشحن",
+      "commercialInvoice": "الفاتورة التجارية",
+      "download": "تحميل",
+      "pdf": "PDF",
+
+      "from": "من",
+      "to": "إلى",
+
+      "details": "التفاصيل",
+      "carrierTracking": "رقم تتبع شركة الشحن",
+      "packages": "الطرود",
+      "pickup": "الاستلام",
+      "paid": "المدفوع",
+
+      "needSomethingChanged": "هل تريد تغيير شيء؟",
+      "cancelShipment": "إلغاء الشحنة",
+      "refundedIfNotYetCollected": "سيتم استرداد المبلغ إذا لم يتم استلام الشحنة بعد",
+
+      "trackLive": "تتبع مباشر",
+
+      "status": {
+        "delivered": "تم التسليم",
+        "attention": "يحتاج إلى الانتباه",
+        "processing": "قيد المعالجة",
+        "inTransit": "قيد النقل"
+      },
+
+      "errors": {
+        "loadFailed": "تعذر تحميل هذه الشحنة."
+      },
+
+      "cancel": {
+        "successTitle": "تم إلغاء الشحنة",
+        "refundSubmitted": "تم إلغاء الشحنة وإرسال طلب استرداد المبلغ للموافقة.",
+        "success": "تم إلغاء الشحنة بنجاح.",
+        "errorTitle": "خطأ"
+      }
+    },
+    "title": "الشحنات",
+    "subtitle": "تتبّع جميع شحناتك",
+    "searchPlaceholder": "ابحث برقم الشحنة أو اسم المستلم...",
+
+    "filters": {
+      "all": "الكل",
+      "processing": "قيد المعالجة",
+      "attention": "تحتاج إلى انتباه",
+      "delivered": "تم التسليم",
+      "inTransit": "قيد الشحن",
+
+      "title": "الفلاتر",
+      "carrier": "شركة الشحن",
+      "anyCarrier": "أي شركة شحن",
+      "payment": "الدفع",
+      "anyPaymentStatus": "أي حالة دفع",
+      "method": "طريقة الشحن",
+      "anyMethod": "أي طريقة شحن",
+      "origin": "بلد الإرسال",
+      "anyOrigin": "أي بلد إرسال",
+      "destination": "الوجهة",
+      "anyDestination": "أي وجهة",
+
+      "paymentOptions": {
+        "paid": "مدفوع",
+        "pending": "معلّق",
+        "unpaid": "غير مدفوع"
+      },
+
+      "methodOptions": {
+        "air": "شحن جوي",
+        "sea": "شحن بحري",
+        "domestic": "شحن داخلي",
+        "expressImport": "استيراد سريع",
+        "expressExport": "تصدير سريع"
+      },
+
+      "locationOptions": {
+        "china": "الصين",
+        "uae": "الإمارات",
+        "saudiArabia": "المملكة العربية السعودية",
+        "other": "أخرى"
+      },
+
+      "createdFrom": "تاريخ الإنشاء من",
+      "createdTo": "تاريخ الإنشاء إلى",
+
+      "applied": "تم تطبيق {{count}} فلتر",
+      "applied_plural": "تم تطبيق {{count}} فلاتر",
+      "matches": "{{count}} نتيجة",
+      "clearAll": "مسح الكل",
+      "apply": "تطبيق الفلاتر"
+    },
+
+    "empty": {
+      "title": "لا توجد شحنات بعد",
+      "description": "أنشئ شحنتك الأولى وستظهر هنا مع إمكانية التتبع المباشر.",
+      "create": "إنشاء شحنة"
+    },
+
+    "cancel": {
+      "title": "هل تريد إلغاء هذه الشحنة؟",
+      "subtitle": "سيتم إلغاء حجز شركة الشحن وطلب الاستلام.",
+      "paid": "المبلغ المدفوع",
+      "cancellationFee": "رسوم الإلغاء",
+      "refund": "المبلغ المسترد",
+      "refundInfo": "سيتم رد المبلغ إلى البطاقة •••• {{last4}} خلال 5–10 أيام عمل.",
+      "cancelling": "جارٍ الإلغاء...",
+      "confirm": "نعم، إلغاء الشحنة",
+      "keep": "الاحتفاظ بها"
+    }
+  },
+  "datePicker": {
+    "placeholder": "يوم/شهر/سنة",
+    "today": "اليوم",
+    "done": "تم",
+    "weekdays": {
+      "sun": "ح",
+      "mon": "ن",
+      "tue": "ث",
+      "wed": "ر",
+      "thu": "خ",
+      "fri": "ج",
+      "sat": "س"
+    },
+    "months": {
+      "january": "يناير",
+      "february": "فبراير",
+      "march": "مارس",
+      "april": "أبريل",
+      "may": "مايو",
+      "june": "يونيو",
+      "july": "يوليو",
+      "august": "أغسطس",
+      "september": "سبتمبر",
+      "october": "أكتوبر",
+      "november": "نوفمبر",
+      "december": "ديسمبر"
     }
   },
   "toast": {

@@ -10,6 +10,7 @@ import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 
 export interface CancelShipmentModalProps {
   visible: boolean;
@@ -29,11 +30,12 @@ export function CancelShipmentModal({
   onClose,
 }: CancelShipmentModalProps) {
   if (!shipment) return null;
-
+  const { t } = useTranslation();
   const paid = parseFloat(shipment.finalPrice as any) || 0;
   const cancellationFee = 0;
   const refund = paid - cancellationFee;
   const insets = useSafeAreaInsets();
+  
   return (
     <Modal
       visible={visible}
@@ -57,15 +59,16 @@ export function CancelShipmentModal({
             <Feather name="alert-triangle" size={rs(22)} color="#DC2626" />
           </View>
           <Text size="medium" weight="bold" style={styles.title}>
-            Cancel this shipment?
+            {t("shipments.cancel.title")}
           </Text>
+
           <Text size="small" dimRate="65%" style={styles.subtitle}>
-            The carrier booking and your pickup will both be cancelled.
+            {t("shipments.cancel.subtitle")}
           </Text>
           <View style={styles.card}>
             <View style={styles.row}>
               <Text size="small" dimRate="65%">
-                Paid
+                {t("shipments.cancel.paid")}
               </Text>
               <View style={styles.valueRow}>
                 <SaudiRiyal
@@ -81,7 +84,7 @@ export function CancelShipmentModal({
 
             <View style={styles.row}>
               <Text size="small" dimRate="65%">
-                Cancellation fee
+                {t("shipments.cancel.cancellationFee")}
               </Text>
               <View style={styles.valueRow}>
                 <SaudiRiyal
@@ -99,7 +102,7 @@ export function CancelShipmentModal({
 
             <View style={styles.row}>
               <Text size="medium" weight="bold">
-                Refund
+                {t("shipments.cancel.refund")}
               </Text>
               <View style={styles.valueRow}>
                 <SaudiRiyal
@@ -125,7 +128,9 @@ export function CancelShipmentModal({
               style={styles.infoIcon}
             />
             <Text size="xs" style={styles.infoText}>
-              Refunded to card •••• {cardLast4} within 5–10 business days.
+              {t("shipments.cancel.refundInfo", {
+                last4: cardLast4,
+              })}
             </Text>
           </View>
           <Pressable
@@ -138,7 +143,9 @@ export function CancelShipmentModal({
             disabled={isPending}
           >
             <Text size="medium" weight="bold" style={{ color: Colors.white }}>
-              {isPending ? "Cancelling..." : "Yes, cancel shipment"}
+              {isPending
+                ? t("shipments.cancel.cancelling")
+                : t("shipments.cancel.confirm")}
             </Text>
           </Pressable>
           <Pressable
@@ -147,7 +154,7 @@ export function CancelShipmentModal({
             disabled={isPending}
           >
             <Text size="medium" weight="semibold" dimRate="65%">
-              Keep it
+              {t("shipments.cancel.keep")}
             </Text>
           </Pressable>
         </View>

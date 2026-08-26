@@ -10,6 +10,7 @@ import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 import { normalizeCountryCode } from "@shared/countries";
 import { SaudiRiyal } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 
 function getStatusMeta(status: string): {
   label: string;
@@ -42,7 +43,8 @@ export interface ShipmentCardProps {
 
 export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
   const [dashCount, setDashCount] = useState(4);
-
+  const { i18n } = useTranslation();
+  const isRTL = i18n.dir() === "rtl";
   const statusMeta = getStatusMeta(shipment.status);
   const senderCountryCode =
     normalizeCountryCode(shipment.senderCountry) ?? shipment.senderCountry;
@@ -91,7 +93,7 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
           ))}
 
           <MaterialIcons
-            name="arrow-forward-ios"
+            name={isRTL ? "arrow-back-ios" : "arrow-forward-ios"}
             size={rs(20)}
             color={Colors.border}
           />

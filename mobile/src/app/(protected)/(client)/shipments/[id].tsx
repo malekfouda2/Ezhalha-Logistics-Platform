@@ -24,23 +24,47 @@ import { API_BASE_URL, apiRequest } from "@/api/client";
 import { CancelShipmentModal } from "@/components/sections/shipments/CancelShipmentModal";
 import Toast from "react-native-toast-message";
 import { LinearGradient } from "expo-linear-gradient";
+import { useTranslation } from "react-i18next";
 
-function getStatusMeta(status: string): {
+function getStatusMeta(
+  status: string,
+  t: (key: string) => string,
+): {
   label: string;
   bg: string;
   color: string;
 } {
   const s = status.toLowerCase();
+
   if (s === "delivered") {
-    return { label: "Delivered", bg: "#DCFCE7", color: "#15803D" };
+    return {
+      label: t("shipments.details.status.delivered"),
+      bg: "#DCFCE7",
+      color: "#15803D",
+    };
   }
+
   if (["on_hold", "returned", "carrier_error"].includes(s)) {
-    return { label: "Attention", bg: "#FEE2E2", color: "#B91C1C" };
+    return {
+      label: t("shipments.details.status.attention"),
+      bg: "#FEE2E2",
+      color: "#B91C1C",
+    };
   }
+
   if (["draft", "payment_pending", "created", "processing"].includes(s)) {
-    return { label: "Processing", bg: "#FEF3C7", color: "#92400E" };
+    return {
+      label: t("shipments.details.status.processing"),
+      bg: "#FEF3C7",
+      color: "#92400E",
+    };
   }
-  return { label: "In Transit", bg: "#DBEAFE", color: "#1D4ED8" };
+
+  return {
+    label: t("shipments.details.status.inTransit"),
+    bg: "#DBEAFE",
+    color: "#1D4ED8",
+  };
 }
 
 function formatDate(value?: string | null): string {
@@ -74,7 +98,8 @@ function formatPickupWindow(shipment: Shipment): string {
 export default function ShipmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [cancelling, setCancelling] = useState(false);
-
+  const { t, i18n } = useTranslation();
+  const isRTL = i18n.dir() === "rtl";
   const {
     data: shipment,
     isLoading,
@@ -103,16 +128,16 @@ export default function ShipmentDetailScreen() {
       setCancelModalVisible(false);
       Toast.show({
         type: "success",
-        text1: "Shipment Cancelled",
+        text1: t("shipments.details.cancel.successTitle"),
         text2: data?.refundRequest
-          ? "Your shipment was cancelled and a refund request was submitted for approval."
-          : "Your shipment has been cancelled successfully.",
+          ? t("shipments.details.cancel.refundSubmitted")
+          : t("shipments.details.cancel.success"),
       });
     },
     onError: (error: Error) => {
       Toast.show({
         type: "error",
-        text1: "Error",
+        text1: t("shipments.details.cancel.errorTitle"),
         text2: error.message,
       });
     },
@@ -130,13 +155,13 @@ export default function ShipmentDetailScreen() {
     return (
       <View style={styles.centerScreen}>
         <Text size="medium" dimRate="60%">
-          Couldn't load this shipment.
+          {t("shipments.details.errors.loadFailed")}
         </Text>
       </View>
     );
   }
 
-  const statusMeta = getStatusMeta(shipment.status);
+  const statusMeta = getStatusMeta(shipment.status, t);
   const packagesCount = shipment.numberOfPackages ?? 1;
   const weightDisplay = shipment.chargeableWeight
     ? `${shipment.chargeableWeight} ${shipment.chargeableWeightUnit ?? "KG"}`
@@ -161,7 +186,7 @@ export default function ShipmentDetailScreen() {
               {shipment.trackingNumber}
             </Text>
             <Text size="small" weight="semibold" dimRate="60%">
-              {shipment.carrierName ?? "Carrier"}
+              {shipment.carrierName ?? t("shipments.details.carrier")}
               {shipment.carrierServiceType
                 ? ` ${shipment.carrierServiceType}`
                 : ""}
@@ -188,7 +213,7 @@ export default function ShipmentDetailScreen() {
         >
           <View style={{ flex: 1 }}>
             <Text size="small" style={styles.deliveryLabel}>
-              Estimated delivery
+              {t("shipments.details.estimatedDelivery")}
             </Text>
             <Text size="large" weight="bold" style={styles.deliveryValue}>
               {formatDate(shipment.estimatedDelivery as any)}
@@ -197,7 +222,6 @@ export default function ShipmentDetailScreen() {
           <Feather name="truck" size={rs(30)} color={Colors.white} />
         </LinearGradient>
 
-        {/* Documents */}
         {(shipment.carrierLabelBase64 || shipment.itemsData) && (
           <>
             <Text
@@ -206,8 +230,9 @@ export default function ShipmentDetailScreen() {
               dimRate="55%"
               style={styles.sectionLabel}
             >
-              DOCUMENTS
+              {t("shipments.details.documents")}
             </Text>
+
             <View style={styles.card}>
               {shipment.carrierLabelBase64 && (
                 <>
@@ -219,14 +244,20 @@ export default function ShipmentDetailScreen() {
                         color={Colors.primary}
                       />
                     </View>
+
                     <View style={{ flex: 1 }}>
                       <Text size="small" weight="bold">
-                        Shipping label
+                        {t("shipments.details.shippingLabel")}
                       </Text>
+
                       <Text size="xs" dimRate="55%">
-                        {(shipment.carrierLabelFormat ?? "PDF").toUpperCase()}
+                        {(
+                          shipment.carrierLabelFormat ??
+                          t("shipments.details.pdf")
+                        ).toUpperCase()}
                       </Text>
                     </View>
+
                     <Pressable
                       onPress={() =>
                         handleDownload(
@@ -240,10 +271,11 @@ export default function ShipmentDetailScreen() {
                         weight="bold"
                         style={{ color: Colors.primary }}
                       >
-                        Download
+                        {t("shipments.details.download")}
                       </Text>
                     </Pressable>
                   </View>
+
                   {shipment.itemsData && <View style={styles.rowDivider} />}
                 </>
               )}
@@ -257,14 +289,17 @@ export default function ShipmentDetailScreen() {
                       color={Colors.primary}
                     />
                   </View>
+
                   <View style={{ flex: 1 }}>
                     <Text size="small" weight="bold">
-                      Commercial invoice
+                      {t("shipments.details.commercialInvoice")}
                     </Text>
+
                     <Text size="xs" dimRate="55%">
-                      PDF
+                      {t("shipments.details.pdf")}
                     </Text>
                   </View>
+
                   <Pressable
                     onPress={() =>
                       handleDownload(
@@ -278,7 +313,7 @@ export default function ShipmentDetailScreen() {
                       weight="bold"
                       style={{ color: Colors.primary }}
                     >
-                      Download
+                      {t("shipments.details.download")}
                     </Text>
                   </Pressable>
                 </View>
@@ -298,7 +333,7 @@ export default function ShipmentDetailScreen() {
                 color={Colors.textSecondary}
               />
               <Text size="small" weight="semibold" dimRate="55%">
-                FROM
+                {t("shipments.details.from")}
               </Text>
             </View>
             <View style={styles.addressCard}>
@@ -331,7 +366,7 @@ export default function ShipmentDetailScreen() {
                 color={Colors.primary}
               />
               <Text size="small" weight="semibold" dimRate="55%">
-                TO
+                {t("shipments.details.to")}
               </Text>
             </View>
             <View style={styles.addressCard}>
@@ -363,31 +398,42 @@ export default function ShipmentDetailScreen() {
           dimRate="55%"
           style={styles.sectionLabel}
         >
-          DETAILS
+          {t("shipments.details.details")}
         </Text>
         <View style={styles.card}>
           <DetailRow
-            label="Carrier tracking"
+            label={t("shipments.details.carrierTracking")}
             value={shipment.carrierTrackingNumber ?? "—"}
           />
+
           <View style={styles.rowDivider} />
+
           <DetailRow
-            label="Packages"
+            label={t("shipments.details.packages")}
             value={`${packagesCount} · ${weightDisplay}`}
           />
+
           <View style={styles.rowDivider} />
-          <DetailRow label="Pickup" value={formatPickupWindow(shipment)} />
+
+          <DetailRow
+            label={t("shipments.details.pickup")}
+            value={formatPickupWindow(shipment)}
+          />
+
           <View style={styles.rowDivider} />
+
           <View style={styles.detailRow}>
             <Text size="small" dimRate="65%">
-              Paid
+              {t("shipments.details.paid")}
             </Text>
+
             <View style={styles.paidValueRow}>
               <SaudiRiyal
                 size={rs(14)}
                 color={Colors.text}
                 style={{ marginRight: rs(3) }}
               />
+
               <Text size="medium" weight="bold">
                 {shipment.finalPrice}
               </Text>
@@ -404,8 +450,9 @@ export default function ShipmentDetailScreen() {
               dimRate="55%"
               style={styles.sectionLabel}
             >
-              NEED SOMETHING CHANGED?
+              {t("shipments.details.needSomethingChanged")}
             </Text>
+
             <Pressable
               style={({ pressed }) => [
                 styles.cancelCard,
@@ -417,16 +464,19 @@ export default function ShipmentDetailScreen() {
               <View style={styles.cancelIconWrap}>
                 <Ionicons name="close" size={rs(18)} color={Colors.error} />
               </View>
+
               <View style={{ flex: 1 }}>
                 <Text size="small" weight="bold">
-                  Cancel shipment
+                  {t("shipments.details.cancelShipment")}
                 </Text>
+
                 <Text size="xs" dimRate="55%">
-                  Refunded if not yet collected
+                  {t("shipments.details.refundedIfNotYetCollected")}
                 </Text>
               </View>
+
               <Ionicons
-                name="chevron-forward"
+                name={isRTL ? "chevron-back" : "chevron-forward"}
                 size={rs(18)}
                 color={Colors.placeholder}
               />
@@ -439,7 +489,7 @@ export default function ShipmentDetailScreen() {
 
       {/* Track live button */}
       <View style={styles.footer}>
-        <Button title="Track live" onPress={() => {}} />
+        <Button title={t("shipments.details.trackLive")} onPress={() => {}} />
       </View>
       <CancelShipmentModal
         visible={cancelModalVisible}

@@ -1,12 +1,6 @@
 // components/sections/shipments/FiltersModal.tsx
 import { useState, useEffect } from "react";
-import {
-  Modal,
-  View,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-} from "react-native";
+import { Modal, View, StyleSheet, Pressable, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -15,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { DatePickerField } from "@/components/ui/DatePickerField";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { useTranslation } from "react-i18next";
 
 export interface ShipmentFilters {
   carrier: string | null;
@@ -40,7 +35,12 @@ export function countActiveFilters(filters: ShipmentFilters): number {
   return Object.values(filters).filter((v) => v !== null && v !== "").length;
 }
 
-type OptionField = "carrier" | "paymentStatus" | "method" | "origin" | "destination";
+type OptionField =
+  | "carrier"
+  | "paymentStatus"
+  | "method"
+  | "origin"
+  | "destination";
 
 interface Option {
   label: string;
@@ -55,37 +55,75 @@ const CARRIER_OPTIONS: Option[] = [
 ];
 
 const PAYMENT_OPTIONS: Option[] = [
-  { label: "Paid", value: "paid" },
-  { label: "Pending", value: "pending" },
-  { label: "Unpaid", value: "unpaid" },
+  { label: "shipments.filters.paymentOptions.paid", value: "paid" },
+  { label: "shipments.filters.paymentOptions.pending", value: "pending" },
+  { label: "shipments.filters.paymentOptions.unpaid", value: "unpaid" },
 ];
 
 const METHOD_OPTIONS: Option[] = [
-  { label: "Air freight", value: "air" },
-  { label: "Sea freight", value: "sea" },
-  { label: "Domestic", value: "domestic" },
-  { label: "Express import", value: "express_import" },
-  { label: "Express export", value: "express_export" },
+  { label: "shipments.filters.methodOptions.air", value: "air" },
+  { label: "shipments.filters.methodOptions.sea", value: "sea" },
+  { label: "shipments.filters.methodOptions.domestic", value: "domestic" },
+  {
+    label: "shipments.filters.methodOptions.expressImport",
+    value: "express_import",
+  },
+  {
+    label: "shipments.filters.methodOptions.expressExport",
+    value: "express_export",
+  },
 ];
 
 const ORIGIN_OPTIONS: Option[] = [
-  { label: "China", value: "cn" },
-  { label: "UAE", value: "uae" },
-  { label: "Saudi Arabia", value: "sa" },
-  { label: "Other", value: "other" },
+  {
+    label: "shipments.filters.locationOptions.china",
+    value: "cn",
+  },
+  {
+    label: "shipments.filters.locationOptions.uae",
+    value: "uae",
+  },
+  {
+    label: "shipments.filters.locationOptions.saudiArabia",
+    value: "sa",
+  },
+  {
+    label: "shipments.filters.locationOptions.other",
+    value: "other",
+  },
 ];
 
-const DESTINATION_OPTIONS: Option[] = ORIGIN_OPTIONS;
+const DESTINATION_OPTIONS = ORIGIN_OPTIONS;
 
 const FIELD_CONFIG: Record<
   OptionField,
   { label: string; placeholder: string; options: Option[] }
 > = {
-  carrier: { label: "Carrier", placeholder: "Any carrier", options: CARRIER_OPTIONS },
-  paymentStatus: { label: "Payment", placeholder: "Any payment status", options: PAYMENT_OPTIONS },
-  method: { label: "Method", placeholder: "Any method", options: METHOD_OPTIONS },
-  origin: { label: "Origin", placeholder: "Any origin", options: ORIGIN_OPTIONS },
-  destination: { label: "Destination", placeholder: "Any destination", options: DESTINATION_OPTIONS },
+  carrier: {
+    label: "shipments.filters.carrier",
+    placeholder: "shipments.filters.anyCarrier",
+    options: CARRIER_OPTIONS,
+  },
+  paymentStatus: {
+    label: "shipments.filters.payment",
+    placeholder: "shipments.filters.anyPaymentStatus",
+    options: PAYMENT_OPTIONS,
+  },
+  method: {
+    label: "shipments.filters.method",
+    placeholder: "shipments.filters.anyMethod",
+    options: METHOD_OPTIONS,
+  },
+  origin: {
+    label: "shipments.filters.origin",
+    placeholder: "shipments.filters.anyOrigin",
+    options: ORIGIN_OPTIONS,
+  },
+  destination: {
+    label: "shipments.filters.destination",
+    placeholder: "shipments.filters.anyDestination",
+    options: DESTINATION_OPTIONS,
+  },
 };
 
 interface SelectFieldProps {
@@ -96,25 +134,40 @@ interface SelectFieldProps {
 }
 
 function SelectField({ field, value, onOpen, active }: SelectFieldProps) {
+  const { t } = useTranslation();
   const config = FIELD_CONFIG[field];
+
   const selectedLabel = config.options.find((o) => o.value === value)?.label;
 
   return (
     <View style={styles.fieldWrapper}>
-      <Text size="small" weight="medium" dimRate="70%" style={styles.fieldLabel}>
-        {config.label}
+      <Text
+        size="small"
+        weight="medium"
+        dimRate="70%"
+        style={styles.fieldLabel}
+      >
+        {t(config.label)}
       </Text>
+
       <Pressable
         onPress={() => onOpen(field)}
         style={[styles.selectBox, active && styles.selectBoxActive]}
       >
         <Text
           size="medium"
-          style={{ color: selectedLabel ? Colors.text : Colors.placeholder }}
+          style={{
+            color: selectedLabel ? Colors.text : Colors.placeholder,
+          }}
         >
-          {selectedLabel || config.placeholder}
+          {selectedLabel || t(config.placeholder)}
         </Text>
-        <Ionicons name="chevron-down" size={rs(18)} color={Colors.placeholder} />
+
+        <Ionicons
+          name="chevron-down"
+          size={rs(18)}
+          color={Colors.placeholder}
+        />
       </Pressable>
     </View>
   );
@@ -127,16 +180,26 @@ interface OptionPickerProps {
   onClose: () => void;
 }
 
-function OptionPickerSheet({ field, currentValue, onSelect, onClose }: OptionPickerProps) {
+function OptionPickerSheet({
+  field,
+  currentValue,
+  onSelect,
+  onClose,
+}: OptionPickerProps) {
+  const { t } = useTranslation();
   const config = FIELD_CONFIG[field];
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.pickerOverlay} onPress={onClose}>
-        <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={styles.pickerSheet}
+          onPress={(e) => e.stopPropagation()}
+        >
           <Text size="large" weight="bold" style={styles.pickerTitle}>
-            {config.label}
+            {t(config.label)}
           </Text>
+
           <ScrollView>
             <Pressable
               style={styles.pickerOption}
@@ -145,15 +208,25 @@ function OptionPickerSheet({ field, currentValue, onSelect, onClose }: OptionPic
                 onClose();
               }}
             >
-              <Text size="medium" weight={!currentValue ? "semibold" : "regular"}>
-                {config.placeholder}
+              <Text
+                size="medium"
+                weight={!currentValue ? "semibold" : "regular"}
+              >
+                {t(config.placeholder)}
               </Text>
+
               {!currentValue && (
-                <Ionicons name="checkmark" size={rs(18)} color={Colors.primary} />
+                <Ionicons
+                  name="checkmark"
+                  size={rs(18)}
+                  color={Colors.primary}
+                />
               )}
             </Pressable>
+
             {config.options.map((option) => {
               const isSelected = currentValue === option.value;
+
               return (
                 <Pressable
                   key={option.value}
@@ -163,11 +236,19 @@ function OptionPickerSheet({ field, currentValue, onSelect, onClose }: OptionPic
                     onClose();
                   }}
                 >
-                  <Text size="medium" weight={isSelected ? "semibold" : "regular"}>
-                    {option.label}
+                  <Text
+                    size="medium"
+                    weight={isSelected ? "semibold" : "regular"}
+                  >
+                    {t(option.label)}
                   </Text>
+
                   {isSelected && (
-                    <Ionicons name="checkmark" size={rs(18)} color={Colors.primary} />
+                    <Ionicons
+                      name="checkmark"
+                      size={rs(18)}
+                      color={Colors.primary}
+                    />
                   )}
                 </Pressable>
               );
@@ -197,6 +278,7 @@ export function FiltersModal({
   const [draft, setDraft] = useState<ShipmentFilters>(initialFilters);
   const [openField, setOpenField] = useState<OptionField | null>(null);
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (visible) setDraft(initialFilters);
@@ -216,9 +298,26 @@ export function FiltersModal({
     onApply(draft);
     onClose();
   };
-
+  const footerText = [
+    t(
+      activeCount === 1
+        ? "shipments.filters.applied"
+        : "shipments.filters.applied_plural",
+      { count: activeCount },
+    ),
+    typeof matchCount === "number"
+      ? t("shipments.filters.matches", { count: matchCount })
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable
           style={[styles.container, { paddingBottom: rvs(20) + insets.bottom }]}
@@ -226,7 +325,7 @@ export function FiltersModal({
         >
           <View style={styles.header}>
             <Text size="large" weight="bold">
-              Filters
+              {t("shipments.filters.title")}
             </Text>
             <Pressable onPress={onClose} hitSlop={10}>
               <Ionicons name="close" size={rs(24)} color={Colors.text} />
@@ -274,38 +373,71 @@ export function FiltersModal({
             />
 
             <DatePickerField
-              label="Created from"
+              label={t("shipments.filters.createdFrom")}
               value={draft.createdFrom}
               maximumDate={draft.createdTo}
-              onChange={(date) => setDraft((prev) => ({ ...prev, createdFrom: date }))}
-              onClear={() => setDraft((prev) => ({ ...prev, createdFrom: null }))}
+              onChange={(date) =>
+                setDraft((prev) => ({ ...prev, createdFrom: date }))
+              }
+              onClear={() =>
+                setDraft((prev) => ({ ...prev, createdFrom: null }))
+              }
             />
 
             <DatePickerField
-              label="Created to"
+              label={t("shipments.filters.createdTo")}
               value={draft.createdTo}
               minimumDate={draft.createdFrom}
-              onChange={(date) => setDraft((prev) => ({ ...prev, createdTo: date }))}
-              onClear={() => setDraft((prev) => ({ ...prev, createdTo: null }))}
+              onChange={(date) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  createdTo: date,
+                }))
+              }
+              onClear={() =>
+                setDraft((prev) => ({
+                  ...prev,
+                  createdTo: null,
+                }))
+              }
             />
           </ScrollView>
 
           <View style={styles.footer}>
             <View style={styles.footerMeta}>
               <Text size="small" dimRate="60%">
-                {activeCount} filter{activeCount === 1 ? "" : "s"} applied
-                {typeof matchCount === "number" ? ` · ${matchCount} matches` : ""}
+                {t(
+                  activeCount === 1
+                    ? "shipments.filters.applied"
+                    : "shipments.filters.applied_plural",
+                  { count: activeCount },
+                )}
+
+                {typeof matchCount === "number"
+                  ? ` · ${t("shipments.filters.matches", { count: matchCount })}`
+                  : ""}
               </Text>
               {activeCount > 0 && (
-                <Pressable onPress={handleClearAll} style={styles.clearAllRow} hitSlop={8}>
+                <Pressable
+                  onPress={handleClearAll}
+                  style={styles.clearAllRow}
+                  hitSlop={8}
+                >
                   <Ionicons name="close" size={rs(14)} color={Colors.text} />
-                  <Text size="small" weight="semibold" style={styles.clearAllText}>
-                    Clear all
+                  <Text
+                    size="small"
+                    weight="semibold"
+                    style={styles.clearAllText}
+                  >
+                    {t("shipments.filters.clearAll")}
                   </Text>
                 </Pressable>
               )}
             </View>
-            <Button title="Apply filters" onPress={handleApply} />
+            <Button
+              title={t("shipments.filters.apply")}
+              onPress={handleApply}
+            />
           </View>
         </Pressable>
       </Pressable>

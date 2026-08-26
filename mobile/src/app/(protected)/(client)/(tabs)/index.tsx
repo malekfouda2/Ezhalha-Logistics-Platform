@@ -93,7 +93,7 @@ export default function ClientDashboard() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        {/* <LanguageSwitch /> */}
+        <LanguageSwitch />
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.userInfo}>
