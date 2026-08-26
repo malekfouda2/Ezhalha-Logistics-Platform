@@ -1,4 +1,7 @@
 {
+  "common": {
+    "tryAgain": "Try again"
+  },
   "tabs": {
     "home": "Home",
     "shipments": "Shipments",
@@ -264,6 +267,18 @@
         "refundSubmitted": "Your shipment was cancelled and a refund request was submitted for approval.",
         "success": "Your shipment has been cancelled successfully.",
         "errorTitle": "Error"
+      }
+    },
+    "tracking": {
+      "title": "Tracking",
+      "expected": "Expected {{date}}",
+      "pending": "Pending",
+      "events": {
+        "pickedUp": "Picked Up",
+        "inTransit": "In Transit",
+        "arrivedAtFacility": "Arrived at Facility",
+        "outForDelivery": "Out for Delivery",
+        "delivered": "Delivered"
       }
     },
     "title": "Shipments",

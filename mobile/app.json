@@ -21,6 +21,12 @@
       }
     },
     "android": {
+      "package": "co.ezhalha.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_KEY"
+        }
+      },
       "adaptiveIcon": {
         "backgroundColor": "#fe5200",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -28,7 +34,6 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "co.ezhalha.app",
       "intentFilters": [
         {
           "action": "VIEW",

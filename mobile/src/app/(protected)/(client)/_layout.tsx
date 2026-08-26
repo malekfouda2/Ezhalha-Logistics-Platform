@@ -17,7 +17,7 @@ export default function ClientLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
-      
+
       <Stack.Screen
         name="shipments/[id]"
         options={{
@@ -27,10 +27,10 @@ export default function ClientLayout() {
       />
 
       <Stack.Screen
-        name="invoice/[id]"
+        name="shipments/[id]/tracking"
         options={{
           headerShown: false,
-          title: "Invoice",
+          title: "Tracking",
         }}
       />
 
@@ -39,23 +39,6 @@ export default function ClientLayout() {
         options={{
           headerShown: false,
           title: "Notifications",
-        }}
-      />
-
-      <Stack.Screen
-        name="edit-profile"
-        options={{
-          headerShown: false,
-          title: "Edit Profile",
-        }}
-      />
-
-      <Stack.Screen
-        name="add-shipment"
-        options={{
-          presentation: "modal",
-          headerShown: false,
-          title: "New Shipment",
         }}
       />
     </Stack>

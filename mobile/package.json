@@ -33,6 +33,7 @@
     "react-i18next": "^17.0.11",
     "react-native": "0.86.2",
     "react-native-country-codes-picker": "^2.3.5",
+    "react-native-maps": "1.27.2",
     "react-native-restart": "^0.0.29",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",

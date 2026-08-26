@@ -1,4 +1,7 @@
 {
+  "common": {
+    "tryAgain": "حاول مرة أخرى"
+  },
   "tabs": {
     "home": "الرئيسية",
     "shipments": "الشحنات",
@@ -265,6 +268,18 @@
         "refundSubmitted": "تم إلغاء الشحنة وإرسال طلب استرداد المبلغ للموافقة.",
         "success": "تم إلغاء الشحنة بنجاح.",
         "errorTitle": "خطأ"
+      }
+    },
+    "tracking": {
+      "title": "تتبع الشحنة",
+      "expected": "متوقع {{date}}",
+      "pending": "قيد الانتظار",
+      "events": {
+        "pickedUp": "تم استلام الشحنة",
+        "inTransit": "الشحنة قيد النقل",
+        "arrivedAtFacility": "وصلت إلى مركز الشحن",
+        "outForDelivery": "خرجت للتوصيل",
+        "delivered": "تم التسليم"
       }
     },
     "title": "الشحنات",

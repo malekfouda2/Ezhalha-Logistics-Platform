@@ -108,7 +108,7 @@ export default function ShipmentDetailScreen() {
     queryKey: [`/api/client/shipments/${id}`],
     enabled: !!id,
   });
-
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [cancelModalVisible, setCancelModalVisible] = useState(false);
 
@@ -489,7 +489,7 @@ export default function ShipmentDetailScreen() {
 
       {/* Track live button */}
       <View style={styles.footer}>
-        <Button title={t("shipments.details.trackLive")} onPress={() => {}} />
+        <Button title={t("shipments.details.trackLive")} onPress={() => {router.push(`/shipments/${id}/tracking`);}} />
       </View>
       <CancelShipmentModal
         visible={cancelModalVisible}
