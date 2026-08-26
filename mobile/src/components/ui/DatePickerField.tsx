@@ -506,6 +506,7 @@ const styles = StyleSheet.create({
 
   daySelected: {
     backgroundColor: Colors.primary,
+    borderRadius: 50
   },
 
   dayToday: {

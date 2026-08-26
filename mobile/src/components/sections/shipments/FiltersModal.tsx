@@ -138,7 +138,6 @@ function SelectField({ field, value, onOpen, active }: SelectFieldProps) {
   const config = FIELD_CONFIG[field];
 
   const selectedLabel = config.options.find((o) => o.value === value)?.label;
-
   return (
     <View style={styles.fieldWrapper}>
       <Text
@@ -160,7 +159,7 @@ function SelectField({ field, value, onOpen, active }: SelectFieldProps) {
             color: selectedLabel ? Colors.text : Colors.placeholder,
           }}
         >
-          {selectedLabel || t(config.placeholder)}
+          {selectedLabel ? t(selectedLabel) : t(config.placeholder)}
         </Text>
 
         <Ionicons
