@@ -8,9 +8,11 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
+import { DatePickerField } from "@/components/ui/DatePickerField";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 
@@ -86,14 +88,6 @@ const FIELD_CONFIG: Record<
   destination: { label: "Destination", placeholder: "Any destination", options: DESTINATION_OPTIONS },
 };
 
-function formatDate(date: Date | null) {
-  if (!date) return "dd/mm/yyyy";
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
 interface SelectFieldProps {
   field: OptionField;
   value: string | null;
@@ -123,69 +117,6 @@ function SelectField({ field, value, onOpen, active }: SelectFieldProps) {
         <Ionicons name="chevron-down" size={rs(18)} color={Colors.placeholder} />
       </Pressable>
     </View>
-  );
-}
-
-interface DateFieldProps {
-  label: string;
-  value: Date | null;
-  onPress: () => void;
-}
-
-function DateField({ label, value, onPress }: DateFieldProps) {
-  return (
-    <View style={styles.fieldWrapper}>
-      <Text size="small" weight="medium" dimRate="70%" style={styles.fieldLabel}>
-        {label}
-      </Text>
-      <Pressable onPress={onPress} style={styles.selectBox}>
-        <Text size="medium" style={{ color: value ? Colors.text : Colors.placeholder }}>
-          {formatDate(value)}
-        </Text>
-        <Ionicons name="calendar-outline" size={rs(18)} color={Colors.placeholder} />
-      </Pressable>
-    </View>
-  );
-}
-
-interface DatePickerSheetProps {
-  value: Date;
-  onSelect: (date: Date) => void;
-  onClose: () => void;
-}
-
-function DatePickerSheet({ value, onSelect, onClose }: DatePickerSheetProps) {
-  const shiftDate = (days: number) => {
-    const next = new Date(value);
-    next.setDate(next.getDate() + days);
-    onSelect(next);
-  };
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.pickerOverlay} onPress={onClose}>
-        <Pressable style={styles.datePickerSheet} onPress={(e) => e.stopPropagation()}>
-          <Text size="large" weight="bold" style={styles.pickerTitle}>
-            Select date
-          </Text>
-          <Text size="large" weight="semibold" style={styles.datePickerValue}>
-            {formatDate(value)}
-          </Text>
-          <View style={styles.datePickerControls}>
-            <Pressable style={styles.datePickerButton} onPress={() => shiftDate(-1)}>
-              <Ionicons name="chevron-back" size={rs(20)} color={Colors.text} />
-            </Pressable>
-            <Pressable style={styles.datePickerToday} onPress={() => onSelect(new Date())}>
-              <Text size="medium" weight="semibold">Today</Text>
-            </Pressable>
-            <Pressable style={styles.datePickerButton} onPress={() => shiftDate(1)}>
-              <Ionicons name="chevron-forward" size={rs(20)} color={Colors.text} />
-            </Pressable>
-          </View>
-          <Button title="Done" onPress={onClose} />
-        </Pressable>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -265,7 +196,7 @@ export function FiltersModal({
 }: FiltersModalProps) {
   const [draft, setDraft] = useState<ShipmentFilters>(initialFilters);
   const [openField, setOpenField] = useState<OptionField | null>(null);
-  const [openDatePicker, setOpenDatePicker] = useState<"from" | "to" | null>(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (visible) setDraft(initialFilters);
@@ -289,7 +220,10 @@ export function FiltersModal({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.container} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[styles.container, { paddingBottom: rvs(20) + insets.bottom }]}
+          onPress={(e) => e.stopPropagation()}
+        >
           <View style={styles.header}>
             <Text size="large" weight="bold">
               Filters
@@ -304,58 +238,56 @@ export function FiltersModal({
             contentContainerStyle={styles.bodyContent}
             showsVerticalScrollIndicator={false}
           >
-            <View style={styles.row}>
-              <SelectField
-                field="carrier"
-                value={draft.carrier}
-                active={openField === "carrier"}
-                onOpen={setOpenField}
-              />
-              <SelectField
-                field="method"
-                value={draft.method}
-                active={openField === "method"}
-                onOpen={setOpenField}
-              />
-            </View>
+            <SelectField
+              field="carrier"
+              value={draft.carrier}
+              active={openField === "carrier"}
+              onOpen={setOpenField}
+            />
 
-            <View style={styles.row}>
-              <SelectField
-                field="paymentStatus"
-                value={draft.paymentStatus}
-                active={openField === "paymentStatus"}
-                onOpen={setOpenField}
-              />
-              <SelectField
-                field="origin"
-                value={draft.origin}
-                active={openField === "origin"}
-                onOpen={setOpenField}
-              />
-            </View>
+            <SelectField
+              field="method"
+              value={draft.method}
+              active={openField === "method"}
+              onOpen={setOpenField}
+            />
 
-            <View style={styles.row}>
-              <SelectField
-                field="destination"
-                value={draft.destination}
-                active={openField === "destination"}
-                onOpen={setOpenField}
-              />
-              <View style={styles.fieldWrapper} />
-            </View>
+            <SelectField
+              field="paymentStatus"
+              value={draft.paymentStatus}
+              active={openField === "paymentStatus"}
+              onOpen={setOpenField}
+            />
 
-            <View style={styles.row}>
-              <DateField
-                label="Created from"
-                value={draft.createdFrom}
-                onPress={() => setOpenDatePicker("from")}
-              />
-              <DateField
-                label="Created to"
-                value={draft.createdTo}
-                onPress={() => setOpenDatePicker("to")}
-              />
-            </View>
+            <SelectField
+              field="origin"
+              value={draft.origin}
+              active={openField === "origin"}
+              onOpen={setOpenField}
+            />
+
+            <SelectField
+              field="destination"
+              value={draft.destination}
+              active={openField === "destination"}
+              onOpen={setOpenField}
+            />
+
+            <DatePickerField
+              label="Created from"
+              value={draft.createdFrom}
+              maximumDate={draft.createdTo}
+              onChange={(date) => setDraft((prev) => ({ ...prev, createdFrom: date }))}
+              onClear={() => setDraft((prev) => ({ ...prev, createdFrom: null }))}
+            />
+
+            <DatePickerField
+              label="Created to"
+              value={draft.createdTo}
+              minimumDate={draft.createdFrom}
+              onChange={(date) => setDraft((prev) => ({ ...prev, createdTo: date }))}
+              onClear={() => setDraft((prev) => ({ ...prev, createdTo: null }))}
+            />
           </ScrollView>
 
           <View style={styles.footer}>
@@ -386,19 +318,6 @@ export function FiltersModal({
           onClose={() => setOpenField(null)}
         />
       )}
-
-      {openDatePicker && (
-        <DatePickerSheet
-          value={(openDatePicker === "from" ? draft.createdFrom : draft.createdTo) || new Date()}
-          onSelect={(selectedDate) => {
-            setDraft((prev) => ({
-              ...prev,
-              [openDatePicker === "from" ? "createdFrom" : "createdTo"]: selectedDate,
-            }));
-          }}
-          onClose={() => setOpenDatePicker(null)}
-        />
-      )}
     </Modal>
   );
 }
@@ -414,7 +333,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: rs(20),
     borderTopRightRadius: rs(20),
     maxHeight: "88%",
-    paddingBottom: rvs(20),
   },
   header: {
     flexDirection: "row",
@@ -433,13 +351,8 @@ const styles = StyleSheet.create({
     paddingTop: rvs(16),
     paddingBottom: rvs(8),
   },
-  row: {
-    flexDirection: "row",
-    gap: rs(12),
-    marginBottom: rvs(14),
-  },
   fieldWrapper: {
-    flex: 1,
+    marginBottom: rvs(14),
   },
   fieldLabel: {
     marginBottom: rvs(6),
@@ -489,29 +402,6 @@ const styles = StyleSheet.create({
     borderRadius: rs(16),
     maxHeight: "60%",
     paddingVertical: rvs(12),
-  },
-  datePickerSheet: {
-    backgroundColor: Colors.white,
-    borderRadius: rs(16),
-    padding: rs(20),
-    gap: rvs(16),
-  },
-  datePickerValue: {
-    textAlign: "center",
-  },
-  datePickerControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  datePickerButton: {
-    padding: rs(10),
-    borderRadius: rs(10),
-    backgroundColor: Colors.inputBackground,
-  },
-  datePickerToday: {
-    paddingHorizontal: rs(20),
-    paddingVertical: rvs(10),
   },
   pickerTitle: {
     paddingHorizontal: rs(18),
