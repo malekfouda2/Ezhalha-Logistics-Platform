@@ -7,6 +7,7 @@ import { Text } from "@/components/ui/Text";
 import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 interface AttentionMeta {
   label: string;
@@ -110,7 +111,7 @@ export function AttentionShipmentCard({
       <View style={styles.content}>
         <View style={styles.topRow}>
           <View style={styles.trackingRow}>
-               {shipment.isQuote && (
+            {shipment.isQuote && (
               <View style={styles.quoteBadge}>
                 <Feather
                   name="file-text"
@@ -129,15 +130,9 @@ export function AttentionShipmentCard({
             <Text size="small" weight="bold">
               {shipment.trackingNumber}
             </Text>
-
-         
           </View>
 
-          <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
-            <Text size="xs" weight="semibold" style={{ color: meta.color }}>
-              {meta.label}
-            </Text>
-          </View>
+          <StatusBadge status={shipment.status} />
         </View>
 
         <Text size="small" dimRate="65%" style={styles.reasonText}>
@@ -206,13 +201,18 @@ const styles = StyleSheet.create({
   },
 
   quoteBadge: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: rs(4),
-    paddingHorizontal: rs(7),
-    paddingVertical: rvs(3),
-    borderRadius: rs(8),
+    gap: 6,
+
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+
+    borderRadius: 999,
+    borderWidth: 1,
     backgroundColor: setOpacity(Colors.primary, 0.1),
+    borderColor: Colors.primary,
   },
   statusPill: {
     paddingHorizontal: rs(9),

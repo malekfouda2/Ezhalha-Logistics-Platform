@@ -1,59 +1,21 @@
 // components/sections/dashboard/RecentShipments.tsx
-import { View, StyleSheet, Pressable, ActivityIndicator } from "react-native";
+
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-
-import { Text } from "@/components/ui/Text";
-import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
-import { Shipment } from "@shared/schema";
 import { SaudiRiyal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 
-const statusStyles: Record<string, { backgroundColor: string; color: string }> =
-  {
-    draft: {
-      backgroundColor: "#F1F2F4",
-      color: "#65748B",
-    },
-    pending: {
-      backgroundColor: "#FFF3D6",
-      color: "#9A7410",
-    },
-    processing: {
-      backgroundColor: "#FFF3D6",
-      color: "#9A7410",
-    },
-    in_transit: {
-      backgroundColor: "#E4EEFF",
-      color: "#2454B8",
-    },
-    out_for_delivery: {
-      backgroundColor: "#E4EEFF",
-      color: "#2454B8",
-    },
-    delivered: {
-      backgroundColor: "#E1F5E9",
-      color: "#16713B",
-    },
-    cancelled: {
-      backgroundColor: "#FBE3E3",
-      color: "#B3261E",
-    },
-  };
-const getStatusLabel = (status: string, t: any) => {
-  const labels: Record<string, string> = {
-    draft: t("dashboard.shipmentStatus.draft"),
-    pending: t("dashboard.shipmentStatus.pending"),
-    processing: t("dashboard.shipmentStatus.processing"),
-    in_transit: t("dashboard.shipmentStatus.inTransit"),
-    out_for_delivery: t("dashboard.shipmentStatus.outForDelivery"),
-    delivered: t("dashboard.shipmentStatus.delivered"),
-    cancelled: t("dashboard.shipmentStatus.cancelled"),
-  };
-
-  return labels[status] ?? status;
-};
+import { Text } from "@/components/ui/Text";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Colors } from "@/constants/colors";
+import { rs, rvs } from "@/utils/responsive";
+import { Shipment } from "@shared/schema";
 
 type RecentShipmentsProps = {
   shipments?: Shipment[];
@@ -89,79 +51,74 @@ export const RecentShipments = ({
           </View>
         ) : !shipments || shipments.length === 0 ? (
           <View style={styles.loadingRow}>
-            <Text size="small" style={{ color: "#65748B" }}>
+            <Text size="small" style={styles.emptyText}>
               No shipments yet
             </Text>
           </View>
         ) : (
-          shipments.map((shipment, index) => {
-            const statusStyle = statusStyles[shipment.status] ?? {
-              backgroundColor: "#F1F2F4",
-              color: "#65748B",
-            };
+          shipments.map((shipment, index) => (
+            <Pressable
+              key={shipment.id}
+              onPress={() =>
+                shipment.isQuote
+                  ? router.push(`/shipments/${shipment.id}/quotation`)
+                  : router.push(`/shipments/${shipment.id}`)
+              }
+              style={[
+                styles.shipmentRow,
+                index !== shipments.length - 1 && styles.shipmentBorder,
+              ]}
+            >
+              <View style={styles.shipmentIcon}>
+                <Feather
+                  name="hexagon"
+                  size={rs(19)}
+                  color={Colors.primary}
+                />
+              </View>
 
-            const statusLabel = getStatusLabel(shipment.status, t);
-            return (
-              <Pressable
-                key={shipment.id}
-                onPress={() => router.push(`/shipments/${shipment.id}` as any)}
-                style={[
-                  styles.shipmentRow,
-                  index !== shipments.length - 1 && styles.shipmentBorder,
-                ]}
-              >
-                <View style={styles.shipmentIcon}>
-                  <Feather
-                    name="hexagon"
-                    size={rs(19)}
-                    color={Colors.primary}
+              <View style={styles.shipmentInfo}>
+                <Text
+                  size="medium"
+                  weight="bold"
+                  numberOfLines={1}
+                  style={styles.shipmentName}
+                >
+                  {shipment.recipientName}
+                </Text>
+
+                <Text
+                  size="xs"
+                  style={styles.shipmentDetails}
+                  numberOfLines={1}
+                >
+                  {shipment.trackingNumber} · {shipment.recipientCity}
+                </Text>
+              </View>
+
+              <View style={styles.shipmentRight}>
+                <View style={styles.priceContainer}>
+                  <SaudiRiyal
+                    size={rs(14)}
+                    style={styles.currencyIcon}
                   />
-                </View>
 
-                <View style={styles.shipmentInfo}>
                   <Text
-                    size="medium"
+                    size="small"
                     weight="bold"
-                    numberOfLines={1}
-                    style={styles.shipmentName}
+                    style={styles.price}
                   >
-                    {shipment.recipientName}
-                  </Text>
-
-                  <Text
-                    size="xs"
-                    style={styles.shipmentDetails}
-                    numberOfLines={1}
-                  >
-                    {shipment.trackingNumber} · {shipment.recipientCity}
+                    {shipment.finalPrice}
                   </Text>
                 </View>
 
-                <View style={styles.shipmentRight}>
-                  <View style={styles.priceContainer}>
-                    <SaudiRiyal size={rs(14)} style={styles.currencyIcon} />
-                    <Text size="small" weight="bold" style={styles.price}>
-                      {shipment.finalPrice}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.status,
-                      { backgroundColor: statusStyle.backgroundColor },
-                    ]}
-                  >
-                    <Text
-                      size="xs"
-                      weight="semibold"
-                      style={{ color: statusStyle.color }}
-                    >
-                      {statusLabel}
-                    </Text>
-                  </View>
-                </View>
-              </Pressable>
-            );
-          })
+                <StatusBadge
+                  status={shipment.status}
+                  style={styles.statusBadge}
+                />
+              </View>
+            </Pressable>
+          ))
         )}
       </View>
     </View>
@@ -172,33 +129,46 @@ const styles = StyleSheet.create({
   section: {
     marginVertical: rvs(18),
   },
+
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: rvs(10),
   },
+
   sectionTitle: {
     color: Colors.text,
   },
+
   seeAll: {
     color: Colors.primary,
   },
+
   shipmentsCard: {
     backgroundColor: Colors.white,
     borderRadius: rs(18),
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.035,
     shadowRadius: 6,
     elevation: 1,
   },
+
   loadingRow: {
     minHeight: rvs(80),
     alignItems: "center",
     justifyContent: "center",
   },
+
+  emptyText: {
+    color: "#65748B",
+  },
+
   shipmentRow: {
     minHeight: rvs(70),
     flexDirection: "row",
@@ -206,10 +176,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: rs(13),
     paddingVertical: rvs(10),
   },
+
   shipmentBorder: {
     borderBottomWidth: 1,
     borderBottomColor: "#ECEEF1",
   },
+
   shipmentIcon: {
     width: rs(38),
     height: rs(38),
@@ -218,35 +190,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
   shipmentInfo: {
     flex: 1,
     marginLeft: rs(10),
     marginRight: rs(6),
   },
+
   shipmentName: {
     color: Colors.text,
   },
+
   shipmentDetails: {
     color: "#65748B",
     marginTop: rvs(3),
   },
+
   shipmentRight: {
     alignItems: "flex-end",
   },
+
   priceContainer: {
     flexDirection: "row",
     alignItems: "center",
   },
+
   price: {
     color: Colors.text,
   },
+
   currencyIcon: {
     marginRight: rs(3),
   },
-  status: {
-    paddingHorizontal: rs(8),
-    paddingVertical: rvs(3),
-    borderRadius: rs(16),
+
+  statusBadge: {
     marginTop: rvs(5),
   },
 });

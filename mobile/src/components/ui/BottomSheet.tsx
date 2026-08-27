@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import Toast from "react-native-toast-message";
+import toastConfig from "./AppToast";
 
 interface BottomSheetProps {
   visible: boolean;
@@ -47,6 +49,7 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
           </View>
         </KeyboardAvoidingView>
       </View>
+      <Toast config={toastConfig} />
     </Modal>
   );
 }

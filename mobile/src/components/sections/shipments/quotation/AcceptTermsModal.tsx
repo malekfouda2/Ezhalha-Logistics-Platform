@@ -14,7 +14,7 @@ interface AcceptTermsSheetProps {
   visible: boolean;
   total: string | number;
   isPending?: boolean;
-  onConfirm: () => void;
+  onConfirm: (accepted: boolean) => void;
   onClose: () => void;
 }
 
@@ -64,7 +64,7 @@ export function AcceptTermsSheet({
 
       <Button
         title={t("shipments.quotation.accept.confirm")}
-        onPress={onConfirm}
+        onPress={() => onConfirm(accepted)}
         loading={isPending}
         disabled={!accepted}
         style={styles.confirmButton}

@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,52 +20,16 @@ import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
 import { BackButton } from "@/components/ui/BackButton";
-import { API_BASE_URL, apiRequest } from "@/api/client";
+import { apiRequest } from "@/api/client";
 import { CancelShipmentModal } from "@/components/sections/shipments/details/CancelShipmentModal";
 import Toast from "react-native-toast-message";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTranslation } from "react-i18next";
-
-function getStatusMeta(
-  status: string,
-  t: (key: string) => string,
-): {
-  label: string;
-  bg: string;
-  color: string;
-} {
-  const s = status.toLowerCase();
-
-  if (s === "delivered") {
-    return {
-      label: t("shipments.details.status.delivered"),
-      bg: "#DCFCE7",
-      color: "#15803D",
-    };
-  }
-
-  if (["on_hold", "returned", "carrier_error"].includes(s)) {
-    return {
-      label: t("shipments.details.status.attention"),
-      bg: "#FEE2E2",
-      color: "#B91C1C",
-    };
-  }
-
-  if (["draft", "payment_pending", "created", "processing"].includes(s)) {
-    return {
-      label: t("shipments.details.status.processing"),
-      bg: "#FEF3C7",
-      color: "#92400E",
-    };
-  }
-
-  return {
-    label: t("shipments.details.status.inTransit"),
-    bg: "#DBEAFE",
-    color: "#1D4ED8",
-  };
-}
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import {
+  handleDownloadCarrierLabel,
+  handleDownloadCommercialInvoice,
+} from "@/utils/utils";
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -162,15 +125,10 @@ export default function ShipmentDetailScreen() {
     );
   }
 
-  const statusMeta = getStatusMeta(shipment.status, t);
   const packagesCount = shipment.numberOfPackages ?? 1;
   const weightDisplay = shipment.chargeableWeight
     ? `${shipment.chargeableWeight} ${shipment.chargeableWeightUnit ?? "KG"}`
     : `${shipment.weight} ${shipment.weightUnit ?? "LB"}`;
-
-  const handleDownload = (url?: string | null) => {
-    if (url) Linking.openURL(url);
-  };
 
   return (
     <View style={styles.screen}>
@@ -194,15 +152,7 @@ export default function ShipmentDetailScreen() {
             </Text>
           </View>
 
-          <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
-            <Text
-              size="xs"
-              weight="semibold"
-              style={{ color: statusMeta.color }}
-            >
-              {statusMeta.label}
-            </Text>
-          </View>
+          <StatusBadge status={shipment.status} />
         </View>
 
         {/* Estimated delivery banner */}
@@ -254,11 +204,7 @@ export default function ShipmentDetailScreen() {
                     </View>
 
                     <Pressable
-                      onPress={() =>
-                        handleDownload(
-                          `${API_BASE_URL}/api/client/shipments/${shipment.id}/label.pdf`,
-                        )
-                      }
+                      onPress={() => handleDownloadCarrierLabel(shipment.id)}
                       hitSlop={8}
                     >
                       <Text
@@ -296,11 +242,7 @@ export default function ShipmentDetailScreen() {
                   </View>
 
                   <Pressable
-                    onPress={() =>
-                      handleDownload(
-                        `${API_BASE_URL}/api/client/shipments/${shipment.id}/commercial-invoice.pdf`,
-                      )
-                    }
+                    onPress={() => handleDownloadCommercialInvoice(shipment.id)}
                     hitSlop={8}
                   >
                     <Text

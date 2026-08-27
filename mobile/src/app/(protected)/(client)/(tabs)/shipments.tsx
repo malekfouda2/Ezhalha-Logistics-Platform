@@ -269,6 +269,7 @@ export default function ShipmentsScreen() {
             refreshing={isFetching && !isLoading}
             onRefresh={refetch}
             tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
         ListEmptyComponent={

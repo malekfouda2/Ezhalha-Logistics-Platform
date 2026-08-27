@@ -11,24 +11,7 @@ import { Shipment } from "@shared/schema";
 import { normalizeCountryCode } from "@shared/countries";
 import { SaudiRiyal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
-
-function getStatusMeta(status: string): {
-  label: string;
-  bg: string;
-  color: string;
-} {
-  const s = status.toLowerCase();
-  if (s === "delivered") {
-    return { label: "Delivered", bg: "#DCFCE7", color: "#15803D" };
-  }
-  if (["on_hold", "returned", "carrier_error"].includes(s)) {
-    return { label: "Attention", bg: "#FEE2E2", color: "#B91C1C" };
-  }
-  if (["draft", "payment_pending", "created", "processing"].includes(s)) {
-    return { label: "Processing", bg: "#FEF3C7", color: "#92400E" };
-  }
-  return { label: "In Transit", bg: "#DBEAFE", color: "#1D4ED8" };
-}
+import { StatusBadge } from "@/components/ui/StatusBadge";
 
 const DASH_SIZE = rs(20);
 const DASH_GAP = rs(2); // approximate spacing AntDesign's "dash" glyph already carries
@@ -45,7 +28,6 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
   const [dashCount, setDashCount] = useState(4);
   const { i18n } = useTranslation();
   const isRTL = i18n.dir() === "rtl";
-  const statusMeta = getStatusMeta(shipment.status);
   const senderCountryCode =
     normalizeCountryCode(shipment.senderCountry) ?? shipment.senderCountry;
   const recipientCountryCode =
@@ -81,7 +63,6 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
                 style={{ color: Colors.primary }}
               >
                 {t("shipments.quotationBadge")}
-                
               </Text>
             </View>
           )}
@@ -90,11 +71,7 @@ export function ShipmentCard({ shipment, onPress }: ShipmentCardProps) {
           </Text>
         </View>
 
-        <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
-          <Text size="xs" weight="semibold" style={{ color: statusMeta.color }}>
-            {statusMeta.label}
-          </Text>
-        </View>
+        <StatusBadge status={shipment.status} />
       </View>
 
       <View style={styles.routeRow}>
@@ -178,18 +155,18 @@ const styles = StyleSheet.create({
   },
 
   quoteBadge: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: rs(4),
-    paddingHorizontal: rs(7),
-    paddingVertical: rvs(3),
-    borderRadius: rs(8),
+    gap: 6,
+
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+
+    borderRadius: 999,
+    borderWidth: 1,
     backgroundColor: setOpacity(Colors.primary, 0.1),
-  },
-  statusPill: {
-    paddingHorizontal: rs(9),
-    paddingVertical: rvs(4),
-    borderRadius: rs(10),
+    borderColor: Colors.primary,
   },
   routeRow: {
     flexDirection: "row",

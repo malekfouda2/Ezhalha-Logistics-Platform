@@ -15,7 +15,9 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "co.ezhalha.app",
-      "associatedDomains": ["applinks:app.ezhalha.co"],
+      "associatedDomains": [
+        "applinks:app.ezhalha.co"
+      ],
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true
       }
@@ -38,7 +40,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
             {
               "scheme": "https",
@@ -72,7 +77,8 @@
         }
       ],
       "expo-secure-store",
-      "expo-router"
+      "expo-router",
+      "expo-sharing"
     ]
   }
 }

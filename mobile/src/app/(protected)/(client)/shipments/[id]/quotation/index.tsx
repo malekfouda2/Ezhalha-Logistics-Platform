@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,8 +22,12 @@ import { SectionLabel, InfoCard, InfoRow } from "@/components/ui/InfoCard";
 import { AcceptTermsSheet } from "@/components/sections/shipments/quotation/AcceptTermsModal";
 import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { API_BASE_URL, apiRequest } from "@/api/client";
+import { apiRequest } from "@/api/client";
 import { Shipment } from "@shared/schema";
+import {
+  handleDownloadCarrierLabel,
+  handleDownloadCommercialInvoice,
+} from "@/utils/utils";
 
 function formatDate(value?: string | null): string {
   if (!value) return "—";
@@ -88,20 +91,39 @@ export default function QuotationDetailScreen() {
   });
 
   const acceptMutation = useMutation({
-    mutationFn: async (shipmentId: string) => {
+    mutationFn: async ({
+      shipmentId,
+      accept,
+    }: {
+      shipmentId: string;
+      accept: boolean;
+    }) => {
       return apiRequest<{ shipmentId?: string }>(
-        `/api/client/shipments/${shipmentId}/accept-quote`,
-        { method: "POST" },
+        `/api/client/quotations/${shipmentId}/accept-terms`,
+        {
+          method: "POST",
+          body: {
+            customsComplianceAccepted: accept,
+            termsAccepted: accept,
+            brokerAuthorizationAccepted: accept,
+          },
+        },
       );
     },
+
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/client/shipments"],
+      });
+
       queryClient.invalidateQueries({
         queryKey: ["/api/client/shipments/recent"],
       });
+
       setAcceptSheetVisible(false);
-      router.push(`/quotations/${id}/accepted`);
+      router.push(`/shipments/${id}/quotation/accepted`);
     },
+
     onError: (error: Error) => {
       Toast.show({
         type: "error",
@@ -139,16 +161,13 @@ export default function QuotationDetailScreen() {
   );
 
   // Price breakdown derived from the shipment's SAR-denominated fields.
-  const shippingAmount = toNumber(quotation.sellSubtotalAmountSar) || toNumber(quotation.baseRate);
+  const shippingAmount =
+    toNumber(quotation.sellSubtotalAmountSar) || toNumber(quotation.baseRate);
   const discountAmount = toNumber(quotation.quoteDiscountSar);
   const vatAmount = toNumber(quotation.sellTaxAmountSar);
   const vatRate = quotation.taxScenario === "zero_rated" ? 0 : 15;
   const totalAmount =
     toNumber(quotation.clientTotalAmountSar) || toNumber(quotation.finalPrice);
-
-  const handleDownload = (url?: string | null) => {
-    if (url) Linking.openURL(url);
-  };
 
   return (
     <View style={styles.screen}>
@@ -162,7 +181,9 @@ export default function QuotationDetailScreen() {
 
           <View style={styles.headerTitleBlock}>
             <Text size="medium" weight="bold">
-              {t("shipments.quotation.details.title", { number: quotation.trackingNumber })}
+              {t("shipments.quotation.details.title", {
+                number: quotation.trackingNumber,
+              })}
             </Text>
             <Text size="small" weight="semibold" dimRate="60%">
               {t("shipments.quotation.details.preparedBy")}
@@ -171,7 +192,9 @@ export default function QuotationDetailScreen() {
         </View>
 
         {/* Shipment details */}
-        <SectionLabel>{t("shipments.quotation.details.shipmentDetails")}</SectionLabel>
+        <SectionLabel>
+          {t("shipments.quotation.details.shipmentDetails")}
+        </SectionLabel>
         <InfoCard>
           <InfoRow
             label={t("shipments.quotation.details.route")}
@@ -192,43 +215,97 @@ export default function QuotationDetailScreen() {
         </InfoCard>
 
         {/* Customs & documents */}
-        {quotation.itemsData && (
+        {(quotation.carrierLabelBase64 || quotation.itemsData) && (
           <>
-            <SectionLabel>{t("shipments.quotation.details.customsAndDocuments")}</SectionLabel>
+            <SectionLabel>{t("shipments.details.documents")}</SectionLabel>
+
             <View style={styles.docCard}>
-              <View style={styles.docRow}>
-                <View style={styles.docIconWrap}>
-                  <Feather name="file-text" size={rs(18)} color={Colors.primary} />
-                </View>
+              {quotation.carrierLabelBase64 && (
+                <>
+                  <View style={styles.docRow}>
+                    <View style={styles.docIconWrap}>
+                      <Feather
+                        name="file-text"
+                        size={rs(18)}
+                        color={Colors.primary}
+                      />
+                    </View>
 
-                <View style={{ flex: 1 }}>
-                  <Text size="small" weight="bold">
-                    {t("shipments.quotation.details.commercialInvoice")}
-                  </Text>
-                  <Text size="xs" dimRate="55%">
-                    {t("shipments.quotation.details.attached")}
-                  </Text>
-                </View>
+                    <View style={{ flex: 1 }}>
+                      <Text size="small" weight="bold">
+                        {t("shipments.details.shippingLabel")}
+                      </Text>
 
-                <Pressable
-                  onPress={() =>
-                    handleDownload(
-                      `${API_BASE_URL}/api/client/shipments/${quotation.id}/commercial-invoice.pdf`,
-                    )
-                  }
-                  hitSlop={8}
-                >
-                  <Text size="small" weight="bold" style={{ color: Colors.primary }}>
-                    {t("shipments.quotation.details.download")}
-                  </Text>
-                </Pressable>
-              </View>
+                      <Text size="xs" dimRate="55%">
+                        {(
+                          quotation.carrierLabelFormat ??
+                          t("shipments.details.pdf")
+                        ).toUpperCase()}
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      onPress={() => handleDownloadCarrierLabel(quotation.id)}
+                      hitSlop={8}
+                    >
+                      <Text
+                        size="small"
+                        weight="bold"
+                        style={{ color: Colors.primary }}
+                      >
+                        {t("shipments.details.download")}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {quotation.itemsData && <View style={styles.rowDivider} />}
+                </>
+              )}
+
+              {quotation.itemsData && (
+                <View style={styles.docRow}>
+                  <View style={styles.docIconWrap}>
+                    <Feather
+                      name="file-text"
+                      size={rs(18)}
+                      color={Colors.primary}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text size="small" weight="bold">
+                      {t("shipments.details.commercialInvoice")}
+                    </Text>
+
+                    <Text size="xs" dimRate="55%">
+                      {t("shipments.details.pdf")}
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    onPress={() =>
+                      handleDownloadCommercialInvoice(quotation.id)
+                    }
+                    hitSlop={8}
+                  >
+                    <Text
+                      size="small"
+                      weight="bold"
+                      style={{ color: Colors.primary }}
+                    >
+                      {t("shipments.details.download")}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           </>
         )}
 
         {/* Customs declaration */}
-        <SectionLabel>{t("shipments.quotation.details.customsDeclaration")}</SectionLabel>
+        <SectionLabel>
+          {t("shipments.quotation.details.customsDeclaration")}
+        </SectionLabel>
         <InfoCard>
           <InfoRow
             label={t("shipments.quotation.details.items")}
@@ -253,7 +330,11 @@ export default function QuotationDetailScreen() {
             label={t("shipments.quotation.details.shipping")}
             value={formatMoney(shippingAmount)}
             icon={
-              <SaudiRiyal size={rs(13)} color={Colors.text} style={styles.riyalIcon} />
+              <SaudiRiyal
+                size={rs(13)}
+                color={Colors.text}
+                style={styles.riyalIcon}
+              />
             }
           />
           {discountAmount > 0 ? (
@@ -273,7 +354,11 @@ export default function QuotationDetailScreen() {
             label={t("shipments.quotation.details.vat", { rate: vatRate })}
             value={formatMoney(vatAmount)}
             icon={
-              <SaudiRiyal size={rs(13)} color={Colors.text} style={styles.riyalIcon} />
+              <SaudiRiyal
+                size={rs(13)}
+                color={Colors.text}
+                style={styles.riyalIcon}
+              />
             }
           />
           <View style={styles.totalRow}>
@@ -308,7 +393,12 @@ export default function QuotationDetailScreen() {
         visible={acceptSheetVisible}
         total={formatMoney(totalAmount)}
         isPending={acceptMutation.isPending}
-        onConfirm={() => acceptMutation.mutate(quotation.id)}
+        onConfirm={(accepted) =>
+          acceptMutation.mutate({
+            shipmentId: quotation.id,
+            accept: accepted,
+          })
+        }
         onClose={() => setAcceptSheetVisible(false)}
       />
     </View>
@@ -366,7 +456,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
+  rowDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+  },
   riyalIcon: {
     marginRight: rs(3),
   },

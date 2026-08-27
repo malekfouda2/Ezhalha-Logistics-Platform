@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +20,9 @@ import { ClientAccount, ClientDashboardStats, Shipment } from "@shared/schema";
 import { router } from "expo-router";
 import { LanguageSwitch } from "@/components/ui/LanguageSwitch";
 import { useTranslation } from "react-i18next";
+import { useNotifications } from "@/lib/hooks/useNotifications";
+import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
+import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
@@ -36,6 +40,9 @@ export default function ClientDashboard() {
   >({
     queryKey: ["/api/client/shipments/recent"],
   });
+  const { refreshing, onRefresh } = useGlobalRefresh();
+
+  const { unreadCount } = useNotifications();
 
   const displayName = account?.companyName || account?.name || "";
   const initials =
@@ -89,10 +96,7 @@ export default function ClientDashboard() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
-      >
+      <RefreshableScreen contentContainerStyle={styles.content}>
         <LanguageSwitch />
         {/* Header */}
         <View style={styles.header}>
@@ -129,7 +133,17 @@ export default function ClientDashboard() {
               color={Colors.text}
             />
 
-            <View style={styles.notificationDot} />
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text
+                  size="xs"
+                  weight="bold"
+                  style={styles.notificationBadgeText}
+                >
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
@@ -276,7 +290,7 @@ export default function ClientDashboard() {
           shipments={recentShipments}
           isLoading={shipmentsLoading}
         />
-      </ScrollView>
+      </RefreshableScreen>
     </SafeAreaView>
   );
 }
@@ -323,27 +337,41 @@ const styles = StyleSheet.create({
     marginTop: rvs(1),
   },
   notificationButton: {
-    width: rs(42),
-    height: rs(42),
-    borderRadius: rs(13),
+    width: rs(40),
+    height: rs(40),
+    borderRadius: rs(10),
     backgroundColor: Colors.white,
     alignItems: "center",
     justifyContent: "center",
+    position: "relative", // important
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
   },
-  notificationDot: {
+
+  notificationBadge: {
     position: "absolute",
-    width: rs(6),
-    height: rs(6),
-    borderRadius: rs(6),
+    top: -rs(12),
+    right: -rs(4),
+    minWidth: rs(25),
+    height: rs(25),
+    paddingHorizontal: rs(3),
+    borderRadius: 50,
     backgroundColor: Colors.primary,
-    top: rs(12),
-    right: rs(14),
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: Colors.white,
   },
+
+  notificationBadgeText: {
+    color: Colors.white,
+    fontSize: rs(9),
+    lineHeight: rs(11),
+  },
+
   welcomeSection: {
     marginTop: rvs(18),
   },

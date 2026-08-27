@@ -26,7 +26,7 @@ export default function QuotationAcceptedScreen() {
     <View style={styles.screen}>
       <View style={styles.content}>
         <View style={styles.iconWrap}>
-          <Ionicons name="checkmark" size={rs(40)} color="#15803D" />
+          <Ionicons name="checkmark" size={rs(50)} color="#2db25e" />
         </View>
 
         <Text size="xxl" weight="bold" style={styles.title}>
@@ -56,7 +56,8 @@ export default function QuotationAcceptedScreen() {
       <View style={styles.footer}>
         <Button
           title={t("shipments.quotation.accepted.continueToPayment")}
-          onPress={() => router.push(`/shipments/${id}/payment`)}
+          // onPress={() => router.push(`/shipments/${id}/payment`)}
+          onPress={() => router.push(`/shipments`)}
         />
       </View>
     </View>
