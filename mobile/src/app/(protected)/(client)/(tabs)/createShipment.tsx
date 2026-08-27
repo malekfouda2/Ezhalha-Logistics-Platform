@@ -12,12 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import {
-  Feather,
-  MaterialIcons,
-  Fontisto,
-  Ionicons,
-} from "@expo/vector-icons";
+import { Feather, MaterialIcons, Fontisto, Ionicons } from "@expo/vector-icons";
 
 type ShipmentTypeIcon =
   | {
@@ -52,7 +47,7 @@ const SHIPMENT_TYPES: ShipmentType[] = [
     },
     iconColor: Colors.primary,
     iconBg: "#FDE4D6",
-    route: "/create-shipment/express",
+    route: "/createShipment/express",
   },
   {
     id: "freight",
@@ -62,7 +57,7 @@ const SHIPMENT_TYPES: ShipmentType[] = [
     },
     iconColor: "#3B6FE0",
     iconBg: "#DCE6FB",
-    route: "/create-shipment/freight",
+    route: "/createShipment/doorToDoor",
   },
   {
     id: "local",
@@ -72,7 +67,7 @@ const SHIPMENT_TYPES: ShipmentType[] = [
     },
     iconColor: "#1C9E6E",
     iconBg: "#D7F0E3",
-    route: "/create-shipment/local",
+    route: "/createShipment/local",
   },
 ];
 
@@ -96,35 +91,35 @@ export default function CreateShipmentScreen() {
 
         {SHIPMENT_TYPES.map((item) => (
           <View key={item.id} style={styles.card}>
-      <View
-  style={[styles.iconWrapper, { backgroundColor: item.iconBg }]}
->
-  {item.icon.library === "feather" ? (
-    <Feather
-      name={item.icon.name}
-      size={rs(28)}
-      color={item.iconColor}
-    />
-  ) : item.icon.library === "materialIcons" ? (
-    <MaterialIcons
-      name={item.icon.name}
-      size={rs(28)}
-      color={item.iconColor}
-    />
-  ) : item.icon.library === "fontisto" ? (
-    <Fontisto
-      name={item.icon.name}
-      size={rs(28)}
-      color={item.iconColor}
-    />
-  ) : (
-    <Ionicons
-      name={item.icon.name}
-      size={rs(28)}
-      color={item.iconColor}
-    />
-  )}
-</View>
+            <View
+              style={[styles.iconWrapper, { backgroundColor: item.iconBg }]}
+            >
+              {item.icon.library === "feather" ? (
+                <Feather
+                  name={item.icon.name}
+                  size={rs(28)}
+                  color={item.iconColor}
+                />
+              ) : item.icon.library === "materialIcons" ? (
+                <MaterialIcons
+                  name={item.icon.name}
+                  size={rs(28)}
+                  color={item.iconColor}
+                />
+              ) : item.icon.library === "fontisto" ? (
+                <Fontisto
+                  name={item.icon.name}
+                  size={rs(28)}
+                  color={item.iconColor}
+                />
+              ) : (
+                <Ionicons
+                  name={item.icon.name}
+                  size={rs(28)}
+                  color={item.iconColor}
+                />
+              )}
+            </View>
 
             <Text size="large" weight="bold">
               {t(`createShipment.${item.id}.title`)}
