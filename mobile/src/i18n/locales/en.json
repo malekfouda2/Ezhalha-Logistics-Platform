@@ -397,7 +397,23 @@
       "keep": "Keep it"
     }
   },
-
+  "createShipment": {
+    "heading": "Create a shipment",
+    "subheading": "Choose the type of shipment",
+    "express": {
+      "title": "Express Shipment",
+      "description": "International & domestic courier via FedEx, DHL and partners."
+    },
+    "freight": {
+      "title": "Door To Door Freight",
+      "description": "Import with all duties & taxes prepaid on fixed lane pricing."
+    },
+    "local": {
+      "title": "Local Delivery",
+      "description": "Last-mile delivery within Saudi Arabia via local carriers."
+    },
+    "continue": "Continue"
+  },
   "datePicker": {
     "placeholder": "dd/mm/yyyy",
     "today": "Today",

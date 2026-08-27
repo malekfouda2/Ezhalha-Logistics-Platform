@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
 
-    marginTop: rvs(-20),
+    marginTop: rvs(-30),
   },
 
   fab: {
