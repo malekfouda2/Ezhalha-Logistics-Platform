@@ -1,11 +1,7 @@
-// components/shipment/SavedAddressCard.tsx
+// components/sections/createShipment/express/SavedAddressCard.tsx
 
 import React from "react";
-import {
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
@@ -18,7 +14,9 @@ interface SavedAddressCardProps {
   city: string;
   type?: "home" | "warehouse";
   defaultAddress?: boolean;
-  selected: boolean;
+  countryFlag?: string;
+  variant?: "select" | "use";
+  selected?: boolean;
   onPress: () => void;
 }
 
@@ -28,35 +26,45 @@ export const SavedAddressCard = ({
   city,
   type = "home",
   defaultAddress = false,
-  selected,
+  countryFlag = "🇸🇦",
+  variant = "select",
+  selected = false,
   onPress,
 }: SavedAddressCardProps) => {
+  const isUseVariant = variant === "use";
+
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         styles.container,
-        selected && styles.containerSelected,
+        !isUseVariant && selected && styles.containerSelected,
         pressed && styles.pressed,
       ]}
     >
       <View
         style={[
           styles.iconContainer,
-          selected && styles.iconContainerSelected,
+          !isUseVariant && selected && styles.iconContainerSelected,
         ]}
       >
         <Feather
-          name={type === "warehouse" ? "archive" : "home"}
-          size={rs(27)}
-          color={selected ? Colors.primary : "#71829C"}
+          name={
+            isUseVariant
+              ? "user"
+              : type === "warehouse"
+              ? "archive"
+              : "home"
+          }
+          size={rs(20)}
+          color={!isUseVariant && selected ? Colors.primary : "#71829C"}
         />
       </View>
 
       <View style={styles.content}>
         <View style={styles.nameRow}>
           <Text
-            size="xl"
+            size="medium"
             weight="bold"
             style={styles.name}
             numberOfLines={1}
@@ -64,38 +72,35 @@ export const SavedAddressCard = ({
             {name}
           </Text>
 
-          {defaultAddress && (
-            <Text
-              size="large"
-              weight="bold"
-              style={styles.defaultText}
-            >
+          {defaultAddress && !isUseVariant && (
+            <Text size="small" weight="bold" style={styles.defaultText}>
               Default
             </Text>
           )}
         </View>
 
-        <Text
-          size="large"
-          style={styles.address}
-          numberOfLines={1}
-        >
+        <Text size="small" style={styles.address} numberOfLines={1}>
           {address}
         </Text>
 
         <View style={styles.cityRow}>
-          <Text
-            size="large"
-            style={styles.city}
-          >
+          <Text size="small" style={styles.city}>
             {city}
           </Text>
 
           <Text size="large"> · </Text>
 
-          <Text size="large">🇸🇦</Text>
+          <Text size="large">{countryFlag}</Text>
         </View>
       </View>
+
+      {isUseVariant && (
+        <Pressable onPress={onPress} hitSlop={10}>
+          <Text size="medium" weight="bold" style={styles.useLabel}>
+            Use
+          </Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 };
@@ -103,19 +108,18 @@ export const SavedAddressCard = ({
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    minHeight: rvs(140),
+    minHeight: rvs(100),
 
     backgroundColor: Colors.white,
 
     borderRadius: rs(22),
 
-    paddingHorizontal: rs(26),
-    paddingVertical: rvs(22),
+    padding: rvs(15),
 
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
 
-    marginBottom: rvs(20),
+    marginBottom: rvs(10),
 
     borderWidth: 1.5,
     borderColor: "transparent",
@@ -140,17 +144,17 @@ const styles = StyleSheet.create({
   },
 
   iconContainer: {
-    width: rs(64),
-    height: rs(64),
+    width: rs(35),
+    height: rs(35),
 
-    borderRadius: rs(18),
+    borderRadius: rs(10),
 
     backgroundColor: "#F4F6F8",
 
     alignItems: "center",
     justifyContent: "center",
 
-    marginEnd: rs(22),
+    marginEnd: rs(15),
   },
 
   iconContainerSelected: {
@@ -191,5 +195,11 @@ const styles = StyleSheet.create({
 
   city: {
     color: "#687994",
+  },
+
+  useLabel: {
+    color: Colors.primary,
+    marginStart: rs(10),
+    alignSelf: "center",
   },
 });

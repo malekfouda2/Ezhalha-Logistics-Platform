@@ -1,4 +1,4 @@
-// app/create-shipment/express/step-2.tsx
+// app/create-shipment/express/step-3.tsx
 
 import React, { useState } from "react";
 import {
@@ -10,54 +10,55 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
+
+import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
+import { CountrySelect } from "@/components/ui/CountrySelect";
 import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
+import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
+import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
+import InfoBox from "@/components/sections/createShipment/InfoBox";
 
-interface SavedAddress {
+interface SavedRecipient {
   id: string;
   name: string;
-  address: string;
+  addressLine: string;
   city: string;
-  type: "home" | "warehouse";
-  defaultAddress?: boolean;
+  countryFlag: string;
 }
 
-const SAVED_ADDRESSES: SavedAddress[] = [
+const SAVED_RECIPIENTS: SavedRecipient[] = [
   {
     id: "1",
-    name: "Al Rajhi Trading — HQ",
-    address: "King Fahd Rd, Al Olaya",
-    city: "Riyadh 12333",
-    type: "home",
-    defaultAddress: true,
-  },
-  {
-    id: "2",
-    name: "Warehouse — Jeddah",
-    address: "Al Khumrah Industrial",
-    city: "Jeddah 23762",
-    type: "warehouse",
+    name: "Gulf Retail LLC",
+    addressLine: "Sheikh Zayed Rd, Al Quoz",
+    city: "Dubai",
+    countryFlag: "🇦🇪",
   },
 ];
 
-export default function SenderDetailsScreen() {
+export default function RecipientDetailsScreen() {
   const router = useRouter();
 
-  const [selectedAddress, setSelectedAddress] = useState("1");
+  const [countryCode, setCountryCode] = useState("AE");
 
-  const [contactName, setContactName] = useState("");
+  const [recipientName, setRecipientName] = useState("");
   const [phone, setPhone] = useState("");
-  const [addressLine1, setAddressLine1] = useState("");
   const [city, setCity] = useState("");
   const [postalCode, setPostalCode] = useState("");
 
   const handleContinue = () => {
-    router.push("/createShipment/express/step-3");
+    router.push("/createShipment/express/step-4");
+  };
+
+  const handleUseSaved = (recipient: SavedRecipient) => {
+    setRecipientName(recipient.name);
+    setCity(recipient.city);
   };
 
   return (
@@ -72,33 +73,41 @@ export default function SenderDetailsScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <ShipmentStepHeader
-          step={2}
+          step={3}
           totalSteps={8}
-          title="Sender Details"
-          subtitle="Pickup address and contact"
+          title="Recipient Details"
+          subtitle="Delivery address and contact"
           onBack={() => router.back()}
         />
 
-        <SectionTitle title="SAVED SENDER ADDRESSES" />
-        {SAVED_ADDRESSES.map((address) => (
+        <SectionTitle title="COUNTRY" />
+
+        <CountrySelect
+          value={countryCode}
+          onChange={(selected) => setCountryCode(selected.code)}
+          placeholder="Select country"
+        />
+
+        <SectionTitle title="SAVED RECIPIENT ADDRESSES" />
+
+        {SAVED_RECIPIENTS.map((recipient) => (
           <SavedAddressCard
-            key={address.id}
-            name={address.name}
-            address={address.address}
-            city={address.city}
-            type={address.type}
-            defaultAddress={address.defaultAddress}
-            selected={selectedAddress === address.id}
-            onPress={() => setSelectedAddress(address.id)}
+            key={recipient.id}
+            variant="use"
+            name={recipient.name}
+            address={recipient.addressLine}
+            city={recipient.city}
+            countryFlag={recipient.countryFlag}
+            onPress={() => handleUseSaved(recipient)}
           />
         ))}
 
         <SectionTitle title="OR ENTER A NEW ADDRESS" />
 
         <Input
-          placeholder="Contact name"
-          value={contactName}
-          onChangeText={setContactName}
+          placeholder="Recipient name"
+          value={recipientName}
+          onChangeText={setRecipientName}
           autoCapitalize="words"
         />
 
@@ -107,12 +116,6 @@ export default function SenderDetailsScreen() {
           value={phone}
           onChangeText={setPhone}
           keyboardType="phone-pad"
-        />
-
-        <Input
-          placeholder="Address line 1"
-          value={addressLine1}
-          onChangeText={setAddressLine1}
         />
 
         <View style={styles.row}>
@@ -129,6 +132,8 @@ export default function SenderDetailsScreen() {
             />
           </View>
         </View>
+
+        <InfoBox text="Some countries also require a state or province." />
       </ScrollView>
 
       <ShipmentFooter onPress={handleContinue} />
@@ -147,6 +152,13 @@ const styles = StyleSheet.create({
     paddingTop: rvs(16),
   },
 
+  sectionTitle: {
+    color: "#687994",
+    letterSpacing: 1.5,
+    marginStart: rs(4),
+    marginBottom: rvs(12),
+  },
+
   row: {
     flexDirection: "row",
     gap: rs(18),
@@ -154,5 +166,27 @@ const styles = StyleSheet.create({
 
   half: {
     flex: 1,
+  },
+
+  infoBox: {
+    marginTop: rvs(4),
+
+    borderWidth: 1.5,
+    borderColor: "#FFCDB6",
+    borderRadius: rs(22),
+
+    backgroundColor: "#FFF9F6",
+
+    paddingHorizontal: rs(15),
+    paddingVertical: rvs(15),
+
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+
+  infoText: {
+    flex: 1,
+    color: "#B65B27",
+    marginStart: rs(10),
   },
 });

@@ -1,0 +1,168 @@
+// components/sections/createShipment/express/PackageCard.tsx
+
+import React from "react";
+import {
+  StyleSheet,
+  View,
+  Pressable,
+  TextInput,
+} from "react-native";
+
+import { Text } from "@/components/ui/Text";
+import { Colors } from "@/constants/colors";
+import { Typography } from "@/constants/typography";
+import { rs, rvs } from "@/utils/responsive";
+
+interface PackageCardProps {
+  index: number;
+  weight: string;
+  length: string;
+  width: string;
+  height: string;
+  onChangeWeight: (v: string) => void;
+  onChangeLength: (v: string) => void;
+  onChangeWidth: (v: string) => void;
+  onChangeHeight: (v: string) => void;
+  onRemove?: () => void;
+  removable?: boolean;
+}
+
+export const PackageCard = ({
+  index,
+  weight,
+  length,
+  width,
+  height,
+  onChangeWeight,
+  onChangeLength,
+  onChangeWidth,
+  onChangeHeight,
+  onRemove,
+  removable = true,
+}: PackageCardProps) => {
+  return (
+    <View style={styles.card}>
+      <View style={styles.headerRow}>
+        <Text size="small" weight="bold" style={styles.title}>
+          Package {index}
+        </Text>
+
+        {removable ? (
+          <Pressable onPress={onRemove} hitSlop={10}>
+            <Text size="small" weight="semibold" style={styles.remove}>
+              Remove
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.grid}>
+        <View style={styles.gridItem}>
+          <Text size="xs" weight="bold" style={styles.label}>
+            WEIGHT
+          </Text>
+          <TextInput
+            value={weight}
+            onChangeText={onChangeWeight}
+            keyboardType="decimal-pad"
+            placeholderTextColor={Colors.placeholder}
+            style={styles.gridInput}
+          />
+        </View>
+
+        <View style={styles.gridItem}>
+          <Text size="xs" weight="bold" style={styles.label}>
+            L CM
+          </Text>
+          <TextInput
+            value={length}
+            onChangeText={onChangeLength}
+            keyboardType="number-pad"
+            placeholderTextColor={Colors.placeholder}
+            style={styles.gridInput}
+          />
+        </View>
+
+        <View style={styles.gridItem}>
+          <Text size="xs" weight="bold" style={styles.label}>
+            W CM
+          </Text>
+          <TextInput
+            value={width}
+            onChangeText={onChangeWidth}
+            keyboardType="number-pad"
+            placeholderTextColor={Colors.placeholder}
+            style={styles.gridInput}
+          />
+        </View>
+
+        <View style={styles.gridItem}>
+          <Text size="xs" weight="bold" style={styles.label}>
+            H CM
+          </Text>
+          <TextInput
+            value={height}
+            onChangeText={onChangeHeight}
+            keyboardType="number-pad"
+            placeholderTextColor={Colors.placeholder}
+            style={styles.gridInput}
+          />
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  card: {
+    width: "100%",
+    backgroundColor: Colors.white,
+    borderRadius: rs(22),
+    padding: rs(18),
+    marginBottom: rvs(16),
+  },
+
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: rvs(14),
+  },
+
+  title: {
+    color: Colors.text,
+  },
+
+  remove: {
+    color: "#687994",
+  },
+
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: rs(10),
+  },
+
+  gridItem: {
+    // flexBasis: "25%",
+    flexGrow: 1,
+    alignItems:"center",
+    backgroundColor: Colors.background,
+    borderRadius: rs(16),
+    paddingHorizontal: rs(10),
+    paddingTop: rvs(10),
+  },
+
+  label: {
+    color: Colors.secondary,
+    letterSpacing: 1,
+  },
+
+  gridInput: {
+    height: rvs(40),
+    paddingHorizontal: 0,
+    fontSize: Typography.size.large,
+    fontFamily: Typography.fontFamily.bold,
+    color: Colors.text,
+  },
+});

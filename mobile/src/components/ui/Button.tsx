@@ -10,9 +10,10 @@ import {
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { ReactNode } from "react";
 
 export interface ButtonProps extends PressableProps {
-  title: string;
+  title: string | ReactNode;
   variant?: "primary" | "outline";
   loading?: boolean;
   style?: ViewStyle;

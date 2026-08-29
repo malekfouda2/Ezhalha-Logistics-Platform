@@ -2,12 +2,9 @@
 
 import React from "react";
 import {
-  I18nManager,
-  Pressable,
   StyleSheet,
   View,
 } from "react-native";
-import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -36,7 +33,7 @@ export const ShipmentStepHeader = ({
 
         <View style={styles.titleContainer}>
           <Text
-            size="large"
+            size="medium"
             weight="bold"
             numberOfLines={1}
             style={styles.title}
@@ -45,7 +42,7 @@ export const ShipmentStepHeader = ({
           </Text>
 
           <Text
-            size="small"
+            size="xs"
             weight="semibold"
             style={styles.subtitle}
           >
@@ -76,7 +73,7 @@ export const ShipmentStepHeader = ({
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    marginBottom: rvs(28),
+    marginBottom: rvs(20),
   },
 
   headerRow: {
@@ -120,7 +117,7 @@ const styles = StyleSheet.create({
 
   progressItem: {
     flex: 1,
-    height: rvs(5),
+    height: rvs(4),
     borderRadius: rs(5),
     backgroundColor: "#E9EDF2",
   },

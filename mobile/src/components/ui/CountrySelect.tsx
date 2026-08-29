@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
   field: {
     flexDirection: "row",
     alignItems: "center",
-    height: rvs(58),
+    height: rvs(50),
     backgroundColor: Colors.inputBackground,
     borderRadius: rs(16),
     borderWidth: 1.5,

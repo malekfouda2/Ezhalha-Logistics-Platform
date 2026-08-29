@@ -128,7 +128,7 @@ Input.displayName = "Input";
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    marginBottom: rvs(20),
+    marginBottom: rvs(15),
   },
 
   label: {
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
 
   input: {
     flex: 1,
-    height: rvs(58),
+    height: rvs(50),
 
     fontSize: Typography.size.medium,
     fontFamily: Typography.fontFamily.regular,

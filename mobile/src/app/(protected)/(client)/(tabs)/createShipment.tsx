@@ -121,11 +121,11 @@ export default function CreateShipmentScreen() {
               )}
             </View>
 
-            <Text size="large" weight="bold">
+            <Text size="medium" weight="bold">
               {t(`createShipment.${item.id}.title`)}
             </Text>
 
-            <Text size="small" dimRate="60%" style={styles.cardDescription}>
+            <Text size="xs" dimRate="60%" style={styles.cardDescription}>
               {t(`createShipment.${item.id}.description`)}
             </Text>
 
@@ -159,29 +159,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   scrollContent: {
-    paddingHorizontal: rs(24),
+    paddingHorizontal: rs(16),
     paddingTop: rvs(16),
-    paddingBottom: rvs(32),
   },
   subheading: {
-    marginBottom: rvs(20),
+    marginBottom: rvs(10),
   },
   card: {
     backgroundColor: Colors.white,
     borderRadius: rs(24),
-    padding: rs(20),
+    padding: rs(18),
     marginBottom: rvs(15),
   },
   iconWrapper: {
-    width: rs(55),
-    height: rs(55),
-    borderRadius: rs(18),
+    width: rs(45),
+    height: rs(45),
+    borderRadius: rs(15),
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: rvs(15),
+    marginBottom: rvs(10),
   },
   cardDescription: {
-    marginBottom: rvs(16),
+    marginBottom: rvs(12),
   },
   continueRow: {
     flexDirection: "row",
