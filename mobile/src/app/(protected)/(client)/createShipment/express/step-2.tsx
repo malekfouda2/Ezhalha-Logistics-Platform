@@ -1,56 +1,27 @@
-import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/Input";
-import { rs } from "@/utils/responsive";
+import { Text } from "@/components/ui/Text";
+
+import { rs, rvs } from "@/utils/responsive";
 import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
-
-interface SavedAddress {
-  id: string;
-  name: string;
-  address: string;
-  city: string;
-  type: "home" | "warehouse";
-  defaultAddress?: boolean;
-}
-
-const SAVED_ADDRESSES: SavedAddress[] = [
-  {
-    id: "1",
-    name: "Al Rajhi Trading — HQ",
-    address: "King Fahd Rd, Al Olaya",
-    city: "Riyadh 12333",
-    type: "home",
-    defaultAddress: true,
-  },
-  {
-    id: "2",
-    name: "Warehouse — Jeddah",
-    address: "Al Khumrah Industrial",
-    city: "Jeddah 23762",
-    type: "warehouse",
-  },
-];
+import { useSenderStep } from "@/lib/hooks/createShipment/express/useSenderStep";
 
 export default function SenderDetailsScreen() {
-  const router = useRouter();
   const { t } = useTranslation();
 
-  const [selectedAddress, setSelectedAddress] = useState("1");
-
-  const [contactName, setContactName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [addressLine1, setAddressLine1] = useState("");
-  const [city, setCity] = useState("");
-  const [postalCode, setPostalCode] = useState("");
-
-  const handleContinue = () => {
-    router.push("/createShipment/express/step-3");
-  };
+  const {
+    shipper,
+    updateShipper,
+    handleContinue,
+    savedSenderAddresses,
+    isLoadingAddresses,
+    applySavedAddress,
+    selectedAddressId,
+  } = useSenderStep();
 
   return (
     <ShipmentStepLayout
@@ -61,21 +32,35 @@ export default function SenderDetailsScreen() {
       onContinue={handleContinue}
     >
       <SectionTitle
-        title={t("createShipment.express.steps.step2.savedAddresses")}
+        title={t("createShipment.express.steps.step2.savedAddresses.title")}
       />
 
-      {SAVED_ADDRESSES.map((address) => (
-        <SavedAddressCard
-          key={address.id}
-          name={address.name}
-          address={address.address}
-          city={address.city}
-          type={address.type}
-          defaultAddress={address.defaultAddress}
-          selected={selectedAddress === address.id}
-          onPress={() => setSelectedAddress(address.id)}
-        />
-      ))}
+      {isLoadingAddresses ? (
+        <Text size="small" style={styles.emptyText}>
+          {t("common.loading")}
+        </Text>
+      ) : savedSenderAddresses.length > 0 ? (
+        savedSenderAddresses.map((address) => (
+          <SavedAddressCard
+            key={address.id}
+            name={address.label}
+            address={address.addressLine1}
+            city={
+              address.postalCode
+                ? `${address.city} ${address.postalCode}`
+                : address.city
+            }
+            countryFlag={address.countryCode === "SA" ? "🇸🇦" : "🌍"}
+            defaultAddress={address.source === "default_shipping"}
+            selected={selectedAddressId === address.id}
+            onPress={() => applySavedAddress(address)}
+          />
+        ))
+      ) : (
+        <Text size="small" style={styles.emptyText}>
+          {t("createShipment.express.steps.step2.savedAddresses.empty")}
+        </Text>
+      )}
 
       <SectionTitle
         title={t("createShipment.express.steps.step2.newAddress")}
@@ -83,38 +68,38 @@ export default function SenderDetailsScreen() {
 
       <Input
         placeholder={t("createShipment.express.steps.step2.contactName")}
-        value={contactName}
-        onChangeText={setContactName}
+        value={shipper.name}
+        onChangeText={(value) => updateShipper({ name: value })}
         autoCapitalize="words"
       />
 
       <Input
         placeholder={t("createShipment.express.steps.step2.phone")}
-        value={phone}
-        onChangeText={setPhone}
+        value={shipper.phone}
+        onChangeText={(value) => updateShipper({ phone: value })}
         keyboardType="phone-pad"
       />
 
       <Input
         placeholder={t("createShipment.express.steps.step2.addressLine1")}
-        value={addressLine1}
-        onChangeText={setAddressLine1}
+        value={shipper.addressLine1}
+        onChangeText={(value) => updateShipper({ addressLine1: value })}
       />
 
       <View style={styles.row}>
         <View style={styles.half}>
           <Input
             placeholder={t("createShipment.express.steps.step2.city")}
-            value={city}
-            onChangeText={setCity}
+            value={shipper.city}
+            onChangeText={(value) => updateShipper({ city: value })}
           />
         </View>
 
         <View style={styles.half}>
           <Input
             placeholder={t("createShipment.express.steps.step2.postalCode")}
-            value={postalCode}
-            onChangeText={setPostalCode}
+            value={shipper.postalCode}
+            onChangeText={(value) => updateShipper({ postalCode: value })}
             keyboardType="number-pad"
           />
         </View>
@@ -131,5 +116,9 @@ const styles = StyleSheet.create({
 
   half: {
     flex: 1,
+  },
+  emptyText: {
+    color: "#687994",
+    marginBottom: rvs(15),
   },
 });

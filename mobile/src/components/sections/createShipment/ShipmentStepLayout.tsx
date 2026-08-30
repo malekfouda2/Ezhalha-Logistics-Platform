@@ -16,6 +16,7 @@ interface ShipmentStepLayoutProps {
   onContinue: () => void;
   continueLabel?: ReactNode;
   footerNote?: string;
+  onBack?: ()=> void
 }
 export function ShipmentStepLayout({
   title,
@@ -26,9 +27,16 @@ export function ShipmentStepLayout({
   onContinue,
   continueLabel,
   footerNote,
+  onBack
 }: ShipmentStepLayoutProps) {
   const router = useRouter();
-
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      router.back();
+    }
+  };
   return (
     <View style={styles.container}>
       <ShipmentStepHeader
@@ -36,7 +44,7 @@ export function ShipmentStepLayout({
         subtitle={subtitle}
         step={step}
         totalSteps={totalSteps}
-        onBack={() => router.back()}
+        onBack={handleBack}
       />
 
       <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>

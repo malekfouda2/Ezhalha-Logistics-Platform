@@ -430,7 +430,11 @@
         "step2": {
           "title": "Sender Details",
           "subtitle": "Pickup address and contact",
-          "savedAddresses": "SAVED SENDER ADDRESSES",
+            "savedAddresses": {
+    "title": "SAVED SENDER ADDRESSES",
+    "empty": "No saved sender addresses yet."
+  },
+          "emptyAddress": "",
           "newAddress": "OR ENTER A NEW ADDRESS",
           "contactName": "Contact name",
           "phone": "Phone",
@@ -688,6 +692,56 @@
       "errorTitle": "Password change failed",
       "invalidToken": "This password reset link is invalid or has expired.",
       "errorMessage": "Unable to change your password. Please try again."
+    },
+    "shipmentValidation": {
+      "shipmentTypeRequired": "Please select a shipment type",
+
+      "addressRequired": "Please fill in all required {{role}} fields",
+
+      "domesticSaudiOnly": "Domestic shipments must be within Saudi Arabia",
+
+      "postalCodeRequired": "{{role}} postal code is required",
+      "postalCodeRequiredDescription": "A valid postal code is required for {{country}}.",
+
+      "postalCodeInvalid": "Check the {{role}} postal code",
+      "roles": {
+        "sender": "Sender",
+        "recipient": "Recipient"
+      },
+      "postalFormats": {
+        "SA": "Saudi postal codes are 5 digits (e.g. 12345).",
+        "US": "US ZIP codes are 5 digits (e.g. 90210).",
+        "CA": "Canadian codes look like A1A 1A1.",
+        "GB": "UK postcodes look like SW1A 1AA.",
+        "DE": "German postal codes are 5 digits.",
+        "FR": "French postal codes are 5 digits.",
+        "EG": "Egyptian postal codes are 5 digits.",
+        "IN": "Indian PIN codes are 6 digits.",
+        "CN": "Chinese postal codes are 6 digits.",
+        "JP": "Japanese postal codes look like 100-0001.",
+        "AU": "Australian postcodes are 4 digits.",
+        "NL": "Dutch codes look like 1011 AB.",
+        "ES": "Spanish postal codes are 5 digits.",
+        "IT": "Italian postal codes are 5 digits."
+      },
+
+      "nationalAddressRequired": "{{role}} National Address is required",
+      "nationalAddressRequiredDescription": "KSA addresses need a National Address short code (e.g. RCTB4359).",
+
+      "nationalAddressInvalid": "Check the {{role}} National Address",
+      "nationalAddressInvalidDescription": "It should be 4 letters followed by 4 digits, e.g. RCTB4359.",
+
+      "stateRequired": "{{role}} state / province is required",
+      "stateRequiredDescription": "US and Canada addresses need a state or province.",
+
+      "packageDetailsRequired": "Please fill in all package details",
+      "packageDetailsRequiredForPackage": "Please fill in all details for Package {{packageNumber}}",
+
+      "shippingRateRequired": "Please select a shipping rate",
+
+      "invoiceRequired": "Please upload an invoice",
+      "customsItemRequired": "Please add at least one item for customs",
+      "customsItemIncomplete": "Please fill in all required fields for \"{{itemName}}\""
     }
   }
 }
