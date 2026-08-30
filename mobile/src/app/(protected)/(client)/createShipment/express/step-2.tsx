@@ -1,22 +1,13 @@
 // app/create-shipment/express/step-2.tsx
 
-import React, { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
+import { useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Input } from "@/components/ui/Input";
-import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
+import { rs } from "@/utils/responsive";
 import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
-import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 interface SavedAddress {
   id: string;
@@ -61,92 +52,68 @@ export default function SenderDetailsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 20}
+    <ShipmentStepLayout
+      step={2}
+      totalSteps={8}
+      title="Sender Details"
+      subtitle="Pickup address and contact"
+      onContinue={handleContinue}
     >
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <ShipmentStepHeader
-          step={2}
-          totalSteps={8}
-          title="Sender Details"
-          subtitle="Pickup address and contact"
-          onBack={() => router.back()}
+      <SectionTitle title="SAVED SENDER ADDRESSES" />
+      {SAVED_ADDRESSES.map((address) => (
+        <SavedAddressCard
+          key={address.id}
+          name={address.name}
+          address={address.address}
+          city={address.city}
+          type={address.type}
+          defaultAddress={address.defaultAddress}
+          selected={selectedAddress === address.id}
+          onPress={() => setSelectedAddress(address.id)}
         />
+      ))}
 
-        <SectionTitle title="SAVED SENDER ADDRESSES" />
-        {SAVED_ADDRESSES.map((address) => (
-          <SavedAddressCard
-            key={address.id}
-            name={address.name}
-            address={address.address}
-            city={address.city}
-            type={address.type}
-            defaultAddress={address.defaultAddress}
-            selected={selectedAddress === address.id}
-            onPress={() => setSelectedAddress(address.id)}
-          />
-        ))}
+      <SectionTitle title="OR ENTER A NEW ADDRESS" />
 
-        <SectionTitle title="OR ENTER A NEW ADDRESS" />
+      <Input
+        placeholder="Contact name"
+        value={contactName}
+        onChangeText={setContactName}
+        autoCapitalize="words"
+      />
 
-        <Input
-          placeholder="Contact name"
-          value={contactName}
-          onChangeText={setContactName}
-          autoCapitalize="words"
-        />
+      <Input
+        placeholder="Phone"
+        value={phone}
+        onChangeText={setPhone}
+        keyboardType="phone-pad"
+      />
 
-        <Input
-          placeholder="Phone"
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-        />
+      <Input
+        placeholder="Address line 1"
+        value={addressLine1}
+        onChangeText={setAddressLine1}
+      />
 
-        <Input
-          placeholder="Address line 1"
-          value={addressLine1}
-          onChangeText={setAddressLine1}
-        />
-
-        <View style={styles.row}>
-          <View style={styles.half}>
-            <Input placeholder="City" value={city} onChangeText={setCity} />
-          </View>
-
-          <View style={styles.half}>
-            <Input
-              placeholder="Postal code"
-              value={postalCode}
-              onChangeText={setPostalCode}
-              keyboardType="number-pad"
-            />
-          </View>
+      <View style={styles.row}>
+        <View style={styles.half}>
+          <Input placeholder="City" value={city} onChangeText={setCity} />
         </View>
-      </ScrollView>
 
-      <ShipmentFooter onPress={handleContinue} />
-    </KeyboardAvoidingView>
+        <View style={styles.half}>
+          <Input
+            placeholder="Postal code"
+            value={postalCode}
+            onChangeText={setPostalCode}
+            keyboardType="number-pad"
+          />
+        </View>
+      </View>
+    </ShipmentStepLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  scrollContent: {
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-  },
-
   row: {
     flexDirection: "row",
     gap: rs(18),

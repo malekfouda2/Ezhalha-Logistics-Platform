@@ -1,6 +1,5 @@
 import { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
-
 import { Button } from "@/components/ui/Button";
 import { Text } from "@/components/ui/Text";
 import { rs, rvs } from "@/utils/responsive";
@@ -32,14 +31,12 @@ export default ShipmentFooter;
 
 const styles = StyleSheet.create({
   footer: {
-    marginTop: rvs(10),
-    marginBottom: rvs(20),
+    marginVertical: rvs(20),
     paddingHorizontal: rs(20),
   },
 
   title: {
     alignItems: "center",
-    marginBottom: rvs(10),
   },
   footerNote: {
     textAlign: "center",

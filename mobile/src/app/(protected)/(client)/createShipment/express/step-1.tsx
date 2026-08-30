@@ -1,21 +1,13 @@
 // app/create-shipment/express/step-1.tsx
 
-import React, { useState } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { Alert } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
-
-import { Text } from "@/components/ui/Text";
-
-import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
 import { CurrencySelect } from "@/components/sections/createShipment/express/CurrencySelect";
 import { ShipmentOptionCard } from "@/components/sections/createShipment/express/ShipmentOptionCard";
-import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 type ShipmentDirection = "domestic" | "import" | "export";
 
@@ -52,61 +44,40 @@ export default function ShipmentTypeScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <ShipmentStepHeader
-          step={1}
-          totalSteps={8}
-          title="Shipment Type"
-          subtitle="Select the shipment direction"
-          onBack={() => router.back()}
-        />
+    <ShipmentStepLayout
+      title="Shipment Type"
+      subtitle="Select the shipment direction"
+      step={1}
+      totalSteps={8}
+      onContinue={handleContinue}
+    >
+      <SectionTitle title="DIRECTION" />
 
-        <SectionTitle title="DIRECTION" />
+      <ShipmentOptionCard
+        title="Domestic"
+        description="Inside Saudi Arabia"
+        selected={direction === "domestic"}
+        onPress={() => setDirection("domestic")}
+      />
 
-        <ShipmentOptionCard
-          title="Domestic"
-          description="Inside Saudi Arabia"
-          selected={direction === "domestic"}
-          onPress={() => setDirection("domestic")}
-        />
+      <ShipmentOptionCard
+        title="Import"
+        description="Into Saudi Arabia (inbound)"
+        selected={direction === "import"}
+        onPress={() => setDirection("import")}
+      />
 
-        <ShipmentOptionCard
-          title="Import"
-          description="Into Saudi Arabia (inbound)"
-          selected={direction === "import"}
-          onPress={() => setDirection("import")}
-        />
+      <ShipmentOptionCard
+        title="Export"
+        description="Out of Saudi Arabia (outbound)"
+        selected={direction === "export"}
+        onPress={() => setDirection("export")}
+      />
 
-        <ShipmentOptionCard
-          title="Export"
-          description="Out of Saudi Arabia (outbound)"
-          selected={direction === "export"}
-          onPress={() => setDirection("export")}
-        />
+      <SectionTitle title="CURRENCY" />
+      <CurrencySelect value={currency} onPress={handleCurrencyPress} />
 
-        <SectionTitle title="CURRENCY" />
-        <CurrencySelect value={currency} onPress={handleCurrencyPress} />
-
-        <InfoBox text="Direction decides which customs steps you’ll see later." />
-      </ScrollView>
-
-      <ShipmentFooter onPress={handleContinue} />
-    </View>
+      <InfoBox text="Direction decides which customs steps you’ll see later." />
+    </ShipmentStepLayout>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  scrollContent: {
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-  },
-});

@@ -95,211 +95,199 @@ export default function ClientDashboard() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      <RefreshableScreen contentContainerStyle={styles.content}>
-        <LanguageSwitch />
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.userInfo}>
-            <View style={styles.avatar}>
-              <Text size="medium" weight="bold" style={styles.avatarText}>
-                {initials}
-              </Text>
-            </View>
+    <RefreshableScreen contentContainerStyle={styles.content}>
+      <LanguageSwitch />
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.userInfo}>
+          <View style={styles.avatar}>
+            <Text size="medium" weight="bold" style={styles.avatarText}>
+              {initials}
+            </Text>
+          </View>
 
-            <View style={styles.userText}>
+          <View style={styles.userText}>
+            <Text
+              size="medium"
+              weight="bold"
+              numberOfLines={1}
+              style={styles.companyName}
+            >
+              {accountLoading ? "Loading…" : displayName}
+            </Text>
+
+            <Text size="xs" style={styles.userName} numberOfLines={1}>
+              {account?.name} · {account?.accountNumber}
+            </Text>
+          </View>
+        </View>
+
+        <Pressable
+          style={styles.notificationButton}
+          onPress={() => router.push("/notifications")}
+        >
+          <Ionicons
+            name="notifications-outline"
+            size={rs(19)}
+            color={Colors.text}
+          />
+
+          {unreadCount > 0 && (
+            <View style={styles.notificationBadge}>
               <Text
-                size="medium"
+                size="xs"
                 weight="bold"
-                numberOfLines={1}
-                style={styles.companyName}
+                style={styles.notificationBadgeText}
               >
-                {accountLoading ? "Loading…" : displayName}
-              </Text>
-
-              <Text size="xs" style={styles.userName} numberOfLines={1}>
-                {account?.name} · {account?.accountNumber}
+                {unreadCount > 9 ? "9+" : unreadCount}
               </Text>
             </View>
-          </View>
+          )}
+        </Pressable>
+      </View>
 
-          <Pressable
-            style={styles.notificationButton}
-            onPress={() => router.push("/notifications")}
-          >
-            <Ionicons
-              name="notifications-outline"
-              size={rs(19)}
-              color={Colors.text}
-            />
+      {/* Welcome */}
+      <View style={styles.welcomeSection}>
+        <Text size="xxl" weight="bold" style={styles.welcome}>
+          {t("dashboard.welcomeBack")}
+        </Text>
 
-            {unreadCount > 0 && (
-              <View style={styles.notificationBadge}>
-                <Text
-                  size="xs"
-                  weight="bold"
-                  style={styles.notificationBadgeText}
-                >
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
-
-        {/* Welcome */}
-        <View style={styles.welcomeSection}>
-          <Text size="xxl" weight="bold" style={styles.welcome}>
-            {t("dashboard.welcomeBack")}
+        <View style={styles.pricingBadge}>
+          <Text size="small" weight="semibold" style={styles.pricingText}>
+            {t("dashboard.pricingTier")}
           </Text>
 
-          <View style={styles.pricingBadge}>
-            <Text size="small" weight="semibold" style={styles.pricingText}>
-              {t("dashboard.pricingTier")}
-            </Text>
-
-            <Text size="small" weight="bold" style={styles.vip}>
-              {account?.profile?.toUpperCase() ?? "—"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Stats */}
-        {statsLoading ? (
-          <View style={styles.statsLoading}>
-            <ActivityIndicator color={Colors.primary} />
-          </View>
-        ) : (
-          <View style={styles.statsGrid}>
-            <StatCard
-              title={t("dashboard.stats.totalShipments")}
-              value={String(stats?.totalShipments ?? 0)}
-              icon="hexagon"
-              subtitle={`▲ ${stats?.trends.shipments.value ?? 0}%`}
-              subtitleColor="#16713B"
-            />
-
-            <StatCard
-              title={t("dashboard.stats.inTransit")}
-              value={String(stats?.shipmentsInTransit ?? 0)}
-              icon="truck"
-              subtitle={`${stats?.shipmentsDelivered ?? 0} ${t(
-                "dashboard.stats.delivered",
-              )}`}
-            />
-
-            <StatCard
-              title={t("dashboard.stats.outstanding")}
-              value={String(stats?.pendingInvoices ?? 0)}
-              icon="file-text"
-              subtitle={t("dashboard.stats.invoicesDue")}
-              subtitleColor="#9A7410"
-            />
-
-            <StatCard
-              title={t("dashboard.stats.spent30d")}
-              value={(stats?.totalSpent ?? 0).toLocaleString(undefined, {
-                maximumFractionDigits: 2,
-              })}
-              valuePrefix
-              icon="trending-up"
-              subtitle={`▲ ${stats?.trends.spent.value ?? 0}%`}
-              subtitleColor="#16713B"
-            />
-          </View>
-        )}
-
-        {/* Shipment Activity */}
-        <View style={styles.section}>
-          <Text size="large" weight="bold" style={styles.sectionTitle}>
-            {t("dashboard.shipmentActivity")}
+          <Text size="small" weight="bold" style={styles.vip}>
+            {account?.profile?.toUpperCase() ?? "—"}
           </Text>
+        </View>
+      </View>
 
-          <View style={styles.chartCard}>
-            {statsLoading ? (
-              <View
-                style={[
-                  styles.chart,
-                  { alignItems: "center", justifyContent: "center" },
-                ]}
-              >
-                <ActivityIndicator color={Colors.primary} />
-              </View>
-            ) : (
-              (() => {
-                const rawMax = Math.max(
-                  ...(stats?.shipmentsByMonth?.map((m) => m.value) ?? [0]),
-                  0,
-                );
-                const axisMax = Math.max(rawMax, 4);
-                const step = Math.ceil(axisMax / 4);
-                const niceMax = step * 4;
-                const yLabels = [4, 3, 2, 1, 0].map((i) => i * step);
+      {/* Stats */}
+      {statsLoading ? (
+        <View style={styles.statsLoading}>
+          <ActivityIndicator color={Colors.primary} />
+        </View>
+      ) : (
+        <View style={styles.statsGrid}>
+          <StatCard
+            title={t("dashboard.stats.totalShipments")}
+            value={String(stats?.totalShipments ?? 0)}
+            icon="hexagon"
+            subtitle={`▲ ${stats?.trends.shipments.value ?? 0}%`}
+            subtitleColor="#16713B"
+          />
 
-                return (
-                  <View style={styles.chartRow}>
-                    <View style={styles.yAxis}>
-                      {yLabels.map((label) => (
-                        <Text key={label} size="xs" style={styles.yAxisLabel}>
-                          {label}
-                        </Text>
-                      ))}
-                    </View>
+          <StatCard
+            title={t("dashboard.stats.inTransit")}
+            value={String(stats?.shipmentsInTransit ?? 0)}
+            icon="truck"
+            subtitle={`${stats?.shipmentsDelivered ?? 0} ${t(
+              "dashboard.stats.delivered",
+            )}`}
+          />
 
-                    <View style={styles.chart}>
-                      {(stats?.shipmentsByMonth ?? []).map(
-                        (item, index, arr) => (
-                          <View key={item.label} style={styles.chartColumn}>
-                            <View style={styles.barTrack}>
-                              {item.value > 0 && (
-                                <View
-                                  style={[
-                                    styles.bar,
-                                    {
-                                      height: `${(item.value / niceMax) * 100}%`,
-                                      backgroundColor:
-                                        index === arr.length - 1
-                                          ? Colors.primary
-                                          : "#FFD5C3",
-                                    },
-                                  ]}
-                                />
-                              )}
-                            </View>
+          <StatCard
+            title={t("dashboard.stats.outstanding")}
+            value={String(stats?.pendingInvoices ?? 0)}
+            icon="file-text"
+            subtitle={t("dashboard.stats.invoicesDue")}
+            subtitleColor="#9A7410"
+          />
 
-                            <Text
-                              size="xs"
-                              weight="semibold"
-                              style={styles.month}
-                            >
-                              {translateMonth(item.label)}
-                            </Text>
-                          </View>
-                        ),
-                      )}
-                    </View>
+          <StatCard
+            title={t("dashboard.stats.spent30d")}
+            value={(stats?.totalSpent ?? 0).toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })}
+            valuePrefix
+            icon="trending-up"
+            subtitle={`▲ ${stats?.trends.spent.value ?? 0}%`}
+            subtitleColor="#16713B"
+          />
+        </View>
+      )}
+
+      {/* Shipment Activity */}
+      <View style={styles.section}>
+        <Text size="large" weight="bold" style={styles.sectionTitle}>
+          {t("dashboard.shipmentActivity")}
+        </Text>
+
+        <View style={styles.chartCard}>
+          {statsLoading ? (
+            <View
+              style={[
+                styles.chart,
+                { alignItems: "center", justifyContent: "center" },
+              ]}
+            >
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          ) : (
+            (() => {
+              const rawMax = Math.max(
+                ...(stats?.shipmentsByMonth?.map((m) => m.value) ?? [0]),
+                0,
+              );
+              const axisMax = Math.max(rawMax, 4);
+              const step = Math.ceil(axisMax / 4);
+              const niceMax = step * 4;
+              const yLabels = [4, 3, 2, 1, 0].map((i) => i * step);
+
+              return (
+                <View style={styles.chartRow}>
+                  <View style={styles.yAxis}>
+                    {yLabels.map((label) => (
+                      <Text key={label} size="xs" style={styles.yAxisLabel}>
+                        {label}
+                      </Text>
+                    ))}
                   </View>
-                );
-              })()
-            )}
-          </View>
-        </View>
 
-        {/* Recent Shipments */}
-        <RecentShipments
-          shipments={recentShipments}
-          isLoading={shipmentsLoading}
-        />
-      </RefreshableScreen>
-    </SafeAreaView>
+                  <View style={styles.chart}>
+                    {(stats?.shipmentsByMonth ?? []).map((item, index, arr) => (
+                      <View key={item.label} style={styles.chartColumn}>
+                        <View style={styles.barTrack}>
+                          {item.value > 0 && (
+                            <View
+                              style={[
+                                styles.bar,
+                                {
+                                  height: `${(item.value / niceMax) * 100}%`,
+                                  backgroundColor:
+                                    index === arr.length - 1
+                                      ? Colors.primary
+                                      : "#FFD5C3",
+                                },
+                              ]}
+                            />
+                          )}
+                        </View>
+
+                        <Text size="xs" weight="semibold" style={styles.month}>
+                          {translateMonth(item.label)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })()
+          )}
+        </View>
+      </View>
+
+      {/* Recent Shipments */}
+      <RecentShipments
+        shipments={recentShipments}
+        isLoading={shipmentsLoading}
+      />
+    </RefreshableScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
   content: {
     paddingHorizontal: rs(16),
     paddingTop: rvs(8),

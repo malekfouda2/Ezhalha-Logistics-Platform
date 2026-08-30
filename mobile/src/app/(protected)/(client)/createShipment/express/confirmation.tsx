@@ -1,16 +1,12 @@
 // app/create-shipment/express/step-9.tsx
 
-import React from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-
 import { Text } from "@/components/ui/Text";
-import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
+import ShipmentFooter from "@/components/sections/createShipment/ShipmentStepFooter";
 
 export default function ShipmentConfirmationScreen() {
   const router = useRouter();

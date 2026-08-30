@@ -1,16 +1,11 @@
 // app/create-shipment/express/step-6.tsx
 
-import React, { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-
-import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
-
-import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
 import {
   HSConfidence,
   CustomsItemCard,
@@ -20,7 +15,7 @@ import {
   HSCodeOption,
   HSCodeConfirmModal,
 } from "@/components/sections/createShipment/express/HSCodeConfirmModal";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 interface CustomsItem {
   id: string;
@@ -116,58 +111,46 @@ export default function CustomsDetailsScreen() {
   };
 
   return (
-    <View style={styles.safeArea}>
-      <View style={styles.container}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          <ShipmentStepHeader
-            step={6}
-            totalSteps={8}
-            title="Customs Details"
-            subtitle="International only"
-            onBack={() => router.back()}
-          />
+    <ShipmentStepLayout
+      step={6}
+      totalSteps={8}
+      title="Customs Details"
+      subtitle="International only"
+      onContinue={handleContinue}
+    >
+      <DashedActionButton
+        icon="upload"
+        label="Scan an invoice to fill this in"
+        onPress={() => {}}
+      />
 
-          <DashedActionButton
-            icon="upload"
-            label="Scan an invoice to fill this in"
-            onPress={() => {}}
-          />
+      {items.map((item) => (
+        <CustomsItemCard
+          key={item.id}
+          name={item.name}
+          category={item.category}
+          material={item.material}
+          countryFlag={item.countryFlag}
+          countryName={item.countryName}
+          totalPrice={item.totalPrice}
+          quantity={item.quantity}
+          unitPrice={item.unitPrice}
+          hsCode={item.hsCode}
+          confidence={item.confidence}
+          onPressHSCode={() => setActiveItemId(item.id)}
+        />
+      ))}
 
-          {items.map((item) => (
-            <CustomsItemCard
-              key={item.id}
-              name={item.name}
-              category={item.category}
-              material={item.material}
-              countryFlag={item.countryFlag}
-              countryName={item.countryName}
-              totalPrice={item.totalPrice}
-              quantity={item.quantity}
-              unitPrice={item.unitPrice}
-              hsCode={item.hsCode}
-              confidence={item.confidence}
-              onPressHSCode={() => setActiveItemId(item.id)}
-            />
-          ))}
+      <DashedActionButton icon="plus" label="Add item" onPress={() => {}} />
 
-          <DashedActionButton icon="plus" label="Add item" onPress={() => {}} />
+      <View style={styles.summaryGap} />
 
-          <View style={styles.summaryGap} />
-
-          <CustomsSummaryCard
-            itemCount={items.length}
-            unitCount={totalUnits}
-            totalPrice={totalPrice}
-            declaredValue="280.00"
-          />
-        </ScrollView>
-
-        <ShipmentFooter onPress={handleContinue} />
-      </View>
-
+      <CustomsSummaryCard
+        itemCount={items.length}
+        unitCount={totalUnits}
+        totalPrice={totalPrice}
+        declaredValue="280.00"
+      />
       <HSCodeConfirmModal
         visible={!!activeItem}
         itemName={activeItem?.name ?? ""}
@@ -176,26 +159,11 @@ export default function CustomsDetailsScreen() {
         onConfirm={handleConfirmHSCode}
         onClose={() => setActiveItemId(null)}
       />
-    </View>
+    </ShipmentStepLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  scrollContent: {
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-  },
-
   summaryGap: {
     height: rvs(6),
   },

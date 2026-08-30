@@ -1,10 +1,7 @@
 // components/shipment/ShipmentStepHeader.tsx
 
 import React from "react";
-import {
-  StyleSheet,
-  View,
-} from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -29,7 +26,7 @@ export const ShipmentStepHeader = ({
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <BackButton/>
+        <BackButton />
 
         <View style={styles.titleContainer}>
           <Text
@@ -41,11 +38,7 @@ export const ShipmentStepHeader = ({
             {title}
           </Text>
 
-          <Text
-            size="xs"
-            weight="semibold"
-            style={styles.subtitle}
-          >
+          <Text size="xs" weight="semibold" style={styles.subtitle}>
             Step {step} of {totalSteps} · {subtitle}
           </Text>
         </View>
@@ -58,10 +51,7 @@ export const ShipmentStepHeader = ({
           return (
             <View
               key={index}
-              style={[
-                styles.progressItem,
-                active && styles.progressItemActive,
-              ]}
+              style={[styles.progressItem, active && styles.progressItemActive]}
             />
           );
         })}
@@ -73,7 +63,9 @@ export const ShipmentStepHeader = ({
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    marginBottom: rvs(20),
+    paddingHorizontal: rs(16),
+    paddingTop: rvs(16),
+    marginBottom: rvs(16),
   },
 
   headerRow: {
@@ -98,7 +90,7 @@ const styles = StyleSheet.create({
 
   titleContainer: {
     flex: 1,
-    marginStart: rs(10)
+    marginStart: rs(10),
   },
 
   title: {

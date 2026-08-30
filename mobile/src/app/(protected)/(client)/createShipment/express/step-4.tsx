@@ -1,18 +1,13 @@
 // app/create-shipment/express/step-4.tsx
 
-import React, { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-
-import { Button } from "@/components/ui/Button";
-import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
-
-import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { PackageCard } from "@/components/sections/createShipment/express/PackageCard";
 import { WeightSummaryCard } from "@/components/sections/createShipment/express/WeightSummaryCard";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
+import { rvs } from "@/utils/responsive";
 
 interface PackageForm {
   id: string;
@@ -35,12 +30,10 @@ export default function PackageDetailsScreen() {
   const updatePackage = (
     id: string,
     field: keyof Omit<PackageForm, "id">,
-    value: string
+    value: string,
   ) => {
     setPackages((prev) =>
-      prev.map((pkg) =>
-        pkg.id === id ? { ...pkg, [field]: value } : pkg
-      )
+      prev.map((pkg) => (pkg.id === id ? { ...pkg, [field]: value } : pkg)),
     );
   };
 
@@ -61,121 +54,88 @@ export default function PackageDetailsScreen() {
     setPackages((prev) => prev.filter((pkg) => pkg.id !== id));
   };
 
-  const { actualWeight, volumetricWeight, chargeableWeight } =
-    useMemo(() => {
-      let actual = 0;
-      let volumetric = 0;
+  const { actualWeight, volumetricWeight, chargeableWeight } = useMemo(() => {
+    let actual = 0;
+    let volumetric = 0;
 
-      packages.forEach((pkg) => {
-        const w = parseFloat(pkg.weight) || 0;
-        const l = parseFloat(pkg.length) || 0;
-        const wd = parseFloat(pkg.width) || 0;
-        const h = parseFloat(pkg.height) || 0;
+    packages.forEach((pkg) => {
+      const w = parseFloat(pkg.weight) || 0;
+      const l = parseFloat(pkg.length) || 0;
+      const wd = parseFloat(pkg.width) || 0;
+      const h = parseFloat(pkg.height) || 0;
 
-        actual += w;
-        volumetric += (l * wd * h) / VOLUMETRIC_DIVISOR;
-      });
+      actual += w;
+      volumetric += (l * wd * h) / VOLUMETRIC_DIVISOR;
+    });
 
-      return {
-        actualWeight: actual,
-        volumetricWeight: volumetric,
-        chargeableWeight: Math.max(actual, volumetric),
-      };
-    }, [packages]);
+    return {
+      actualWeight: actual,
+      volumetricWeight: volumetric,
+      chargeableWeight: Math.max(actual, volumetric),
+    };
+  }, [packages]);
 
   const handleGetRates = () => {
     router.push("/createShipment/express/step-5");
   };
 
   return (
-      <View style={styles.container}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          <ShipmentStepHeader
-            step={4}
-            totalSteps={8}
-            title="Package Details"
-            subtitle="Weight and dimensions"
-            onBack={() => router.back()}
-          />
+    <ShipmentStepLayout
+      step={4}
+      totalSteps={8}
+      title="Package Details"
+      subtitle="Weight and dimensions"
+      onContinue={handleGetRates}
+      continueLabel="Get rates"
+    >
+      {packages.map((pkg, index) => (
+        <PackageCard
+          key={pkg.id}
+          index={index + 1}
+          weight={pkg.weight}
+          length={pkg.length}
+          width={pkg.width}
+          height={pkg.height}
+          removable={packages.length > 1}
+          onChangeWeight={(v) => updatePackage(pkg.id, "weight", v)}
+          onChangeLength={(v) => updatePackage(pkg.id, "length", v)}
+          onChangeWidth={(v) => updatePackage(pkg.id, "width", v)}
+          onChangeHeight={(v) => updatePackage(pkg.id, "height", v)}
+          onRemove={() => removePackage(pkg.id)}
+        />
+      ))}
 
-          {packages.map((pkg, index) => (
-            <PackageCard
-              key={pkg.id}
-              index={index + 1}
-              weight={pkg.weight}
-              length={pkg.length}
-              width={pkg.width}
-              height={pkg.height}
-              removable={packages.length > 1}
-              onChangeWeight={(v) => updatePackage(pkg.id, "weight", v)}
-              onChangeLength={(v) => updatePackage(pkg.id, "length", v)}
-              onChangeWidth={(v) => updatePackage(pkg.id, "width", v)}
-              onChangeHeight={(v) => updatePackage(pkg.id, "height", v)}
-              onRemove={() => removePackage(pkg.id)}
-            />
-          ))}
+      <View style={styles.actionsGap} />
 
-          <View style={styles.actionsGap} />
+      <DashedActionButton
+        icon="plus"
+        label="Add another package"
+        onPress={addPackage}
+      />
 
-          <DashedActionButton
-            icon="plus"
-            label="Add another package"
-            onPress={addPackage}
-          />
+      <DashedActionButton
+        icon="upload"
+        label="Scan a document to fill this in"
+        onPress={() => {}}
+      />
 
-          <DashedActionButton
-            icon="upload"
-            label="Scan a document to fill this in"
-            onPress={() => {}}
-          />
+      <View style={styles.summaryGap} />
 
-          <View style={styles.summaryGap} />
-
-          <WeightSummaryCard
-            actualWeight={actualWeight}
-            volumetricWeight={volumetricWeight}
-            chargeableWeight={chargeableWeight}
-          />
-        </ScrollView>
-
-        <View style={styles.footer}>
-          <Button title="Get rates" onPress={handleGetRates} />
-        </View>
-      </View>
+      <WeightSummaryCard
+        actualWeight={actualWeight}
+        volumetricWeight={volumetricWeight}
+        chargeableWeight={chargeableWeight}
+      />
+    </ShipmentStepLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  scrollContent: {
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-  },
-
   actionsGap: {
     height: rvs(4),
   },
 
   summaryGap: {
     height: rvs(10),
-  },
-
-  footer: {
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(10),
-    backgroundColor: Colors.background,
   },
 });

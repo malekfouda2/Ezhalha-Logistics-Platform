@@ -18,7 +18,6 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     letterSpacing: 1,
     marginBottom: rvs(8),
-    marginTop: rvs(8),
     marginStart: rs(4),
     textTransform:"uppercase"
   },

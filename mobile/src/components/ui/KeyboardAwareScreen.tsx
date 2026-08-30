@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "@/constants/colors";
-
 export interface KeyboardAwareScreenProps {
   children: ReactNode;
   contentContainerStyle?: ViewStyle;
@@ -27,7 +26,7 @@ export const KeyboardAwareScreen = ({
   keyboardVerticalOffset = 20,
 }: KeyboardAwareScreenProps) => {
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
+    // <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -45,7 +44,7 @@ export const KeyboardAwareScreen = ({
           {children}
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    // </SafeAreaView>
   );
 };
 

@@ -1,28 +1,17 @@
 // app/create-shipment/express/step-7.tsx
 
-import React, { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
+import { useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-
-import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
-import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-
-import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
 import { DatePill } from "@/components/sections/createShipment/express/DatePill";
 import { ToggleCard } from "@/components/sections/createShipment/ToggleCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 interface DateOption {
   id: string;
@@ -51,94 +40,79 @@ export default function CarrierPickupScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 20}
+    <ShipmentStepLayout
+      step={7}
+      totalSteps={8}
+      title="Carrier Pickup"
+      subtitle="Optional"
+      onContinue={handleReviewOrder}
+      continueLabel="Review order"
     >
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <ShipmentStepHeader
-          step={7}
-          totalSteps={8}
-          title="Carrier Pickup"
-          subtitle="Optional"
-          onBack={() => router.back()}
-        />
+      <ToggleCard
+        title="Request a pickup"
+        description="Otherwise drop off at a branch"
+        value={requestPickup}
+        onValueChange={setRequestPickup}
+      />
 
-        <ToggleCard
-          title="Request a pickup"
-          description="Otherwise drop off at a branch"
-          value={requestPickup}
-          onValueChange={setRequestPickup}
-        />
+      {requestPickup ? (
+        <>
+          <SectionTitle title="PICKUP DATE" />
 
-        {requestPickup ? (
-          <>
-            <SectionTitle title="PICKUP DATE" />
+          <View style={styles.dateRow}>
+            {DATE_OPTIONS.map((date) => (
+              <DatePill
+                key={date.id}
+                dayLabel={date.dayLabel}
+                dateLabel={date.dateLabel}
+                selected={selectedDateId === date.id}
+                onPress={() => setSelectedDateId(date.id)}
+              />
+            ))}
+          </View>
 
-            <View style={styles.dateRow}>
-              {DATE_OPTIONS.map((date) => (
-                <DatePill
-                  key={date.id}
-                  dayLabel={date.dayLabel}
-                  dateLabel={date.dateLabel}
-                  selected={selectedDateId === date.id}
-                  onPress={() => setSelectedDateId(date.id)}
-                />
-              ))}
+          <SectionTitle title="READY BETWEEN" />
+
+          <View style={styles.timeRow}>
+            <View style={styles.timeHalf}>
+              <Input
+                value={readyFrom}
+                onChangeText={setReadyFrom}
+                rightElement={
+                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
+                }
+              />
             </View>
 
-            <SectionTitle title="READY BETWEEN" />
-
-            <View style={styles.timeRow}>
-              <View style={styles.timeHalf}>
-                <Input
-                  value={readyFrom}
-                  onChangeText={setReadyFrom}
-                  rightElement={
-                    <Feather name="clock" size={rs(18)} color="#8A93A3" />
-                  }
-                />
-              </View>
-
-              <View style={styles.timeHalf}>
-                <Input
-                  value={readyTo}
-                  onChangeText={setReadyTo}
-                  rightElement={
-                    <Feather name="clock" size={rs(18)} color="#8A93A3" />
-                  }
-                />
-              </View>
+            <View style={styles.timeHalf}>
+              <Input
+                value={readyTo}
+                onChangeText={setReadyTo}
+                rightElement={
+                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
+                }
+              />
             </View>
+          </View>
 
-            <SectionTitle title="PICKUP LOCATION" />
+          <SectionTitle title="PICKUP LOCATION" />
 
-            <Input
-              placeholder="Reception, Gate 2..."
-              value={pickupLocation}
-              onChangeText={setPickupLocation}
-            />
+          <Input
+            placeholder="Reception, Gate 2..."
+            value={pickupLocation}
+            onChangeText={setPickupLocation}
+          />
 
-            <Input
-              placeholder="Instructions (optional)"
-              value={instructions}
-              onChangeText={setInstructions}
-            />
+          <Input
+            placeholder="Instructions (optional)"
+            value={instructions}
+            onChangeText={setInstructions}
+          />
 
-            <InfoBox text="Booked after payment. A failed pickup never fails the shipment." />
-          </>
-        ) : null}
-      </ScrollView>
-
-      <View style={styles.footer}>
-        <Button title="Review order" onPress={handleReviewOrder} />
-      </View>
-    </KeyboardAvoidingView>
+          <InfoBox text="Booked after payment. A failed pickup never fails the shipment." />
+        </>
+      ) : null}
+    </ShipmentStepLayout>
   );
 }
 

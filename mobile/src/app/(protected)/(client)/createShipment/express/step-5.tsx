@@ -1,20 +1,17 @@
 // app/create-shipment/express/step-5.tsx
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
-
 import { Text } from "@/components/ui/Text";
-import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { RateOptionCard } from "@/components/sections/createShipment/RateOptionCard";
 import { ShipmentStepHeader } from "@/components/sections/createShipment/ShipmentStepHeader";
-import ShipmentFooter from "@/components/sections/createShipment/ShipmentFooter";
+import ShipmentFooter from "@/components/sections/createShipment/ShipmentStepFooter";
 import { SaudiRiyal } from "lucide-react-native";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
+import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 interface RateOption {
   id: string;
@@ -66,60 +63,66 @@ export default function SelectShippingRateScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <ShipmentStepHeader
-          step={5}
-          totalSteps={8}
-          title="Select Shipping Rate"
-          subtitle="Riyadh → Dubai · 6.5 kg"
-          onBack={() => router.back()}
+    <ShipmentStepLayout
+      step={5}
+      totalSteps={8}
+      title="Select Shipping Rate"
+      subtitle="Riyadh → Dubai · 6.5 kg"
+      onContinue={handleContinue}
+      continueLabel={
+        <View style={styles.continueTitle}>
+          <Text size="medium" weight="semibold" style={styles.continueText}>
+            Continue with {selectedRate?.carrierCode ?? ""} ·
+          </Text>
+
+          <SaudiRiyal size={rs(18)} color={Colors.white} />
+
+          <Text size="medium" weight="semibold" style={styles.continueText}>
+            {selectedRate?.price ?? ""}
+          </Text>
+        </View>
+      }
+    >
+      {RATE_OPTIONS.map((rate) => (
+        <RateOptionCard
+          key={rate.id}
+          carrierCode={rate.carrierCode}
+          carrierColor={rate.carrierColor}
+          serviceName={rate.serviceName}
+          deliveryLabel={rate.deliveryLabel}
+          price={rate.price}
+          badge={rate.badge}
+          selected={selectedRateId === rate.id}
+          onPress={() => setSelectedRateId(rate.id)}
         />
+      ))}
 
-        {RATE_OPTIONS.map((rate) => (
-          <RateOptionCard
-            key={rate.id}
-            carrierCode={rate.carrierCode}
-            carrierColor={rate.carrierColor}
-            serviceName={rate.serviceName}
-            deliveryLabel={rate.deliveryLabel}
-            price={rate.price}
-            badge={rate.badge}
-            selected={selectedRateId === rate.id}
-            onPress={() => setSelectedRateId(rate.id)}
-          />
-        ))}
-
-        <InfoBox
-          text="Prices held for 30 minutes. Re-quote after that."
-          borderWidth={0}
-          backgroundColor={Colors.white}
-          textColor={Colors.secondary}
-          iconColor={Colors.secondary}
-          iconName="clock"
-        />
-      </ScrollView>
-
-      <ShipmentFooter
-        onPress={handleContinue}
-        title={
-          <View style={styles.continueTitle}>
-            <Text size="medium" weight="semibold" style={styles.continueText}>
-              Continue with {selectedRate?.carrierCode ?? ""} ·
-            </Text>
-
-            <SaudiRiyal size={rs(18)} color={Colors.white} />
-
-            <Text size="medium" weight="semibold" style={styles.continueText}>
-              {selectedRate?.price ?? ""}
-            </Text>
-          </View>
-        }
+      <InfoBox
+        text="Prices held for 30 minutes. Re-quote after that."
+        borderWidth={0}
+        backgroundColor={Colors.white}
+        textColor={Colors.secondary}
+        iconColor={Colors.secondary}
+        iconName="clock"
       />
-    </View>
+    </ShipmentStepLayout>
+
+    // <ShipmentFooter
+    //   onPress={handleContinue}
+    //   title={
+    //     <View style={styles.continueTitle}>
+    //       <Text size="medium" weight="semibold" style={styles.continueText}>
+    //         Continue with {selectedRate?.carrierCode ?? ""} ·
+    //       </Text>
+
+    //       <SaudiRiyal size={rs(18)} color={Colors.white} />
+
+    //       <Text size="medium" weight="semibold" style={styles.continueText}>
+    //         {selectedRate?.price ?? ""}
+    //       </Text>
+    //     </View>
+    //   }
+    // />
   );
 }
 

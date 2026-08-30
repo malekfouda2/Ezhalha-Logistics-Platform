@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "transparent",
     padding: rs(15),
-    marginBottom: rvs(16),
+    marginVertical: rvs(8),
   },
 
   cardSelected: {
