@@ -1,7 +1,6 @@
-// components/sections/createShipment/express/WeightSummaryCard.tsx
-
 import React from "react";
 import { StyleSheet, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -20,12 +19,15 @@ export const WeightSummaryCard = ({
   chargeableWeight,
   unit = "kg",
 }: WeightSummaryCardProps) => {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.card}>
       <View style={styles.row}>
         <Text size="small" style={styles.label}>
-          Actual weight
+          {t("createShipment.express.steps.step4.actualWeight")}
         </Text>
+
         <Text size="small" weight="bold" style={styles.value}>
           {actualWeight.toFixed(1)} {unit}
         </Text>
@@ -33,8 +35,9 @@ export const WeightSummaryCard = ({
 
       <View style={styles.row}>
         <Text size="small" style={styles.label}>
-          Volumetric weight
+          {t("createShipment.express.steps.step4.volumetricWeight")}
         </Text>
+
         <Text size="small" weight="bold" style={styles.value}>
           {volumetricWeight.toFixed(1)} {unit}
         </Text>
@@ -43,10 +46,19 @@ export const WeightSummaryCard = ({
       <View style={styles.divider} />
 
       <View style={styles.row}>
-        <Text size="medium" weight="bold" style={styles.chargeableLabel}>
-          Chargeable weight
+        <Text
+          size="medium"
+          weight="bold"
+          style={styles.chargeableLabel}
+        >
+          {t("createShipment.express.steps.step4.chargeableWeight")}
         </Text>
-        <Text size="large" weight="bold" style={styles.chargeableValue}>
+
+        <Text
+          size="large"
+          weight="bold"
+          style={styles.chargeableValue}
+        >
           {chargeableWeight.toFixed(1)} {unit}
         </Text>
       </View>
@@ -67,8 +79,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-        paddingVertical: rvs(8),
-
+    paddingVertical: rvs(8),
   },
 
   label: {

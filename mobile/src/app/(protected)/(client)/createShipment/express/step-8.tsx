@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
+
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
@@ -13,10 +15,10 @@ import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 
 const SUMMARY_LINES = [
-  { label: "Shipping", value: "620.00" },
-  { label: "Fuel surcharge", value: "58.00" },
-  { label: "Pickup", value: "25.00" },
-  { label: "VAT (15%)", value: "92.00" },
+  { key: "shipping", value: "620.00" },
+  { key: "fuelSurcharge", value: "58.00" },
+  { key: "pickup", value: "25.00" },
+  { key: "vat", value: "92.00" },
 ];
 
 const TOTAL = "795.00";
@@ -25,39 +27,54 @@ type PaymentMethodId = "visa" | "new-card" | "pay-later";
 
 export default function PaymentOptionsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId>("visa");
+  const [selectedMethod, setSelectedMethod] =
+    useState<PaymentMethodId>("visa");
 
   const handlePay = () => {
-    router.push("/createShipment/express/confirmation");
+    router.push({ pathname: "/createShipment/confirmation", params: { type: "express" } });
   };
+
+  const summaryLines = SUMMARY_LINES.map((line) => ({
+    label: t(`createShipment.express.steps.step8.summary.${line.key}`),
+    value: line.value,
+  }));
 
   return (
     <ShipmentStepLayout
       step={8}
       totalSteps={8}
-      title="Payment Options"
-      subtitle="Order Summary"
+      title={t("createShipment.express.steps.step8.title")}
+      subtitle={t("createShipment.express.steps.step8.subtitle")}
       onContinue={handlePay}
       continueLabel={
         <View style={styles.continueTitle}>
           <Text size="medium" weight="semibold" style={styles.continueText}>
-            Pay
+            {t("createShipment.express.steps.step8.pay")}
           </Text>
+
           <SaudiRiyal size={rs(18)} color={Colors.white} />
+
           <Text size="medium" weight="semibold" style={styles.continueText}>
             {TOTAL}
           </Text>
         </View>
       }
-      footerNote="Booked with the carrier after payment"
+      footerNote={t("createShipment.express.steps.step8.footerNote")}
     >
-      <OrderSummaryCard lines={SUMMARY_LINES} total={TOTAL} />
+      <OrderSummaryCard
+        lines={summaryLines}
+        total={TOTAL}
+      />
 
-      <SectionTitle title={"PAY WITH"} />
+      <SectionTitle
+        title={t("createShipment.express.steps.step8.payWith")}
+      />
+
       <PaymentMethodCard
         title="•••• 4242"
-        subtitle="Expires 09/28"
+        subtitle={t("createShipment.express.payment.visa.expires")}
         iconLabel="VISA"
         iconBackground="#1A1F71"
         selected={selectedMethod === "visa"}
@@ -65,27 +82,38 @@ export default function PaymentOptionsScreen() {
       />
 
       <PaymentMethodCard
-        title="New card"
-        subtitle="Secured by Tap"
+        title={t("createShipment.express.payment.newCard.title")}
+        subtitle={t("createShipment.express.payment.newCard.subtitle")}
         iconLabel="+"
-        iconBackground={"#F2F3F5"}
+        iconBackground="#F2F3F5"
         iconColor={Colors.secondary}
         selected={selectedMethod === "new-card"}
         onPress={() => setSelectedMethod("new-card")}
       />
 
       <PaymentMethodCard
-        title="Pay later · 30 days"
+        title={t("createShipment.express.payment.payLater.title")}
         subtitle={
           <>
-            <Text size="small" weight="semibold" style={styles.subtitleText}>
+            <Text
+              size="small"
+              weight="semibold"
+              style={styles.subtitleText}
+            >
               42,300
             </Text>
 
-            <SaudiRiyal size={rs(14)} color={Colors.textSecondary} />
+            <SaudiRiyal
+              size={rs(14)}
+              color={Colors.textSecondary}
+            />
 
-            <Text size="small" weight="semibold" style={styles.subtitleText}>
-              credit available
+            <Text
+              size="small"
+              weight="semibold"
+              style={styles.subtitleText}
+            >
+              {t("createShipment.express.payment.payLater.creditAvailable")}
             </Text>
           </>
         }
@@ -128,6 +156,7 @@ const styles = StyleSheet.create({
     paddingBottom: rvs(10),
     backgroundColor: Colors.background,
   },
+
   continueTitle: {
     flexDirection: "row",
     alignItems: "center",
@@ -138,12 +167,14 @@ const styles = StyleSheet.create({
   continueText: {
     color: Colors.white,
   },
+
   footerNote: {
     textAlign: "center",
     color: "#8A93A3",
     fontSize: rs(13),
     marginTop: rvs(10),
   },
+
   subtitleText: {
     color: Colors.textSecondary,
   },

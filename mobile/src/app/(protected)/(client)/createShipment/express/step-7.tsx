@@ -1,9 +1,9 @@
-// app/create-shipment/express/step-7.tsx
-
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
+
 import { Input } from "@/components/ui/Input";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
@@ -27,6 +27,7 @@ const DATE_OPTIONS: DateOption[] = [
 
 export default function CarrierPickupScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [requestPickup, setRequestPickup] = useState(true);
   const [selectedDateId, setSelectedDateId] = useState("tue");
@@ -43,27 +44,31 @@ export default function CarrierPickupScreen() {
     <ShipmentStepLayout
       step={7}
       totalSteps={8}
-      title="Carrier Pickup"
-      subtitle="Optional"
+      title={t("createShipment.express.steps.step7.title")}
+      subtitle={t("createShipment.express.steps.step7.subtitle")}
       onContinue={handleReviewOrder}
-      continueLabel="Review order"
+      continueLabel={t("createShipment.express.steps.step7.reviewOrder")}
     >
       <ToggleCard
-        title="Request a pickup"
-        description="Otherwise drop off at a branch"
+        title={t("createShipment.express.steps.step7.requestPickup")}
+        description={t("createShipment.express.steps.step7.dropOffBranch")}
         value={requestPickup}
         onValueChange={setRequestPickup}
       />
 
       {requestPickup ? (
         <>
-          <SectionTitle title="PICKUP DATE" />
+          <SectionTitle
+            title={t("createShipment.express.steps.step7.pickupDate")}
+          />
 
           <View style={styles.dateRow}>
             {DATE_OPTIONS.map((date) => (
               <DatePill
                 key={date.id}
-                dayLabel={date.dayLabel}
+                dayLabel={t(
+                  `createShipment.express.days.${date.id}`
+                )}
                 dateLabel={date.dateLabel}
                 selected={selectedDateId === date.id}
                 onPress={() => setSelectedDateId(date.id)}
@@ -71,7 +76,9 @@ export default function CarrierPickupScreen() {
             ))}
           </View>
 
-          <SectionTitle title="READY BETWEEN" />
+          <SectionTitle
+            title={t("createShipment.express.steps.step7.readyBetween")}
+          />
 
           <View style={styles.timeRow}>
             <View style={styles.timeHalf}>
@@ -79,7 +86,11 @@ export default function CarrierPickupScreen() {
                 value={readyFrom}
                 onChangeText={setReadyFrom}
                 rightElement={
-                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
+                  <Feather
+                    name="clock"
+                    size={rs(18)}
+                    color="#8A93A3"
+                  />
                 }
               />
             </View>
@@ -89,27 +100,39 @@ export default function CarrierPickupScreen() {
                 value={readyTo}
                 onChangeText={setReadyTo}
                 rightElement={
-                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
+                  <Feather
+                    name="clock"
+                    size={rs(18)}
+                    color="#8A93A3"
+                  />
                 }
               />
             </View>
           </View>
 
-          <SectionTitle title="PICKUP LOCATION" />
+          <SectionTitle
+            title={t("createShipment.express.steps.step7.pickupLocation")}
+          />
 
           <Input
-            placeholder="Reception, Gate 2..."
+            placeholder={t(
+              "createShipment.express.steps.step7.locationPlaceholder"
+            )}
             value={pickupLocation}
             onChangeText={setPickupLocation}
           />
 
           <Input
-            placeholder="Instructions (optional)"
+            placeholder={t(
+              "createShipment.express.steps.step7.instructionsPlaceholder"
+            )}
             value={instructions}
             onChangeText={setInstructions}
           />
 
-          <InfoBox text="Booked after payment. A failed pickup never fails the shipment." />
+          <InfoBox
+            text={t("createShipment.express.steps.step7.info")}
+          />
         </>
       ) : null}
     </ShipmentStepLayout>

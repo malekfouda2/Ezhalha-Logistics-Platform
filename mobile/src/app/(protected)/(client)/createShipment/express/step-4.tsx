@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
+
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { PackageCard } from "@/components/sections/createShipment/express/PackageCard";
 import { WeightSummaryCard } from "@/components/sections/createShipment/express/WeightSummaryCard";
@@ -21,10 +23,23 @@ const VOLUMETRIC_DIVISOR = 5000;
 
 export default function PackageDetailsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [packages, setPackages] = useState<PackageForm[]>([
-    { id: "1", weight: "4.5", length: "40", width: "30", height: "20" },
-    { id: "2", weight: "2.0", length: "25", width: "20", height: "15" },
+    {
+      id: "1",
+      weight: "4.5",
+      length: "40",
+      width: "30",
+      height: "20",
+    },
+    {
+      id: "2",
+      weight: "2.0",
+      length: "25",
+      width: "20",
+      height: "15",
+    },
   ]);
 
   const updatePackage = (
@@ -33,7 +48,9 @@ export default function PackageDetailsScreen() {
     value: string,
   ) => {
     setPackages((prev) =>
-      prev.map((pkg) => (pkg.id === id ? { ...pkg, [field]: value } : pkg)),
+      prev.map((pkg) =>
+        pkg.id === id ? { ...pkg, [field]: value } : pkg,
+      ),
     );
   };
 
@@ -83,10 +100,10 @@ export default function PackageDetailsScreen() {
     <ShipmentStepLayout
       step={4}
       totalSteps={8}
-      title="Package Details"
-      subtitle="Weight and dimensions"
+      title={t("createShipment.express.steps.step4.title")}
+      subtitle={t("createShipment.express.steps.step4.subtitle")}
       onContinue={handleGetRates}
-      continueLabel="Get rates"
+      continueLabel={t("createShipment.express.steps.step4.getRates")}
     >
       {packages.map((pkg, index) => (
         <PackageCard
@@ -97,10 +114,18 @@ export default function PackageDetailsScreen() {
           width={pkg.width}
           height={pkg.height}
           removable={packages.length > 1}
-          onChangeWeight={(v) => updatePackage(pkg.id, "weight", v)}
-          onChangeLength={(v) => updatePackage(pkg.id, "length", v)}
-          onChangeWidth={(v) => updatePackage(pkg.id, "width", v)}
-          onChangeHeight={(v) => updatePackage(pkg.id, "height", v)}
+          onChangeWeight={(v) =>
+            updatePackage(pkg.id, "weight", v)
+          }
+          onChangeLength={(v) =>
+            updatePackage(pkg.id, "length", v)
+          }
+          onChangeWidth={(v) =>
+            updatePackage(pkg.id, "width", v)
+          }
+          onChangeHeight={(v) =>
+            updatePackage(pkg.id, "height", v)
+          }
           onRemove={() => removePackage(pkg.id)}
         />
       ))}
@@ -109,13 +134,13 @@ export default function PackageDetailsScreen() {
 
       <DashedActionButton
         icon="plus"
-        label="Add another package"
+        label={t("createShipment.express.steps.step4.addPackage")}
         onPress={addPackage}
       />
 
       <DashedActionButton
         icon="upload"
-        label="Scan a document to fill this in"
+        label={t("createShipment.express.steps.step4.scanDocument")}
         onPress={() => {}}
       />
 

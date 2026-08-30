@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Button } from "@/components/ui/Button";
 import { Text } from "@/components/ui/Text";
 import { rs, rvs } from "@/utils/responsive";
+import { useTranslation } from "react-i18next";
 
 interface ShipmentFooterProps {
   onPress: () => void;
@@ -15,14 +16,15 @@ const ShipmentFooter = ({
   title,
   footerNote,
 }: ShipmentFooterProps) => {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.footer}>
-      <Button title={title ?? "Continue"} onPress={handleContinue} />
-      {footerNote && (
-        <Text style={styles.footerNote}>
-          Booked with the carrier after payment
-        </Text>
-      )}
+      <Button
+        title={title ?? t("createShipment.express.common.continue")}
+        onPress={handleContinue}
+      />
+      {footerNote && <Text style={styles.footerNote}>{footerNote}</Text>}
     </View>
   );
 };

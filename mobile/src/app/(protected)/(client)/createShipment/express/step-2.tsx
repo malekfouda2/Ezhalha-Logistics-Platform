@@ -1,8 +1,8 @@
-// app/create-shipment/express/step-2.tsx
-
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
+
 import { Input } from "@/components/ui/Input";
 import { rs } from "@/utils/responsive";
 import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
@@ -38,6 +38,7 @@ const SAVED_ADDRESSES: SavedAddress[] = [
 
 export default function SenderDetailsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [selectedAddress, setSelectedAddress] = useState("1");
 
@@ -55,11 +56,14 @@ export default function SenderDetailsScreen() {
     <ShipmentStepLayout
       step={2}
       totalSteps={8}
-      title="Sender Details"
-      subtitle="Pickup address and contact"
+      title={t("createShipment.express.steps.step2.title")}
+      subtitle={t("createShipment.express.steps.step2.subtitle")}
       onContinue={handleContinue}
     >
-      <SectionTitle title="SAVED SENDER ADDRESSES" />
+      <SectionTitle
+        title={t("createShipment.express.steps.step2.savedAddresses")}
+      />
+
       {SAVED_ADDRESSES.map((address) => (
         <SavedAddressCard
           key={address.id}
@@ -73,36 +77,42 @@ export default function SenderDetailsScreen() {
         />
       ))}
 
-      <SectionTitle title="OR ENTER A NEW ADDRESS" />
+      <SectionTitle
+        title={t("createShipment.express.steps.step2.newAddress")}
+      />
 
       <Input
-        placeholder="Contact name"
+        placeholder={t("createShipment.express.steps.step2.contactName")}
         value={contactName}
         onChangeText={setContactName}
         autoCapitalize="words"
       />
 
       <Input
-        placeholder="Phone"
+        placeholder={t("createShipment.express.steps.step2.phone")}
         value={phone}
         onChangeText={setPhone}
         keyboardType="phone-pad"
       />
 
       <Input
-        placeholder="Address line 1"
+        placeholder={t("createShipment.express.steps.step2.addressLine1")}
         value={addressLine1}
         onChangeText={setAddressLine1}
       />
 
       <View style={styles.row}>
         <View style={styles.half}>
-          <Input placeholder="City" value={city} onChangeText={setCity} />
+          <Input
+            placeholder={t("createShipment.express.steps.step2.city")}
+            value={city}
+            onChangeText={setCity}
+          />
         </View>
 
         <View style={styles.half}>
           <Input
-            placeholder="Postal code"
+            placeholder={t("createShipment.express.steps.step2.postalCode")}
             value={postalCode}
             onChangeText={setPostalCode}
             keyboardType="number-pad"

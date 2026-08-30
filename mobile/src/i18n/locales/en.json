@@ -402,8 +402,189 @@
     "subheading": "Choose the type of shipment",
     "express": {
       "title": "Express Shipment",
-      "description": "International & domestic courier via FedEx, DHL and partners."
+      "description": "International & domestic courier via FedEx, DHL and partners.",
+      "steps": {
+        "step1": {
+          "title": "Shipment Type",
+          "subtitle": "Select the shipment direction",
+          "direction": {
+            "title": "DIRECTION",
+            "domestic": {
+              "title": "Domestic",
+              "description": "Inside Saudi Arabia"
+            },
+            "import": {
+              "title": "Import",
+              "description": "Into Saudi Arabia (inbound)"
+            },
+            "export": {
+              "title": "Export",
+              "description": "Out of Saudi Arabia (outbound)"
+            }
+          },
+          "currency": {
+            "title": "CURRENCY"
+          },
+          "info": "Direction decides which customs steps you’ll see later."
+        },
+        "step2": {
+          "title": "Sender Details",
+          "subtitle": "Pickup address and contact",
+          "savedAddresses": "SAVED SENDER ADDRESSES",
+          "newAddress": "OR ENTER A NEW ADDRESS",
+          "contactName": "Contact name",
+          "phone": "Phone",
+          "addressLine1": "Address line 1",
+          "city": "City",
+          "postalCode": "Postal code"
+        },
+        "step3": {
+          "title": "Recipient Details",
+          "subtitle": "Delivery address and contact",
+
+          "country": {
+            "title": "COUNTRY",
+            "placeholder": "Select country"
+          },
+
+          "savedRecipients": {
+            "title": "SAVED RECIPIENT ADDRESSES"
+          },
+
+          "newAddress": {
+            "title": "OR ENTER A NEW ADDRESS",
+            "recipientName": "Recipient name",
+            "phone": "Phone",
+            "city": "City",
+            "postalCode": "Postal code"
+          },
+
+          "info": "Some countries also require a state or province."
+        },
+        "step4": {
+          "title": "Package Details",
+          "subtitle": "Weight and dimensions",
+          "getRates": "Get rates",
+
+          "package": "Package",
+          "remove": "Remove",
+
+          "weight": "WEIGHT",
+          "length": "L CM",
+          "width": "W CM",
+          "height": "H CM",
+
+          "addPackage": "Add another package",
+          "scanDocument": "Scan a document to fill this in",
+
+          "actualWeight": "Actual weight",
+          "volumetricWeight": "Volumetric weight",
+          "chargeableWeight": "Chargeable weight"
+        },
+        "step5": {
+          "title": "Select Shipping Rate",
+          "subtitle": "Riyadh → Dubai · 6.5 kg",
+          "continueWith": "Continue with",
+          "selected": "SELECTED",
+          "cheapest": "CHEAPEST",
+          "includingVat": "incl. VAT",
+          "info": "Prices held for 30 minutes. Re-quote after that.",
+          "rates": {
+            "fedex": {
+              "serviceName": "International Priority",
+              "delivery": "Delivered Tue 19 Aug · 2 days"
+            },
+            "dhl": {
+              "serviceName": "Express Worldwide",
+              "delivery": "Delivered Wed 20 Aug · 3 days"
+            },
+            "arx": {
+              "serviceName": "Priority Document",
+              "delivery": "Delivered Wed 20 Aug · 3 days"
+            }
+          }
+        },
+        "step6": {
+          "title": "Customs Details",
+          "subtitle": "International only",
+          "scanInvoice": "Scan an invoice to fill this in",
+          "addItem": "Add item"
+        },
+        "step7": {
+          "title": "Carrier Pickup",
+          "subtitle": "Optional",
+          "reviewOrder": "Review order",
+          "requestPickup": "Request a pickup",
+          "dropOffBranch": "Otherwise drop off at a branch",
+          "pickupDate": "PICKUP DATE",
+          "readyBetween": "READY BETWEEN",
+          "pickupLocation": "PICKUP LOCATION",
+          "locationPlaceholder": "Reception, Gate 2...",
+          "instructionsPlaceholder": "Instructions (optional)",
+          "info": "Booked after payment. A failed pickup never fails the shipment."
+        },
+        "step8": {
+          "title": "Payment Options",
+          "subtitle": "Order Summary",
+          "pay": "Pay",
+          "payWith": "PAY WITH",
+          "footerNote": "Booked with the carrier after payment",
+          "summary": {
+            "shipping": "Shipping",
+            "fuelSurcharge": "Fuel surcharge",
+            "pickup": "Pickup",
+            "vat": "VAT (15%)"
+          }
+        }
+      },
+
+      "payment": {
+        "visa": {
+          "expires": "Expires 09/28"
+        },
+        "newCard": {
+          "title": "New card",
+          "subtitle": "Secured by Tap"
+        },
+        "payLater": {
+          "title": "Pay later · 30 days",
+          "creditAvailable": "credit available"
+        }
+      },
+      "days": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed"
+      },
+      "customs": {
+        "hsCode": "HS {{code}}",
+        "highConfidence": "high confidence",
+        "confirmThis": "confirm this",
+        "itemsSummary": "{{itemCount}} items · {{unitCount}} units",
+        "declaredValue": "Declared value",
+        "confirmHSCode": "Confirm the HS code",
+        "hsCodeSubtitle": "{{itemName}} — pick the code customs should see.",
+        "confirmCode": "Confirm code"
+      },
+      "common": {
+        "continue": "Continue",
+        "step": "Step",
+        "of": "of",
+        "default": "Default",
+        "use": "Use"
+      },
+      "currency": {
+        "title": "Currency",
+        "selectCurrency": "Select currency",
+        "options": {
+          "sar": "SAR - Saudi Riyal",
+          "usd": "USD - US Dollar",
+          "eur": "EUR - Euro"
+        },
+        "cancel": "Cancel"
+      }
     },
+
     "freight": {
       "title": "Door To Door Freight",
       "description": "Import with all duties & taxes prepaid on fixed lane pricing."
@@ -412,7 +593,34 @@
       "title": "Local Delivery",
       "description": "Last-mile delivery within Saudi Arabia via local carriers."
     },
-    "continue": "Continue"
+
+    "continue": "Continue",
+    "confirmation": {
+      "express": {
+        "title": "Shipment Created Successfully!",
+        "subtitle": "Your shipment has been booked with the carrier.",
+        "idLabel": "SHIPMENT ID",
+        "footerTitle": "Track shipment",
+        "statusProcessing": "Processing",
+        "docLabel": "Label",
+        "docInvoice": "Invoice"
+      },
+      "local": {
+        "title": "Local shipment created",
+        "subtitle": "SMSA has the booking and your label is ready.",
+        "idLabel": "SHIPMENT ID",
+        "footerTitle": "Track shipment",
+        "docLabel": "Label",
+        "docTrack": "Track"
+      },
+      "freight": {
+        "title": "Door To Door Freight shipment submitted",
+        "subtitle": "Our team will confirm the final rate once the cargo is measured at origin.",
+        "idLabel": "REFERENCE",
+        "footerTitle": "View shipment",
+        "statusUnderReview": "Under review"
+      }
+    }
   },
   "datePicker": {
     "placeholder": "dd/mm/yyyy",

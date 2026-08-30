@@ -1,12 +1,11 @@
-// components/sections/createShipment/express/RateOptionCard.tsx
-
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { useTranslation } from "react-i18next";
+import { SaudiRiyal } from "lucide-react-native";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { SaudiRiyal } from "lucide-react-native";
 
 interface RateOptionCardProps {
   carrierCode: string;
@@ -26,11 +25,12 @@ export const RateOptionCard = ({
   serviceName,
   deliveryLabel,
   price,
-  currencySymbol = "ريال",
   badge,
   selected = false,
   onPress,
 }: RateOptionCardProps) => {
+  const { t } = useTranslation();
+
   return (
     <Pressable
       onPress={onPress}
@@ -39,7 +39,7 @@ export const RateOptionCard = ({
       {selected ? (
         <View style={styles.selectedBadge}>
           <Text size="xs" weight="bold" style={styles.selectedBadgeText}>
-            SELECTED
+            {t("createShipment.express.steps.step5.selected")}
           </Text>
         </View>
       ) : null}
@@ -59,7 +59,7 @@ export const RateOptionCard = ({
           {badge === "cheapest" ? (
             <View style={styles.cheapestPill}>
               <Text size="xs" weight="bold" style={styles.cheapestText}>
-                CHEAPEST
+                {t("createShipment.express.steps.step5.cheapest")}
               </Text>
             </View>
           ) : null}
@@ -72,12 +72,14 @@ export const RateOptionCard = ({
         <View style={styles.priceContainer}>
           <View style={styles.priceRow}>
             <SaudiRiyal size={rs(20)} />
+
             <Text size="large" weight="bold" style={styles.price}>
               {price}
             </Text>
           </View>
+
           <Text size="xs" style={styles.vatLabel}>
-            incl. VAT
+            {t("createShipment.express.steps.step5.includingVat")}
           </Text>
         </View>
       </View>
@@ -104,7 +106,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: rvs(-10),
     right: rs(16),
-
     backgroundColor: Colors.primary,
     borderRadius: rs(10),
     paddingHorizontal: rs(10),
@@ -173,12 +174,9 @@ const styles = StyleSheet.create({
   vatLabel: {
     color: "#8A93A3",
   },
+
   priceRow: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  totalPrice: {
-    paddingStart: rvs(2),
-    color: Colors.text,
   },
 });

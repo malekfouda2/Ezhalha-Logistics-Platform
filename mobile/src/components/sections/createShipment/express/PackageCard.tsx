@@ -1,5 +1,3 @@
-// components/sections/createShipment/express/PackageCard.tsx
-
 import React from "react";
 import {
   StyleSheet,
@@ -7,6 +5,7 @@ import {
   Pressable,
   TextInput,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -40,17 +39,19 @@ export const PackageCard = ({
   onRemove,
   removable = true,
 }: PackageCardProps) => {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text size="small" weight="bold" style={styles.title}>
-          Package {index}
+          {t("createShipment.express.steps.step4.package")} {index}
         </Text>
 
         {removable ? (
           <Pressable onPress={onRemove} hitSlop={10}>
             <Text size="small" weight="semibold" style={styles.remove}>
-              Remove
+              {t("createShipment.express.steps.step4.remove")}
             </Text>
           </Pressable>
         ) : null}
@@ -59,8 +60,9 @@ export const PackageCard = ({
       <View style={styles.grid}>
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            WEIGHT
+            {t("createShipment.express.steps.step4.weight")}
           </Text>
+
           <TextInput
             value={weight}
             onChangeText={onChangeWeight}
@@ -72,8 +74,9 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            L CM
+            {t("createShipment.express.steps.step4.length")}
           </Text>
+
           <TextInput
             value={length}
             onChangeText={onChangeLength}
@@ -85,8 +88,9 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            W CM
+            {t("createShipment.express.steps.step4.width")}
           </Text>
+
           <TextInput
             value={width}
             onChangeText={onChangeWidth}
@@ -98,8 +102,9 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            H CM
+            {t("createShipment.express.steps.step4.height")}
           </Text>
+
           <TextInput
             value={height}
             onChangeText={onChangeHeight}
@@ -144,9 +149,8 @@ const styles = StyleSheet.create({
   },
 
   gridItem: {
-    // flexBasis: "25%",
     flexGrow: 1,
-    alignItems:"center",
+    alignItems: "center",
     backgroundColor: Colors.background,
     borderRadius: rs(16),
     paddingHorizontal: rs(10),

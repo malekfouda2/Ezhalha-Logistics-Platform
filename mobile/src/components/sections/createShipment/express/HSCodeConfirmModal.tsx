@@ -1,5 +1,3 @@
-// components/sections/createShipment/express/HSCodeConfirmModal.tsx
-
 import React, { useState, useEffect } from "react";
 import {
   Modal,
@@ -8,6 +6,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
@@ -36,6 +35,8 @@ export const HSCodeConfirmModal = ({
   onConfirm,
   onClose,
 }: HSCodeConfirmModalProps) => {
+  const { t } = useTranslation();
+
   const [selectedCode, setSelectedCode] = useState(
     defaultCode ?? options[0]?.code
   );
@@ -60,11 +61,13 @@ export const HSCodeConfirmModal = ({
           <View style={styles.handle} />
 
           <Text size="xl" weight="bold" style={styles.title}>
-            Confirm the HS code
+            {t("createShipment.express.customs.confirmHSCode")}
           </Text>
 
           <Text size="medium" style={styles.subtitle}>
-            {itemName} — pick the code customs should see.
+            {t("createShipment.express.customs.hsCodeSubtitle", {
+              itemName,
+            })}
           </Text>
 
           {options.map((option) => {
@@ -84,6 +87,7 @@ export const HSCodeConfirmModal = ({
                   >
                     {option.code}
                   </Text>
+
                   <Text size="small" style={styles.optionDescription}>
                     {option.description}
                   </Text>
@@ -103,7 +107,7 @@ export const HSCodeConfirmModal = ({
 
           <View style={styles.footer}>
             <Button
-              title="Confirm code"
+              title={t("createShipment.express.customs.confirmCode")}
               onPress={() => onConfirm(selectedCode)}
             />
           </View>

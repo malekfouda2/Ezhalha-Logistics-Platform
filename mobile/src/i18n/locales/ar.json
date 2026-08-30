@@ -405,7 +405,187 @@
     "subheading": "اختر نوع الشحنة",
     "express": {
       "title": "شحن سريع",
-      "description": "شحن دولي ومحلي عبر FedEx وDHL وشركاء آخرين."
+      "description": "شحن دولي ومحلي عبر FedEx وDHL وشركاء آخرين.",
+      "steps": {
+        "step1": {
+          "title": "نوع الشحنة",
+          "subtitle": "اختر اتجاه الشحنة",
+          "direction": {
+            "title": "اتجاه الشحنة",
+            "domestic": {
+              "title": "محلي",
+              "description": "داخل المملكة العربية السعودية"
+            },
+            "import": {
+              "title": "استيراد",
+              "description": "إلى المملكة العربية السعودية (وارد)"
+            },
+            "export": {
+              "title": "تصدير",
+              "description": "من المملكة العربية السعودية (صادر)"
+            }
+          },
+          "currency": {
+            "title": "العملة"
+          },
+          "info": "يحدد اتجاه الشحنة خطوات الجمارك التي ستظهر لك لاحقًا."
+        },
+        "step2": {
+          "title": "بيانات المُرسِل",
+          "subtitle": "عنوان الاستلام وبيانات الاتصال",
+          "savedAddresses": "عناوين المُرسِل المحفوظة",
+          "newAddress": "أو أدخل عنوانًا جديدًا",
+          "contactName": "اسم جهة الاتصال",
+          "phone": "رقم الهاتف",
+          "addressLine1": "العنوان، السطر الأول",
+          "city": "المدينة",
+          "postalCode": "الرمز البريدي"
+        },
+        "step3": {
+          "title": "بيانات المستلم",
+          "subtitle": "عنوان التسليم وبيانات الاتصال",
+
+          "country": {
+            "title": "الدولة",
+            "placeholder": "اختر الدولة"
+          },
+
+          "savedRecipients": {
+            "title": "عناوين المستلمين المحفوظة"
+          },
+
+          "newAddress": {
+            "title": "أو أدخل عنوانًا جديدًا",
+            "recipientName": "اسم المستلم",
+            "phone": "رقم الهاتف",
+            "city": "المدينة",
+            "postalCode": "الرمز البريدي"
+          },
+
+          "info": "تتطلب بعض الدول أيضًا تحديد المنطقة أو المحافظة."
+        },
+        "step4": {
+          "title": "تفاصيل الطرود",
+          "subtitle": "الوزن والأبعاد",
+          "getRates": "احصل على الأسعار",
+
+          "package": "الطرد",
+          "remove": "إزالة",
+
+          "weight": "الوزن",
+          "length": "الطول سم",
+          "width": "العرض سم",
+          "height": "الارتفاع سم",
+
+          "addPackage": "إضافة طرد آخر",
+          "scanDocument": "مسح مستند لتعبئة البيانات",
+
+          "actualWeight": "الوزن الفعلي",
+          "volumetricWeight": "الوزن الحجمي",
+          "chargeableWeight": "الوزن الخاضع للفوترة"
+        },
+        "step5": {
+          "title": "اختر سعر الشحن",
+          "subtitle": "الرياض → دبي · 6.5 كجم",
+          "continueWith": "المتابعة مع",
+          "selected": "محدد",
+          "cheapest": "الأرخص",
+          "includingVat": "شامل ضريبة القيمة المضافة",
+          "info": "الأسعار ثابتة لمدة 30 دقيقة. بعد ذلك يجب إعادة الحصول على عرض السعر.",
+          "rates": {
+            "fedex": {
+              "serviceName": "أولوية دولية",
+              "delivery": "التسليم الثلاثاء 19 أغسطس · يومان"
+            },
+            "dhl": {
+              "serviceName": "إكسبريس عالمي",
+              "delivery": "التسليم الأربعاء 20 أغسطس · 3 أيام"
+            },
+            "arx": {
+              "serviceName": "مستندات ذات أولوية",
+              "delivery": "التسليم الأربعاء 20 أغسطس · 3 أيام"
+            }
+          }
+        },
+        "step6": {
+          "title": "تفاصيل الجمارك",
+          "subtitle": "للشحنات الدولية فقط",
+          "scanInvoice": "امسح فاتورة لملء البيانات",
+          "addItem": "إضافة صنف"
+        },
+        "step7": {
+          "title": "استلام الشحنة من الناقل",
+          "subtitle": "اختياري",
+          "reviewOrder": "مراجعة الطلب",
+          "requestPickup": "طلب استلام الشحنة",
+          "dropOffBranch": "أو قم بتسليمها إلى أحد الفروع",
+          "pickupDate": "تاريخ الاستلام",
+          "readyBetween": "متاح للاستلام بين",
+          "pickupLocation": "موقع الاستلام",
+          "locationPlaceholder": "الاستقبال، البوابة 2...",
+          "instructionsPlaceholder": "التعليمات (اختياري)",
+          "info": "يتم الحجز بعد الدفع. فشل عملية الاستلام لا يؤثر على الشحنة."
+        },
+        "step8": {
+          "title": "خيارات الدفع",
+          "subtitle": "ملخص الطلب",
+          "pay": "دفع",
+          "payWith": "الدفع باستخدام",
+          "footerNote": "يتم الحجز مع الناقل بعد الدفع",
+          "summary": {
+            "shipping": "الشحن",
+            "fuelSurcharge": "رسوم الوقود",
+            "pickup": "الاستلام",
+            "vat": "ضريبة القيمة المضافة (15%)"
+          }
+        }
+      },
+
+      "payment": {
+        "visa": {
+          "expires": "تنتهي في 09/28"
+        },
+        "newCard": {
+          "title": "بطاقة جديدة",
+          "subtitle": "مؤمنة بواسطة Tap"
+        },
+        "payLater": {
+          "title": "الدفع لاحقًا · 30 يومًا",
+          "creditAvailable": "الرصيد المتاح"
+        }
+      },
+      "days": {
+        "mon": "الإثنين",
+        "tue": "الثلاثاء",
+        "wed": "الأربعاء"
+      },
+      "customs": {
+        "hsCode": "رمز HS {{code}}",
+        "highConfidence": "ثقة عالية",
+        "confirmThis": "تأكيد الرمز",
+        "itemsSummary": "{{itemCount}} أصناف · {{unitCount}} وحدات",
+        "declaredValue": "القيمة المصرح بها",
+        "confirmHSCode": "تأكيد رمز HS",
+        "hsCodeSubtitle": "{{itemName}} — اختر الرمز الذي ستراه الجمارك.",
+        "confirmCode": "تأكيد الرمز"
+      },
+      "common": {
+        "continue": "متابعة",
+        "step": "الخطوة",
+        "of": "من",
+        "default": "افتراضي",
+        "use": "استخدام"
+      },
+      "currency": {
+        "title": "العملة",
+        "selectCurrency": "اختر العملة",
+        "options": {
+          "sar": "SAR - الريال السعودي",
+          "usd": "USD - الدولار الأمريكي",
+          "eur": "EUR - اليورو"
+        },
+        "cancel": "إلغاء"
+      }
     },
     "freight": {
       "title": "شحن من الباب إلى الباب",
@@ -415,7 +595,33 @@
       "title": "توصيل محلي",
       "description": "توصيل الميل الأخير داخل المملكة العربية السعودية عبر ناقلين محليين."
     },
-    "continue": "متابعة"
+    "continue": "متابعة",
+    "confirmation": {
+      "express": {
+        "title": "تم إنشاء الشحنة بنجاح!",
+        "subtitle": "تم حجز شحنتك مع شركة الشحن.",
+        "idLabel": "رقم الشحنة",
+        "footerTitle": "تتبع الشحنة",
+        "statusProcessing": "قيد المعالجة",
+        "docLabel": "الملصق",
+        "docInvoice": "الفاتورة"
+      },
+      "local": {
+        "title": "تم إنشاء الشحنة المحلية",
+        "subtitle": "استلمت SMSA الحجز والملصق جاهز.",
+        "idLabel": "رقم الشحنة",
+        "footerTitle": "تتبع الشحنة",
+        "docLabel": "الملصق",
+        "docTrack": "تتبع"
+      },
+      "freight": {
+        "title": "تم إرسال شحنة الشحن الجوي من الباب إلى الباب",
+        "subtitle": "سيؤكد فريقنا السعر النهائي بعد قياس البضاعة في نقطة المنشأ.",
+        "idLabel": "الرقم المرجعي",
+        "footerTitle": "عرض الشحنة",
+        "statusUnderReview": "قيد المراجعة"
+      }
+    }
   },
   "datePicker": {
     "placeholder": "يوم/شهر/سنة",

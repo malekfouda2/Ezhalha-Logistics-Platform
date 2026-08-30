@@ -24,7 +24,7 @@ export function ShipmentStepLayout({
   totalSteps,
   children,
   onContinue,
-  continueLabel = "Continue",
+  continueLabel,
   footerNote,
 }: ShipmentStepLayoutProps) {
   const router = useRouter();

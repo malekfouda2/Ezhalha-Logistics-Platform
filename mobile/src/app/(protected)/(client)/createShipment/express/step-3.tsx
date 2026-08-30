@@ -1,10 +1,10 @@
-// app/create-shipment/express/step-3.tsx
-
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
+
 import { Input } from "@/components/ui/Input";
-import { rs, rvs } from "@/utils/responsive";
+import { rs } from "@/utils/responsive";
 import { CountrySelect } from "@/components/ui/CountrySelect";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
@@ -31,6 +31,7 @@ const SAVED_RECIPIENTS: SavedRecipient[] = [
 
 export default function RecipientDetailsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [countryCode, setCountryCode] = useState("AE");
 
@@ -52,19 +53,27 @@ export default function RecipientDetailsScreen() {
     <ShipmentStepLayout
       step={3}
       totalSteps={8}
-      title="Recipient Details"
-      subtitle="Delivery address and contact"
+      title={t("createShipment.express.steps.step3.title")}
+      subtitle={t("createShipment.express.steps.step3.subtitle")}
       onContinue={handleContinue}
     >
-      <SectionTitle title="COUNTRY" />
+      <SectionTitle
+        title={t("createShipment.express.steps.step3.country.title")}
+      />
 
       <CountrySelect
         value={countryCode}
         onChange={(selected) => setCountryCode(selected.code)}
-        placeholder="Select country"
+        placeholder={t(
+          "createShipment.express.steps.step3.country.placeholder"
+        )}
       />
 
-      <SectionTitle title="SAVED RECIPIENT ADDRESSES" />
+      <SectionTitle
+        title={t(
+          "createShipment.express.steps.step3.savedRecipients.title"
+        )}
+      />
 
       {SAVED_RECIPIENTS.map((recipient) => (
         <SavedAddressCard
@@ -78,17 +87,21 @@ export default function RecipientDetailsScreen() {
         />
       ))}
 
-      <SectionTitle title="OR ENTER A NEW ADDRESS" />
+      <SectionTitle
+        title={t("createShipment.express.steps.step3.newAddress.title")}
+      />
 
       <Input
-        placeholder="Recipient name"
+        placeholder={t(
+          "createShipment.express.steps.step3.newAddress.recipientName"
+        )}
         value={recipientName}
         onChangeText={setRecipientName}
         autoCapitalize="words"
       />
 
       <Input
-        placeholder="Phone"
+        placeholder={t("createShipment.express.steps.step3.newAddress.phone")}
         value={phone}
         onChangeText={setPhone}
         keyboardType="phone-pad"
@@ -96,12 +109,20 @@ export default function RecipientDetailsScreen() {
 
       <View style={styles.row}>
         <View style={styles.half}>
-          <Input placeholder="City" value={city} onChangeText={setCity} />
+          <Input
+            placeholder={t(
+              "createShipment.express.steps.step3.newAddress.city"
+            )}
+            value={city}
+            onChangeText={setCity}
+          />
         </View>
 
         <View style={styles.half}>
           <Input
-            placeholder="Postal code"
+            placeholder={t(
+              "createShipment.express.steps.step3.newAddress.postalCode"
+            )}
             value={postalCode}
             onChangeText={setPostalCode}
             keyboardType="number-pad"
@@ -109,7 +130,9 @@ export default function RecipientDetailsScreen() {
         </View>
       </View>
 
-      <InfoBox text="Some countries also require a state or province." />
+      <InfoBox
+        text={t("createShipment.express.steps.step3.info")}
+      />
     </ShipmentStepLayout>
   );
 }

@@ -7,6 +7,7 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { BackButton } from "@/components/ui/BackButton";
+import { useTranslation } from "react-i18next";
 
 interface ShipmentStepHeaderProps {
   step: number;
@@ -23,6 +24,8 @@ export const ShipmentStepHeader = ({
   subtitle,
   onBack,
 }: ShipmentStepHeaderProps) => {
+    const { t } = useTranslation();
+  
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
@@ -39,7 +42,7 @@ export const ShipmentStepHeader = ({
           </Text>
 
           <Text size="xs" weight="semibold" style={styles.subtitle}>
-            Step {step} of {totalSteps} · {subtitle}
+            {t("createShipment.express.common.step")} {step} {t("createShipment.express.common.of")} {totalSteps} · {subtitle}
           </Text>
         </View>
       </View>

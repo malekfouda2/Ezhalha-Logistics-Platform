@@ -1,7 +1,6 @@
-// components/sections/createShipment/express/CustomsItemCard.tsx
-
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -37,6 +36,8 @@ export const CustomsItemCard = ({
   confidence,
   onPressHSCode,
 }: CustomsItemCardProps) => {
+  const { t } = useTranslation();
+
   const isHighConfidence = confidence === "high";
 
   return (
@@ -55,17 +56,22 @@ export const CustomsItemCard = ({
         <View style={styles.priceContainer}>
           <View style={styles.priceRow}>
             <SaudiRiyal size={rs(20)} />
+
             <Text size="medium" weight="bold" style={styles.totalPrice}>
               {totalPrice}
             </Text>
           </View>
 
           <View style={styles.unitPriceContainer}>
-            <Text size="xs" style={styles.unitPrice}>{quantity} x</Text>
+            <Text size="xs" style={styles.unitPrice}>
+              {quantity} x
+            </Text>
 
-            <SaudiRiyal size={rs(12)} color={Colors.secondary}/>
+            <SaudiRiyal size={rs(12)} color={Colors.secondary} />
 
-            <Text size="xs" style={styles.unitPrice}> {unitPrice} </Text>
+            <Text size="xs" style={styles.unitPrice}>
+              {unitPrice}
+            </Text>
           </View>
         </View>
       </View>
@@ -87,7 +93,13 @@ export const CustomsItemCard = ({
         />
 
         <Text size="xs" weight="bold" style={styles.hsText}>
-          HS {hsCode} · {isHighConfidence ? "high confidence" : "confirm this"}
+          {t("createShipment.express.customs.hsCode", {
+            code: hsCode,
+          })}{" "}
+          ·{" "}
+          {isHighConfidence
+            ? t("createShipment.express.customs.highConfidence")
+            : t("createShipment.express.customs.confirmThis")}
         </Text>
       </Pressable>
     </View>

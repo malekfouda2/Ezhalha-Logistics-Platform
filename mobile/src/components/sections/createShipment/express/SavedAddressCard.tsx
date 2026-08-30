@@ -7,6 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { useTranslation } from "react-i18next";
 
 interface SavedAddressCardProps {
   name: string;
@@ -32,7 +33,7 @@ export const SavedAddressCard = ({
   onPress,
 }: SavedAddressCardProps) => {
   const isUseVariant = variant === "use";
-
+  const { t } = useTranslation();
   return (
     <Pressable
       onPress={onPress}
@@ -50,11 +51,7 @@ export const SavedAddressCard = ({
       >
         <Feather
           name={
-            isUseVariant
-              ? "user"
-              : type === "warehouse"
-              ? "archive"
-              : "home"
+            isUseVariant ? "user" : type === "warehouse" ? "archive" : "home"
           }
           size={rs(20)}
           color={!isUseVariant && selected ? Colors.primary : "#71829C"}
@@ -74,7 +71,7 @@ export const SavedAddressCard = ({
 
           {defaultAddress && !isUseVariant && (
             <Text size="small" weight="bold" style={styles.defaultText}>
-              Default
+              {t("createShipment.express.common.default")}
             </Text>
           )}
         </View>
@@ -97,7 +94,7 @@ export const SavedAddressCard = ({
       {isUseVariant && (
         <Pressable onPress={onPress} hitSlop={10}>
           <Text size="medium" weight="bold" style={styles.useLabel}>
-            Use
+            {t("createShipment.express.common.use")}
           </Text>
         </Pressable>
       )}

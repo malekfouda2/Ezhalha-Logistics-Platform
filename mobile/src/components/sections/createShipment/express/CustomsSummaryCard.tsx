@@ -1,7 +1,6 @@
-// components/sections/createShipment/express/CustomsSummaryCard.tsx
-
 import React from "react";
 import { StyleSheet, View } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -23,15 +22,21 @@ export const CustomsSummaryCard = ({
   declaredValue,
   declaredCurrency = "USD",
 }: CustomsSummaryCardProps) => {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.card}>
       <View style={styles.row}>
         <Text size="small" weight="semibold" style={styles.label}>
-          {itemCount} items · {unitCount} units
+          {t("createShipment.express.customs.itemsSummary", {
+            itemCount,
+            unitCount,
+          })}
         </Text>
 
         <View style={styles.priceRow}>
           <SaudiRiyal size={rs(20)} />
+
           <Text size="medium" weight="bold" style={styles.totalPrice}>
             {totalPrice}
           </Text>
@@ -40,7 +45,7 @@ export const CustomsSummaryCard = ({
 
       <View style={styles.row}>
         <Text size="small" weight="semibold" style={styles.label}>
-          Declared value
+          {t("createShipment.express.customs.declaredValue")}
         </Text>
 
         <Text size="medium" weight="bold" style={styles.value}>

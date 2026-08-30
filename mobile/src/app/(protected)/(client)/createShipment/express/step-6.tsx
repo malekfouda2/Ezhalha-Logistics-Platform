@@ -1,8 +1,8 @@
-// app/create-shipment/express/step-6.tsx
-
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
+
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
@@ -83,6 +83,7 @@ const CUSTOMS_ITEMS: CustomsItem[] = [
 
 export default function CustomsDetailsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [items, setItems] = useState(CUSTOMS_ITEMS);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export default function CustomsDetailsScreen() {
           : item,
       ),
     );
+
     setActiveItemId(null);
   };
 
@@ -114,13 +116,13 @@ export default function CustomsDetailsScreen() {
     <ShipmentStepLayout
       step={6}
       totalSteps={8}
-      title="Customs Details"
-      subtitle="International only"
+      title={t("createShipment.express.steps.step6.title")}
+      subtitle={t("createShipment.express.steps.step6.subtitle")}
       onContinue={handleContinue}
     >
       <DashedActionButton
         icon="upload"
-        label="Scan an invoice to fill this in"
+        label={t("createShipment.express.steps.step6.scanInvoice")}
         onPress={() => {}}
       />
 
@@ -141,7 +143,11 @@ export default function CustomsDetailsScreen() {
         />
       ))}
 
-      <DashedActionButton icon="plus" label="Add item" onPress={() => {}} />
+      <DashedActionButton
+        icon="plus"
+        label={t("createShipment.express.steps.step6.addItem")}
+        onPress={() => {}}
+      />
 
       <View style={styles.summaryGap} />
 
@@ -151,6 +157,7 @@ export default function CustomsDetailsScreen() {
         totalPrice={totalPrice}
         declaredValue="280.00"
       />
+
       <HSCodeConfirmModal
         visible={!!activeItem}
         itemName={activeItem?.name ?? ""}
