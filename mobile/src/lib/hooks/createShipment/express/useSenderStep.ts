@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
+import Toast from "react-native-toast-message";
+import { useTranslation } from "react-i18next";
 
 import { useCreateShipmentStore } from "@/store/createShipmentStore";
 import { AddressBookEntry } from "@/lib/services/createShipment";
@@ -11,6 +13,7 @@ import { Address } from "@/store/createShipmentStore";
 
 export function useSenderStep() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
 
   const shipper = useCreateShipmentStore((s) => s.shipper);
@@ -33,11 +36,21 @@ export function useSenderStep() {
 
   const savedSenderAddresses = addressBookEntries.filter((e) => e.useForShipper);
 
-  const handleContinue = form.handleSubmit((values) => {
-    const address: Address = { ...values };
-    setShipper(address);
-    router.push("/createShipment/express/step-3");
-  });
+  const handleContinue = form.handleSubmit(
+    (values) => {
+      const address: Address = { ...values };
+      setShipper(address);
+      router.push("/createShipment/express/step-3");
+    },
+    (errors) => {
+      const firstError = Object.values(errors)[0];
+      Toast.show({
+        type: "error",
+        text1: t("toast.shipmentValidation.formInvalidTitle"),
+        text2: typeof firstError?.message === "string" ? firstError.message : undefined,
+      });
+    },
+  );
 
   const applySavedAddress = (entry: AddressBookEntry) => {
     setSelectedAddressId(entry.id);

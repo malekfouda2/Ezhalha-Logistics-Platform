@@ -1,115 +1,94 @@
-import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import * as DocumentPicker from "expo-document-picker";
 
+import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
-import {
-  HSConfidence,
-  CustomsItemCard,
-} from "@/components/sections/createShipment/express/CustomsItemCard";
+import { CustomsItemCard } from "@/components/sections/createShipment/express/CustomsItemCard";
 import { CustomsSummaryCard } from "@/components/sections/createShipment/express/CustomsSummaryCard";
 import {
   HSCodeOption,
   HSCodeConfirmModal,
 } from "@/components/sections/createShipment/express/HSCodeConfirmModal";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
+import InfoBox from "@/components/sections/createShipment/InfoBox";
+import { useCustomsStep } from "@/lib/hooks/createShipment/express/useCustomsStep";
+import { countryCodeToFlag } from "@/utils/utils";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
+import { useState } from "react";
 
-interface CustomsItem {
-  id: string;
-  name: string;
-  category: string;
-  material: string;
-  countryFlag: string;
-  countryName: string;
-  totalPrice: string;
-  quantity: number;
-  unitPrice: string;
-  hsCode: string;
-  confidence: HSConfidence;
-  hsOptions: HSCodeOption[];
+function getCountryName(countryCode: string) {
+  return (
+    COUNTRY_CODE_SELECT_OPTIONS.find((c) => c.value === countryCode)?.label ??
+    countryCode
+  );
 }
 
-const CUSTOMS_ITEMS: CustomsItem[] = [
-  {
-    id: "1",
-    name: "Cotton T-Shirts",
-    category: "Apparel",
-    material: "100% cotton",
-    countryFlag: "🇮🇳",
-    countryName: "India",
-    totalPrice: "450.00",
-    quantity: 30,
-    unitPrice: "15.00",
-    hsCode: "6109.10",
-    confidence: "high",
-    hsOptions: [
-      {
-        code: "6109.10",
-        description: "T-shirts, of cotton, knitted or crocheted",
-      },
-    ],
-  },
-  {
-    id: "2",
-    name: "Leather Wallets",
-    category: "Accessories",
-    material: "Genuine leather",
-    countryFlag: "🇮🇹",
-    countryName: "Italy",
-    totalPrice: "600.00",
-    quantity: 10,
-    unitPrice: "60.00",
-    hsCode: "4202.31",
-    confidence: "review",
-    hsOptions: [
-      {
-        code: "4202.31",
-        description: "Articles of leather, pocket-size",
-      },
-      {
-        code: "4202.32",
-        description: "With outer surface of plastic sheeting",
-      },
-      {
-        code: "4202.39",
-        description: "Other similar articles",
-      },
-    ],
-  },
-];
-
 export default function CustomsDetailsScreen() {
-  const router = useRouter();
   const { t } = useTranslation();
+  const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
 
-  const [items, setItems] = useState(CUSTOMS_ITEMS);
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const {
+    items,
+    addItem,
+    updateItem,
+    removeItem,
+    invoiceDocument,
+    handleInvoicePick,
+    clearInvoiceDocument,
+    isUploadingInvoice,
+    isExtractingInvoice,
+    invoiceExtractionSummary,
+    handleContinue,
+    handleBack,
+  } = useCustomsStep();
 
-  const activeItem = items.find((item) => item.id === activeItemId);
+  const activeItem = activeItemIndex !== null ? items[activeItemIndex] : undefined;
+  const activeItemOptions: HSCodeOption[] =
+    activeItem?.hsCodeCandidates.map((c) => ({ code: c.code, description: c.description })) ?? [];
 
   const totalPrice = items
-    .reduce((sum, item) => sum + parseFloat(item.totalPrice), 0)
+    .reduce((sum, item) => sum + item.price * item.quantity, 0)
     .toFixed(2);
-
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const isProcessingInvoice = isUploadingInvoice || isExtractingInvoice;
 
-  const handleConfirmHSCode = (code: string) => {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === activeItemId
-          ? { ...item, hsCode: code, confidence: "high" }
-          : item,
-      ),
-    );
+  const handleScanInvoice = async () => {
+    if (isProcessingInvoice) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "image/jpeg",
+        "image/png",
+      ],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
 
-    setActiveItemId(null);
+    const file = result.assets[0];
+    await handleInvoicePick({
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType ?? "application/octet-stream",
+      size: file.size ?? 0,
+    });
   };
 
-  const handleContinue = () => {
-    router.push("/createShipment/express/step-7");
+  const handleConfirmHSCode = (code: string) => {
+    if (activeItemIndex !== null) {
+      updateItem(activeItemIndex, {
+        hsCode: code,
+        hsCodeSource: "USER",
+        hsCodeConfidence: "HIGH",
+      });
+    }
+    setActiveItemIndex(null);
   };
 
   return (
@@ -119,34 +98,65 @@ export default function CustomsDetailsScreen() {
       title={t("createShipment.express.steps.step6.title")}
       subtitle={t("createShipment.express.steps.step6.subtitle")}
       onContinue={handleContinue}
+      onBack={handleBack}
     >
-      <DashedActionButton
-        icon="upload"
-        label={t("createShipment.express.steps.step6.scanInvoice")}
-        onPress={() => {}}
-      />
+      {invoiceDocument ? (
+        <InfoBox
+          text={
+            invoiceExtractionSummary?.importedItemCount
+              ? `${invoiceDocument.fileName} · ${invoiceExtractionSummary.importedItemCount} item(s) imported`
+              : invoiceDocument.fileName
+          }
+          iconName="file-text"
+        />
+      ) : (
+        <DashedActionButton
+          icon="upload"
+          label={
+            isProcessingInvoice
+              ? t("common.loading")
+              : t("createShipment.express.steps.step6.scanInvoice")
+          }
+          onPress={handleScanInvoice}
+        />
+      )}
 
-      {items.map((item) => (
+      {invoiceDocument ? (
+        <View style={styles.clearRow}>
+          <Text
+            size="small"
+            weight="semibold"
+            style={styles.clearText}
+            onPress={clearInvoiceDocument}
+          >
+            {t("createShipment.express.steps.step4.remove")}
+          </Text>
+        </View>
+      ) : null}
+
+      {items.map((item, index) => (
         <CustomsItemCard
-          key={item.id}
-          name={item.name}
+          key={index}
+          name={item.itemName}
           category={item.category}
           material={item.material}
-          countryFlag={item.countryFlag}
-          countryName={item.countryName}
-          totalPrice={item.totalPrice}
+          countryFlag={countryCodeToFlag(item.countryOfOrigin)}
+          countryName={getCountryName(item.countryOfOrigin)}
+          totalPrice={(item.price * item.quantity).toFixed(2)}
           quantity={item.quantity}
-          unitPrice={item.unitPrice}
+          unitPrice={item.price.toFixed(2)}
           hsCode={item.hsCode}
-          confidence={item.confidence}
-          onPressHSCode={() => setActiveItemId(item.id)}
+          confidence={item.hsCodeConfidence === "HIGH" ? "high" : "review"}
+          removable={items.length > 1}
+          onPressHSCode={() => setActiveItemIndex(index)}
+          onRemove={() => removeItem(index)}
         />
       ))}
 
       <DashedActionButton
         icon="plus"
         label={t("createShipment.express.steps.step6.addItem")}
-        onPress={() => {}}
+        onPress={() => addItem()}
       />
 
       <View style={styles.summaryGap} />
@@ -155,16 +165,17 @@ export default function CustomsDetailsScreen() {
         itemCount={items.length}
         unitCount={totalUnits}
         totalPrice={totalPrice}
-        declaredValue="280.00"
+        declaredValue={totalPrice}
+        declaredCurrency={items[0]?.currency ?? "SAR"}
       />
 
       <HSCodeConfirmModal
-        visible={!!activeItem}
-        itemName={activeItem?.name ?? ""}
-        options={activeItem?.hsOptions ?? []}
+        visible={activeItemIndex !== null}
+        itemName={activeItem?.itemName ?? ""}
+        options={activeItemOptions}
         defaultCode={activeItem?.hsCode}
         onConfirm={handleConfirmHSCode}
-        onClose={() => setActiveItemId(null)}
+        onClose={() => setActiveItemIndex(null)}
       />
     </ShipmentStepLayout>
   );
@@ -173,6 +184,16 @@ export default function CustomsDetailsScreen() {
 const styles = StyleSheet.create({
   summaryGap: {
     height: rvs(6),
+  },
+
+  clearRow: {
+    alignItems: "flex-end",
+    marginTop: -rvs(6),
+    marginBottom: rvs(14),
+  },
+
+  clearText: {
+    color: Colors.secondary,
   },
 
   footer: {

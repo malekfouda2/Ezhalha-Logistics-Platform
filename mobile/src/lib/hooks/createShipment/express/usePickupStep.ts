@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
-import { Alert } from "react-native";
+import Toast from "react-native-toast-message";
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useCreateShipmentStore, isInternationalShipment } from "@/store/createShipmentStore";
 import { CheckoutPayload, submitCheckout } from "@/lib/services/createShipment";
@@ -27,6 +28,7 @@ export function computeDefaultPickup(now: Date = new Date()): { date: string; sa
 
 export function usePickupStep() {
   const router = useRouter();
+  const { t } = useTranslation();
   const store = useCreateShipmentStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastCheckoutSignature, setLastCheckoutSignature] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export function usePickupStep() {
 
     const signature = JSON.stringify(payload);
     if (signature === lastCheckoutSignature && store.checkoutData) {
-      router.push("/createShipment/express/payment");
+      router.push("/createShipment/express/step-8");
       return;
     }
 
@@ -88,16 +90,23 @@ export function usePickupStep() {
       const data = await submitCheckout(payload);
       setLastCheckoutSignature(signature);
       store.setCheckoutData(data);
-      router.push("/createShipment/express/payment");
+      router.push("/createShipment/express/step-8");
     } catch (error) {
-      Alert.alert("Failed to process checkout", error instanceof Error ? error.message : "Please try again.");
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.checkout.errorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.createShipment.express.checkout.errorMessage"),
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleBack = () =>
-    router.push(isInternational ? "/createShipment/express/customs" : "/createShipment/express/step-5");
+    router.push(isInternational ? "/createShipment/express/step-6" : "/createShipment/express/step-5");
 
   return {
     pickup: store.pickup,

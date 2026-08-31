@@ -435,6 +435,8 @@
           "subtitle": "عنوان الاستلام وبيانات الاتصال",
           "savedAddresses": {
             "title": "عناوين المرسل المحفوظة",
+            "description": "استخدم عنوان الشحن الافتراضي أو أي بيانات مرسل استخدمتها في شحنات سابقة.",
+            "placeholder": "اختر عنوان مرسل محفوظ",
             "empty": "لا توجد عناوين مرسل محفوظة حتى الآن."
           },
           "newAddress": "أو أدخل عنوانًا جديدًا",
@@ -446,7 +448,9 @@
           "senderFullName": "الاسم الكامل للمرسل",
           "senderCompany": "شركة المرسل",
           "addressLine2": "العنوان - السطر الثاني",
-          "country": "اختر الدولة"
+          "country": "اختر الدولة",
+          "stateOrProvince": "المنطقة / المحافظة",
+          "shortAddress": "العنوان الوطني (مثال: RCTB4359)"
         },
         "step3": {
           "title": "بيانات المستلم",
@@ -458,7 +462,10 @@
           },
 
           "savedRecipients": {
-            "title": "عناوين المستلمين المحفوظة"
+            "title": "عناوين المستلمين المحفوظة",
+            "description": "استخدم عنوان الشحن الافتراضي أو أي بيانات مستلم استخدمتها في شحنات سابقة.",
+            "placeholder": "اختر عنوان مستلم محفوظ",
+            "empty": "لا توجد عناوين مستلمين محفوظة حتى الآن."
           },
 
           "newAddress": {
@@ -469,7 +476,9 @@
             "recipientFullName": "الاسم الكامل للمستلم",
             "recipientCompany": "شركة المستلم",
             "addressLine1": "العنوان، السطر الأول",
-            "addressLine2": "العنوان - السطر الثاني"
+            "addressLine2": "العنوان - السطر الثاني",
+            "stateOrProvince": "المنطقة / المحافظة",
+            "shortAddress": "العنوان الوطني (مثال: RCTB4359)"
           },
 
           "info": "تتطلب بعض الدول أيضًا تحديد المنطقة أو المحافظة."
@@ -482,17 +491,21 @@
           "package": "الطرد",
           "remove": "إزالة",
 
-          "weight": "الوزن",
-          "length": "الطول سم",
-          "width": "العرض سم",
-          "height": "الارتفاع سم",
+          "weight": "الوزن ({{unit}})",
+          "length": "الطول {{unit}}",
+          "width": "العرض {{unit}}",
+          "height": "الارتفاع {{unit}}",
 
           "addPackage": "إضافة طرد آخر",
           "scanDocument": "مسح مستند لتعبئة البيانات",
 
           "actualWeight": "الوزن الفعلي",
           "volumetricWeight": "الوزن الحجمي",
-          "chargeableWeight": "الوزن الخاضع للفوترة"
+          "chargeableWeight": "الوزن الخاضع للفوترة",
+
+          "weightUnit": "وحدة الوزن",
+          "dimensionUnit": "وحدة الأبعاد",
+          "packageType": "نوع الطرد"
         },
         "step5": {
           "title": "اختر سعر الشحن",
@@ -552,6 +565,10 @@
       },
 
       "payment": {
+        "comingSoon": "قريبًا",
+        "savedCard": {
+          "title": "بطاقة محفوظة"
+        },
         "visa": {
           "expires": "تنتهي في 09/28"
         },
@@ -565,9 +582,11 @@
         }
       },
       "days": {
+        "sun": "الأحد",
         "mon": "الإثنين",
         "tue": "الثلاثاء",
-        "wed": "الأربعاء"
+        "wed": "الأربعاء",
+        "thu": "الخميس"
       },
       "customs": {
         "hsCode": "رمز HS {{code}}",
@@ -700,6 +719,7 @@
       "errorMessage": "تعذر تغيير كلمة المرور. حاول مرة أخرى."
     },
     "shipmentValidation": {
+      "formInvalidTitle": "يرجى مراجعة الحقول المظللة",
       "shipmentTypeRequired": "يرجى اختيار نوع الشحنة",
       "domesticSaudiOnly": "الشحنات المحلية يجب أن تكون داخل المملكة العربية السعودية فقط",
 
@@ -745,6 +765,47 @@
       "invoiceRequired": "يرجى رفع الفاتورة",
       "customsItemRequired": "يرجى إضافة عنصر واحد على الأقل للجمارك",
       "customsItemIncomplete": "يرجى تعبئة جميع الحقول المطلوبة لـ \"{{itemName}}\""
+    },
+
+    "createShipment": {
+      "express": {
+        "rates": {
+          "errorTitle": "تعذر الحصول على أسعار لهذه الشحنة",
+          "errorMessage": "يرجى المحاولة مرة أخرى."
+        },
+        "checkout": {
+          "errorTitle": "فشلت معالجة الدفع",
+          "errorMessage": "يرجى المحاولة مرة أخرى."
+        },
+        "payment": {
+          "errorTitle": "فشلت عملية الدفع",
+          "errorMessage": "يرجى المحاولة مرة أخرى."
+        },
+        "payLater": {
+          "errorTitle": "فشلت معالجة الدفع لاحقًا",
+          "errorMessage": "يرجى المحاولة مرة أخرى."
+        },
+        "invoice": {
+          "uploadFailedTitle": "فشل رفع الفاتورة",
+          "unsupportedFormatTitle": "صيغة فاتورة غير مدعومة",
+          "unsupportedFormatMessage": "يرجى رفع فاتورة بصيغة PDF أو DOC أو DOCX أو XLS أو XLSX أو RTF أو TXT أو JPG أو JPEG أو PNG أو BMP أو TIFF أو GIF.",
+          "tooLargeTitle": "حجم الفاتورة كبير جدًا",
+          "tooLargeMessage": "يتجاوز حجم الفاتورة الحد الأقصى البالغ {{limit}} ميجابايت.",
+          "processErrorTitle": "تعذرت معالجة الفاتورة",
+          "processErrorMessage": "يرجى رفع فاتورة أخرى أو إدخال العناصر يدويًا."
+        },
+        "packageList": {
+          "uploadFailedTitle": "فشل رفع قائمة الطرود",
+          "unsupportedFormatTitle": "صيغة قائمة طرود غير مدعومة",
+          "unsupportedFormatMessage": "يرجى رفع قائمة طرود بصيغة PDF أو DOCX أو XLS أو XLSX أو TXT أو JPG أو JPEG أو PNG أو GIF.",
+          "tooLargeTitle": "حجم قائمة الطرود كبير جدًا",
+          "tooLargeMessage": "يتجاوز حجم قائمة الطرود الحد الأقصى البالغ {{limit}} ميجابايت.",
+          "processErrorTitle": "تعذرت معالجة قائمة الطرود",
+          "processErrorMessage": "يرجى رفع ملف آخر أو إدخال الطرود يدويًا.",
+          "successTitle": "تمت معالجة قائمة الطرود",
+          "successMessage": "تم استيراد {{count}} طرد."
+        }
+      }
     }
   }
 }

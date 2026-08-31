@@ -36,7 +36,7 @@ export const addressSchema = z
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 path: ["shortAddress"],
-                message: "National address is required",
+                message: "National address is required (4 letters followed by 4 digits, e.g. RCTB4359)",
             });
         } else if (
             data.countryCode === "SA" &&
@@ -46,7 +46,7 @@ export const addressSchema = z
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 path: ["shortAddress"],
-                message: "National address format is invalid",
+                message: "Must be 4 letters followed by 4 digits, e.g. RCTB4359",
             });
         }
 

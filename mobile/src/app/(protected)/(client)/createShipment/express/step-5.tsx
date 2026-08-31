@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
@@ -10,30 +8,46 @@ import { RateOptionCard } from "@/components/sections/createShipment/RateOptionC
 import { SaudiRiyal } from "lucide-react-native";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
+import { useRatesStep } from "@/lib/hooks/createShipment/express/useRatesStep";
+import { RateQuote } from "@/store/createShipmentStore";
 
-interface RateOption {
-  id: string;
-  carrierCode: string;
-  carrierColor: string;
-  serviceName: string;
-  deliveryLabel: string;
-  price: string;
-  badge?: "cheapest";
+const CARRIER_COLORS: Record<string, string> = {
+  FEDEX: "#4D148C",
+  DHL: "#FFCC00",
+  ARAMEX: "#C8102E",
+};
+
+function getCarrierColor(carrierCode: string) {
+  return CARRIER_COLORS[carrierCode.toUpperCase()] ?? Colors.secondary;
+}
+
+function getDeliveryLabel(quote: RateQuote) {
+  if (quote.estimatedDelivery) {
+    const date = new Date(quote.estimatedDelivery);
+    if (!Number.isNaN(date.getTime())) {
+      const formatted = new Intl.DateTimeFormat("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      }).format(date);
+      return `${formatted} · ${quote.transitDays} day${quote.transitDays === 1 ? "" : "s"}`;
+    }
+  }
+  return `${quote.transitDays} day${quote.transitDays === 1 ? "" : "s"}`;
 }
 
 export default function SelectShippingRateScreen() {
-  const router = useRouter();
   const { t } = useTranslation();
 
-  const [selectedRateId, setSelectedRateId] = useState("fedex");
+  const { rates, selectedQuoteId, setSelectedQuoteId, selectedQuote, handleContinue, handleBack } =
+    useRatesStep();
 
-  const selectedRate = RATE_OPTIONS.find(
-    (rate) => rate.id === selectedRateId
-  );
-
-  const handleContinue = () => {
-    router.push("/createShipment/express/step-6");
-  };
+  const quotes = rates?.quotes ?? [];
+  const cheapestQuoteId = quotes.reduce<string | null>((cheapestId, quote) => {
+    if (!cheapestId) return quote.quoteId;
+    const cheapest = quotes.find((q) => q.quoteId === cheapestId);
+    return cheapest && quote.finalPrice < cheapest.finalPrice ? quote.quoteId : cheapestId;
+  }, null);
 
   return (
     <ShipmentStepLayout
@@ -42,36 +56,37 @@ export default function SelectShippingRateScreen() {
       title={t("createShipment.express.steps.step5.title")}
       subtitle={t("createShipment.express.steps.step5.subtitle")}
       onContinue={handleContinue}
+      onBack={handleBack}
       continueLabel={
-        <View style={styles.continueTitle}>
-          <Text size="medium" weight="semibold" style={styles.continueText}>
-            {t("createShipment.express.steps.step5.continueWith")}{" "}
-            {selectedRate?.carrierCode ?? ""} ·
-          </Text>
+        selectedQuote ? (
+          <View style={styles.continueTitle}>
+            <Text size="medium" weight="semibold" style={styles.continueText}>
+              {t("createShipment.express.steps.step5.continueWith")}{" "}
+              {selectedQuote.carrierCode} ·
+            </Text>
 
-          <SaudiRiyal size={rs(18)} color={Colors.white} />
+            <SaudiRiyal size={rs(18)} color={Colors.white} />
 
-          <Text size="medium" weight="semibold" style={styles.continueText}>
-            {selectedRate?.price ?? ""}
-          </Text>
-        </View>
+            <Text size="medium" weight="semibold" style={styles.continueText}>
+              {selectedQuote.finalPrice.toFixed(2)}
+            </Text>
+          </View>
+        ) : (
+          t("createShipment.express.common.continue")
+        )
       }
     >
-      {RATE_OPTIONS.map((rate) => (
+      {quotes.map((quote) => (
         <RateOptionCard
-          key={rate.id}
-          carrierCode={rate.carrierCode}
-          carrierColor={rate.carrierColor}
-          serviceName={t(
-            `createShipment.express.steps.step5.rates.${rate.id}.serviceName`
-          )}
-          deliveryLabel={t(
-            `createShipment.express.steps.step5.rates.${rate.id}.delivery`
-          )}
-          price={rate.price}
-          badge={rate.badge}
-          selected={selectedRateId === rate.id}
-          onPress={() => setSelectedRateId(rate.id)}
+          key={quote.quoteId}
+          carrierCode={quote.carrierCode}
+          carrierColor={getCarrierColor(quote.carrierCode)}
+          serviceName={quote.serviceName}
+          deliveryLabel={getDeliveryLabel(quote)}
+          price={quote.finalPrice.toFixed(2)}
+          badge={quote.quoteId === cheapestQuoteId ? "cheapest" : undefined}
+          selected={selectedQuoteId === quote.quoteId}
+          onPress={() => setSelectedQuoteId(quote.quoteId)}
         />
       ))}
 
@@ -86,34 +101,6 @@ export default function SelectShippingRateScreen() {
     </ShipmentStepLayout>
   );
 }
-
-const RATE_OPTIONS: RateOption[] = [
-  {
-    id: "fedex",
-    carrierCode: "FedEx",
-    carrierColor: "#4D148C",
-    serviceName: "",
-    deliveryLabel: "",
-    price: "795",
-  },
-  {
-    id: "dhl",
-    carrierCode: "DHL",
-    carrierColor: "#FFCC00",
-    serviceName: "",
-    deliveryLabel: "",
-    price: "712",
-    badge: "cheapest",
-  },
-  {
-    id: "arx",
-    carrierCode: "ARX",
-    carrierColor: "#C8102E",
-    serviceName: "",
-    deliveryLabel: "",
-    price: "864",
-  },
-];
 
 const styles = StyleSheet.create({
   continueTitle: {

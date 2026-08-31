@@ -17,6 +17,7 @@ interface ShipmentStepLayoutProps {
   continueLabel?: ReactNode;
   footerNote?: string;
   onBack?: ()=> void
+  loading?: boolean;
 }
 export function ShipmentStepLayout({
   title,
@@ -27,7 +28,8 @@ export function ShipmentStepLayout({
   onContinue,
   continueLabel,
   footerNote,
-  onBack
+  onBack,
+  loading,
 }: ShipmentStepLayoutProps) {
   const router = useRouter();
   const handleBack = () => {
@@ -55,6 +57,7 @@ export function ShipmentStepLayout({
         title={continueLabel}
         onPress={onContinue}
         footerNote={footerNote}
+        loading={loading}
       />
     </View>
   );

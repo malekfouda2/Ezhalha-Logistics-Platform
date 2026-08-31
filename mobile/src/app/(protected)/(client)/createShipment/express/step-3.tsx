@@ -8,7 +8,7 @@ import { rs, rvs } from "@/utils/responsive";
 import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
+import { SavedAddressSelect } from "@/components/sections/createShipment/express/SavedAddressSelect";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRecipientStep } from "@/lib/hooks/createShipment/express/useRecipientStep";
@@ -28,6 +28,7 @@ export default function RecipientDetailsScreen() {
 
   const { control, watch, formState: { errors } } = form;
   const countryCode = watch("countryCode");
+  const recipientNeedsShortAddress = countryCode === "SA";
 
   return (
     <ShipmentStepLayout
@@ -39,26 +40,25 @@ export default function RecipientDetailsScreen() {
     >
       <SectionTitle title={t("createShipment.express.steps.step3.savedRecipients.title")} />
 
-      {isLoadingAddresses ? (
-        <Text size="small" style={styles.emptyText}>{t("common.loading")}</Text>
-      ) : savedRecipientAddresses.length > 0 ? (
-        savedRecipientAddresses.map((address) => (
-          <SavedAddressCard
-            key={address.id}
-            name={address.label}
-            address={address.addressLine1}
-            city={address.postalCode ? `${address.city} ${address.postalCode}` : address.city}
-            countryFlag={address.countryCode === "SA" ? "🇸🇦" : "🌍"}
-            defaultAddress={address.source === "default_shipping"}
-            selected={selectedAddressId === address.id}
-            onPress={() => applySavedAddress(address)}
-          />
-        ))
-      ) : (
-        <Text size="small" style={styles.emptyText}>
-          {t("createShipment.express.steps.step3.savedRecipients.empty")}
-        </Text>
-      )}
+      <Text size="small" style={styles.description}>
+        {t("createShipment.express.steps.step3.savedRecipients.description")}
+      </Text>
+
+      <SavedAddressSelect
+        title={t("createShipment.express.steps.step3.savedRecipients.title")}
+        placeholder={t(
+          "createShipment.express.steps.step3.savedRecipients.placeholder",
+        )}
+        emptyText={t(
+          "createShipment.express.steps.step3.savedRecipients.empty",
+        )}
+        addresses={savedRecipientAddresses}
+        isLoading={isLoadingAddresses}
+        selectedAddressId={selectedAddressId}
+        onSelect={applySavedAddress}
+      />
+
+      <View style={styles.selectGap} />
 
       <SectionTitle title={t("createShipment.express.steps.step3.newAddress.title")} />
 
@@ -201,6 +201,22 @@ export default function RecipientDetailsScreen() {
         />
       )}
 
+      {recipientNeedsShortAddress && (
+        <Controller
+          control={control}
+          name="shortAddress"
+          render={({ field }) => (
+            <Input
+              placeholder={t("createShipment.express.steps.step3.newAddress.shortAddress")}
+              value={field.value ?? ""}
+              onChangeText={field.onChange}
+              autoCapitalize="characters"
+              error={errors.shortAddress?.message}
+            />
+          )}
+        />
+      )}
+
       <InfoBox text={t("createShipment.express.steps.step3.info")} />
     </ShipmentStepLayout>
   );
@@ -209,5 +225,6 @@ export default function RecipientDetailsScreen() {
 const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: rs(18) },
   half: { flex: 1 },
-  emptyText: { color: "#687994", marginBottom: rvs(15) },
+  description: { color: "#687994", marginBottom: rvs(12) },
+  selectGap: { height: rvs(20) },
 });

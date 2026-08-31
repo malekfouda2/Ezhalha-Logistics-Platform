@@ -432,6 +432,8 @@
           "subtitle": "Pickup address and contact",
           "savedAddresses": {
             "title": "SAVED SENDER ADDRESSES",
+            "description": "Reuse your default shipping address or any sender details you used in previous shipments.",
+            "placeholder": "Select a saved sender address",
             "empty": "No saved sender addresses yet."
           },
           "emptyAddress": "",
@@ -444,7 +446,9 @@
           "senderFullName": "Sender's full name",
           "senderCompany": "Sender company",
           "addressLine2": "Address Line 2",
-          "country": "Select country"
+          "country": "Select country",
+          "stateOrProvince": "State / Province",
+          "shortAddress": "National Address (e.g. RCTB4359)"
         },
         "step3": {
           "title": "Recipient Details",
@@ -456,7 +460,10 @@
           },
 
           "savedRecipients": {
-            "title": "SAVED RECIPIENT ADDRESSES"
+            "title": "SAVED RECIPIENT ADDRESSES",
+            "description": "Reuse your default shipping address or any recipient details you used in previous shipments.",
+            "placeholder": "Select a saved recipient address",
+            "empty": "No saved recipient addresses yet."
           },
 
           "newAddress": {
@@ -467,7 +474,9 @@
             "recipientFullName": "Recipient's full name",
             "recipientCompany": "Recipient company",
             "addressLine1": "Address line 1",
-            "addressLine2": "Address Line 2"
+            "addressLine2": "Address Line 2",
+            "stateOrProvince": "State / Province",
+            "shortAddress": "National Address (e.g. RCTB4359)"
           },
 
           "info": "Some countries also require a state or province."
@@ -480,17 +489,21 @@
           "package": "Package",
           "remove": "Remove",
 
-          "weight": "WEIGHT",
-          "length": "L CM",
-          "width": "W CM",
-          "height": "H CM",
+          "weight": "WEIGHT ({{unit}})",
+          "length": "L {{unit}}",
+          "width": "W {{unit}}",
+          "height": "H {{unit}}",
 
           "addPackage": "Add another package",
           "scanDocument": "Scan a document to fill this in",
 
           "actualWeight": "Actual weight",
           "volumetricWeight": "Volumetric weight",
-          "chargeableWeight": "Chargeable weight"
+          "chargeableWeight": "Chargeable weight",
+
+          "weightUnit": "Weight Unit",
+          "dimensionUnit": "Dimension Unit",
+          "packageType": "Package Type"
         },
         "step5": {
           "title": "Select Shipping Rate",
@@ -550,6 +563,10 @@
       },
 
       "payment": {
+        "comingSoon": "Coming soon",
+        "savedCard": {
+          "title": "Saved card"
+        },
         "visa": {
           "expires": "Expires 09/28"
         },
@@ -563,9 +580,11 @@
         }
       },
       "days": {
+        "sun": "Sun",
         "mon": "Mon",
         "tue": "Tue",
-        "wed": "Wed"
+        "wed": "Wed",
+        "thu": "Thu"
       },
       "customs": {
         "hsCode": "HS {{code}}",
@@ -701,6 +720,7 @@
       "errorMessage": "Unable to change your password. Please try again."
     },
     "shipmentValidation": {
+      "formInvalidTitle": "Please check the highlighted fields",
       "shipmentTypeRequired": "Please select a shipment type",
       "domesticSaudiOnly": "Domestic shipments must be within Saudi Arabia",
 
@@ -746,6 +766,47 @@
       "invoiceRequired": "Please upload an invoice",
       "customsItemRequired": "Please add at least one item for customs",
       "customsItemIncomplete": "Please fill in all required fields for \"{{itemName}}\""
+    },
+
+    "createShipment": {
+      "express": {
+        "rates": {
+          "errorTitle": "We couldn't get rates for this shipment",
+          "errorMessage": "Please try again."
+        },
+        "checkout": {
+          "errorTitle": "Failed to process checkout",
+          "errorMessage": "Please try again."
+        },
+        "payment": {
+          "errorTitle": "Payment failed",
+          "errorMessage": "Please try again."
+        },
+        "payLater": {
+          "errorTitle": "Failed to process Pay Later",
+          "errorMessage": "Please try again."
+        },
+        "invoice": {
+          "uploadFailedTitle": "Invoice upload failed",
+          "unsupportedFormatTitle": "Unsupported invoice format",
+          "unsupportedFormatMessage": "Upload a PDF, DOC, DOCX, XLS, XLSX, RTF, TXT, JPG, JPEG, PNG, BMP, TIFF, or GIF invoice.",
+          "tooLargeTitle": "Invoice is too large",
+          "tooLargeMessage": "The invoice exceeds the {{limit}}MB limit.",
+          "processErrorTitle": "Could not process invoice",
+          "processErrorMessage": "Please upload another invoice or enter the items manually."
+        },
+        "packageList": {
+          "uploadFailedTitle": "Packing list upload failed",
+          "unsupportedFormatTitle": "Unsupported packing list format",
+          "unsupportedFormatMessage": "Upload a PDF, DOCX, XLS, XLSX, TXT, JPG, JPEG, PNG, or GIF packing list.",
+          "tooLargeTitle": "Packing list is too large",
+          "tooLargeMessage": "The packing list exceeds the {{limit}}MB limit.",
+          "processErrorTitle": "Could not process packing list",
+          "processErrorMessage": "Please upload another file or enter the packages manually.",
+          "successTitle": "Packing list processed",
+          "successMessage": "{{count}} package(s) imported."
+        }
+      }
     }
   }
 }

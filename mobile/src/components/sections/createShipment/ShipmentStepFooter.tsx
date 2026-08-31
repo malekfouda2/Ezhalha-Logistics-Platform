@@ -9,12 +9,14 @@ interface ShipmentFooterProps {
   onPress: () => void;
   title?: ReactNode;
   footerNote?: string;
+  loading?: boolean;
 }
 
 const ShipmentFooter = ({
   onPress: handleContinue,
   title,
   footerNote,
+  loading,
 }: ShipmentFooterProps) => {
   const { t } = useTranslation();
 
@@ -23,6 +25,7 @@ const ShipmentFooter = ({
       <Button
         title={title ?? t("createShipment.express.common.continue")}
         onPress={handleContinue}
+        loading={loading}
       />
       {footerNote && <Text style={styles.footerNote}>{footerNote}</Text>}
     </View>

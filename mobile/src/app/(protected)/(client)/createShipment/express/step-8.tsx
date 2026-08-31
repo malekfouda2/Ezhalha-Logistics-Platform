@@ -2,44 +2,47 @@
 
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
+import { rs } from "@/utils/responsive";
 import { OrderSummaryCard } from "@/components/sections/createShipment/OrderSummaryCard";
 import { PaymentMethodCard } from "@/components/sections/createShipment/PaymentMethodCard";
 import { SaudiRiyal } from "lucide-react-native";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
+import { usePaymentStep } from "@/lib/hooks/createShipment/express/usePaymentStep";
 
-const SUMMARY_LINES = [
-  { key: "shipping", value: "620.00" },
-  { key: "fuelSurcharge", value: "58.00" },
-  { key: "pickup", value: "25.00" },
-  { key: "vat", value: "92.00" },
-];
-
-const TOTAL = "795.00";
-
-type PaymentMethodId = "visa" | "new-card" | "pay-later";
+type PaymentMethodId = "saved-card" | "new-card" | "pay-later";
 
 export default function PaymentOptionsScreen() {
-  const router = useRouter();
   const { t } = useTranslation();
 
   const [selectedMethod, setSelectedMethod] =
-    useState<PaymentMethodId>("visa");
+    useState<PaymentMethodId>("pay-later");
+
+  const { checkoutData, isPayingLater, handlePayLater, handleBack } =
+    usePaymentStep();
+
+  const total = (checkoutData?.amount ?? 0).toFixed(2);
+  const summaryLines = checkoutData
+    ? [
+        {
+          label:
+            [checkoutData.carrierName, checkoutData.serviceName]
+              .filter(Boolean)
+              .join(" · ") || t("createShipment.express.steps.step8.summary.shipping"),
+          value: total,
+        },
+      ]
+    : [];
 
   const handlePay = () => {
-    router.push({ pathname: "/createShipment/confirmation", params: { type: "express" } });
+    if (selectedMethod === "pay-later") {
+      handlePayLater();
+    }
   };
-
-  const summaryLines = SUMMARY_LINES.map((line) => ({
-    label: t(`createShipment.express.steps.step8.summary.${line.key}`),
-    value: line.value,
-  }));
 
   return (
     <ShipmentStepLayout
@@ -48,75 +51,55 @@ export default function PaymentOptionsScreen() {
       title={t("createShipment.express.steps.step8.title")}
       subtitle={t("createShipment.express.steps.step8.subtitle")}
       onContinue={handlePay}
+      onBack={handleBack}
       continueLabel={
-        <View style={styles.continueTitle}>
-          <Text size="medium" weight="semibold" style={styles.continueText}>
-            {t("createShipment.express.steps.step8.pay")}
-          </Text>
+        isPayingLater ? (
+          t("common.loading")
+        ) : (
+          <View style={styles.continueTitle}>
+            <Text size="medium" weight="semibold" style={styles.continueText}>
+              {t("createShipment.express.steps.step8.pay")}
+            </Text>
 
-          <SaudiRiyal size={rs(18)} color={Colors.white} />
+            <SaudiRiyal size={rs(18)} color={Colors.white} />
 
-          <Text size="medium" weight="semibold" style={styles.continueText}>
-            {TOTAL}
-          </Text>
-        </View>
+            <Text size="medium" weight="semibold" style={styles.continueText}>
+              {total}
+            </Text>
+          </View>
+        )
       }
       footerNote={t("createShipment.express.steps.step8.footerNote")}
     >
-      <OrderSummaryCard
-        lines={summaryLines}
-        total={TOTAL}
-      />
+      <OrderSummaryCard lines={summaryLines} total={total} />
 
       <SectionTitle
         title={t("createShipment.express.steps.step8.payWith")}
       />
 
       <PaymentMethodCard
-        title="•••• 4242"
-        subtitle={t("createShipment.express.payment.visa.expires")}
+        title={t("createShipment.express.payment.savedCard.title")}
+        subtitle={t("createShipment.express.payment.comingSoon")}
         iconLabel="VISA"
-        iconBackground="#1A1F71"
-        selected={selectedMethod === "visa"}
-        onPress={() => setSelectedMethod("visa")}
+        iconBackground={Colors.border}
+        iconColor={Colors.secondary}
+        selected={false}
+        onPress={() => {}}
       />
 
       <PaymentMethodCard
         title={t("createShipment.express.payment.newCard.title")}
-        subtitle={t("createShipment.express.payment.newCard.subtitle")}
+        subtitle={t("createShipment.express.payment.comingSoon")}
         iconLabel="+"
         iconBackground="#F2F3F5"
         iconColor={Colors.secondary}
-        selected={selectedMethod === "new-card"}
-        onPress={() => setSelectedMethod("new-card")}
+        selected={false}
+        onPress={() => {}}
       />
 
       <PaymentMethodCard
         title={t("createShipment.express.payment.payLater.title")}
-        subtitle={
-          <>
-            <Text
-              size="small"
-              weight="semibold"
-              style={styles.subtitleText}
-            >
-              42,300
-            </Text>
-
-            <SaudiRiyal
-              size={rs(14)}
-              color={Colors.textSecondary}
-            />
-
-            <Text
-              size="small"
-              weight="semibold"
-              style={styles.subtitleText}
-            >
-              {t("createShipment.express.payment.payLater.creditAvailable")}
-            </Text>
-          </>
-        }
+        subtitle={t("createShipment.express.payment.payLater.creditAvailable")}
         iconLabel=""
         iconBackground="#FFE8DA"
         iconColor={Colors.primary}
@@ -128,35 +111,6 @@ export default function PaymentOptionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  scrollContent: {
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-  },
-
-  sectionTitle: {
-    color: "#687994",
-    letterSpacing: 1,
-    marginBottom: rvs(10),
-    marginStart: rs(4),
-  },
-
-  footer: {
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(10),
-    backgroundColor: Colors.background,
-  },
-
   continueTitle: {
     flexDirection: "row",
     alignItems: "center",
@@ -166,16 +120,5 @@ const styles = StyleSheet.create({
 
   continueText: {
     color: Colors.white,
-  },
-
-  footerNote: {
-    textAlign: "center",
-    color: "#8A93A3",
-    fontSize: rs(13),
-    marginTop: rvs(10),
-  },
-
-  subtitleText: {
-    color: Colors.textSecondary,
   },
 });

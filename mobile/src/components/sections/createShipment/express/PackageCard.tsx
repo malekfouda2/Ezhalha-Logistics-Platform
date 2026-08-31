@@ -13,6 +13,8 @@ interface PackageCardProps {
   length: string;
   width: string;
   height: string;
+  weightUnit: string;
+  dimensionUnit: string;
   onChangeWeight: (v: string) => void;
   onChangeLength: (v: string) => void;
   onChangeWidth: (v: string) => void;
@@ -27,6 +29,8 @@ export const PackageCard = ({
   length,
   width,
   height,
+  weightUnit,
+  dimensionUnit,
   onChangeWeight,
   onChangeLength,
   onChangeWidth,
@@ -55,7 +59,7 @@ export const PackageCard = ({
       <View style={styles.grid}>
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            {t("createShipment.express.steps.step4.weight")}
+            {t("createShipment.express.steps.step4.weight", { unit: weightUnit })}
           </Text>
 
           <TextInput
@@ -69,7 +73,7 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            {t("createShipment.express.steps.step4.length")}
+            {t("createShipment.express.steps.step4.length", { unit: dimensionUnit })}
           </Text>
 
           <TextInput
@@ -83,7 +87,7 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            {t("createShipment.express.steps.step4.width")}
+            {t("createShipment.express.steps.step4.width", { unit: dimensionUnit })}
           </Text>
 
           <TextInput
@@ -97,7 +101,7 @@ export const PackageCard = ({
 
         <View style={styles.gridItem}>
           <Text size="xs" weight="bold" style={styles.label}>
-            {t("createShipment.express.steps.step4.height")}
+            {t("createShipment.express.steps.step4.height", { unit: dimensionUnit })}
           </Text>
 
           <TextInput

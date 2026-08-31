@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
-import { Alert } from "react-native";
+import Toast from "react-native-toast-message";
+import { useTranslation } from "react-i18next";
 import { useCreateShipmentStore } from "@/store/createShipmentStore";
 import { useState } from "react";
 import { Linking } from "react-native";
@@ -8,6 +9,7 @@ import { payShipment, confirmShipment, payLater } from "@/lib/services/createShi
 
 export function usePaymentStep() {
   const router = useRouter();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const checkoutData = useCreateShipmentStore((s) => s.checkoutData);
   const setConfirmData = useCreateShipmentStore((s) => s.setConfirmData);
@@ -46,10 +48,17 @@ export function usePaymentStep() {
         });
         setConfirmData(confirmed);
         invalidateShipmentQueries();
-        router.push("/createShipment/express/confirmation");
+        router.push({ pathname: "/createShipment/confirmation", params: { type: "express" } });
       }
     } catch (error) {
-      Alert.alert("Payment Failed", error instanceof Error ? error.message : "Please try again.");
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.payment.errorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.createShipment.express.payment.errorMessage"),
+      });
     } finally {
       setIsPaying(false);
       setIsConfirming(false);
@@ -69,9 +78,16 @@ export function usePaymentStep() {
       });
       invalidateShipmentQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
-      router.push("/createShipment/express/confirmation");
+      router.push({ pathname: "/createShipment/confirmation", params: { type: "express" } });
     } catch (error) {
-      Alert.alert("Failed to process Pay Later", error instanceof Error ? error.message : "Please try again.");
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.payLater.errorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.createShipment.express.payLater.errorMessage"),
+      });
     } finally {
       setIsPayingLater(false);
     }

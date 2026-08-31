@@ -1,11 +1,13 @@
 import { useRouter } from "expo-router";
-import { Alert } from "react-native";
+import Toast from "react-native-toast-message";
+import { useTranslation } from "react-i18next";
 import { useCreateShipmentStore, isInternationalShipment } from "@/store/createShipmentStore";
 import { validateRateSelection } from "@/utils/shipmentValidation";
 
 
 export function useRatesStep() {
   const router = useRouter();
+  const { t } = useTranslation();
   const rates = useCreateShipmentStore((s) => s.rates);
   const selectedQuoteId = useCreateShipmentStore((s) => s.selectedQuoteId);
   const setSelectedQuoteId = useCreateShipmentStore((s) => s.setSelectedQuoteId);
@@ -17,13 +19,16 @@ export function useRatesStep() {
   const handleContinue = () => {
     const result = validateRateSelection(selectedQuoteId);
     if (!result.ok) {
-      Alert.alert(result.title || "Error");
+      Toast.show({
+        type: "error",
+        text1: result.title ? t(result.title, result.values) : t("toast.error.title"),
+      });
       return;
     }
     router.push(
       isInternational
-        ? "/createShipment/express/customs"
-        : "/createShipment/express/pickup",
+        ? "/createShipment/express/step-6"
+        : "/createShipment/express/step-7",
     );
   };
 

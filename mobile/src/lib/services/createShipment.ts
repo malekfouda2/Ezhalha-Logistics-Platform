@@ -1,4 +1,4 @@
-import { apiRequest } from "@/lib/queryClient"; // adjust to your RN api client
+import { apiRequest } from "@/api/client";
 import {
     Address,
     PackageItem,
@@ -40,8 +40,10 @@ export async function fetchRates(payload: {
     packageType: string;
     currency: string;
 }): Promise<RatesResponse> {
-    const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
-    return res.json();
+    return apiRequest<RatesResponse>("/api/client/shipments/rates", {
+        method: "POST",
+        body: payload,
+    });
 }
 
 export interface CheckoutPayload {
@@ -72,8 +74,22 @@ export interface CheckoutPayload {
 }
 
 export async function submitCheckout(payload: CheckoutPayload): Promise<CheckoutResponse> {
-    const res = await apiRequest("POST", "/api/client/shipments/checkout", payload);
-    return res.json();
+    return apiRequest<CheckoutResponse>("/api/client/shipments/checkout", {
+        method: "POST",
+        body: payload,
+    });
+}
+
+export interface PayShipmentResponse {
+    shipmentId: string;
+    trackingNumber: string;
+    paymentId?: string;
+    transactionUrl?: string;
+    amount: number;
+    currency: string;
+    amountSar: number;
+    fxRate: number | string;
+    paymentStatus: string;
 }
 
 export async function payShipment(payload: {
@@ -81,24 +97,63 @@ export async function payShipment(payload: {
     tapTokenId?: string;
     saveCardForFuture?: boolean;
 }) {
-    const res = await apiRequest("POST", "/api/client/shipments/pay", {
-        ...payload,
-        returnPath: "/createShipment/express",
+    return apiRequest<PayShipmentResponse>("/api/client/shipments/pay", {
+        method: "POST",
+        body: {
+            ...payload,
+            returnPath: "/createShipment/express",
+        },
     });
-    return res.json();
 }
 
 export async function confirmShipment(params: {
     shipmentId: string;
     paymentIntentId?: string;
 }): Promise<ConfirmResponse> {
-    const res = await apiRequest("POST", "/api/client/shipments/confirm", params);
-    return res.json();
+    return apiRequest<ConfirmResponse>("/api/client/shipments/confirm", {
+        method: "POST",
+        body: params,
+    });
+}
+
+export interface PayLaterResponse {
+    shipment: unknown;
+    carrierTrackingNumber?: string;
+    labelUrl?: string;
+    estimatedDelivery?: string;
 }
 
 export async function payLater(shipmentId: string) {
-    const res = await apiRequest("POST", `/api/client/shipments/${shipmentId}/pay-later`);
-    return res.json();
+    return apiRequest<PayLaterResponse>(`/api/client/shipments/${shipmentId}/pay-later`, {
+        method: "POST",
+    });
+}
+
+export interface ExtractedInvoiceItem {
+    itemName: string;
+    itemDescription?: string;
+    category: string;
+    material?: string;
+    countryOfOrigin: string;
+    hsCode?: string;
+    hsCodeSource?: string;
+    hsCodeConfidence?: string;
+    hsCodeCandidates?: Array<{ code: string; description: string; confidence: number }>;
+    price: number;
+    currency?: string;
+    quantity: number;
+}
+
+export interface ExtractInvoiceItemsResponse {
+    items: ExtractedInvoiceItem[];
+    detectedCurrency: string;
+    summary?: {
+        importedItemCount: number;
+        aiAssisted: boolean;
+        hasParsingWarnings: boolean;
+        autoMatchedHsCodeCount?: number;
+        hsCodeReviewCount?: number;
+    };
 }
 
 export async function extractInvoiceItems(payload: {
@@ -109,8 +164,29 @@ export async function extractInvoiceItems(payload: {
     objectPath: string;
     contentType: string;
 }) {
-    const res = await apiRequest("POST", "/api/client/shipments/extract-invoice-items", payload);
-    return res.json();
+    return apiRequest<ExtractInvoiceItemsResponse>("/api/client/shipments/extract-invoice-items", {
+        method: "POST",
+        body: payload,
+    });
+}
+
+export interface ExtractPackageDetailsResponse {
+    packages: Array<{
+        packageNumber: string;
+        weight: number;
+        length: number;
+        width: number;
+        height: number;
+    }>;
+    detectedWeightUnit: "LB" | "KG";
+    detectedDimensionUnit: "IN" | "CM";
+    extractionMethod: "deterministic" | "gemini";
+    summary?: {
+        importedPackageCount: number;
+        totalWeight: number;
+        aiAssisted: boolean;
+        hasParsingWarnings: boolean;
+    };
 }
 
 export async function extractPackageDetails(payload: {
@@ -118,8 +194,10 @@ export async function extractPackageDetails(payload: {
     objectPath: string;
     contentType: string;
 }) {
-    const res = await apiRequest("POST", "/api/client/shipments/extract-package-details", payload);
-    return res.json();
+    return apiRequest<ExtractPackageDetailsResponse>("/api/client/shipments/extract-package-details", {
+        method: "POST",
+        body: payload,
+    });
 }
 
 export async function lookupHsCode(params: {
@@ -131,12 +209,10 @@ export async function lookupHsCode(params: {
     material?: string;
 }) {
     const search = new URLSearchParams(params as Record<string, string>);
-    const res = await fetch(`/api/hs-lookup?${search}`, { credentials: "include" });
-    if (!res.ok) throw new Error("Lookup failed");
-    return res.json() as Promise<{
+    return apiRequest<{
         candidates: Array<{ code: string; description: string; confidence: number }>;
         source: string;
-    }>;
+    }>(`/api/hs-lookup?${search}`, { method: "GET" });
 }
 
 export async function confirmHsCode(payload: {
@@ -148,11 +224,11 @@ export async function confirmHsCode(payload: {
     description?: string;
 }) {
     try {
-        await apiRequest("POST", "/api/client/hs-code/confirm", payload);
+        await apiRequest("/api/client/hs-code/confirm", {
+            method: "POST",
+            body: payload,
+        });
     } catch {
         // best-effort, same as web
     }
 }
-
-
-

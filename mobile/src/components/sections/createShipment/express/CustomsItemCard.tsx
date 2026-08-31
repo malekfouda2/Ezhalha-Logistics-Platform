@@ -21,6 +21,8 @@ interface CustomsItemCardProps {
   hsCode: string;
   confidence: HSConfidence;
   onPressHSCode?: () => void;
+  onRemove?: () => void;
+  removable?: boolean;
 }
 
 export const CustomsItemCard = ({
@@ -35,6 +37,8 @@ export const CustomsItemCard = ({
   hsCode,
   confidence,
   onPressHSCode,
+  onRemove,
+  removable = false,
 }: CustomsItemCardProps) => {
   const { t } = useTranslation();
 
@@ -44,9 +48,19 @@ export const CustomsItemCard = ({
     <View style={styles.card}>
       <View style={styles.row}>
         <View style={styles.info}>
-          <Text size="small" weight="bold" style={styles.name}>
-            {name}
-          </Text>
+          <View style={styles.nameRow}>
+            <Text size="small" weight="bold" style={styles.name}>
+              {name}
+            </Text>
+
+            {removable ? (
+              <Pressable onPress={onRemove} hitSlop={10}>
+                <Text size="xs" weight="semibold" style={styles.remove}>
+                  {t("createShipment.express.steps.step4.remove")}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
 
           <Text size="xs" style={styles.meta}>
             {category} · {material} · {countryFlag} {countryName}
@@ -124,9 +138,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
   name: {
     color: Colors.text,
     marginBottom: rvs(2),
+  },
+
+  remove: {
+    color: "#687994",
   },
 
   meta: {

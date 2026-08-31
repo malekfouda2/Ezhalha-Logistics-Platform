@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
-import { Alert } from "react-native";
+import Toast from "react-native-toast-message";
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useCreateShipmentStore, CustomsItem, defaultCustomsItem } from "@/store/createShipmentStore";
 import { extractInvoiceItems } from "@/lib/services/createShipment";
@@ -10,12 +11,18 @@ import { useUpload } from "../../useUpload";
 
 export function useCustomsStep() {
   const router = useRouter();
+  const { t } = useTranslation();
   const store = useCreateShipmentStore();
   const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
   const [invoiceExtractionSummary, setInvoiceExtractionSummary] = useState<any>(null);
 
   const { uploadFile, isUploading } = useUpload({
-    onError: (error: Error) => Alert.alert("Invoice upload failed", error.message),
+    onError: (error: Error) =>
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.invoice.uploadFailedTitle"),
+        text2: error.message,
+      }),
   });
 
   const invoiceDocument = store.tradeDocuments[0] ?? null;
@@ -24,17 +31,21 @@ export function useCustomsStep() {
     const normalizedType = file.type.split(";")[0].trim().toLowerCase();
 
     if (!(FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES as readonly string[]).includes(normalizedType)) {
-      Alert.alert(
-        "Unsupported invoice format",
-        "Upload a PDF, DOC, DOCX, XLS, XLSX, RTF, TXT, JPG, JPEG, PNG, BMP, TIFF, or GIF invoice.",
-      );
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.invoice.unsupportedFormatTitle"),
+        text2: t("toast.createShipment.express.invoice.unsupportedFormatMessage"),
+      });
       return;
     }
     if (file.size > FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES) {
-      Alert.alert(
-        "Invoice is too large",
-        `The invoice exceeds the ${Math.round(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024))}MB limit.`,
-      );
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.invoice.tooLargeTitle"),
+        text2: t("toast.createShipment.express.invoice.tooLargeMessage", {
+          limit: Math.round(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024)),
+        }),
+      });
       return;
     }
 
@@ -81,10 +92,14 @@ export function useCustomsStep() {
     } catch (error) {
       store.setTradeDocuments([]);
       setInvoiceExtractionSummary(null);
-      Alert.alert(
-        "Could not process invoice",
-        error instanceof Error ? error.message : "Please upload another invoice or enter the items manually.",
-      );
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.invoice.processErrorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.createShipment.express.invoice.processErrorMessage"),
+      });
     } finally {
       setIsExtractingInvoice(false);
     }
@@ -93,10 +108,14 @@ export function useCustomsStep() {
   const handleContinue = () => {
     const result = validateCustoms(store.customsInputMode, !!invoiceDocument, store.items);
     if (!result.ok) {
-      Alert.alert(result.title || "Error", result.description);
+      Toast.show({
+        type: "error",
+        text1: result.title ? t(result.title, result.values) : t("toast.error.title"),
+        text2: result.description ? t(result.description, result.values) : undefined,
+      });
       return;
     }
-    router.push("/createShipment/express/pickup");
+    router.push("/createShipment/express/step-7");
   };
 
   const handleBack = () => router.push("/createShipment/express/step-5");

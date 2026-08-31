@@ -1,99 +1,79 @@
 // app/create-shipment/express/step-4.tsx
 
-import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import * as DocumentPicker from "expo-document-picker";
 
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { PackageCard } from "@/components/sections/createShipment/express/PackageCard";
+import { PackageTypeSelect } from "@/components/sections/createShipment/express/PackageTypeSelect";
+import { UnitToggle } from "@/components/sections/createShipment/express/UnitToggle";
 import { WeightSummaryCard } from "@/components/sections/createShipment/express/WeightSummaryCard";
+import { Text } from "@/components/ui/Text";
+import InfoBox from "@/components/sections/createShipment/InfoBox";
+import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
+import { usePackagesStep } from "@/lib/hooks/createShipment/express/usePackagesStep";
+import { Colors } from "@/constants/colors";
 import { rvs } from "@/utils/responsive";
-
-interface PackageForm {
-  id: string;
-  weight: string;
-  length: string;
-  width: string;
-  height: string;
-}
-
-const VOLUMETRIC_DIVISOR = 5000;
+import {
+  dimensionUnitOptions,
+  packageTypes,
+  weightUnitOptions,
+} from "@/constants/packageOptions";
 
 export default function PackageDetailsScreen() {
-  const router = useRouter();
   const { t } = useTranslation();
 
-  const [packages, setPackages] = useState<PackageForm[]>([
-    {
-      id: "1",
-      weight: "4.5",
-      length: "40",
-      width: "30",
-      height: "20",
-    },
-    {
-      id: "2",
-      weight: "2.0",
-      length: "25",
-      width: "20",
-      height: "15",
-    },
-  ]);
+  const {
+    packages,
+    weightUnit,
+    dimensionUnit,
+    packageType,
+    setWeightUnit,
+    setDimensionUnit,
+    setPackageType,
+    chargeableWeightSummary,
+    isLoadingRates,
+    packageListDocument,
+    isUploadingPackageList,
+    isExtractingPackageList,
+    packageExtractionSummary,
+    handlePackageListPick,
+    clearPackageListDocument,
+    updatePackage,
+    addPackage,
+    removePackage,
+    handleContinue,
+    handleBack,
+  } = usePackagesStep();
 
-  const updatePackage = (
-    id: string,
-    field: keyof Omit<PackageForm, "id">,
-    value: string,
-  ) => {
-    setPackages((prev) =>
-      prev.map((pkg) =>
-        pkg.id === id ? { ...pkg, [field]: value } : pkg,
-      ),
-    );
-  };
+  const isProcessingPackageList = isUploadingPackageList || isExtractingPackageList;
 
-  const addPackage = () => {
-    setPackages((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        weight: "",
-        length: "",
-        width: "",
-        height: "",
-      },
-    ]);
-  };
-
-  const removePackage = (id: string) => {
-    setPackages((prev) => prev.filter((pkg) => pkg.id !== id));
-  };
-
-  const { actualWeight, volumetricWeight, chargeableWeight } = useMemo(() => {
-    let actual = 0;
-    let volumetric = 0;
-
-    packages.forEach((pkg) => {
-      const w = parseFloat(pkg.weight) || 0;
-      const l = parseFloat(pkg.length) || 0;
-      const wd = parseFloat(pkg.width) || 0;
-      const h = parseFloat(pkg.height) || 0;
-
-      actual += w;
-      volumetric += (l * wd * h) / VOLUMETRIC_DIVISOR;
+  const handleScanDocument = async () => {
+    if (isProcessingPackageList) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/plain",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+      ],
+      copyToCacheDirectory: true,
     });
+    if (result.canceled) return;
 
-    return {
-      actualWeight: actual,
-      volumetricWeight: volumetric,
-      chargeableWeight: Math.max(actual, volumetric),
-    };
-  }, [packages]);
-
-  const handleGetRates = () => {
-    router.push("/createShipment/express/step-5");
+    const file = result.assets[0];
+    await handlePackageListPick({
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType ?? "application/octet-stream",
+      size: file.size ?? 0,
+    });
   };
 
   return (
@@ -102,31 +82,55 @@ export default function PackageDetailsScreen() {
       totalSteps={8}
       title={t("createShipment.express.steps.step4.title")}
       subtitle={t("createShipment.express.steps.step4.subtitle")}
-      onContinue={handleGetRates}
+      onContinue={handleContinue}
+      onBack={handleBack}
       continueLabel={t("createShipment.express.steps.step4.getRates")}
+      loading={isLoadingRates}
     >
+      <SectionTitle title={t("createShipment.express.steps.step4.weightUnit")} />
+      <UnitToggle
+        options={weightUnitOptions}
+        value={weightUnit}
+        onChange={(v) => setWeightUnit(v as "LB" | "KG")}
+      />
+
+      <View style={styles.selectorGap} />
+
+      <SectionTitle title={t("createShipment.express.steps.step4.dimensionUnit")} />
+      <UnitToggle
+        options={dimensionUnitOptions}
+        value={dimensionUnit}
+        onChange={(v) => setDimensionUnit(v as "IN" | "CM")}
+      />
+
+      <View style={styles.selectorGap} />
+
+      <SectionTitle title={t("createShipment.express.steps.step4.packageType")} />
+      <PackageTypeSelect
+        title={t("createShipment.express.steps.step4.packageType")}
+        options={packageTypes}
+        value={packageType}
+        onChange={setPackageType}
+      />
+
+      <View style={styles.summaryGap} />
+
       {packages.map((pkg, index) => (
         <PackageCard
-          key={pkg.id}
+          key={index}
           index={index + 1}
-          weight={pkg.weight}
-          length={pkg.length}
-          width={pkg.width}
-          height={pkg.height}
+          weight={String(pkg.weight)}
+          length={String(pkg.length)}
+          width={String(pkg.width)}
+          height={String(pkg.height)}
+          weightUnit={weightUnit}
+          dimensionUnit={dimensionUnit}
           removable={packages.length > 1}
-          onChangeWeight={(v) =>
-            updatePackage(pkg.id, "weight", v)
-          }
-          onChangeLength={(v) =>
-            updatePackage(pkg.id, "length", v)
-          }
-          onChangeWidth={(v) =>
-            updatePackage(pkg.id, "width", v)
-          }
-          onChangeHeight={(v) =>
-            updatePackage(pkg.id, "height", v)
-          }
-          onRemove={() => removePackage(pkg.id)}
+          onChangeWeight={(v) => updatePackage(index, { weight: Number(v) || 0 })}
+          onChangeLength={(v) => updatePackage(index, { length: Number(v) || 0 })}
+          onChangeWidth={(v) => updatePackage(index, { width: Number(v) || 0 })}
+          onChangeHeight={(v) => updatePackage(index, { height: Number(v) || 0 })}
+          onRemove={() => removePackage(index)}
         />
       ))}
 
@@ -138,18 +142,47 @@ export default function PackageDetailsScreen() {
         onPress={addPackage}
       />
 
-      <DashedActionButton
-        icon="upload"
-        label={t("createShipment.express.steps.step4.scanDocument")}
-        onPress={() => {}}
-      />
+      {packageListDocument ? (
+        <>
+          <InfoBox
+            text={
+              packageExtractionSummary?.importedPackageCount
+                ? `${packageListDocument.name} · ${packageExtractionSummary.importedPackageCount} package(s) imported`
+                : packageListDocument.name
+            }
+            iconName="file-text"
+          />
+
+          <View style={styles.clearRow}>
+            <Text
+              size="small"
+              weight="semibold"
+              style={styles.clearText}
+              onPress={clearPackageListDocument}
+            >
+              {t("createShipment.express.steps.step4.remove")}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <DashedActionButton
+          icon="upload"
+          label={
+            isProcessingPackageList
+              ? t("common.loading")
+              : t("createShipment.express.steps.step4.scanDocument")
+          }
+          onPress={handleScanDocument}
+        />
+      )}
 
       <View style={styles.summaryGap} />
 
       <WeightSummaryCard
-        actualWeight={actualWeight}
-        volumetricWeight={volumetricWeight}
-        chargeableWeight={chargeableWeight}
+        actualWeight={chargeableWeightSummary.actualWeight}
+        volumetricWeight={chargeableWeightSummary.dimensionalWeight}
+        chargeableWeight={chargeableWeightSummary.chargeableWeight}
+        unit={chargeableWeightSummary.weightUnit.toLowerCase()}
       />
     </ShipmentStepLayout>
   );
@@ -160,7 +193,21 @@ const styles = StyleSheet.create({
     height: rvs(4),
   },
 
+  selectorGap: {
+    height: rvs(14),
+  },
+
   summaryGap: {
     height: rvs(10),
+  },
+
+  clearRow: {
+    alignItems: "flex-end",
+    marginTop: -rvs(6),
+    marginBottom: rvs(14),
+  },
+
+  clearText: {
+    color: Colors.secondary,
   },
 });
