@@ -1,27 +1,37 @@
 import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
+import { Controller } from "react-hook-form";
 
 import { Input } from "@/components/ui/Input";
 import { Text } from "@/components/ui/Text";
+import { CountrySelect } from "@/components/ui/CountrySelect";
+import { PhoneInput } from "@/components/ui/PhoneInput";
 
 import { rs, rvs } from "@/utils/responsive";
 import { SavedAddressCard } from "@/components/sections/createShipment/express/SavedAddressCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useSenderStep } from "@/lib/hooks/createShipment/express/useSenderStep";
+import { isStateRequired } from "@/utils/shipmentValidation";
 
 export default function SenderDetailsScreen() {
   const { t } = useTranslation();
 
   const {
-    shipper,
-    updateShipper,
+    form,
     handleContinue,
     savedSenderAddresses,
     isLoadingAddresses,
     applySavedAddress,
     selectedAddressId,
   } = useSenderStep();
+
+  const {
+    control,
+    watch,
+    formState: { errors },
+  } = form;
+  const countryCode = watch("countryCode");
 
   return (
     <ShipmentStepLayout
@@ -66,59 +76,157 @@ export default function SenderDetailsScreen() {
         title={t("createShipment.express.steps.step2.newAddress")}
       />
 
-      <Input
-        placeholder={t("createShipment.express.steps.step2.contactName")}
-        value={shipper.name}
-        onChangeText={(value) => updateShipper({ name: value })}
-        autoCapitalize="words"
+      <Controller
+        control={control}
+        name="countryCode"
+        render={({ field }) => (
+          <CountrySelect
+            value={field.value}
+            onChange={(selected) => {
+              field.onChange(selected.code);
+              form.setValue("country", selected.name, { shouldValidate: true });
+            }}
+            placeholder={t("createShipment.express.steps.step2.country")}
+            title={t("createShipment.express.steps.step2.country")}
+            error={errors.countryCode?.message}
+          />
+        )}
       />
 
-      <Input
-        placeholder={t("createShipment.express.steps.step2.phone")}
-        value={shipper.phone}
-        onChangeText={(value) => updateShipper({ phone: value })}
-        keyboardType="phone-pad"
+      <Controller
+        control={control}
+        name="name"
+        render={({ field }) => (
+          <Input
+            placeholder={t("createShipment.express.steps.step2.senderFullName")}
+            value={field.value}
+            onChangeText={field.onChange}
+            autoCapitalize="words"
+            error={errors.name?.message}
+          />
+        )}
       />
 
-      <Input
-        placeholder={t("createShipment.express.steps.step2.addressLine1")}
-        value={shipper.addressLine1}
-        onChangeText={(value) => updateShipper({ addressLine1: value })}
+      <Controller
+        control={control}
+        name="company"
+        render={({ field }) => (
+          <Input
+            placeholder={t("createShipment.express.steps.step2.senderCompany")}
+            value={field.value}
+            onChangeText={field.onChange}
+            autoCapitalize="words"
+          />
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="phone"
+        render={({ field }) => (
+          <PhoneInput
+            value={field.value}
+            onChangeValue={field.onChange}
+            error={errors.phone?.message}
+          />
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="email"
+        render={({ field }) => (
+          <Input
+            placeholder="Sender@example.com"
+            value={field.value}
+            onChangeText={field.onChange}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            error={errors.email?.message}
+          />
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="addressLine1"
+        render={({ field }) => (
+          <Input
+            placeholder={t("createShipment.express.steps.step2.addressLine1")}
+            value={field.value}
+            onChangeText={field.onChange}
+            error={errors.addressLine1?.message}
+          />
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="addressLine2"
+        render={({ field }) => (
+          <Input
+            placeholder={t("createShipment.express.steps.step2.addressLine2")}
+            value={field.value}
+            onChangeText={field.onChange}
+          />
+        )}
       />
 
       <View style={styles.row}>
         <View style={styles.half}>
-          <Input
-            placeholder={t("createShipment.express.steps.step2.city")}
-            value={shipper.city}
-            onChangeText={(value) => updateShipper({ city: value })}
+          <Controller
+            control={control}
+            name="city"
+            render={({ field }) => (
+              <Input
+                placeholder={t("createShipment.express.steps.step2.city")}
+                value={field.value}
+                onChangeText={field.onChange}
+                error={errors.city?.message}
+              />
+            )}
           />
         </View>
 
         <View style={styles.half}>
-          <Input
-            placeholder={t("createShipment.express.steps.step2.postalCode")}
-            value={shipper.postalCode}
-            onChangeText={(value) => updateShipper({ postalCode: value })}
-            keyboardType="number-pad"
+          <Controller
+            control={control}
+            name="postalCode"
+            render={({ field }) => (
+              <Input
+                placeholder={t("createShipment.express.steps.step2.postalCode")}
+                value={field.value}
+                onChangeText={field.onChange}
+                keyboardType="number-pad"
+                error={errors.postalCode?.message}
+              />
+            )}
           />
         </View>
       </View>
+
+      {isStateRequired(countryCode) && (
+        <Controller
+          control={control}
+          name="stateOrProvince"
+          render={({ field }) => (
+            <Input
+              placeholder={t(
+                "createShipment.express.steps.step2.stateOrProvince",
+              )}
+              value={field.value}
+              onChangeText={field.onChange}
+              error={errors.stateOrProvince?.message}
+            />
+          )}
+        />
+      )}
     </ShipmentStepLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    gap: rs(18),
-  },
-
-  half: {
-    flex: 1,
-  },
-  emptyText: {
-    color: "#687994",
-    marginBottom: rvs(15),
-  },
+  row: { flexDirection: "row", gap: rs(18) },
+  half: { flex: 1 },
+  emptyText: { color: "#687994", marginBottom: rvs(15) },
 });

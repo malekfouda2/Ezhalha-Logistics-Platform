@@ -14,6 +14,7 @@ export interface Address {
   addressLine2?: string;
   stateOrProvince?: string;
   shortAddress?: string;
+  country:string
 }
 
 export interface PackageItem {
@@ -123,6 +124,7 @@ const emptyAddress: Address = {
   addressLine2: "",
   stateOrProvince: "",
   shortAddress: "",
+  country: "",
 };
 
 export const defaultCustomsItem: CustomsItem = {

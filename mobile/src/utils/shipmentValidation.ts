@@ -1,4 +1,4 @@
-import { Address, CustomsItem, PackageItem } from "@/store/createShipmentStore";
+import { CustomsItem, PackageItem } from "@/store/createShipmentStore";
 
 export const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
   "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
@@ -116,108 +116,6 @@ export function validateShipmentType(
     return {
       ok: false,
       title: "toast.shipmentValidation.shipmentTypeRequired",
-    };
-  }
-
-  return ok;
-}
-
-export function validateAddress(
-  address: Address,
-  shipmentType: string,
-  role: "sender" | "recipient",
-): ValidationResult {
-  const {
-    name,
-    phone,
-    countryCode,
-    city,
-    postalCode,
-    addressLine1,
-    shortAddress,
-    stateOrProvince,
-  } = address;
-
-  const label = role;
-
-  if (!name || !phone || !countryCode || !city || !addressLine1) {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.addressRequired",
-      values: {
-        role: label,
-      },
-    };
-  }
-
-  if (shipmentType === "domestic" && countryCode !== "SA") {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.domesticSaudiOnly",
-    };
-  }
-
-  if (isPostalRequired(countryCode) && !postalCode) {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.postalCodeRequired",
-      description: "toast.shipmentValidation.postalCodeRequiredDescription",
-      values: {
-        role: label,
-        country: countryCode,
-      },
-    };
-  }
-
-  if (isPostalRequired(countryCode)) {
-    const hint = postalFormatError(countryCode, postalCode);
-
-    if (hint) {
-      return {
-        ok: false,
-        title: "toast.shipmentValidation.postalCodeInvalid",
-        description: `toast.shipmentValidation.postalFormats.${countryCode}`,
-        values: {
-          role: label,
-        },
-      };
-    }
-  }
-
-  if (countryCode === "SA" && !shortAddress) {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.nationalAddressRequired",
-      description: "toast.shipmentValidation.nationalAddressRequiredDescription",
-      values: {
-        role: label,
-      },
-    };
-  }
-
-  if (
-    countryCode === "SA" &&
-    shortAddress &&
-    !SA_SHORT_ADDRESS_REGEX.test(shortAddress.trim())
-  ) {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.nationalAddressInvalid",
-      description: "toast.shipmentValidation.nationalAddressInvalidDescription",
-      values: {
-        role: label,
-      },
-    };
-  }
-
-  if (isStateRequired(countryCode) && !stateOrProvince) {
-    return {
-      ok: false,
-      title: "toast.shipmentValidation.stateRequired",
-      description: "toast.shipmentValidation.stateRequiredDescription",
-      values: {
-        role: label,
-      },
     };
   }
 

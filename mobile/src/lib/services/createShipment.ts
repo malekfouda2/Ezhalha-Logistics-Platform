@@ -15,13 +15,14 @@ export interface AddressBookEntry {
     useForShipper: boolean;
     useForRecipient: boolean;
     lastUsedAt: string | null;
-
+    country:string,
+    company:string,
     name: string;
     phone: string;
     email?: string | null;
     countryCode: string;
     city: string;
-    postalCode?: string | null;
+    postalCode: string;
     addressLine1: string;
     addressLine2?: string | null;
     stateOrProvince?: string | null;

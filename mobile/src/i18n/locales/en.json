@@ -430,17 +430,21 @@
         "step2": {
           "title": "Sender Details",
           "subtitle": "Pickup address and contact",
-            "savedAddresses": {
-    "title": "SAVED SENDER ADDRESSES",
-    "empty": "No saved sender addresses yet."
-  },
+          "savedAddresses": {
+            "title": "SAVED SENDER ADDRESSES",
+            "empty": "No saved sender addresses yet."
+          },
           "emptyAddress": "",
           "newAddress": "OR ENTER A NEW ADDRESS",
           "contactName": "Contact name",
           "phone": "Phone",
           "addressLine1": "Address line 1",
           "city": "City",
-          "postalCode": "Postal code"
+          "postalCode": "Postal code",
+          "senderFullName": "Sender's full name",
+          "senderCompany": "Sender company",
+          "addressLine2": "Address Line 2",
+          "country": "Select country"
         },
         "step3": {
           "title": "Recipient Details",
@@ -457,10 +461,13 @@
 
           "newAddress": {
             "title": "OR ENTER A NEW ADDRESS",
-            "recipientName": "Recipient name",
             "phone": "Phone",
             "city": "City",
-            "postalCode": "Postal code"
+            "postalCode": "Postal code",
+            "recipientFullName": "Recipient's full name",
+            "recipientCompany": "Recipient company",
+            "addressLine1": "Address line 1",
+            "addressLine2": "Address Line 2"
           },
 
           "info": "Some countries also require a state or province."
@@ -695,9 +702,6 @@
     },
     "shipmentValidation": {
       "shipmentTypeRequired": "Please select a shipment type",
-
-      "addressRequired": "Please fill in all required {{role}} fields",
-
       "domesticSaudiOnly": "Domestic shipments must be within Saudi Arabia",
 
       "postalCodeRequired": "{{role}} postal code is required",

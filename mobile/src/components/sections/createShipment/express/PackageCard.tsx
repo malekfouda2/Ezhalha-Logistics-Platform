@@ -1,10 +1,5 @@
 import React from "react";
-import {
-  StyleSheet,
-  View,
-  Pressable,
-  TextInput,
-} from "react-native";
+import { StyleSheet, View, Pressable, TextInput } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
@@ -163,8 +158,10 @@ const styles = StyleSheet.create({
   },
 
   gridInput: {
+    width: "100%",
     height: rvs(40),
     paddingHorizontal: 0,
+    textAlign: "center",
     fontSize: Typography.size.large,
     fontFamily: Typography.fontFamily.bold,
     color: Colors.text,

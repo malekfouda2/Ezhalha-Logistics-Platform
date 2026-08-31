@@ -442,7 +442,11 @@
           "phone": "رقم الهاتف",
           "addressLine1": "العنوان، السطر الأول",
           "city": "المدينة",
-          "postalCode": "الرمز البريدي"
+          "postalCode": "الرمز البريدي",
+          "senderFullName": "الاسم الكامل للمرسل",
+          "senderCompany": "شركة المرسل",
+          "addressLine2": "العنوان - السطر الثاني",
+          "country": "اختر الدولة"
         },
         "step3": {
           "title": "بيانات المستلم",
@@ -459,10 +463,13 @@
 
           "newAddress": {
             "title": "أو أدخل عنوانًا جديدًا",
-            "recipientName": "اسم المستلم",
             "phone": "رقم الهاتف",
             "city": "المدينة",
-            "postalCode": "الرمز البريدي"
+            "postalCode": "الرمز البريدي",
+            "recipientFullName": "الاسم الكامل للمستلم",
+            "recipientCompany": "شركة المستلم",
+            "addressLine1": "العنوان، السطر الأول",
+            "addressLine2": "العنوان - السطر الثاني"
           },
 
           "info": "تتطلب بعض الدول أيضًا تحديد المنطقة أو المحافظة."
@@ -694,9 +701,6 @@
     },
     "shipmentValidation": {
       "shipmentTypeRequired": "يرجى اختيار نوع الشحنة",
-
-      "addressRequired": "يرجى تعبئة جميع الحقول المطلوبة لعنوان {{role}}",
-
       "domesticSaudiOnly": "الشحنات المحلية يجب أن تكون داخل المملكة العربية السعودية فقط",
 
       "postalCodeRequired": "الرمز البريدي لـ{{role}} مطلوب",

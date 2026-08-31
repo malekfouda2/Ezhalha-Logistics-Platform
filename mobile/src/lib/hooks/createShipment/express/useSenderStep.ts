@@ -1,117 +1,73 @@
-import { useState } from "react";
 import { useRouter } from "expo-router";
-import Toast from "react-native-toast-message";
-import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 
 import { useCreateShipmentStore } from "@/store/createShipmentStore";
-import { validateAddress } from "@/utils/shipmentValidation";
 import { AddressBookEntry } from "@/lib/services/createShipment";
+import { AddressFormInput, addressSchema } from "@/schemas/address";
+import { Address } from "@/store/createShipmentStore";
 
 export function useSenderStep() {
   const router = useRouter();
-  const { t } = useTranslation();
-
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
-    null,
-  );
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
 
   const shipper = useCreateShipmentStore((s) => s.shipper);
   const shipmentType = useCreateShipmentStore((s) => s.shipmentType);
+  const setShipper = useCreateShipmentStore((s) => s.setShipper);
 
-  const updateShipper = useCreateShipmentStore(
-    (s) => s.updateShipper,
-  );
+  const form = useForm<AddressFormInput>({
+    resolver: zodResolver(addressSchema),
+    mode: "onSubmit",
+    reValidateMode: "onChange",
+    defaultValues: shipper,
+  });
 
-  const setShipper = useCreateShipmentStore(
-    (s) => s.setShipper,
-  );
-
-  const {
-    data: addressBookEntries = [],
-    isLoading: isLoadingAddresses,
-    isError: isAddressBookError,
-  } = useQuery<AddressBookEntry[]>({
+  const { data: addressBookEntries = [], isLoading: isLoadingAddresses } = useQuery<AddressBookEntry[]>({
     queryKey: ["/api/client/address-book"],
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     staleTime: 30_000,
   });
 
-  const savedSenderAddresses = addressBookEntries.filter(
-    (entry) => entry.useForShipper,
-  );
+  const savedSenderAddresses = addressBookEntries.filter((e) => e.useForShipper);
 
-  const handleContinue = () => {
-    const result = validateAddress(
-      shipper,
-      shipmentType,
-      "sender",
-    );
-
-    if (!result.ok) {
-      const role = result.values?.role;
-
-      Toast.show({
-        type: "error",
-        text1: result.title
-          ? t(result.title, {
-              ...result.values,
-              role: role
-                ? t(`toast.shipmentValidation.roles.${role}`)
-                : undefined,
-            })
-          : t("toast.error.title"),
-
-        text2: result.description
-          ? t(result.description, result.values)
-          : undefined,
-      });
-
-      return;
-    }
-
+  const handleContinue = form.handleSubmit((values) => {
+    const address: Address = { ...values };
+    setShipper(address);
     router.push("/createShipment/express/step-3");
-  };
-
-  const handleBack = () => {
-    router.back();
-  };
+  });
 
   const applySavedAddress = (entry: AddressBookEntry) => {
-    // Mark this address as selected
     setSelectedAddressId(entry.id);
-
-    setShipper({
+    const values: Address = {
       name: entry.name,
+      company: entry.company || "",
       phone: entry.phone,
       email: entry.email || "",
-      countryCode:
-        shipmentType === "domestic"
-          ? "SA"
-          : entry.countryCode,
+      countryCode: shipmentType === "domestic" ? "SA" : entry.countryCode,
       city: entry.city,
       postalCode: entry.postalCode || "",
       addressLine1: entry.addressLine1,
       addressLine2: entry.addressLine2 || "",
       stateOrProvince: entry.stateOrProvince || "",
       shortAddress: entry.shortAddress || "",
-    });
+      country: entry.country || entry.countryCode,
+    };
+    form.reset(values);
+    setShipper(values);
+    setTimeout(() => form.trigger(), 0);
   };
 
   return {
-    shipper,
+    form,
     shipmentType,
-    updateShipper,
-
     savedSenderAddresses,
     isLoadingAddresses,
-    isAddressBookError,
-
     selectedAddressId,
     applySavedAddress,
-
     handleContinue,
-    handleBack,
+    handleBack: () => router.back(),
   };
 }

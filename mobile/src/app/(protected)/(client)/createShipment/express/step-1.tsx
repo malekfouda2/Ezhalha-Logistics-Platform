@@ -41,9 +41,6 @@ export default function ShipmentTypeScreen() {
         onPress={() => setDirection("outbound")}
       />
 
-      <SectionTitle
-        title={t("createShipment.express.steps.step1.currency.title")}
-      />
       <InfoBox text={t("createShipment.express.steps.step1.info")} />
     </ShipmentStepLayout>
   );
