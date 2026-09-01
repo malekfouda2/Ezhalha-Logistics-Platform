@@ -82,7 +82,7 @@ export const PackageTypeSelect = ({
 const styles = StyleSheet.create({
   trigger: {
     width: "100%",
-    height: rvs(55),
+    height: rvs(50),
 
     backgroundColor: Colors.white,
 

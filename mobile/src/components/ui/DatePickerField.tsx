@@ -16,6 +16,7 @@ export interface DatePickerFieldProps {
   onClear?: () => void;
   minimumDate?: Date | null;
   maximumDate?: Date | null;
+  isDateDisabled?: (date: Date) => boolean;
   placeholder?: string;
 }
 
@@ -69,6 +70,7 @@ interface CalendarModalProps {
   value: Date | null;
   minimumDate?: Date | null;
   maximumDate?: Date | null;
+  isDateDisabled?: (date: Date) => boolean;
   onSelect: (date: Date) => void;
   onClose: () => void;
 }
@@ -78,6 +80,7 @@ function CalendarModal({
   value,
   minimumDate,
   maximumDate,
+  isDateDisabled,
   onSelect,
   onClose,
 }: CalendarModalProps) {
@@ -148,6 +151,10 @@ function CalendarModal({
     }
 
     if (maximumDate && date > stripTime(maximumDate)) {
+      return true;
+    }
+
+    if (isDateDisabled?.(date)) {
       return true;
     }
 
@@ -355,6 +362,7 @@ export function DatePickerField({
   onClear,
   minimumDate,
   maximumDate,
+  isDateDisabled,
   placeholder,
 }: DatePickerFieldProps) {
   const [visible, setVisible] = useState(false);
@@ -412,6 +420,7 @@ export function DatePickerField({
           value={value}
           minimumDate={minimumDate}
           maximumDate={maximumDate}
+          isDateDisabled={isDateDisabled}
           onSelect={onChange}
           onClose={() => setVisible(false)}
         />

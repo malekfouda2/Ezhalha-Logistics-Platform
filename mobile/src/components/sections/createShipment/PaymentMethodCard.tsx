@@ -10,6 +10,7 @@ import { rs, rvs } from "@/utils/responsive";
 interface PaymentMethodCardProps {
   title: string;
   subtitle: ReactNode;
+  icon?: ReactNode;
   iconLabel?: string;
   iconBackground?: string;
   iconColor?: string;
@@ -20,6 +21,7 @@ interface PaymentMethodCardProps {
 export const PaymentMethodCard = ({
   title,
   subtitle,
+  icon,
   iconLabel,
   iconBackground = "#F2F3F5",
   iconColor = Colors.white,
@@ -30,7 +32,9 @@ export const PaymentMethodCard = ({
     <Pressable onPress={onPress} style={styles.card}>
       {/* Payment method icon */}
       <View style={[styles.icon, { backgroundColor: iconBackground }]}>
-        {iconLabel ? (
+        {icon ? (
+          icon
+        ) : iconLabel ? (
           <Text size="xs" weight="bold" style={{ color: iconColor }}>
             {iconLabel}
           </Text>

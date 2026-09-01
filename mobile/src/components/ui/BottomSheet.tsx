@@ -1,11 +1,12 @@
 // components/ui/BottomSheet.tsx
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import {
   Modal,
   View,
   StyleSheet,
   Pressable,
-  KeyboardAvoidingView,
+  Keyboard,
+  KeyboardEvent,
   Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,6 +24,25 @@ interface BottomSheetProps {
 
 export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // KeyboardAvoidingView measures its position via onLayout, which is
+  // unreliable inside a Modal's separate native layer (and Android gets no
+  // avoidance at all with behavior=undefined) — so shift the sheet manually
+  // by the real keyboard height instead, which works the same on both
+  // platforms regardless of how the Modal's window handles resize.
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (e: KeyboardEvent) =>
+      setKeyboardHeight(e.endCoordinates?.height ?? 0),
+    );
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   return (
     <Modal
@@ -35,19 +55,18 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        <View
+          style={[
+            styles.sheet,
+            {
+              paddingBottom: Math.max(insets.bottom, rvs(20)) + rvs(10),
+              marginBottom: keyboardHeight,
+            },
+          ]}
         >
-          <View
-            style={[
-              styles.sheet,
-              { paddingBottom: Math.max(insets.bottom, rvs(20)) + rvs(10) },
-            ]}
-          >
-            <View style={styles.handle} />
-            {children}
-          </View>
-        </KeyboardAvoidingView>
+          <View style={styles.handle} />
+          {children}
+        </View>
       </View>
       <Toast config={toastConfig} />
     </Modal>

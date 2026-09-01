@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as DocumentPicker from "expo-document-picker";
+import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
-import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
+import { DocUploadRow } from "@/components/ui/DocumentUpload";
+import { rvs } from "@/utils/responsive";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { CustomsItemCard } from "@/components/sections/createShipment/express/CustomsItemCard";
 import { CustomsSummaryCard } from "@/components/sections/createShipment/express/CustomsSummaryCard";
@@ -12,12 +14,14 @@ import {
   HSCodeOption,
   HSCodeConfirmModal,
 } from "@/components/sections/createShipment/express/HSCodeConfirmModal";
+import { AddItemModal } from "@/components/sections/createShipment/express/AddItemModal";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { useCustomsStep } from "@/lib/hooks/createShipment/express/useCustomsStep";
 import { countryCodeToFlag } from "@/utils/utils";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
-import { useState } from "react";
+import { Colors } from "@/constants/colors";
+
+
 
 function getCountryName(countryCode: string) {
   return (
@@ -26,9 +30,12 @@ function getCountryName(countryCode: string) {
   );
 }
 
+type ItemModalState = { mode: "add" } | { mode: "edit"; index: number };
+
 export default function CustomsDetailsScreen() {
   const { t } = useTranslation();
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+  const [itemModalState, setItemModalState] = useState<ItemModalState | null>(null);
 
   const {
     items,
@@ -41,6 +48,7 @@ export default function CustomsDetailsScreen() {
     isUploadingInvoice,
     isExtractingInvoice,
     invoiceExtractionSummary,
+    destinationCountryCode,
     handleContinue,
     handleBack,
   } = useCustomsStep();
@@ -48,6 +56,8 @@ export default function CustomsDetailsScreen() {
   const activeItem = activeItemIndex !== null ? items[activeItemIndex] : undefined;
   const activeItemOptions: HSCodeOption[] =
     activeItem?.hsCodeCandidates.map((c) => ({ code: c.code, description: c.description })) ?? [];
+
+  const hasFilledItems = items.some((item) => item.itemName.trim().length > 0);
 
   const totalPrice = items
     .reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -100,63 +110,91 @@ export default function CustomsDetailsScreen() {
       onContinue={handleContinue}
       onBack={handleBack}
     >
-      {invoiceDocument ? (
-        <InfoBox
-          text={
-            invoiceExtractionSummary?.importedItemCount
+      <DocUploadRow
+        label={t("createShipment.express.steps.step6.invoiceLabel")}
+        subLabel={t("createShipment.express.steps.step6.invoiceHint")}
+        fileName={
+          invoiceDocument
+            ? invoiceExtractionSummary?.importedItemCount
               ? `${invoiceDocument.fileName} · ${invoiceExtractionSummary.importedItemCount} item(s) imported`
               : invoiceDocument.fileName
-          }
-          iconName="file-text"
-        />
-      ) : (
-        <DashedActionButton
-          icon="upload"
-          label={
-            isProcessingInvoice
-              ? t("common.loading")
-              : t("createShipment.express.steps.step6.scanInvoice")
-          }
-          onPress={handleScanInvoice}
-        />
-      )}
+            : undefined
+        }
+        onPick={handleScanInvoice}
+        onRemove={invoiceDocument ? clearInvoiceDocument : undefined}
+        isLoading={isProcessingInvoice}
+        uploadText={t("documents.upload")}
+        replaceText={t("documents.replace")}
+        noFileText={t("documents.noFile")}
+      />
 
-      {invoiceDocument ? (
-        <View style={styles.clearRow}>
-          <Text
-            size="small"
-            weight="semibold"
-            style={styles.clearText}
-            onPress={clearInvoiceDocument}
-          >
-            {t("createShipment.express.steps.step4.remove")}
-          </Text>
+      {invoiceExtractionSummary ? (
+        <View style={styles.extractionSummaryBox}>
+          <Feather
+            name="alert-triangle"
+            size={rvs(16)}
+            color={Colors.amberTextColor}
+            style={styles.extractionSummaryIcon}
+          />
+          <View style={styles.extractionSummaryTextGroup}>
+            <Text size="small" weight="semibold" style={styles.extractionSummaryText}>
+              {t("createShipment.express.steps.step6.invoiceSummaryTitle", {
+                count: invoiceExtractionSummary.importedItemCount,
+              })}
+            </Text>
+            <Text size="small" style={styles.extractionSummaryText}>
+              {t("createShipment.express.steps.step6.invoiceSummaryReview")}
+            </Text>
+            {invoiceExtractionSummary.autoMatchedHsCodeCount ? (
+              <Text size="small" style={styles.extractionSummaryText}>
+                {t("createShipment.express.steps.step6.invoiceSummaryAutoMatched", {
+                  count: invoiceExtractionSummary.autoMatchedHsCodeCount,
+                })}
+              </Text>
+            ) : null}
+            {invoiceExtractionSummary.hsCodeReviewCount ? (
+              <Text size="small" style={styles.extractionSummaryText}>
+                {t("createShipment.express.steps.step6.invoiceSummaryNeedsReview", {
+                  count: invoiceExtractionSummary.hsCodeReviewCount,
+                })}
+              </Text>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
-      {items.map((item, index) => (
-        <CustomsItemCard
-          key={index}
-          name={item.itemName}
-          category={item.category}
-          material={item.material}
-          countryFlag={countryCodeToFlag(item.countryOfOrigin)}
-          countryName={getCountryName(item.countryOfOrigin)}
-          totalPrice={(item.price * item.quantity).toFixed(2)}
-          quantity={item.quantity}
-          unitPrice={item.price.toFixed(2)}
-          hsCode={item.hsCode}
-          confidence={item.hsCodeConfidence === "HIGH" ? "high" : "review"}
-          removable={items.length > 1}
-          onPressHSCode={() => setActiveItemIndex(index)}
-          onRemove={() => removeItem(index)}
-        />
-      ))}
+
+      {hasFilledItems ? (
+        items.map((item, index) => (
+          <CustomsItemCard
+            key={index}
+            name={item.itemName}
+            category={item.category}
+            material={item.material}
+            countryFlag={countryCodeToFlag(item.countryOfOrigin)}
+            countryName={getCountryName(item.countryOfOrigin)}
+            currency={item.currency}
+            totalPrice={(item.price * item.quantity).toFixed(2)}
+            quantity={item.quantity}
+            unitPrice={item.price.toFixed(2)}
+            hsCode={item.hsCode}
+            confidence={item.hsCodeConfidence === "HIGH" ? "high" : "review"}
+            removable={items.length > 1}
+            onPressHSCode={() => setActiveItemIndex(index)}
+            onEdit={() => setItemModalState({ mode: "edit", index })}
+            onRemove={() => removeItem(index)}
+          />
+        ))
+      ) : (
+        <Text size="small" style={styles.emptyItemsText}>
+          {t("createShipment.express.steps.step6.noItemsYet")}
+        </Text>
+      )}
 
       <DashedActionButton
         icon="plus"
         label={t("createShipment.express.steps.step6.addItem")}
-        onPress={() => addItem()}
+        onPress={() => setItemModalState({ mode: "add" })}
       />
 
       <View style={styles.summaryGap} />
@@ -177,6 +215,22 @@ export default function CustomsDetailsScreen() {
         onConfirm={handleConfirmHSCode}
         onClose={() => setActiveItemIndex(null)}
       />
+
+      <AddItemModal
+        visible={itemModalState !== null}
+        mode={itemModalState?.mode ?? "add"}
+        initialItem={itemModalState?.mode === "edit" ? items[itemModalState.index] : undefined}
+        destinationCountryCode={destinationCountryCode}
+        onClose={() => setItemModalState(null)}
+        onSubmit={(item) => {
+          if (itemModalState?.mode === "edit") {
+            updateItem(itemModalState.index, item);
+          } else {
+            addItem(item);
+          }
+          setItemModalState(null);
+        }}
+      />
     </ShipmentStepLayout>
   );
 }
@@ -186,20 +240,33 @@ const styles = StyleSheet.create({
     height: rvs(6),
   },
 
-  clearRow: {
-    alignItems: "flex-end",
-    marginTop: -rvs(6),
-    marginBottom: rvs(14),
+  emptyItemsText: {
+    color: "#687994",
+    textAlign: "center",
+    paddingVertical: rvs(20),
   },
 
-  clearText: {
-    color: Colors.secondary,
+  extractionSummaryBox: {
+    flexDirection: "row",
+    gap: rvs(8),
+    padding: rvs(12),
+    borderRadius: rvs(10),
+    borderWidth: 1,
+    borderColor: Colors.amberBorderColor,
+    backgroundColor: Colors.amberBackgroundColor,
+    marginBottom: rvs(20),
   },
 
-  footer: {
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(10),
-    backgroundColor: Colors.background,
+  extractionSummaryIcon: {
+    marginTop: rvs(2),
+  },
+
+  extractionSummaryTextGroup: {
+    flex: 1,
+    gap: rvs(2),
+  },
+
+  extractionSummaryText: {
+    color: Colors.amberTextColor,
   },
 });

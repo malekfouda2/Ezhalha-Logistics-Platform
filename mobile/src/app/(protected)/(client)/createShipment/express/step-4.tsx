@@ -3,24 +3,25 @@
 import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as DocumentPicker from "expo-document-picker";
+import { Feather } from "@expo/vector-icons";
 
-import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { PackageCard } from "@/components/sections/createShipment/express/PackageCard";
 import { PackageTypeSelect } from "@/components/sections/createShipment/express/PackageTypeSelect";
 import { UnitToggle } from "@/components/sections/createShipment/express/UnitToggle";
 import { WeightSummaryCard } from "@/components/sections/createShipment/express/WeightSummaryCard";
+import { DocUploadRow } from "@/components/ui/DocumentUpload";
 import { Text } from "@/components/ui/Text";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { usePackagesStep } from "@/lib/hooks/createShipment/express/usePackagesStep";
-import { Colors } from "@/constants/colors";
 import { rvs } from "@/utils/responsive";
 import {
   dimensionUnitOptions,
   packageTypes,
   weightUnitOptions,
 } from "@/constants/packageOptions";
+import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
+import { Colors } from "@/constants/colors";
 
 export default function PackageDetailsScreen() {
   const { t } = useTranslation();
@@ -43,12 +44,14 @@ export default function PackageDetailsScreen() {
     clearPackageListDocument,
     updatePackage,
     addPackage,
+
     removePackage,
     handleContinue,
     handleBack,
   } = usePackagesStep();
 
-  const isProcessingPackageList = isUploadingPackageList || isExtractingPackageList;
+  const isProcessingPackageList =
+    isUploadingPackageList || isExtractingPackageList;
 
   const handleScanDocument = async () => {
     if (isProcessingPackageList) return;
@@ -87,7 +90,63 @@ export default function PackageDetailsScreen() {
       continueLabel={t("createShipment.express.steps.step4.getRates")}
       loading={isLoadingRates}
     >
-      <SectionTitle title={t("createShipment.express.steps.step4.weightUnit")} />
+      <DocUploadRow
+        label={t("createShipment.express.steps.step4.packingList")}
+        subLabel={t("createShipment.express.steps.step4.packingListHint")}
+        fileName={
+          packageListDocument
+            ? packageExtractionSummary?.importedPackageCount
+              ? `${packageListDocument.name} · ${packageExtractionSummary.importedPackageCount} package(s) imported`
+              : packageListDocument.name
+            : undefined
+        }
+        onPick={handleScanDocument}
+        onRemove={packageListDocument ? clearPackageListDocument : undefined}
+        isLoading={isProcessingPackageList}
+        uploadText={t("documents.upload")}
+        replaceText={t("documents.replace")}
+        noFileText={t("documents.noFile")}
+      />
+
+      {packageExtractionSummary ? (
+        <View style={styles.extractionSummaryBox}>
+          <Feather
+            name="alert-triangle"
+            size={rvs(16)}
+            color={Colors.amberTextColor}
+            style={styles.extractionSummaryIcon}
+          />
+          <View style={styles.extractionSummaryTextGroup}>
+            <Text
+              size="small"
+              weight="semibold"
+              style={styles.extractionSummaryText}
+            >
+              {t("createShipment.express.steps.step4.packingListSummaryTitle", {
+                count: packageExtractionSummary.importedPackageCount,
+              })}
+            </Text>
+            <Text size="small" style={styles.extractionSummaryText}>
+              {t(
+                "createShipment.express.steps.step4.packingListSummaryWeight",
+                {
+                  weight: packageExtractionSummary.totalWeight.toFixed(3),
+                  unit: weightUnit,
+                },
+              )}
+            </Text>
+            <Text size="small" style={styles.extractionSummaryText}>
+              {t("createShipment.express.steps.step4.packingListSummaryReview")}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.summaryGap} />
+
+      <SectionTitle
+        title={t("createShipment.express.steps.step4.weightUnit")}
+      />
       <UnitToggle
         options={weightUnitOptions}
         value={weightUnit}
@@ -96,7 +155,9 @@ export default function PackageDetailsScreen() {
 
       <View style={styles.selectorGap} />
 
-      <SectionTitle title={t("createShipment.express.steps.step4.dimensionUnit")} />
+      <SectionTitle
+        title={t("createShipment.express.steps.step4.dimensionUnit")}
+      />
       <UnitToggle
         options={dimensionUnitOptions}
         value={dimensionUnit}
@@ -105,7 +166,9 @@ export default function PackageDetailsScreen() {
 
       <View style={styles.selectorGap} />
 
-      <SectionTitle title={t("createShipment.express.steps.step4.packageType")} />
+      <SectionTitle
+        title={t("createShipment.express.steps.step4.packageType")}
+      />
       <PackageTypeSelect
         title={t("createShipment.express.steps.step4.packageType")}
         options={packageTypes}
@@ -126,57 +189,26 @@ export default function PackageDetailsScreen() {
           weightUnit={weightUnit}
           dimensionUnit={dimensionUnit}
           removable={packages.length > 1}
-          onChangeWeight={(v) => updatePackage(index, { weight: Number(v) || 0 })}
-          onChangeLength={(v) => updatePackage(index, { length: Number(v) || 0 })}
+          onChangeWeight={(v) =>
+            updatePackage(index, { weight: Number(v) || 0 })
+          }
+          onChangeLength={(v) =>
+            updatePackage(index, { length: Number(v) || 0 })
+          }
           onChangeWidth={(v) => updatePackage(index, { width: Number(v) || 0 })}
-          onChangeHeight={(v) => updatePackage(index, { height: Number(v) || 0 })}
+          onChangeHeight={(v) =>
+            updatePackage(index, { height: Number(v) || 0 })
+          }
           onRemove={() => removePackage(index)}
         />
       ))}
 
       <View style={styles.actionsGap} />
-
       <DashedActionButton
         icon="plus"
         label={t("createShipment.express.steps.step4.addPackage")}
         onPress={addPackage}
       />
-
-      {packageListDocument ? (
-        <>
-          <InfoBox
-            text={
-              packageExtractionSummary?.importedPackageCount
-                ? `${packageListDocument.name} · ${packageExtractionSummary.importedPackageCount} package(s) imported`
-                : packageListDocument.name
-            }
-            iconName="file-text"
-          />
-
-          <View style={styles.clearRow}>
-            <Text
-              size="small"
-              weight="semibold"
-              style={styles.clearText}
-              onPress={clearPackageListDocument}
-            >
-              {t("createShipment.express.steps.step4.remove")}
-            </Text>
-          </View>
-        </>
-      ) : (
-        <DashedActionButton
-          icon="upload"
-          label={
-            isProcessingPackageList
-              ? t("common.loading")
-              : t("createShipment.express.steps.step4.scanDocument")
-          }
-          onPress={handleScanDocument}
-        />
-      )}
-
-      <View style={styles.summaryGap} />
 
       <WeightSummaryCard
         actualWeight={chargeableWeightSummary.actualWeight}
@@ -201,13 +233,27 @@ const styles = StyleSheet.create({
     height: rvs(10),
   },
 
-  clearRow: {
-    alignItems: "flex-end",
-    marginTop: -rvs(6),
-    marginBottom: rvs(14),
+  extractionSummaryBox: {
+    flexDirection: "row",
+    gap: rvs(8),
+    padding: rvs(12),
+    borderRadius: rvs(10),
+    borderWidth: 1,
+    borderColor: Colors.amberBorderColor,
+    backgroundColor: Colors.amberBackgroundColor,
+    marginTop: rvs(10),
   },
 
-  clearText: {
-    color: Colors.secondary,
+  extractionSummaryIcon: {
+    marginTop: rvs(2),
+  },
+
+  extractionSummaryTextGroup: {
+    flex: 1,
+    gap: rvs(2),
+  },
+
+  extractionSummaryText: {
+    color: Colors.amberTextColor,
   },
 });

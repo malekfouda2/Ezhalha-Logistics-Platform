@@ -26,7 +26,6 @@ export const KeyboardAwareScreen = ({
   keyboardVerticalOffset = 20,
 }: KeyboardAwareScreenProps) => {
   return (
-    // <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -44,7 +43,6 @@ export const KeyboardAwareScreen = ({
           {children}
         </ScrollView>
       </KeyboardAvoidingView>
-    // </SafeAreaView>
   );
 };
 

@@ -3,10 +3,11 @@ import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useCreateShipmentStore, CustomsItem, defaultCustomsItem } from "@/store/createShipmentStore";
-import { extractInvoiceItems } from "@/lib/services/createShipment";
+import { extractInvoiceItems, type ExtractInvoiceItemsResponse } from "@/lib/services/createShipment";
 import { validateCustoms } from "@/utils/shipmentValidation";
 import { FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES, FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES } from "@shared/schema";
 import { useUpload } from "../../useUpload";
+import { normalizeTradeDocumentContentType } from "@/utils/documentContentType";
 
 
 export function useCustomsStep() {
@@ -14,7 +15,8 @@ export function useCustomsStep() {
   const { t } = useTranslation();
   const store = useCreateShipmentStore();
   const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
-  const [invoiceExtractionSummary, setInvoiceExtractionSummary] = useState<any>(null);
+  const [invoiceExtractionSummary, setInvoiceExtractionSummary] =
+    useState<ExtractInvoiceItemsResponse["summary"] | null>(null);
 
   const { uploadFile, isUploading } = useUpload({
     onError: (error: Error) =>
@@ -28,7 +30,7 @@ export function useCustomsStep() {
   const invoiceDocument = store.tradeDocuments[0] ?? null;
 
   const handleInvoicePick = async (file: { uri: string; name: string; type: string; size: number }) => {
-    const normalizedType = file.type.split(";")[0].trim().toLowerCase();
+    const normalizedType = normalizeTradeDocumentContentType(file.type, file.name);
 
     if (!(FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES as readonly string[]).includes(normalizedType)) {
       Toast.show({
@@ -49,7 +51,9 @@ export function useCustomsStep() {
       return;
     }
 
-    const uploadResponse = await uploadFile(file);
+    const uploadResponse = await uploadFile(
+      file.type === normalizedType ? file : { ...file, type: normalizedType },
+    );
     if (!uploadResponse) return;
 
     setIsExtractingInvoice(true);
@@ -120,6 +124,12 @@ export function useCustomsStep() {
 
   const handleBack = () => router.push("/createShipment/express/step-5");
 
+  // Mirrors web's destinationCountry calc (client/src/pages/client/create-shipment.tsx)
+  const destinationCountryCode =
+    store.shipmentType === "inbound"
+      ? store.recipient.countryCode || "SA"
+      : store.recipient.countryCode || store.shipper.countryCode || "SA";
+
   return {
     customsInputMode: store.customsInputMode,
     setCustomsInputMode: store.setCustomsInputMode,
@@ -133,6 +143,7 @@ export function useCustomsStep() {
     isUploadingInvoice: isUploading,
     isExtractingInvoice,
     invoiceExtractionSummary,
+    destinationCountryCode,
     handleContinue,
     handleBack,
   };

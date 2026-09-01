@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
@@ -32,7 +33,8 @@ export default function PaymentOptionsScreen() {
           label:
             [checkoutData.carrierName, checkoutData.serviceName]
               .filter(Boolean)
-              .join(" · ") || t("createShipment.express.steps.step8.summary.shipping"),
+              .join(" · ") ||
+            t("createShipment.express.steps.step8.summary.shipping"),
           value: total,
         },
       ]
@@ -52,37 +54,32 @@ export default function PaymentOptionsScreen() {
       subtitle={t("createShipment.express.steps.step8.subtitle")}
       onContinue={handlePay}
       onBack={handleBack}
+      loading={isPayingLater}
       continueLabel={
-        isPayingLater ? (
-          t("common.loading")
-        ) : (
-          <View style={styles.continueTitle}>
-            <Text size="medium" weight="semibold" style={styles.continueText}>
-              {t("createShipment.express.steps.step8.pay")}
-            </Text>
+        <View style={styles.continueTitle}>
+          <Text size="medium" weight="semibold" style={styles.continueText}>
+            {t("createShipment.express.steps.step8.pay")}
+          </Text>
 
-            <SaudiRiyal size={rs(18)} color={Colors.white} />
+          <SaudiRiyal size={rs(18)} color={Colors.white} />
 
-            <Text size="medium" weight="semibold" style={styles.continueText}>
-              {total}
-            </Text>
-          </View>
-        )
+          <Text size="medium" weight="semibold" style={styles.continueText}>
+            {total}
+          </Text>
+        </View>
       }
       footerNote={t("createShipment.express.steps.step8.footerNote")}
     >
       <OrderSummaryCard lines={summaryLines} total={total} />
 
-      <SectionTitle
-        title={t("createShipment.express.steps.step8.payWith")}
-      />
+      <SectionTitle title={t("createShipment.express.steps.step8.payWith")} />
 
       <PaymentMethodCard
         title={t("createShipment.express.payment.savedCard.title")}
         subtitle={t("createShipment.express.payment.comingSoon")}
         iconLabel="VISA"
-        iconBackground={Colors.border}
-        iconColor={Colors.secondary}
+        iconBackground={"navy"}
+        iconColor={Colors.white}
         selected={false}
         onPress={() => {}}
       />
@@ -100,9 +97,10 @@ export default function PaymentOptionsScreen() {
       <PaymentMethodCard
         title={t("createShipment.express.payment.payLater.title")}
         subtitle={t("createShipment.express.payment.payLater.creditAvailable")}
-        iconLabel=""
+        icon={
+          <Feather name="credit-card" size={rs(20)} color={Colors.primary} />
+        }
         iconBackground="#FFE8DA"
-        iconColor={Colors.primary}
         selected={selectedMethod === "pay-later"}
         onPress={() => setSelectedMethod("pay-later")}
       />

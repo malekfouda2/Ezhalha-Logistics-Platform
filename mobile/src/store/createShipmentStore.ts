@@ -104,6 +104,7 @@ export interface ConfirmResponse {
 }
 
 export interface PickupInfo {
+  requested: boolean;
   custom: boolean;
   date: string;
   readyTime: string;
@@ -225,7 +226,7 @@ const initialState = {
   customsInputMode: "manual" as const,
   items: [{ ...defaultCustomsItem }],
   tradeDocuments: [],
-  pickup: { custom: false, date: "", readyTime: "09:00", closeTime: "17:00", location: "", instructions: "" },
+  pickup: { requested: false, custom: false, date: "", readyTime: "09:00", closeTime: "17:00", location: "", instructions: "" },
   checkoutData: null,
   confirmData: null,
   lastRatesSignature: null,

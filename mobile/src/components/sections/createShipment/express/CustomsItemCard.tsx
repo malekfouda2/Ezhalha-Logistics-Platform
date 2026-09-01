@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
+import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
@@ -15,12 +16,14 @@ interface CustomsItemCardProps {
   material: string;
   countryFlag: string;
   countryName: string;
+  currency: string;
   totalPrice: string;
   quantity: number;
   unitPrice: string;
   hsCode: string;
   confidence: HSConfidence;
   onPressHSCode?: () => void;
+  onEdit?: () => void;
   onRemove?: () => void;
   removable?: boolean;
 }
@@ -31,45 +34,52 @@ export const CustomsItemCard = ({
   material,
   countryFlag,
   countryName,
+  currency,
   totalPrice,
   quantity,
   unitPrice,
   hsCode,
   confidence,
   onPressHSCode,
+  onEdit,
   onRemove,
   removable = false,
 }: CustomsItemCardProps) => {
   const { t } = useTranslation();
 
   const isHighConfidence = confidence === "high";
+  const isSar = currency === "SAR";
+
+  const metaText = [
+    category,
+    material,
+    countryName ? `${countryFlag} ${countryName}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <View style={styles.card}>
       <View style={styles.row}>
         <View style={styles.info}>
-          <View style={styles.nameRow}>
-            <Text size="small" weight="bold" style={styles.name}>
-              {name}
-            </Text>
-
-            {removable ? (
-              <Pressable onPress={onRemove} hitSlop={10}>
-                <Text size="xs" weight="semibold" style={styles.remove}>
-                  {t("createShipment.express.steps.step4.remove")}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
+          <Text size="small" weight="bold" style={styles.name}>
+            {name}
+          </Text>
 
           <Text size="xs" style={styles.meta}>
-            {category} · {material} · {countryFlag} {countryName}
+            {metaText}
           </Text>
         </View>
 
         <View style={styles.priceContainer}>
           <View style={styles.priceRow}>
-            <SaudiRiyal size={rs(20)} />
+            {isSar ? (
+              <SaudiRiyal size={rs(20)} />
+            ) : (
+              <Text size="medium" weight="bold" style={styles.currencyCode}>
+                {currency}
+              </Text>
+            )}
 
             <Text size="medium" weight="bold" style={styles.totalPrice}>
               {totalPrice}
@@ -81,7 +91,13 @@ export const CustomsItemCard = ({
               {quantity} x
             </Text>
 
-            <SaudiRiyal size={rs(12)} color={Colors.secondary} />
+            {isSar ? (
+              <SaudiRiyal size={rs(12)} color={Colors.secondary} />
+            ) : (
+              <Text size="xs" style={styles.unitPrice}>
+                {currency}
+              </Text>
+            )}
 
             <Text size="xs" style={styles.unitPrice}>
               {unitPrice}
@@ -116,6 +132,22 @@ export const CustomsItemCard = ({
             : t("createShipment.express.customs.confirmThis")}
         </Text>
       </Pressable>
+
+      {onEdit || removable ? (
+        <View style={styles.actionsRow}>
+          {onEdit ? (
+            <Pressable onPress={onEdit} hitSlop={10} style={styles.actionButton}>
+              <Feather name="edit-2" size={rs(15)} color={Colors.secondary} />
+            </Pressable>
+          ) : null}
+
+          {removable ? (
+            <Pressable onPress={onRemove} hitSlop={10} style={styles.actionButton}>
+              <Feather name="trash-2" size={rs(15)} color={Colors.error} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -132,16 +164,12 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "flex-start",
+    justifyContent: "space-between",
   },
 
   info: {
     flex: 1,
-  },
-
-  nameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    marginEnd: rs(10),
   },
 
   name: {
@@ -149,13 +177,9 @@ const styles = StyleSheet.create({
     marginBottom: rvs(2),
   },
 
-  remove: {
-    color: "#687994",
-  },
-
   meta: {
     color: Colors.textSecondary,
-    paddingStart: rvs(4)
+    paddingStart: rvs(4),
   },
 
   priceContainer: {
@@ -164,9 +188,14 @@ const styles = StyleSheet.create({
   priceRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: rs(2),
   },
   totalPrice: {
     paddingStart: rvs(2),
+    color: Colors.text,
+  },
+
+  currencyCode: {
     color: Colors.text,
   },
 
@@ -177,7 +206,7 @@ const styles = StyleSheet.create({
     gap: rs(4),
     color: Colors.secondary,
   },
-    unitPrice: {
+  unitPrice: {
     color: Colors.secondary,
   },
 
@@ -189,7 +218,7 @@ const styles = StyleSheet.create({
     borderRadius: rs(15),
     paddingHorizontal: rs(12),
     paddingVertical: rvs(4),
-    marginTop: rvs(4),
+    marginTop: rvs(10),
     gap: rs(8),
   },
 
@@ -209,5 +238,19 @@ const styles = StyleSheet.create({
 
   hsText: {
     color: Colors.text,
+  },
+
+  actionsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: rs(14),
+    marginTop: rvs(10),
+    paddingTop: rvs(10),
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+
+  actionButton: {
+    padding: rs(2),
   },
 });

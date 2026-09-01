@@ -4,13 +4,14 @@ import { useTranslation } from "react-i18next";
 import { useCreateShipmentStore, isInternationalShipment } from "@/store/createShipmentStore";
 import { useState } from "react";
 import { getChargeableWeightSummary } from "@/utils/chargeableWeight";
-import { extractPackageDetails, fetchRates } from "@/lib/services/createShipment";
+import { extractPackageDetails, fetchRates, type ExtractPackageDetailsResponse } from "@/lib/services/createShipment";
 import { validatePackages } from "@/utils/shipmentValidation";
 import { apiRequest } from "@/api/client";
 import { useUpload } from "../../useUpload";
 import type { UploadedDocument } from "@/lib/services/auth";
 import type { CompanyApplicationDocumentType } from "@shared/application-documents";
 import { FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES } from "@shared/schema";
+import { normalizeTradeDocumentContentType } from "@/utils/documentContentType";
 
 const SUPPORTED_PACKAGE_LIST_CONTENT_TYPES = new Set<string>([
   "application/pdf",
@@ -23,6 +24,13 @@ const SUPPORTED_PACKAGE_LIST_CONTENT_TYPES = new Set<string>([
   "image/png",
 ]);
 
+function formatFileSize(size: number): string {
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function usePackagesStep() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -30,7 +38,8 @@ export function usePackagesStep() {
   const [isLoadingRates, setIsLoadingRates] = useState(false);
   const [packageListDocument, setPackageListDocument] = useState<UploadedDocument | null>(null);
   const [isExtractingPackageList, setIsExtractingPackageList] = useState(false);
-  const [packageExtractionSummary, setPackageExtractionSummary] = useState<any>(null);
+  const [packageExtractionSummary, setPackageExtractionSummary] =
+    useState<ExtractPackageDetailsResponse["summary"] | null>(null);
 
   const { uploadFile, isUploading: isUploadingPackageList } = useUpload({
     onError: (error: Error) =>
@@ -50,7 +59,7 @@ export function usePackagesStep() {
 
   // Mirrors web's handlePackageListSelect (create-shipment.tsx)
   const handlePackageListPick = async (file: { uri: string; name: string; type: string; size: number }) => {
-    const normalizedType = file.type.split(";")[0].trim().toLowerCase();
+    const normalizedType = normalizeTradeDocumentContentType(file.type, file.name);
 
     if (!SUPPORTED_PACKAGE_LIST_CONTENT_TYPES.has(normalizedType)) {
       Toast.show({
@@ -71,7 +80,9 @@ export function usePackagesStep() {
       return;
     }
 
-    const uploadResponse = await uploadFile(file);
+    const uploadResponse = await uploadFile(
+      file.type === normalizedType ? file : { ...file, type: normalizedType },
+    );
     if (!uploadResponse) return;
 
     setIsExtractingPackageList(true);
@@ -158,19 +169,7 @@ export function usePackagesStep() {
 
     setIsLoadingRates(true);
     try {
-      console.log({store});
-            const payload = {
-       shipmentType: store.shipmentType,
-        isDdp: store.isDdp,
-        shipper: store.shipper,
-        recipient: store.recipient,
-        packages: store.packages,
-        weightUnit: store.weightUnit,
-        dimensionUnit: store.dimensionUnit,
-        packageType: store.packageType,
-        currency: store.currency,
-      };
-      
+
       const data = await fetchRates({
         shipmentType: store.shipmentType,
         isDdp: store.isDdp,

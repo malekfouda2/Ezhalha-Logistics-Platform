@@ -2,7 +2,7 @@
 import { Colors } from "@/constants/colors";
 import { rvs, rs } from "@/utils/responsive";
 import { Ionicons } from "@expo/vector-icons";
-import { View, Pressable, StyleSheet } from "react-native";
+import { View, Pressable, ActivityIndicator, StyleSheet } from "react-native";
 import { Text } from "@/components/ui/Text";
 
 interface DocUploadRowProps {
@@ -10,6 +10,7 @@ interface DocUploadRowProps {
   subLabel: string;
   fileName?: string;
   error?: string;
+  isLoading?: boolean;
   onPick: () => void;
   onRemove?: () => void;
   uploadText?: string;
@@ -22,6 +23,7 @@ export const DocUploadRow = ({
   subLabel,
   fileName,
   error,
+  isLoading = false,
   onPick,
   onRemove,
   uploadText = "Upload",
@@ -42,12 +44,16 @@ export const DocUploadRow = ({
           </Text>
         </View>
 
-        <Pressable style={styles.uploadBtn} onPress={onPick}>
-          <Ionicons
-            name={hasFile ? "refresh-outline" : "cloud-upload-outline"}
-            size={rs(16)}
-            color={Colors.text}
-          />
+        <Pressable style={styles.uploadBtn} onPress={onPick} disabled={isLoading}>
+          {isLoading ? (
+            <ActivityIndicator size="small" color={Colors.text} />
+          ) : (
+            <Ionicons
+              name={hasFile ? "refresh-outline" : "cloud-upload-outline"}
+              size={rs(16)}
+              color={Colors.text}
+            />
+          )}
           <Text size="small" weight="semibold" style={{ marginStart: rs(6) }}>
             {hasFile ? replaceText : uploadText}
           </Text>

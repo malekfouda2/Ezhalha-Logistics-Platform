@@ -11,6 +11,9 @@ export const Colors = {
   black: "#000000",
   placeholder: "#9AA3B2",
   error: "#FF4D4F",
+  amberBackgroundColor: "#FFFBEB",
+  amberBorderColor: "#FDE68A",
+  amberTextColor: "#92400E",
 };
 
 export const setOpacity = (hex: string, alpha: number) =>

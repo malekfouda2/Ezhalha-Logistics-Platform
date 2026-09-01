@@ -21,6 +21,8 @@ interface UseUploadOptions {
 export function useUpload({ onError }: UseUploadOptions = {}) {
   const [isUploading, setIsUploading] = useState(false);
 
+  // Mirrors web's two-step presigned-URL flow (client/src/hooks/use-upload.ts):
+  // request an upload URL for the metadata, then PUT the file bytes to it directly.
   const uploadFile = async (file: {
     uri: string;
     name: string;
@@ -29,30 +31,47 @@ export function useUpload({ onError }: UseUploadOptions = {}) {
   }): Promise<UploadResponse | null> => {
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", {
-        uri: file.uri,
-        name: file.name,
-        type: file.type,
-      } as any);
-
       const token = getAccessToken();
-      const response = await fetch(`${API_BASE_URL}/api/uploads`, {
+
+      const requestUrlResponse = await fetch(`${API_BASE_URL}/api/uploads/request-url`, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           Accept: "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: formData,
+        body: JSON.stringify({
+          name: file.name,
+          size: file.size,
+          contentType: file.type,
+        }),
       });
 
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body?.error || body?.message || "Upload failed");
+      if (!requestUrlResponse.ok) {
+        const body = await requestUrlResponse.json().catch(() => ({}));
+        throw new Error(body?.error || body?.message || "Failed to get upload URL");
       }
 
-      const data = (await response.json()) as UploadResponse;
-      return data;
+      const { uploadURL, objectPath, metadata } = (await requestUrlResponse.json()) as {
+        uploadURL: string;
+        objectPath: string;
+        metadata: UploadedFileMetadata;
+      };
+
+      const fileBlob = await (await fetch(file.uri)).blob();
+      const putResponse = await fetch(uploadURL, {
+        method: "PUT",
+        body: fileBlob,
+        headers: {
+          "Content-Type": file.type,
+        },
+      });
+
+      if (!putResponse.ok) {
+        throw new Error("Failed to upload file to storage");
+      }
+
+      return { objectPath, metadata };
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error("Upload failed"));
       return null;

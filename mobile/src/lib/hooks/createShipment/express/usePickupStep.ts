@@ -42,10 +42,12 @@ export function usePickupStep() {
     const payload: CheckoutPayload = {
       quoteId: store.selectedQuoteId,
       pickup: {
-        requested: true,
-        ...(store.pickup.custom && store.pickup.date
-          ? { date: store.pickup.date, readyTime: store.pickup.readyTime, closeTime: store.pickup.closeTime }
-          : {}),
+        requested: store.pickup.requested,
+        date: store.pickup.requested
+          ? defaultPickup.date
+          : store.pickup.date || defaultPickup.date,
+        readyTime: store.pickup.readyTime,
+        closeTime: store.pickup.closeTime,
         location: store.pickup.location || undefined,
         instructions: store.pickup.instructions || undefined,
       },

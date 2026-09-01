@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/Input";
+import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { DatePill } from "@/components/sections/createShipment/express/DatePill";
+import { DatePickerField } from "@/components/ui/DatePickerField";
 import { ToggleCard } from "@/components/sections/createShipment/ToggleCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
@@ -19,31 +20,56 @@ function isKsaWeekendDow(dow: number): boolean {
   return dow === 5 || dow === 6;
 }
 
-function getUpcomingPickupDates(startDate: string, count: number): string[] {
-  const dates: string[] = [];
-  const cur = new Date(`${startDate}T00:00:00Z`);
-  while (dates.length < count) {
-    if (!isKsaWeekendDow(cur.getUTCDay())) {
-      dates.push(cur.toISOString().slice(0, 10));
-    }
-    cur.setUTCDate(cur.getUTCDate() + 1);
-  }
-  return dates;
+function parseDateKey(dateKey: string): Date {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function CarrierPickupScreen() {
   const { t } = useTranslation();
-  const [requestPickup, setRequestPickup] = useState(true);
 
-  const { pickup, setPickup, defaultPickup, isSubmitting, handleContinue, handleBack } =
-    usePickupStep();
+  const {
+    pickup,
+    setPickup,
+    defaultPickup,
+    isSubmitting,
+    handleContinue,
+    handleBack,
+  } = usePickupStep();
 
-  const dateOptions = useMemo(
-    () => getUpcomingPickupDates(defaultPickup.date, 3),
+  const requestPickup = pickup.requested;
+
+  const selectedDate =
+    pickup.custom && pickup.date ? pickup.date : defaultPickup.date;
+
+  const selectedDateValue = useMemo(
+    () => parseDateKey(selectedDate),
+    [selectedDate],
+  );
+
+  const minPickupDate = useMemo(
+    () => parseDateKey(defaultPickup.date),
     [defaultPickup.date],
   );
 
-  const selectedDate = pickup.custom && pickup.date ? pickup.date : defaultPickup.date;
+  const defaultDateLabel = useMemo(() => {
+    const d = new Date(`${defaultPickup.date}T00:00:00Z`);
+    const dayLabel = DAY_KEYS[d.getUTCDay()];
+    const formatted = new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(d);
+    return `${t(`createShipment.express.days.${dayLabel}`)}, ${formatted}`;
+  }, [defaultPickup.date, t]);
 
   return (
     <ShipmentStepLayout
@@ -53,45 +79,47 @@ export default function CarrierPickupScreen() {
       subtitle={t("createShipment.express.steps.step7.subtitle")}
       onContinue={handleContinue}
       onBack={handleBack}
-      continueLabel={
-        isSubmitting
-          ? t("common.loading")
-          : t("createShipment.express.steps.step7.reviewOrder")
-      }
+      loading={isSubmitting}
+      continueLabel={t("createShipment.express.steps.step7.reviewOrder")}
     >
+      <View style={styles.sameDayBox}>
+        <Feather
+          name="clock"
+          size={rvs(16)}
+          color={Colors.amberTextColor}
+          style={styles.sameDayIcon}
+        />
+        <View style={styles.sameDayTextGroup}>
+          <Text size="small" weight="semibold" style={styles.sameDayText}>
+            {t("createShipment.express.steps.step7.sameDayPickupTitle")}
+          </Text>
+          <Text size="small" style={styles.sameDayText}>
+            {t("createShipment.express.steps.step7.sameDayPickupDefaultDate", {
+              date: defaultDateLabel,
+            })}
+          </Text>
+          <Text size="small" style={styles.sameDayText}>
+            {t("createShipment.express.steps.step7.sameDayPickupRule")}
+          </Text>
+        </View>
+      </View>
+
       <ToggleCard
         title={t("createShipment.express.steps.step7.requestPickup")}
         description={t("createShipment.express.steps.step7.dropOffBranch")}
         value={requestPickup}
-        onValueChange={setRequestPickup}
+        onValueChange={(v) => setPickup({ requested: v })}
       />
 
       {requestPickup ? (
         <>
-          <SectionTitle
-            title={t("createShipment.express.steps.step7.pickupDate")}
+          <DatePickerField
+            label={t("createShipment.express.steps.step7.pickupDate")}
+            value={selectedDateValue}
+            minimumDate={minPickupDate}
+            isDateDisabled={(date) => isKsaWeekendDow(date.getDay())}
+            onChange={(date) => setPickup({ custom: true, date: formatDateKey(date) })}
           />
-
-          <View style={styles.dateRow}>
-            {dateOptions.map((date) => {
-              const dayLabel = DAY_KEYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
-              const dateLabel = new Intl.DateTimeFormat("en-GB", {
-                day: "numeric",
-                month: "short",
-                timeZone: "UTC",
-              }).format(new Date(`${date}T00:00:00Z`));
-
-              return (
-                <DatePill
-                  key={date}
-                  dayLabel={t(`createShipment.express.days.${dayLabel}`)}
-                  dateLabel={dateLabel}
-                  selected={selectedDate === date}
-                  onPress={() => setPickup({ custom: true, date })}
-                />
-              );
-            })}
-          </View>
 
           <SectionTitle
             title={t("createShipment.express.steps.step7.readyBetween")}
@@ -139,9 +167,7 @@ export default function CarrierPickupScreen() {
             onChangeText={(v) => setPickup({ instructions: v })}
           />
 
-          <InfoBox
-            text={t("createShipment.express.steps.step7.info")}
-          />
+          <InfoBox text={t("createShipment.express.steps.step7.info")} />
         </>
       ) : null}
     </ShipmentStepLayout>
@@ -149,10 +175,28 @@ export default function CarrierPickupScreen() {
 }
 
 const styles = StyleSheet.create({
-  dateRow: {
+  sameDayBox: {
     flexDirection: "row",
-    gap: rs(12),
-    marginBottom: rvs(10),
+    gap: rvs(8),
+    padding: rvs(12),
+    borderRadius: rvs(10),
+    borderWidth: 1,
+    borderColor: Colors.amberBorderColor,
+    backgroundColor: Colors.amberBackgroundColor,
+    marginBottom: rvs(14),
+  },
+
+  sameDayIcon: {
+    marginTop: rvs(2),
+  },
+
+  sameDayTextGroup: {
+    flex: 1,
+    gap: rvs(2),
+  },
+
+  sameDayText: {
+    color: Colors.amberTextColor,
   },
 
   timeRow: {

@@ -1,15 +1,10 @@
 import React, { useState, useEffect } from "react";
-import {
-  Modal,
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 
@@ -48,103 +43,59 @@ export const HSCodeConfirmModal = ({
   }, [visible, defaultCode, options]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <Pressable style={styles.backdrop} onPress={onClose} />
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text size="xl" weight="bold" style={styles.title}>
+        {t("createShipment.express.customs.confirmHSCode")}
+      </Text>
 
-      <SafeAreaView edges={["bottom"]} style={styles.sheetContainer}>
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
+      <Text size="medium" style={styles.subtitle}>
+        {t("createShipment.express.customs.hsCodeSubtitle", {
+          itemName,
+        })}
+      </Text>
 
-          <Text size="xl" weight="bold" style={styles.title}>
-            {t("createShipment.express.customs.confirmHSCode")}
-          </Text>
+      {options.map((option) => {
+        const selected = option.code === selectedCode;
 
-          <Text size="medium" style={styles.subtitle}>
-            {t("createShipment.express.customs.hsCodeSubtitle", {
-              itemName,
-            })}
-          </Text>
+        return (
+          <Pressable
+            key={option.code}
+            onPress={() => setSelectedCode(option.code)}
+            style={styles.option}
+          >
+            <View style={styles.optionText}>
+              <Text size="large" weight="bold" style={styles.optionCode}>
+                {option.code}
+              </Text>
 
-          {options.map((option) => {
-            const selected = option.code === selectedCode;
+              <Text size="small" style={styles.optionDescription}>
+                {option.description}
+              </Text>
+            </View>
 
-            return (
-              <Pressable
-                key={option.code}
-                onPress={() => setSelectedCode(option.code)}
-                style={styles.option}
-              >
-                <View style={styles.optionText}>
-                  <Text
-                    size="large"
-                    weight="bold"
-                    style={styles.optionCode}
-                  >
-                    {option.code}
-                  </Text>
+            <View
+              style={[
+                styles.radioOuter,
+                selected && styles.radioOuterSelected,
+              ]}
+            >
+              {selected ? <View style={styles.radioInner} /> : null}
+            </View>
+          </Pressable>
+        );
+      })}
 
-                  <Text size="small" style={styles.optionDescription}>
-                    {option.description}
-                  </Text>
-                </View>
-
-                <View
-                  style={[
-                    styles.radioOuter,
-                    selected && styles.radioOuterSelected,
-                  ]}
-                >
-                  {selected ? <View style={styles.radioInner} /> : null}
-                </View>
-              </Pressable>
-            );
-          })}
-
-          <View style={styles.footer}>
-            <Button
-              title={t("createShipment.express.customs.confirmCode")}
-              onPress={() => onConfirm(selectedCode)}
-            />
-          </View>
-        </View>
-      </SafeAreaView>
-    </Modal>
+      <View style={styles.footer}>
+        <Button
+          title={t("createShipment.express.customs.confirmCode")}
+          onPress={() => onConfirm(selectedCode)}
+        />
+      </View>
+    </BottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 20, 30, 0.4)",
-  },
-
-  sheetContainer: {
-    backgroundColor: Colors.white,
-  },
-
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: rs(28),
-    borderTopRightRadius: rs(28),
-
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(12),
-  },
-
-  handle: {
-    alignSelf: "center",
-    width: rs(40),
-    height: rvs(5),
-    borderRadius: rs(5),
-    backgroundColor: Colors.border,
-    marginBottom: rvs(18),
-  },
-
   title: {
     color: Colors.text,
     marginBottom: rvs(8),
@@ -160,8 +111,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
 
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.white,
     borderRadius: rs(18),
+    borderWidth: 1,
+    borderColor: Colors.border,
 
     paddingHorizontal: rs(16),
     paddingVertical: rvs(16),

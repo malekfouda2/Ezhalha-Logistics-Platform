@@ -23,6 +23,7 @@ export const CustomsSummaryCard = ({
   declaredCurrency = "USD",
 }: CustomsSummaryCardProps) => {
   const { t } = useTranslation();
+  const isSar = declaredCurrency === "SAR";
 
   return (
     <View style={styles.card}>
@@ -35,7 +36,13 @@ export const CustomsSummaryCard = ({
         </Text>
 
         <View style={styles.priceRow}>
-          <SaudiRiyal size={rs(20)} />
+          {isSar ? (
+            <SaudiRiyal size={rs(20)} />
+          ) : (
+            <Text size="medium" weight="bold" style={styles.totalPrice}>
+              {declaredCurrency}
+            </Text>
+          )}
 
           <Text size="medium" weight="bold" style={styles.totalPrice}>
             {totalPrice}

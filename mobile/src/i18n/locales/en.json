@@ -1,6 +1,7 @@
 {
   "common": {
-    "tryAgain": "Try again"
+    "tryAgain": "Try again",
+    "loading": "Loading..."
   },
   "tabs": {
     "home": "Home",
@@ -496,6 +497,12 @@
 
           "addPackage": "Add another package",
           "scanDocument": "Scan a document to fill this in",
+          "packingList": "Packing List",
+          "packingListHint": "Upload a packing list or spreadsheet and we will prepare the cartons, total weight, and package count for you.",
+          "packingListSummaryTitle_one": "{{count}} carton imported.",
+          "packingListSummaryTitle_other": "{{count}} cartons imported.",
+          "packingListSummaryWeight": "Total gross weight: {{weight}} {{unit}}.",
+          "packingListSummaryReview": "Please review the imported packages before getting rates.",
 
           "actualWeight": "Actual weight",
           "volumetricWeight": "Volumetric weight",
@@ -532,7 +539,47 @@
           "title": "Customs Details",
           "subtitle": "International only",
           "scanInvoice": "Scan an invoice to fill this in",
-          "addItem": "Add item"
+          "addItem": "Add item",
+          "invoiceLabel": "Commercial Invoice",
+          "invoiceHint": "Upload a commercial invoice and we will prepare the customs items for you.",
+          "invoiceSummaryTitle_one": "{{count}} item imported from your invoice.",
+          "invoiceSummaryTitle_other": "{{count}} items imported from your invoice.",
+          "invoiceSummaryReview": "Please review the imported items before continuing.",
+          "invoiceSummaryAutoMatched_one": "HS code was matched automatically for {{count}} item.",
+          "invoiceSummaryAutoMatched_other": "HS codes were matched automatically for {{count}} items.",
+          "invoiceSummaryNeedsReview_one": "{{count}} item needs HS code review before you continue.",
+          "invoiceSummaryNeedsReview_other": "{{count}} items need HS code review before you continue.",
+          "noItemsYet": "No invoice items available yet.",
+          "itemModal": {
+            "addTitle": "Add Item",
+            "editTitle": "Edit Item",
+            "subtitle": "Fill in the item details for customs clearance",
+            "itemName": "Item Name *",
+            "itemNamePlaceholder": "e.g. Wireless Bluetooth Headphones",
+            "category": "Category *",
+            "countryOfOrigin": "Country of Origin *",
+            "unitPrice": "Unit Price *",
+            "currency": "Currency *",
+            "quantity": "Quantity *",
+            "itemDescription": "Item Description",
+            "itemDescriptionPlaceholder": "Detailed description for customs classification...",
+            "material": "Material",
+            "materialPlaceholder": "e.g. ABS Plastic, Cotton, Stainless Steel",
+            "hsCode": "HS Code",
+            "lookupHsCode": "Lookup HS Code",
+            "lookingUp": "Looking up...",
+            "lookupMissingFieldsTitle": "Missing details",
+            "lookupMissingFieldsMessage": "Please fill in item name, category, and origin country first",
+            "lookupFailedTitle": "HS code lookup failed",
+            "suggestedCodes": "Suggested code",
+            "change": "Change",
+            "enterManually": "Enter manually",
+            "useSuggested": "Use suggested",
+            "hsCodePlaceholder": "Enter HS code (e.g. 847130)",
+            "cancel": "Cancel",
+            "addButton": "Add Item",
+            "updateButton": "Update Item"
+          }
         },
         "step7": {
           "title": "Carrier Pickup",
@@ -540,6 +587,9 @@
           "reviewOrder": "Review order",
           "requestPickup": "Request a pickup",
           "dropOffBranch": "Otherwise drop off at a branch",
+          "sameDayPickupTitle": "Same-day pickup",
+          "sameDayPickupDefaultDate": "Default pickup date: {{date}}",
+          "sameDayPickupRule": "Orders placed before 15:00 (KSA) are picked up the same day; later orders roll to the next business day (Fri/Sat weekend excluded).",
           "pickupDate": "PICKUP DATE",
           "readyBetween": "READY BETWEEN",
           "pickupLocation": "PICKUP LOCATION",

@@ -1,6 +1,7 @@
 {
   "common": {
-    "tryAgain": "حاول مرة أخرى"
+    "tryAgain": "حاول مرة أخرى",
+            "loading": "جارٍ التحميل..."
   },
   "tabs": {
     "home": "الرئيسية",
@@ -498,6 +499,12 @@
 
           "addPackage": "إضافة طرد آخر",
           "scanDocument": "مسح مستند لتعبئة البيانات",
+          "packingList": "قائمة التعبئة",
+          "packingListHint": "قم برفع قائمة تعبئة أو جدول بيانات وسنقوم بتجهيز الطرود والوزن الإجمالي وعدد الطرود نيابةً عنك.",
+          "packingListSummaryTitle_one": "تم استيراد {{count}} طرد.",
+          "packingListSummaryTitle_other": "تم استيراد {{count}} طرود.",
+          "packingListSummaryWeight": "الوزن الإجمالي: {{weight}} {{unit}}.",
+          "packingListSummaryReview": "يرجى مراجعة الطرود المستوردة قبل الحصول على الأسعار.",
 
           "actualWeight": "الوزن الفعلي",
           "volumetricWeight": "الوزن الحجمي",
@@ -534,7 +541,47 @@
           "title": "تفاصيل الجمارك",
           "subtitle": "للشحنات الدولية فقط",
           "scanInvoice": "امسح فاتورة لملء البيانات",
-          "addItem": "إضافة صنف"
+          "addItem": "إضافة صنف",
+          "invoiceLabel": "الفاتورة التجارية",
+          "invoiceHint": "قم برفع فاتورة تجارية وسنقوم بتجهيز أصناف الجمارك نيابةً عنك.",
+          "invoiceSummaryTitle_one": "تم استيراد {{count}} صنف من فاتورتك.",
+          "invoiceSummaryTitle_other": "تم استيراد {{count}} أصناف من فاتورتك.",
+          "invoiceSummaryReview": "يرجى مراجعة الأصناف المستوردة قبل المتابعة.",
+          "invoiceSummaryAutoMatched_one": "تمت مطابقة الرمز الجمركي تلقائيًا لـ {{count}} صنف.",
+          "invoiceSummaryAutoMatched_other": "تمت مطابقة الرموز الجمركية تلقائيًا لـ {{count}} أصناف.",
+          "invoiceSummaryNeedsReview_one": "{{count}} صنف يحتاج إلى مراجعة الرمز الجمركي قبل المتابعة.",
+          "invoiceSummaryNeedsReview_other": "{{count}} أصناف تحتاج إلى مراجعة الرمز الجمركي قبل المتابعة.",
+          "noItemsYet": "لا توجد أصناف فاتورة متاحة بعد.",
+          "itemModal": {
+            "addTitle": "إضافة صنف",
+            "editTitle": "تعديل الصنف",
+            "subtitle": "أدخل تفاصيل الصنف للتخليص الجمركي",
+            "itemName": "اسم الصنف *",
+            "itemNamePlaceholder": "مثال: سماعات بلوتوث لاسلكية",
+            "category": "الفئة *",
+            "countryOfOrigin": "بلد المنشأ *",
+            "unitPrice": "سعر الوحدة *",
+            "currency": "العملة *",
+            "quantity": "الكمية *",
+            "itemDescription": "وصف الصنف",
+            "itemDescriptionPlaceholder": "وصف تفصيلي للتصنيف الجمركي...",
+            "material": "الخامة",
+            "materialPlaceholder": "مثال: بلاستيك ABS، قطن، فولاذ مقاوم للصدأ",
+            "hsCode": "الرمز الجمركي",
+            "lookupHsCode": "البحث عن الرمز الجمركي",
+            "lookingUp": "جارٍ البحث...",
+            "lookupMissingFieldsTitle": "بيانات ناقصة",
+            "lookupMissingFieldsMessage": "يرجى إدخال اسم الصنف والفئة وبلد المنشأ أولاً",
+            "lookupFailedTitle": "فشل البحث عن الرمز الجمركي",
+            "suggestedCodes": "الرمز المقترح",
+            "change": "تغيير",
+            "enterManually": "إدخال يدوي",
+            "useSuggested": "استخدام المقترح",
+            "hsCodePlaceholder": "أدخل الرمز الجمركي (مثال: 847130)",
+            "cancel": "إلغاء",
+            "addButton": "إضافة الصنف",
+            "updateButton": "تحديث الصنف"
+          }
         },
         "step7": {
           "title": "استلام الشحنة من الناقل",
@@ -542,6 +589,9 @@
           "reviewOrder": "مراجعة الطلب",
           "requestPickup": "طلب استلام الشحنة",
           "dropOffBranch": "أو قم بتسليمها إلى أحد الفروع",
+          "sameDayPickupTitle": "الاستلام في نفس اليوم",
+          "sameDayPickupDefaultDate": "تاريخ الاستلام الافتراضي: {{date}}",
+          "sameDayPickupRule": "يتم استلام الطلبات المقدمة قبل الساعة 15:00 (بتوقيت السعودية) في نفس اليوم؛ أما الطلبات المتأخرة فتُحوَّل إلى يوم العمل التالي (باستثناء عطلة نهاية الأسبوع الجمعة والسبت).",
           "pickupDate": "تاريخ الاستلام",
           "readyBetween": "متاح للاستلام بين",
           "pickupLocation": "موقع الاستلام",
