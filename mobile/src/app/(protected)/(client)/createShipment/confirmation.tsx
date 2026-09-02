@@ -1,6 +1,7 @@
 // app/create-shipment/confirmation.tsx
 
-import { StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Feather } from "@expo/vector-icons";
@@ -8,6 +9,7 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import ShipmentFooter from "@/components/sections/createShipment/ShipmentStepFooter";
+import { handleDownloadCarrierLabel, handleDownloadCommercialInvoice } from "@/utils/utils";
 
 type ShipmentType = "express" | "local" | "freight";
 
@@ -15,7 +17,7 @@ type DocAction = {
   key: string;
   label: string;
   icon: keyof typeof Feather.glyphMap;
-  onPress: () => void;
+  onPress: () => void | Promise<void>;
 };
 
 type ShipmentConfig = {
@@ -35,8 +37,11 @@ type ShipmentConfig = {
 function getConfig(
   type: ShipmentType,
   router: ReturnType<typeof useRouter>,
-  t: (key: string) => string
+  t: (key: string) => string,
+  params: { trackingNumber?: string; route?: string; shipmentId?: string },
 ): ShipmentConfig {
+  const shipmentId = params.shipmentId;
+
   switch (type) {
     case "local":
       return {
@@ -45,7 +50,7 @@ function getConfig(
         idLabel: t("createShipment.confirmation.local.idLabel"),
         idValue: "EZH552031884",
         footerTitle: t("createShipment.confirmation.local.footerTitle"),
-        onFooterPress: (r) => r.push("/(tabs)/shipments"),
+        onFooterPress: (r) => r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "",
           status: "",
@@ -55,7 +60,7 @@ function getConfig(
             key: "label",
             label: t("createShipment.confirmation.local.docLabel"),
             icon: "file-text",
-            onPress: () => {},
+            onPress: () => (shipmentId ? handleDownloadCarrierLabel(shipmentId) : undefined),
           },
           {
             key: "track",
@@ -71,11 +76,11 @@ function getConfig(
         title: t("createShipment.confirmation.freight.title"),
         subtitle: t("createShipment.confirmation.freight.subtitle"),
         idLabel: t("createShipment.confirmation.freight.idLabel"),
-        idValue: "DDP-2026-0117",
+        idValue: params.trackingNumber || "DDP-2026-0117",
         footerTitle: t("createShipment.confirmation.freight.footerTitle"),
-        onFooterPress: (r) => r.push("/(tabs)/shipments"),
+        onFooterPress: (r) => (shipmentId ? r.replace(`/shipments/${shipmentId}`) : r.replace("/(tabs)/shipments")),
         cardRow: {
-          left: "Air · China → Riyadh",
+          left: params.route || "Air · China → Riyadh",
           status: t("createShipment.confirmation.freight.statusUnderReview"),
         },
         docActions: undefined,
@@ -89,7 +94,7 @@ function getConfig(
         idLabel: t("createShipment.confirmation.express.idLabel"),
         idValue: "EZH977158300",
         footerTitle: t("createShipment.confirmation.express.footerTitle"),
-        onFooterPress: (r) => r.push("/(tabs)/shipments"),
+        onFooterPress: (r) => r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "FedEx · 7940 5613 3021",
           status: t("createShipment.confirmation.express.statusProcessing"),
@@ -99,13 +104,13 @@ function getConfig(
             key: "label",
             label: t("createShipment.confirmation.express.docLabel"),
             icon: "file-text",
-            onPress: () => {},
+            onPress: () => (shipmentId ? handleDownloadCarrierLabel(shipmentId) : undefined),
           },
           {
             key: "invoice",
             label: t("createShipment.confirmation.express.docInvoice"),
             icon: "file-text",
-            onPress: () => {},
+            onPress: () => (shipmentId ? handleDownloadCommercialInvoice(shipmentId) : undefined),
           },
         ],
       };
@@ -115,15 +120,35 @@ function getConfig(
 export default function ShipmentConfirmationScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const params = useLocalSearchParams<{ type?: string }>();
+  const params = useLocalSearchParams<{
+    type?: string;
+    trackingNumber?: string;
+    route?: string;
+    shipmentId?: string;
+  }>();
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
 
   const type: ShipmentType =
     params.type === "local" || params.type === "freight"
       ? params.type
       : "express";
 
-  const config = getConfig(type, router, t);
+  const config = getConfig(type, router, t, {
+    trackingNumber: params.trackingNumber,
+    route: params.route,
+    shipmentId: params.shipmentId,
+  });
   const showCardRow = config.cardRow.left.length > 0;
+
+  const handleDocPress = async (action: DocAction) => {
+    if (downloadingKey) return;
+    setDownloadingKey(action.key);
+    try {
+      await action.onPress();
+    } finally {
+      setDownloadingKey(null);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -175,12 +200,21 @@ export default function ShipmentConfirmationScreen() {
         {config.docActions && config.docActions.length > 0 && (
           <View style={styles.docRow}>
             {config.docActions.map((action) => (
-              <View key={action.key} style={styles.docButton}>
-                <Feather name={action.icon} size={rs(18)} color={Colors.text} />
+              <Pressable
+                key={action.key}
+                style={({ pressed }) => [styles.docButton, pressed && styles.docButtonPressed]}
+                onPress={() => handleDocPress(action)}
+                disabled={downloadingKey === action.key}
+              >
+                {downloadingKey === action.key ? (
+                  <ActivityIndicator size="small" color={Colors.text} />
+                ) : (
+                  <Feather name={action.icon} size={rs(18)} color={Colors.text} />
+                )}
                 <Text size="medium" weight="bold" style={styles.docLabel}>
                   {action.label}
                 </Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         )}
@@ -304,6 +338,10 @@ const styles = StyleSheet.create({
 
     paddingVertical: rvs(12),
     gap: rs(8),
+  },
+
+  docButtonPressed: {
+    opacity: 0.7,
   },
 
   docLabel: {

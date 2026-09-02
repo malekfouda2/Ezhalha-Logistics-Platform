@@ -12,7 +12,6 @@ import { SavedAddressSelect } from "@/components/sections/createShipment/express
 import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRecipientStep } from "@/lib/hooks/createShipment/express/useRecipientStep";
-import { isStateRequired } from "@/utils/shipmentValidation";
 
 export default function RecipientDetailsScreen() {
   const { t } = useTranslation();
@@ -186,20 +185,18 @@ export default function RecipientDetailsScreen() {
         </View>
       </View>
 
-      {isStateRequired(countryCode) && (
-        <Controller
-          control={control}
-          name="stateOrProvince"
-          render={({ field }) => (
-            <Input
-              placeholder={t("createShipment.express.steps.step3.newAddress.stateOrProvince")}
-              value={field.value}
-              onChangeText={field.onChange}
-              error={errors.stateOrProvince?.message}
-            />
-          )}
-        />
-      )}
+      <Controller
+        control={control}
+        name="stateOrProvince"
+        render={({ field }) => (
+          <Input
+            placeholder={t("createShipment.express.steps.step3.newAddress.stateOrProvince")}
+            value={field.value}
+            onChangeText={field.onChange}
+            error={errors.stateOrProvince?.message}
+          />
+        )}
+      />
 
       {recipientNeedsShortAddress && (
         <Controller

@@ -1,19 +1,29 @@
 import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
-import { useCreateShipmentStore } from "@/store/createShipmentStore";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+
 import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
 import { getSavedCards, SavedCard } from "@/lib/services/payments";
 import { TapCheckoutResult } from "@/components/payments/TapCheckoutWebView";
+import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
+
+function countryLabel(code: string) {
+  return COUNTRY_CODE_SELECT_OPTIONS.find((c) => c.value === code)?.label ?? code;
+}
 
 export function usePaymentStep() {
   const router = useRouter();
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const checkoutData = useCreateShipmentStore((s) => s.checkoutData);
-  const setConfirmData = useCreateShipmentStore((s) => s.setConfirmData);
+  const checkoutData = useDoorToDoorStore((s) => s.checkoutData);
+  const setConfirmData = useDoorToDoorStore((s) => s.setConfirmData);
+  const transportMethod = useDoorToDoorStore((s) => s.transportMethod);
+  const originCountryCode = useDoorToDoorStore((s) => s.originCountryCode);
+  const destinationCountryCode = useDoorToDoorStore((s) => s.destinationCountryCode);
+
   const [isPaying, setIsPaying] = useState(false);
   const [isPayingLater, setIsPayingLater] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -46,44 +56,43 @@ export function usePaymentStep() {
     queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
   };
 
+  const goToConfirmation = () => {
+    const methodLabel = transportMethod === "air" ? "Air" : transportMethod === "sea" ? "Sea" : "Land";
+    const route = `${methodLabel} · ${countryLabel(originCountryCode)} → ${countryLabel(destinationCountryCode)}`;
+    router.push({
+      pathname: "/createShipment/confirmation",
+      params: {
+        type: "freight",
+        trackingNumber: checkoutData?.trackingNumber ?? "",
+        route,
+        shipmentId: checkoutData?.shipmentId ?? "",
+      },
+    });
+  };
+
   const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean) => {
     if (!checkoutData) return;
     setIsPaying(true);
     try {
-      const data = await payShipment({
-        shipmentId: checkoutData.shipmentId,
-        tapTokenId,
-        saveCardForFuture,
-      });
+      const data = await payShipment({ shipmentId: checkoutData.shipmentId, tapTokenId, saveCardForFuture });
 
       if (data.transactionUrl) {
-        // No embedded Tap Card SDK in Expo managed — new/unrecognized cards, and cards
-        // requiring 3D Secure, go through Tap's hosted checkout in a WebView instead.
         setCheckoutWebViewUrl(data.transactionUrl);
         return;
       }
 
       if (["CAPTURED", "AUTHORIZED"].includes(String(data.paymentStatus || "").toUpperCase())) {
         setIsConfirming(true);
-        const confirmed = await confirmShipment({
-          shipmentId: data.shipmentId,
-          paymentIntentId: data.paymentId,
-        });
+        const confirmed = await confirmShipment({ shipmentId: data.shipmentId, paymentIntentId: data.paymentId });
         setConfirmData(confirmed);
         invalidateShipmentQueries();
-        router.push({
-          pathname: "/createShipment/confirmation",
-          params: { type: "express", shipmentId: data.shipmentId },
-        });
+        goToConfirmation();
       }
     } catch (error) {
       Toast.show({
         type: "error",
         text1: t("toast.createShipment.express.payment.errorTitle"),
-        text2:
-          error instanceof Error
-            ? error.message
-            : t("toast.createShipment.express.payment.errorMessage"),
+        text2: error instanceof Error ? error.message : t("toast.createShipment.express.payment.errorMessage"),
       });
     } finally {
       setIsPaying(false);
@@ -122,18 +131,12 @@ export function usePaymentStep() {
       const confirmed = await confirmShipment({ shipmentId: targetShipmentId });
       setConfirmData(confirmed);
       invalidateShipmentQueries();
-      router.push({
-        pathname: "/createShipment/confirmation",
-        params: { type: "express", shipmentId: targetShipmentId },
-      });
+      goToConfirmation();
     } catch (error) {
       Toast.show({
         type: "error",
         text1: t("toast.createShipment.express.payment.errorTitle"),
-        text2:
-          error instanceof Error
-            ? error.message
-            : t("toast.createShipment.express.payment.errorMessage"),
+        text2: error instanceof Error ? error.message : t("toast.createShipment.express.payment.errorMessage"),
       });
     } finally {
       setIsConfirming(false);
@@ -153,18 +156,12 @@ export function usePaymentStep() {
       });
       invalidateShipmentQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
-      router.push({
-        pathname: "/createShipment/confirmation",
-        params: { type: "express", shipmentId: checkoutData.shipmentId },
-      });
+      goToConfirmation();
     } catch (error) {
       Toast.show({
         type: "error",
         text1: t("toast.createShipment.express.payLater.errorTitle"),
-        text2:
-          error instanceof Error
-            ? error.message
-            : t("toast.createShipment.express.payLater.errorMessage"),
+        text2: error instanceof Error ? error.message : t("toast.createShipment.express.payLater.errorMessage"),
       });
     } finally {
       setIsPayingLater(false);

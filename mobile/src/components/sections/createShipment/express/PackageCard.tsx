@@ -21,6 +21,8 @@ interface PackageCardProps {
   onChangeHeight: (v: string) => void;
   onRemove?: () => void;
   removable?: boolean;
+  /** Overrides the "Package" label (e.g. "Pallet" for the door-to-door flow). */
+  label?: string;
 }
 
 export const PackageCard = ({
@@ -37,6 +39,7 @@ export const PackageCard = ({
   onChangeHeight,
   onRemove,
   removable = true,
+  label,
 }: PackageCardProps) => {
   const { t } = useTranslation();
 
@@ -44,7 +47,7 @@ export const PackageCard = ({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text size="small" weight="bold" style={styles.title}>
-          {t("createShipment.express.steps.step4.package")} {index}
+          {label ?? t("createShipment.express.steps.step4.package")} {index}
         </Text>
 
         {removable ? (

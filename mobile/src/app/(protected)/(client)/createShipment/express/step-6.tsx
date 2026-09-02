@@ -3,13 +3,11 @@ import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as DocumentPicker from "expo-document-picker";
 import { Feather } from "@expo/vector-icons";
-
 import { Text } from "@/components/ui/Text";
 import { DocUploadRow } from "@/components/ui/DocumentUpload";
 import { rvs } from "@/utils/responsive";
 import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
 import { CustomsItemCard } from "@/components/sections/createShipment/express/CustomsItemCard";
-import { CustomsSummaryCard } from "@/components/sections/createShipment/express/CustomsSummaryCard";
 import {
   HSCodeOption,
   HSCodeConfirmModal,
@@ -20,8 +18,6 @@ import { useCustomsStep } from "@/lib/hooks/createShipment/express/useCustomsSte
 import { countryCodeToFlag } from "@/utils/utils";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
 import { Colors } from "@/constants/colors";
-
-
 
 function getCountryName(countryCode: string) {
   return (
@@ -198,14 +194,6 @@ export default function CustomsDetailsScreen() {
       />
 
       <View style={styles.summaryGap} />
-
-      <CustomsSummaryCard
-        itemCount={items.length}
-        unitCount={totalUnits}
-        totalPrice={totalPrice}
-        declaredValue={totalPrice}
-        declaredCurrency={items[0]?.currency ?? "SAR"}
-      />
 
       <HSCodeConfirmModal
         visible={activeItemIndex !== null}

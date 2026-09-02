@@ -8,7 +8,6 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DatePickerField } from "@/components/ui/DatePickerField";
-import { ToggleCard } from "@/components/sections/createShipment/ToggleCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
@@ -43,8 +42,6 @@ export default function CarrierPickupScreen() {
     handleContinue,
     handleBack,
   } = usePickupStep();
-
-  const requestPickup = pickup.requested;
 
   const selectedDate =
     pickup.custom && pickup.date ? pickup.date : defaultPickup.date;
@@ -104,72 +101,61 @@ export default function CarrierPickupScreen() {
         </View>
       </View>
 
-      <ToggleCard
-        title={t("createShipment.express.steps.step7.requestPickup")}
-        description={t("createShipment.express.steps.step7.dropOffBranch")}
-        value={requestPickup}
-        onValueChange={(v) => setPickup({ requested: v })}
+      <DatePickerField
+        label={t("createShipment.express.steps.step7.pickupDate")}
+        value={selectedDateValue}
+        minimumDate={minPickupDate}
+        isDateDisabled={(date) => isKsaWeekendDow(date.getDay())}
+        onChange={(date) => setPickup({ custom: true, date: formatDateKey(date) })}
       />
 
-      {requestPickup ? (
-        <>
-          <DatePickerField
-            label={t("createShipment.express.steps.step7.pickupDate")}
-            value={selectedDateValue}
-            minimumDate={minPickupDate}
-            isDateDisabled={(date) => isKsaWeekendDow(date.getDay())}
-            onChange={(date) => setPickup({ custom: true, date: formatDateKey(date) })}
-          />
+      <SectionTitle
+        title={t("createShipment.express.steps.step7.readyBetween")}
+      />
 
-          <SectionTitle
-            title={t("createShipment.express.steps.step7.readyBetween")}
-          />
-
-          <View style={styles.timeRow}>
-            <View style={styles.timeHalf}>
-              <Input
-                value={pickup.readyTime}
-                onChangeText={(v) => setPickup({ readyTime: v })}
-                rightElement={
-                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
-                }
-              />
-            </View>
-
-            <View style={styles.timeHalf}>
-              <Input
-                value={pickup.closeTime}
-                onChangeText={(v) => setPickup({ closeTime: v })}
-                rightElement={
-                  <Feather name="clock" size={rs(18)} color="#8A93A3" />
-                }
-              />
-            </View>
-          </View>
-
-          <SectionTitle
-            title={t("createShipment.express.steps.step7.pickupLocation")}
-          />
-
+      <View style={styles.timeRow}>
+        <View style={styles.timeHalf}>
           <Input
-            placeholder={t(
-              "createShipment.express.steps.step7.locationPlaceholder",
-            )}
-            value={pickup.location}
-            onChangeText={(v) => setPickup({ location: v })}
+            value={pickup.readyTime}
+            onChangeText={(v) => setPickup({ readyTime: v })}
+            rightElement={
+              <Feather name="clock" size={rs(18)} color="#8A93A3" />
+            }
           />
+        </View>
 
+        <View style={styles.timeHalf}>
           <Input
-            placeholder={t(
-              "createShipment.express.steps.step7.instructionsPlaceholder",
-            )}
-            value={pickup.instructions}
-            onChangeText={(v) => setPickup({ instructions: v })}
+            value={pickup.closeTime}
+            onChangeText={(v) => setPickup({ closeTime: v })}
+            rightElement={
+              <Feather name="clock" size={rs(18)} color="#8A93A3" />
+            }
           />
+        </View>
+      </View>
 
-          <InfoBox text={t("createShipment.express.steps.step7.info")} />
-        </>
-      ) : null}
+      <SectionTitle
+        title={t("createShipment.express.steps.step7.pickupLocation")}
+      />
+
+      <Input
+        placeholder={t(
+          "createShipment.express.steps.step7.locationPlaceholder",
+        )}
+        value={pickup.location}
+        onChangeText={(v) => setPickup({ location: v })}
+      />
+
+      <Input
+        placeholder={t(
+          "createShipment.express.steps.step7.instructionsPlaceholder",
+        )}
+        value={pickup.instructions}
+        onChangeText={(v) => setPickup({ instructions: v })}
+      />
+
+      <InfoBox text={t("createShipment.express.steps.step7.info")} />
     </ShipmentStepLayout>
   );
 }

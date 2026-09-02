@@ -1,63 +1,53 @@
+// app/create-shipment/doorToDoor/step-3.tsx
+
 import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Controller } from "react-hook-form";
 
 import { Input } from "@/components/ui/Input";
-import { Text } from "@/components/ui/Text";
-import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
-
-import { rs, rvs } from "@/utils/responsive";
-import { SavedAddressSelect } from "@/components/sections/createShipment/express/SavedAddressSelect";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
+import { SavedAddressSelect } from "@/components/sections/createShipment/express/SavedAddressSelect";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
-import { useSenderStep } from "@/lib/hooks/createShipment/express/useSenderStep";
+import { useRecipientStep } from "@/lib/hooks/createShipment/doorToDoor/useRecipientStep";
+import { rs } from "@/utils/responsive";
+import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
 
-export default function SenderDetailsScreen() {
+function countryLabel(code: string) {
+  return COUNTRY_CODE_SELECT_OPTIONS.find((c) => c.value === code)?.label ?? code;
+}
+
+export default function RecipientDetailsScreen() {
   const { t } = useTranslation();
 
   const {
     form,
-    handleContinue,
-    savedSenderAddresses,
+    destinationCountryCode,
+    savedRecipientAddresses,
     isLoadingAddresses,
     applySavedAddress,
     selectedAddressId,
-  } = useSenderStep();
+    handleContinue,
+    handleBack,
+  } = useRecipientStep();
 
-  const {
-    control,
-    watch,
-    formState: { errors },
-  } = form;
-  const countryCode = watch("countryCode");
-  const senderNeedsShortAddress = countryCode === "SA";
+  const { control, formState: { errors } } = form;
+  const recipientNeedsShortAddress = destinationCountryCode === "SA";
 
   return (
     <ShipmentStepLayout
-      step={2}
-      totalSteps={8}
-      title={t("createShipment.express.steps.step2.title")}
-      subtitle={t("createShipment.express.steps.step2.subtitle")}
+      step={3}
+      totalSteps={9}
+      title={t("createShipment.freight.steps.step3.title")}
+      subtitle={t("createShipment.freight.steps.step3.subtitle", { country: countryLabel(destinationCountryCode) })}
       onContinue={handleContinue}
+      onBack={handleBack}
     >
-      <SectionTitle
-        title={t("createShipment.express.steps.step2.savedAddresses.title")}
-      />
-
-      <Text size="small" style={styles.description}>
-        {t("createShipment.express.steps.step2.savedAddresses.description")}
-      </Text>
-
       <SavedAddressSelect
-        title={t("createShipment.express.steps.step2.savedAddresses.title")}
-        placeholder={t(
-          "createShipment.express.steps.step2.savedAddresses.placeholder",
-        )}
-        emptyText={t(
-          "createShipment.express.steps.step2.savedAddresses.empty",
-        )}
-        addresses={savedSenderAddresses}
+        title={t("createShipment.freight.steps.step3.savedRecipients.title")}
+        placeholder={t("createShipment.freight.steps.step3.savedRecipients.placeholder")}
+        emptyText={t("createShipment.freight.steps.step3.savedRecipients.empty")}
+        addresses={savedRecipientAddresses}
         isLoading={isLoadingAddresses}
         selectedAddressId={selectedAddressId}
         onSelect={applySavedAddress}
@@ -65,33 +55,14 @@ export default function SenderDetailsScreen() {
 
       <View style={styles.selectGap} />
 
-      <SectionTitle
-        title={t("createShipment.express.steps.step2.newAddress")}
-      />
-
-      <Controller
-        control={control}
-        name="countryCode"
-        render={({ field }) => (
-          <CountrySelect
-            value={field.value}
-            onChange={(selected) => {
-              field.onChange(selected.code);
-              form.setValue("country", selected.name, { shouldValidate: true });
-            }}
-            placeholder={t("createShipment.express.steps.step2.country")}
-            title={t("createShipment.express.steps.step2.country")}
-            error={errors.countryCode?.message}
-          />
-        )}
-      />
+      <SectionTitle title={t("createShipment.freight.steps.step3.newAddress")} />
 
       <Controller
         control={control}
         name="name"
         render={({ field }) => (
           <Input
-            placeholder={t("createShipment.express.steps.step2.senderFullName")}
+            placeholder={t("createShipment.freight.steps.step3.recipientName")}
             value={field.value}
             onChangeText={field.onChange}
             autoCapitalize="words"
@@ -102,26 +73,9 @@ export default function SenderDetailsScreen() {
 
       <Controller
         control={control}
-        name="company"
-        render={({ field }) => (
-          <Input
-            placeholder={t("createShipment.express.steps.step2.senderCompany")}
-            value={field.value}
-            onChangeText={field.onChange}
-            autoCapitalize="words"
-          />
-        )}
-      />
-
-      <Controller
-        control={control}
         name="phone"
         render={({ field }) => (
-          <PhoneInput
-            value={field.value}
-            onChangeValue={field.onChange}
-            error={errors.phone?.message}
-          />
+          <PhoneInput value={field.value} onChangeValue={field.onChange} error={errors.phone?.message} />
         )}
       />
 
@@ -130,7 +84,7 @@ export default function SenderDetailsScreen() {
         name="email"
         render={({ field }) => (
           <Input
-            placeholder="Sender@example.com"
+            placeholder={t("createShipment.freight.steps.step3.email")}
             value={field.value}
             onChangeText={field.onChange}
             keyboardType="email-address"
@@ -145,7 +99,7 @@ export default function SenderDetailsScreen() {
         name="addressLine1"
         render={({ field }) => (
           <Input
-            placeholder={t("createShipment.express.steps.step2.addressLine1")}
+            placeholder={t("createShipment.freight.steps.step3.addressLine1")}
             value={field.value}
             onChangeText={field.onChange}
             error={errors.addressLine1?.message}
@@ -158,7 +112,7 @@ export default function SenderDetailsScreen() {
         name="addressLine2"
         render={({ field }) => (
           <Input
-            placeholder={t("createShipment.express.steps.step2.addressLine2")}
+            placeholder={t("createShipment.freight.steps.step3.addressLine2")}
             value={field.value}
             onChangeText={field.onChange}
           />
@@ -172,7 +126,7 @@ export default function SenderDetailsScreen() {
             name="city"
             render={({ field }) => (
               <Input
-                placeholder={t("createShipment.express.steps.step2.city")}
+                placeholder={t("createShipment.freight.steps.step3.city")}
                 value={field.value}
                 onChangeText={field.onChange}
                 error={errors.city?.message}
@@ -187,7 +141,7 @@ export default function SenderDetailsScreen() {
             name="postalCode"
             render={({ field }) => (
               <Input
-                placeholder={t("createShipment.express.steps.step2.postalCode")}
+                placeholder={t("createShipment.freight.steps.step3.postalCode")}
                 value={field.value}
                 onChangeText={field.onChange}
                 keyboardType="number-pad"
@@ -203,9 +157,7 @@ export default function SenderDetailsScreen() {
         name="stateOrProvince"
         render={({ field }) => (
           <Input
-            placeholder={t(
-              "createShipment.express.steps.step2.stateOrProvince",
-            )}
+            placeholder={t("createShipment.freight.steps.step3.stateOrProvince")}
             value={field.value}
             onChangeText={field.onChange}
             error={errors.stateOrProvince?.message}
@@ -213,15 +165,13 @@ export default function SenderDetailsScreen() {
         )}
       />
 
-      {senderNeedsShortAddress && (
+      {recipientNeedsShortAddress && (
         <Controller
           control={control}
           name="shortAddress"
           render={({ field }) => (
             <Input
-              placeholder={t(
-                "createShipment.express.steps.step2.shortAddress",
-              )}
+              placeholder={t("createShipment.freight.steps.step3.shortAddress")}
               value={field.value ?? ""}
               onChangeText={field.onChange}
               autoCapitalize="characters"
@@ -237,6 +187,5 @@ export default function SenderDetailsScreen() {
 const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: rs(18) },
   half: { flex: 1 },
-  description: { color: "#687994", marginBottom: rvs(12) },
-  selectGap: { height: rvs(20) },
+  selectGap: { height: rs(20) },
 });

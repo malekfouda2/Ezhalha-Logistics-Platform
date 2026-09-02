@@ -416,11 +416,11 @@
             },
             "import": {
               "title": "Import",
-              "description": "Into Saudi Arabia (inbound)"
+              "description": "International shipping into a country (inbound)"
             },
             "export": {
               "title": "Export",
-              "description": "Out of Saudi Arabia (outbound)"
+              "description": "International shipping out of a country (outbound)"
             }
           },
           "currency": {
@@ -448,7 +448,7 @@
           "senderCompany": "Sender company",
           "addressLine2": "Address Line 2",
           "country": "Select country",
-          "stateOrProvince": "State / Province",
+          "stateOrProvince": "State / Province (optional)",
           "shortAddress": "National Address (e.g. RCTB4359)"
         },
         "step3": {
@@ -476,7 +476,7 @@
             "recipientCompany": "Recipient company",
             "addressLine1": "Address line 1",
             "addressLine2": "Address Line 2",
-            "stateOrProvince": "State / Province",
+            "stateOrProvince": "State / Province (optional)",
             "shortAddress": "National Address (e.g. RCTB4359)"
           },
 
@@ -677,7 +677,132 @@
 
     "freight": {
       "title": "Door To Door Freight",
-      "description": "Import with all duties & taxes prepaid on fixed lane pricing."
+      "description": "Import with all duties & taxes prepaid on fixed lane pricing.",
+      "steps": {
+        "step1": {
+          "title": "Shipment method",
+          "subtitle": "Door To Door Freight",
+          "air": { "title": "Air", "subtitle": "5–8 days" },
+          "sea": { "title": "Sea", "subtitle": "25–35 days" },
+          "info": "Duties and taxes are prepaid — the recipient pays nothing on arrival."
+        },
+        "step2": {
+          "title": "Origin country",
+          "subtitle": "Fixed lane pricing",
+          "originPlaceholder": "Select an origin country",
+          "originEmpty": "No active lanes for this shipment method yet. Please contact support.",
+          "availableLanes": "AVAILABLE LANES",
+          "laneFixedPricing": "Fixed lane pricing — confirmed once package details are entered",
+          "info": "Lane rates are agreed in advance and don't change per shipment.",
+          "selectOrigin": "Select an origin country to continue."
+        },
+        "step3": {
+          "title": "Recipient details",
+          "subtitle": "Delivery in {{country}}",
+          "savedRecipients": {
+            "title": "SAVED RECIPIENTS",
+            "placeholder": "Select a saved recipient address",
+            "empty": "No saved recipient addresses yet."
+          },
+          "newAddress": "OR ENTER A NEW ADDRESS",
+          "recipientName": "Recipient name",
+          "phone": "Phone",
+          "email": "Email (optional)",
+          "addressLine1": "Address line 1",
+          "addressLine2": "Address Line 2",
+          "city": "City",
+          "postalCode": "Postal code",
+          "shortAddress": "National Address (e.g. RCTB4359)",
+          "stateOrProvince": "State / Province (optional)"
+        },
+        "step4": {
+          "title": "Supplier details",
+          "subtitle": "Who we collect from",
+          "supplierName": "Supplier name",
+          "supplierPhone": "Supplier phone",
+          "factoryAddress": "Factory address (optional)",
+          "info": "We contact the supplier directly to arrange collection."
+        },
+        "step5": {
+          "title": "Package details",
+          "subtitle": "Cargo",
+          "packageLabel": "Package",
+          "addPackageButton": "Add package",
+          "totalVolume": "Total volume",
+          "totalWeight": "Total weight",
+          "totalCbm": "Total volume (CBM)",
+          "getRate": "Get rate",
+          "gettingRate": "Calculating...",
+          "addPackage": "Add at least one package.",
+          "enterVolume": "Enter the shipment volume in CBM.",
+          "completeDimensions": "Enter weight and dimensions for every package.",
+          "rateErrorTitle": "Could not calculate the rate",
+          "rateErrorMessage": "Please review the route and package details."
+        },
+        "step6": {
+          "title": "Select rate",
+          "subtitle": "{{method}} freight",
+          "doorToDoor": "door to door",
+          "days": "{{min}}–{{max}} days · duties prepaid",
+          "dutiesPrepaid": "Duties prepaid",
+          "chargeableWeight": "Chargeable weight",
+          "laneRate": "Lane rate",
+          "dutiesClearance": "Duties & clearance",
+          "included": "Included",
+          "estimated": "Estimated"
+        },
+        "step7": {
+          "title": "Documents",
+          "subtitle": "Required for clearance",
+          "commercialInvoice": "Commercial invoice",
+          "required": "Required",
+          "packingList": "Packing list",
+          "recommended": "Recommended",
+          "uploaded": "Uploaded",
+          "upload": "Upload",
+          "info": "Missing documents are the most common cause of clearance delays.",
+          "invoiceRequired": "Upload a commercial invoice before continuing.",
+          "itemsRequired": "We could not read any items from your invoice. Please upload a clearer file.",
+          "tooLarge": "File is too large to upload.",
+          "invoiceItems": "Invoice items",
+          "addItem": "Add item",
+          "noItemsYet": "Upload a commercial invoice, or add an item manually.",
+          "itemName": "Item name",
+          "category": "Category",
+          "origin": "Origin",
+          "quantity": "Qty",
+          "price": "Price",
+          "hsCode": "HS code"
+        },
+        "step8": {
+          "title": "Notes & terms",
+          "subtitle": "",
+          "notesLabel": "NOTES FOR OUR TEAM",
+          "notesPlaceholder": "Anything we should know...",
+          "acceptCustoms": "I confirm that the shipment contents are accurate and comply with customs regulations and import laws.",
+          "acceptTermsPrefix": "I agree to Ezhalha's",
+          "acceptTermsLink": "Terms & Conditions",
+          "acceptTermsAnd": "and",
+          "acceptShippingLink": "Shipping & Return Policy",
+          "acceptBroker": "I authorize Ezhalha to act as my customs broker and clearance agent for this shipment.",
+          "info": "Final price is confirmed by our team after the cargo is measured at origin.",
+          "acceptRequired": "Please accept all three confirmations to continue.",
+          "checkoutErrorTitle": "Could not prepare checkout",
+          "checkoutErrorMessage": "Please review your shipment details."
+        },
+        "step9": {
+          "title": "Payment options",
+          "subtitle": "Order summary",
+          "freight": "Freight",
+          "dutiesClearance": "Duties & clearance",
+          "included": "Included",
+          "vat": "VAT (15%)",
+          "total": "Total",
+          "payWith": "PAY WITH",
+          "pay": "Pay",
+          "footerNote": "Booked with our team after payment"
+        }
+      }
     },
     "local": {
       "title": "Local Delivery",
@@ -778,6 +903,9 @@
       "errorTitle": "Password change failed",
       "invalidToken": "This password reset link is invalid or has expired.",
       "errorMessage": "Unable to change your password. Please try again."
+    },
+    "error": {
+      "title": "Something went wrong"
     },
     "shipmentValidation": {
       "formInvalidTitle": "Please check the highlighted fields",
