@@ -614,6 +614,9 @@
 
       "payment": {
         "comingSoon": "Coming soon",
+        "checkout": {
+          "title": "Secure Payment"
+        },
         "savedCard": {
           "title": "Saved card"
         },
@@ -626,7 +629,14 @@
         },
         "payLater": {
           "title": "Pay later · 30 days",
-          "creditAvailable": "credit available"
+          "creditAvailable": "credit available",
+          "description": "Create your shipment now and receive an invoice with 30-day payment terms. You will receive email reminders before the due date.",
+          "noAccess": {
+            "heading": "Credit / Pay Later",
+            "pending": "Your credit access request is pending review. You will be notified once it is approved.",
+            "rejected": "Your credit access request was not approved. Please contact support for more information.",
+            "notEnabled": "Credit / Pay Later is not enabled for your account. You can request access from your Billing page."
+          }
         }
       },
       "days": {
@@ -830,7 +840,9 @@
         },
         "payment": {
           "errorTitle": "Payment failed",
-          "errorMessage": "Please try again."
+          "errorMessage": "Please try again.",
+          "pendingTitle": "Payment pending",
+          "pendingMessage": "Your payment is being processed."
         },
         "payLater": {
           "errorTitle": "Failed to process Pay Later",

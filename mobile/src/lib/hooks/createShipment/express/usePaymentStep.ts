@@ -2,10 +2,11 @@ import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 import { useCreateShipmentStore } from "@/store/createShipmentStore";
-import { useState } from "react";
-import { Linking } from "react-native";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { payShipment, confirmShipment, payLater } from "@/lib/services/createShipment";
+import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
+import { getSavedCards, SavedCard } from "@/lib/services/payments";
+import { TapCheckoutResult } from "@/components/payments/TapCheckoutWebView";
 
 export function usePaymentStep() {
   const router = useRouter();
@@ -16,6 +17,26 @@ export function usePaymentStep() {
   const [isPaying, setIsPaying] = useState(false);
   const [isPayingLater, setIsPayingLater] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [creditAccess, setCreditAccess] = useState<CreditAccessResponse | null>(null);
+  const [checkoutWebViewUrl, setCheckoutWebViewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSavedCards()
+      .then((cards) => {
+        if (!cancelled) setSavedCards(cards.filter((c) => c.status === "active"));
+      })
+      .catch(() => undefined);
+    getCreditAccess()
+      .then((access) => {
+        if (!cancelled) setCreditAccess(access);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const invalidateShipmentQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
@@ -25,7 +46,7 @@ export function usePaymentStep() {
     queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
   };
 
-  const handlePayNow = async (tapTokenId: string, saveCardForFuture?: boolean) => {
+  const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean) => {
     if (!checkoutData) return;
     setIsPaying(true);
     try {
@@ -36,7 +57,9 @@ export function usePaymentStep() {
       });
 
       if (data.transactionUrl) {
-        await Linking.openURL(data.transactionUrl);
+        // No embedded Tap Card SDK in Expo managed — new/unrecognized cards, and cards
+        // requiring 3D Secure, go through Tap's hosted checkout in a WebView instead.
+        setCheckoutWebViewUrl(data.transactionUrl);
         return;
       }
 
@@ -61,6 +84,52 @@ export function usePaymentStep() {
       });
     } finally {
       setIsPaying(false);
+      setIsConfirming(false);
+    }
+  };
+
+  const closeCheckoutWebView = () => setCheckoutWebViewUrl(null);
+
+  const handleCheckoutWebViewResult = async ({ status, shipmentId, message }: TapCheckoutResult) => {
+    setCheckoutWebViewUrl(null);
+
+    if (status === "failed") {
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.payment.errorTitle"),
+        text2: message || t("toast.createShipment.express.payment.errorMessage"),
+      });
+      return;
+    }
+
+    if (status === "pending") {
+      Toast.show({
+        type: "info",
+        text1: t("toast.createShipment.express.payment.pendingTitle"),
+        text2: t("toast.createShipment.express.payment.pendingMessage"),
+      });
+      return;
+    }
+
+    const targetShipmentId = shipmentId || checkoutData?.shipmentId;
+    if (!targetShipmentId) return;
+
+    setIsConfirming(true);
+    try {
+      const confirmed = await confirmShipment({ shipmentId: targetShipmentId });
+      setConfirmData(confirmed);
+      invalidateShipmentQueries();
+      router.push({ pathname: "/createShipment/confirmation", params: { type: "express" } });
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: t("toast.createShipment.express.payment.errorTitle"),
+        text2:
+          error instanceof Error
+            ? error.message
+            : t("toast.createShipment.express.payment.errorMessage"),
+      });
+    } finally {
       setIsConfirming(false);
     }
   };
@@ -95,5 +164,18 @@ export function usePaymentStep() {
 
   const handleBack = () => router.back();
 
-  return { checkoutData, isPaying, isPayingLater, isConfirming, handlePayNow, handlePayLater, handleBack };
+  return {
+    checkoutData,
+    isPaying,
+    isPayingLater,
+    isConfirming,
+    savedCards,
+    creditAccess,
+    checkoutWebViewUrl,
+    handlePayNow,
+    handlePayLater,
+    handleBack,
+    closeCheckoutWebView,
+    handleCheckoutWebViewResult,
+  };
 }

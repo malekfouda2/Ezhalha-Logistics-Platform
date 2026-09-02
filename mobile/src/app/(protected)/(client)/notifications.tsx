@@ -122,6 +122,7 @@ export default function NotificationsScreen() {
     openNotification,
     refetch,
   } = useNotifications();
+console.log({notifications});
 
   const handleActionUrl = (actionUrl: string) => {
     try {
@@ -144,6 +145,12 @@ export default function NotificationsScreen() {
       case "quotation_created": {
         if (notification.entityType === "shipment" && notification.entityId) {
           router.push(`/shipments/${notification.entityId}/quotation` as any);
+        }
+        return;
+      }
+      case "shipment_milestone": {
+        if (notification.entityType === "shipment" && notification.entityId) {
+          router.push(`/shipments/${notification.entityId}` as any);
         }
         return;
       }

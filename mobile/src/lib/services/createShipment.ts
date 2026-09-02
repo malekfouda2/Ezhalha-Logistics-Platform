@@ -99,10 +99,7 @@ export async function payShipment(payload: {
 }) {
     return apiRequest<PayShipmentResponse>("/api/client/shipments/pay", {
         method: "POST",
-        body: {
-            ...payload,
-            returnPath: "/createShipment/express",
-        },
+        body: payload,
     });
 }
 
@@ -126,6 +123,18 @@ export interface PayLaterResponse {
 export async function payLater(shipmentId: string) {
     return apiRequest<PayLaterResponse>(`/api/client/shipments/${shipmentId}/pay-later`, {
         method: "POST",
+    });
+}
+
+export interface CreditAccessResponse {
+    creditEnabled: boolean;
+    request: { status: "pending" | "approved" | "rejected" } | null;
+    availableCreditSar: number | null;
+}
+
+export async function getCreditAccess() {
+    return apiRequest<CreditAccessResponse>("/api/client/credit-access", {
+        method: "GET",
     });
 }
 
