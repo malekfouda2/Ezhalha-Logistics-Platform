@@ -49,16 +49,19 @@ export function ShipmentStepLayout({
         onBack={handleBack}
       />
 
-      <KeyboardAwareScreen contentContainerStyle={styles.scrollContent}>
+      <KeyboardAwareScreen
+        contentContainerStyle={styles.scrollContent}
+        footer={
+          <ShipmentStepFooter
+            title={continueLabel}
+            onPress={onContinue}
+            footerNote={footerNote}
+            loading={loading}
+          />
+        }
+      >
         {children}
       </KeyboardAwareScreen>
-
-      <ShipmentStepFooter
-        title={continueLabel}
-        onPress={onContinue}
-        footerNote={footerNote}
-        loading={loading}
-      />
     </View>
   );
 }

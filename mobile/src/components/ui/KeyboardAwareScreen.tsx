@@ -8,7 +8,6 @@ import {
   ScrollViewProps,
   ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "@/constants/colors";
 export interface KeyboardAwareScreenProps {
   children: ReactNode;
@@ -16,14 +15,15 @@ export interface KeyboardAwareScreenProps {
   scrollViewProps?: Partial<ScrollViewProps>;
   backgroundColor?: string;
   keyboardVerticalOffset?: number;
+  footer?: ReactNode;
 }
 
 export const KeyboardAwareScreen = ({
   children,
   contentContainerStyle,
   scrollViewProps,
-  backgroundColor = Colors.background,
   keyboardVerticalOffset = 20,
+  footer,
 }: KeyboardAwareScreenProps) => {
   return (
       <KeyboardAvoidingView
@@ -42,14 +42,12 @@ export const KeyboardAwareScreen = ({
         >
           {children}
         </ScrollView>
+        {footer}
       </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
   flex: {
     flex: 1,
   },

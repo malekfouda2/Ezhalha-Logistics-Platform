@@ -1,20 +1,13 @@
 // components/ui/BottomSheet.tsx
-import { ReactNode, useEffect, useState } from "react";
-import {
-  Modal,
-  View,
-  StyleSheet,
-  Pressable,
-  Keyboard,
-  KeyboardEvent,
-  Platform,
-} from "react-native";
+import { ReactNode } from "react";
+import { Modal, View, StyleSheet, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import Toast from "react-native-toast-message";
 import toastConfig from "./AppToast";
+import { useKeyboardHeight } from "@/lib/hooks/useKeyboardHeight";
 
 interface BottomSheetProps {
   visible: boolean;
@@ -24,25 +17,7 @@ interface BottomSheetProps {
 
 export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-  // KeyboardAvoidingView measures its position via onLayout, which is
-  // unreliable inside a Modal's separate native layer (and Android gets no
-  // avoidance at all with behavior=undefined) — so shift the sheet manually
-  // by the real keyboard height instead, which works the same on both
-  // platforms regardless of how the Modal's window handles resize.
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvent, (e: KeyboardEvent) =>
-      setKeyboardHeight(e.endCoordinates?.height ?? 0),
-    );
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
+  const keyboardHeight = useKeyboardHeight();
 
   return (
     <Modal

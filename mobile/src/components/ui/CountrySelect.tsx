@@ -7,6 +7,7 @@ import {
   I18nManager,
   TextInput,
   FlatList,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
@@ -17,6 +18,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Typography } from "@/constants/typography";
 import { normalizeCountryCode, COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
+import { useKeyboardHeight } from "@/lib/hooks/useKeyboardHeight";
 
 
 
@@ -44,6 +46,12 @@ export const CountrySelect = ({
   const [query, setQuery] = useState("");
 
   const isRTL = I18nManager.isRTL;
+  const { height: screenHeight } = useWindowDimensions();
+  const keyboardHeight = useKeyboardHeight();
+  // Keep the usual 75%-of-screen sheet, but never let it (plus the shift
+  // below) push past the top of the screen once the keyboard eats into
+  // the remaining space.
+  const sheetHeight = Math.min(screenHeight * 0.75, screenHeight - keyboardHeight);
 
   const selectedCountry = useMemo(() => {
     const code = normalizeCountryCode(value);
@@ -119,7 +127,12 @@ export const CountrySelect = ({
             onPress={() => setVisible(false)}
           />
 
-          <SafeAreaView style={styles.sheet}>
+          <SafeAreaView
+            style={[
+              styles.sheet,
+              { height: sheetHeight, marginBottom: keyboardHeight },
+            ]}
+          >
             <View style={styles.sheetHeader}>
               <Text size="large" weight="bold">
                 {title}

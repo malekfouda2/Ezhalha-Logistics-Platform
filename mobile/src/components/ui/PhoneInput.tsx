@@ -7,6 +7,7 @@ import {
   I18nManager,
   Modal,
   FlatList,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,6 +16,7 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { Typography } from "@/constants/typography";
 import { rs, rvs } from "@/utils/responsive";
+import { useKeyboardHeight } from "@/lib/hooks/useKeyboardHeight";
 
 import {
   COUNTRY_DIAL_OPTIONS,
@@ -46,6 +48,12 @@ export const PhoneInput = ({
   const [query, setQuery] = useState("");
 
   const isRTL = I18nManager.isRTL;
+  const { height: screenHeight } = useWindowDimensions();
+  const keyboardHeight = useKeyboardHeight();
+  // Keep the usual 75%-of-screen sheet, but never let it (plus the shift
+  // below) push past the top of the screen once the keyboard eats into
+  // the remaining space.
+  const sheetHeight = Math.min(screenHeight * 0.75, screenHeight - keyboardHeight);
 
   /**
    * Parse the externally stored phone number.
@@ -256,7 +264,12 @@ export const PhoneInput = ({
           />
 
           {/* Bottom Sheet */}
-          <SafeAreaView style={styles.sheet}>
+          <SafeAreaView
+            style={[
+              styles.sheet,
+              { height: sheetHeight, marginBottom: keyboardHeight },
+            ]}
+          >
             {/* Header */}
             <View style={styles.sheetHeader}>
               <Text size="large" weight="bold">
