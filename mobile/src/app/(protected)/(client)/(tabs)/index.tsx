@@ -96,7 +96,7 @@ export default function ClientDashboard() {
 
   return (
     <RefreshableScreen contentContainerStyle={styles.content}>
-      <LanguageSwitch />
+      {/* <LanguageSwitch /> */}
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
