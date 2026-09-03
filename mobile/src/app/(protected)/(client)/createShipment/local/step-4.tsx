@@ -6,7 +6,7 @@ import { Colors } from "@/constants/colors";
 import { rs } from "@/utils/responsive";
 import { RateOptionCard } from "@/components/sections/createShipment/RateOptionCard";
 import { SaudiRiyal } from "lucide-react-native";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useLocalRatesStep } from "@/lib/hooks/createShipment/local/useRatesStep";
 

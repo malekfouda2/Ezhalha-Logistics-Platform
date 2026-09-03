@@ -1,13 +1,15 @@
 // components/shipment/ShipmentStepHeader.tsx
 
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { BackButton } from "@/components/ui/BackButton";
 import { useTranslation } from "react-i18next";
+import { BackButton } from "@/components/ui/BackButton";
 
 interface ShipmentStepHeaderProps {
   step: number;
@@ -22,27 +24,38 @@ export const ShipmentStepHeader = ({
   totalSteps = 9,
   title,
   subtitle,
-  onBack,
 }: ShipmentStepHeaderProps) => {
-    const { t } = useTranslation();
-  
+  const { t } = useTranslation();
+  const router = useRouter();
+  const handleClose = () => router.replace("/createShipment");
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <BackButton />
 
         <View style={styles.titleContainer}>
-          <Text
-            size="medium"
-            weight="bold"
-            numberOfLines={1}
-            style={styles.title}
-          >
-            {title}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text
+              size="medium"
+              weight="bold"
+              numberOfLines={1}
+              style={styles.title}
+            >
+              {title}
+            </Text>
+
+            <Pressable
+              onPress={handleClose}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close" size={rs(22)} color={Colors.text} />
+            </Pressable>
+          </View>
 
           <Text size="xs" weight="semibold" style={styles.subtitle}>
-            {t("createShipment.express.common.step")} {step} {t("createShipment.express.common.of")} {totalSteps} · {subtitle}
+            {t("createShipment.express.common.step")} {step}{" "}
+            {t("createShipment.express.common.of")} {totalSteps} · {subtitle}
           </Text>
         </View>
       </View>
@@ -59,6 +72,7 @@ export const ShipmentStepHeader = ({
           );
         })}
       </View>
+
     </View>
   );
 };
@@ -76,24 +90,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  backButton: {
-    width: rs(68),
-    height: rvs(68),
-    borderRadius: rs(20),
-    backgroundColor: Colors.white,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    borderWidth: 1,
-    borderColor: Colors.border,
-
-    marginEnd: rs(20),
-  },
-
   titleContainer: {
     flex: 1,
     marginStart: rs(10),
+  },
+
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: rs(10),
   },
 
   title: {

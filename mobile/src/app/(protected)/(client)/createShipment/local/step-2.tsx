@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { PhoneInput } from "@/components/ui/PhoneInput";
 
 import { rs, rvs } from "@/utils/responsive";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useLocalRecipientStep } from "@/lib/hooks/createShipment/local/useRecipientStep";
 

@@ -20,7 +20,7 @@ import {
   packageTypes,
   weightUnitOptions,
 } from "@/constants/packageOptions";
-import { DashedActionButton } from "@/components/sections/createShipment/DashedActionButton";
+import { DashedActionButton } from "@/components/ui/DashedActionButton";
 import { Colors } from "@/constants/colors";
 
 export default function PackageDetailsScreen() {

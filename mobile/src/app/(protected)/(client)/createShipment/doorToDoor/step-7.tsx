@@ -8,7 +8,7 @@ import { Text } from "@/components/ui/Text";
 import { DocUploadRow } from "@/components/ui/DocumentUpload";
 import { InvoiceItemRow } from "@/components/sections/createShipment/doorToDoor/InvoiceItemRow";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useDocumentsStep } from "@/lib/hooks/createShipment/doorToDoor/useDocumentsStep";
 import { Colors } from "@/constants/colors";

@@ -62,7 +62,7 @@ export function InfoCard({
 export function InfoRow({
   label,
   value,
-  valueSize = "medium",
+  valueSize = "small",
   valueWeight = "bold",
   valueColor,
   labelSize = "small",

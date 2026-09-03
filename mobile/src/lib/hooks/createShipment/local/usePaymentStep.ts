@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCreateLocalShipmentStore } from "@/store/createLocalShipmentStore";
 import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
 import { getSavedCards, SavedCard } from "@/lib/services/payments";
-import { TapCheckoutResult } from "@/components/payments/TapCheckoutWebView";
+import { TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
 
 export function useLocalPaymentStep() {
   const router = useRouter();

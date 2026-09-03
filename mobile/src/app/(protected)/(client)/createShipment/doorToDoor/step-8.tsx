@@ -7,7 +7,7 @@ import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
 import { AcceptCheckboxRow } from "@/components/sections/createShipment/doorToDoor/AcceptCheckboxRow";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useNotesStep } from "@/lib/hooks/createShipment/doorToDoor/useNotesStep";
 import { API_BASE_URL } from "@/api/client";

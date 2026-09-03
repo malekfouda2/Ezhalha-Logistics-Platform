@@ -1064,5 +1064,144 @@
         }
       }
     }
+  },
+  "invoices": {
+    "tabs": {
+      "all": "All",
+      "pending": "Pending",
+      "paid": "Paid"
+    },
+    "outstandingBalance": "Outstanding balance",
+    "invoicesOpen": "Invoices",
+    "invoicesOpenCount": "{{count}} open",
+    "nextDue": "Next due",
+    "overdue": "Overdue",
+    "none": "None",
+    "issued": "Issued {{date}} · due {{dueDate}}",
+    "paidOn": "Paid {{date}}",
+    "payNow": "Pay now",
+    "creditBillingLink": "Credit / Billing",
+    "empty": {
+      "title": "No invoices yet",
+      "description": "Invoices for your shipments will show up here."
+    },
+    "errors": {
+      "loadFailed": "Couldn't load your invoices."
+    },
+    "confirmPayment": {
+      "title": "Confirm Payment",
+      "invoice": "Invoice",
+      "due": "Due",
+      "amount": "Amount",
+      "payWith": "Pay with",
+      "newCard": "New card",
+      "newCardSubtitle": "Pay with a different card",
+      "pay": "Pay {{amount}}",
+      "successTitle": "Payment successful",
+      "successMessage": "Invoice {{number}} has been paid.",
+      "errorTitle": "Payment failed",
+      "errorMessage": "Please try again.",
+      "pendingTitle": "Payment pending",
+      "pendingMessage": "Your payment is being processed."
+    },
+    "creditBilling": {
+      "title": "Credit / Billing",
+      "subtitle": "30-day payment terms",
+      "tabs": {
+        "all": "All",
+        "unpaid": "Unpaid",
+        "overdue": "Overdue",
+        "paid": "Paid"
+      },
+      "availableCredit": "Available credit",
+      "limit": "Limit",
+      "used": "Used",
+      "nextDue": "Next due",
+      "creditInvoices": "Credit Invoices",
+      "due": "Due {{date}}",
+      "daysLeft": "{{count}} days",
+      "dueToday": "Due today",
+      "overdueBy": "{{count}}d overdue",
+      "lateNotice": "Late invoices pause pay-later on new shipments until settled.",
+      "pay": "Pay {{amount}}",
+      "empty": "No credit invoices yet.",
+      "settleNoticeTitle": "Handled by our billing team",
+      "settleNotice": "Credit invoices are settled automatically. Contact support to pay early.",
+      "notEnabled": {
+        "title": "Credit isn't enabled yet",
+        "description": "Request credit access to unlock 30-day payment terms on your shipments.",
+        "pending": "Your credit access request is pending review.",
+        "rejected": "Your last credit access request wasn't approved."
+      }
+    },
+    "creditInvoiceDetails": {
+      "title": "Credit Invoice Details",
+      "issued": "Issued",
+      "due": "Due",
+      "terms": "Terms",
+      "net30": "Net 30",
+      "shipment": "Shipment",
+      "carrierTracking": "Carrier Tracking",
+      "type": "Type",
+      "service": "Service",
+      "from": "From",
+      "to": "To",
+      "weight": "Weight",
+      "packages": "Packages",
+      "created": "Created",
+      "amount": "Amount",
+      "status": "Status",
+      "remindersSent": "Reminders Sent",
+      "items": "Items",
+      "item": "Item",
+      "qty": "Qty {{count}}",
+      "payThisInvoice": "Pay this invoice",
+      "errors": {
+        "loadFailed": "Couldn't load this invoice."
+      }
+    },
+    "requestCreditAccess": {
+      "title": "Request Credit Access",
+      "description": "Tell us roughly what you ship each month and we'll review your account.",
+      "reasonLabel": "Reason (optional)",
+      "reasonPlaceholder": "Monthly volume, payment terms needed...",
+      "send": "Send request",
+      "successTitle": "Request sent",
+      "successMessage": "We'll review your account and get back to you.",
+      "errorTitle": "Couldn't send request"
+    },
+    "payments": {
+      "title": "Payments",
+      "accountSnapshot": "Account snapshot",
+      "billed": "Billed (6 months)",
+      "paid": "Paid",
+      "outstanding": "Outstanding",
+      "chartTitle": "Billed vs Paid (Last 6 Months)",
+      "extraFeeNotices": "Extra fee notices",
+      "transactions": "Payment transactions",
+      "refund": "Refund",
+      "payment": "Payment",
+      "extraWeight": "Extra weight surcharge",
+      "extraCost": "Additional cost",
+      "new": "New",
+      "empty": "No payment activity yet."
+    },
+    "savedCards": {
+      "title": "Saved cards",
+      "subtitle": "Secured by Tap",
+      "default": "Default",
+      "expires": "Expires {{date}}",
+      "addCard": "Add a card",
+      "notice": "Card details never touch our servers — Tap stores them.",
+      "empty": "No saved cards yet.",
+      "removeConfirmTitle": "Remove card",
+      "removeConfirmMessage": "Remove the card ending in {{lastFour}}?",
+      "remove": "Remove",
+      "cancel": "Cancel",
+      "setDefaultErrorTitle": "Couldn't update default card",
+      "removeErrorTitle": "Couldn't remove card",
+      "addCardInfoTitle": "Add a card at checkout",
+      "addCardInfoMessage": "Choose \"save this card\" the next time you pay to add it here."
+    }
   }
 }

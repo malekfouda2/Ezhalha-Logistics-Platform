@@ -7,7 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { OriginCountrySelect } from "@/components/sections/createShipment/doorToDoor/OriginCountrySelect";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useOriginStep } from "@/lib/hooks/createShipment/doorToDoor/useOriginStep";
 import { Colors } from "@/constants/colors";

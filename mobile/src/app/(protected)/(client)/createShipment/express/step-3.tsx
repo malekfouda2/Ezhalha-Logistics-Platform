@@ -9,7 +9,7 @@ import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRecipientStep } from "@/lib/hooks/createShipment/express/useRecipientStep";
 

@@ -5,7 +5,7 @@ import { Controller } from "react-hook-form";
 
 import { Input } from "@/components/ui/Input";
 import { PhoneInput } from "@/components/ui/PhoneInput";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useSupplierStep } from "@/lib/hooks/createShipment/doorToDoor/useSupplierStep";
 

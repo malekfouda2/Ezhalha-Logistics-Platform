@@ -9,7 +9,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DatePickerField } from "@/components/ui/DatePickerField";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { usePickupStep } from "@/lib/hooks/createShipment/express/usePickupStep";
 

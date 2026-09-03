@@ -14,7 +14,7 @@ import { SaudiRiyal } from "lucide-react-native";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { usePaymentStep } from "@/lib/hooks/createShipment/express/usePaymentStep";
-import { TapCheckoutWebView } from "@/components/payments/TapCheckoutWebView";
+import { TapCheckoutWebView } from "@/components/ui/TapCheckoutWebView";
 
 type PaymentMethodId = "saved-card" | "new-card" | "pay-later";
 

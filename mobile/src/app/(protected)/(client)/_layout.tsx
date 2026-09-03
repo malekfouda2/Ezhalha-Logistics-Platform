@@ -49,6 +49,38 @@ export default function ClientLayout() {
           title: "Notifications",
         }}
       />
+
+      <Stack.Screen
+        name="credit-billing"
+        options={{
+          headerShown: false,
+          title: "Credit / Billing",
+        }}
+      />
+
+      <Stack.Screen
+        name="credit-billing/[id]"
+        options={{
+          headerShown: false,
+          title: "Credit Invoice Details",
+        }}
+      />
+
+      <Stack.Screen
+        name="payments"
+        options={{
+          headerShown: false,
+          title: "Payments",
+        }}
+      />
+
+      <Stack.Screen
+        name="saved-cards"
+        options={{
+          headerShown: false,
+          title: "Saved Cards",
+        }}
+      />
     </Stack>
   );
 }

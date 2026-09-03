@@ -4,7 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { MethodOptionCard } from "@/components/sections/createShipment/doorToDoor/MethodOptionCard";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useMethodStep } from "@/lib/hooks/createShipment/doorToDoor/useMethodStep";
 import { rs } from "@/utils/responsive";

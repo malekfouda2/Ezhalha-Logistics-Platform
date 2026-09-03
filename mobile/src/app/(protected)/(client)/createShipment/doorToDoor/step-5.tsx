@@ -9,7 +9,7 @@ import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
 import { DocUploadRow } from "@/components/ui/DocumentUpload";
 import { PackageCard } from "@/components/sections/createShipment/PackageCard";
-import { DashedActionButton } from "@/components/sections/createShipment/DashedActionButton";
+import { DashedActionButton } from "@/components/ui/DashedActionButton";
 import { PackageSummaryCard } from "@/components/sections/createShipment/doorToDoor/PackageSummaryCard";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { usePackagesStep } from "@/lib/hooks/createShipment/doorToDoor/usePackagesStep";

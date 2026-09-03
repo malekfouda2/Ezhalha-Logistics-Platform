@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { ShipmentOptionCard } from "@/components/sections/createShipment/express/ShipmentOptionCard";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import InfoBox from "@/components/sections/createShipment/InfoBox";
+import InfoBox from "@/components/ui/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useShipmentTypeStep } from "@/lib/hooks/createShipment/express/useShipmentTypeStep";
 

@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
 import { getSavedCards, SavedCard } from "@/lib/services/payments";
-import { TapCheckoutResult } from "@/components/payments/TapCheckoutWebView";
+import { TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
 import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@shared/countries";
 

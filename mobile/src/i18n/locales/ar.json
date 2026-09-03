@@ -1063,5 +1063,144 @@
         }
       }
     }
+  },
+  "invoices": {
+    "tabs": {
+      "all": "الكل",
+      "pending": "قيد الانتظار",
+      "paid": "مدفوعة"
+    },
+    "outstandingBalance": "الرصيد المستحق",
+    "invoicesOpen": "الفواتير",
+    "invoicesOpenCount": "{{count}} مفتوحة",
+    "nextDue": "الاستحقاق القادم",
+    "overdue": "متأخرة",
+    "none": "لا يوجد",
+    "issued": "أُصدرت {{date}} · تستحق {{dueDate}}",
+    "paidOn": "دُفعت {{date}}",
+    "payNow": "ادفع الآن",
+    "creditBillingLink": "الائتمان / الفواتير",
+    "empty": {
+      "title": "لا توجد فواتير بعد",
+      "description": "ستظهر هنا فواتير شحناتك."
+    },
+    "errors": {
+      "loadFailed": "تعذّر تحميل فواتيرك."
+    },
+    "confirmPayment": {
+      "title": "تأكيد الدفع",
+      "invoice": "الفاتورة",
+      "due": "تاريخ الاستحقاق",
+      "amount": "المبلغ",
+      "payWith": "الدفع باستخدام",
+      "newCard": "بطاقة جديدة",
+      "newCardSubtitle": "الدفع ببطاقة مختلفة",
+      "pay": "ادفع {{amount}}",
+      "successTitle": "تم الدفع بنجاح",
+      "successMessage": "تم دفع الفاتورة {{number}}.",
+      "errorTitle": "فشل الدفع",
+      "errorMessage": "يرجى المحاولة مرة أخرى.",
+      "pendingTitle": "الدفع قيد المعالجة",
+      "pendingMessage": "جارٍ معالجة عملية الدفع الخاصة بك."
+    },
+    "creditBilling": {
+      "title": "الائتمان / الفواتير",
+      "subtitle": "شروط دفع لمدة 30 يومًا",
+      "tabs": {
+        "all": "الكل",
+        "unpaid": "غير مدفوعة",
+        "overdue": "متأخرة",
+        "paid": "مدفوعة"
+      },
+      "availableCredit": "الائتمان المتاح",
+      "limit": "الحد",
+      "used": "المستخدم",
+      "nextDue": "الاستحقاق القادم",
+      "creditInvoices": "فواتير الائتمان",
+      "due": "تستحق في {{date}}",
+      "daysLeft": "{{count}} أيام",
+      "dueToday": "تستحق اليوم",
+      "overdueBy": "متأخرة {{count}} يوم",
+      "lateNotice": "الفواتير المتأخرة توقف الدفع الآجل على الشحنات الجديدة حتى تسويتها.",
+      "pay": "ادفع {{amount}}",
+      "empty": "لا توجد فواتير ائتمان بعد.",
+      "settleNoticeTitle": "تتم التسوية عبر فريق الفوترة",
+      "settleNotice": "تتم تسوية فواتير الائتمان تلقائيًا. تواصل مع الدعم للدفع المبكر.",
+      "notEnabled": {
+        "title": "الائتمان غير مفعّل بعد",
+        "description": "اطلب الوصول إلى الائتمان لفتح شروط دفع 30 يومًا على شحناتك.",
+        "pending": "طلب الوصول إلى الائتمان الخاص بك قيد المراجعة.",
+        "rejected": "لم تتم الموافقة على طلبك الأخير للوصول إلى الائتمان."
+      }
+    },
+    "creditInvoiceDetails": {
+      "title": "تفاصيل فاتورة الائتمان",
+      "issued": "تاريخ الإصدار",
+      "due": "تاريخ الاستحقاق",
+      "terms": "الشروط",
+      "net30": "صافي 30",
+      "shipment": "الشحنة",
+      "carrierTracking": "تتبع شركة الشحن",
+      "type": "النوع",
+      "service": "الخدمة",
+      "from": "من",
+      "to": "إلى",
+      "weight": "الوزن",
+      "packages": "الطرود",
+      "created": "تاريخ الإنشاء",
+      "amount": "المبلغ",
+      "status": "الحالة",
+      "remindersSent": "التذكيرات المُرسلة",
+      "items": "العناصر",
+      "item": "عنصر",
+      "qty": "الكمية {{count}}",
+      "payThisInvoice": "ادفع هذه الفاتورة",
+      "errors": {
+        "loadFailed": "تعذّر تحميل هذه الفاتورة."
+      }
+    },
+    "requestCreditAccess": {
+      "title": "طلب الوصول إلى الائتمان",
+      "description": "أخبرنا تقريبًا بحجم شحناتك الشهرية وسنراجع حسابك.",
+      "reasonLabel": "السبب (اختياري)",
+      "reasonPlaceholder": "الحجم الشهري، شروط الدفع المطلوبة...",
+      "send": "إرسال الطلب",
+      "successTitle": "تم إرسال الطلب",
+      "successMessage": "سنراجع حسابك ونعود إليك.",
+      "errorTitle": "تعذّر إرسال الطلب"
+    },
+    "payments": {
+      "title": "المدفوعات",
+      "accountSnapshot": "لمحة عن الحساب",
+      "billed": "المفوتر (6 أشهر)",
+      "paid": "المدفوع",
+      "outstanding": "المستحق",
+      "chartTitle": "الفوترة مقابل الدفع (آخر 6 أشهر)",
+      "extraFeeNotices": "إشعارات الرسوم الإضافية",
+      "transactions": "معاملات الدفع",
+      "refund": "استرداد",
+      "payment": "دفعة",
+      "extraWeight": "رسوم وزن إضافي",
+      "extraCost": "تكلفة إضافية",
+      "new": "جديد",
+      "empty": "لا توجد معاملات دفع بعد."
+    },
+    "savedCards": {
+      "title": "البطاقات المحفوظة",
+      "subtitle": "مؤمّنة عبر Tap",
+      "default": "افتراضية",
+      "expires": "تنتهي في {{date}}",
+      "addCard": "إضافة بطاقة",
+      "notice": "تفاصيل البطاقة لا تصل إلى خوادمنا أبدًا — يتم تخزينها لدى Tap.",
+      "empty": "لا توجد بطاقات محفوظة بعد.",
+      "removeConfirmTitle": "إزالة البطاقة",
+      "removeConfirmMessage": "إزالة البطاقة المنتهية بـ {{lastFour}}؟",
+      "remove": "إزالة",
+      "cancel": "إلغاء",
+      "setDefaultErrorTitle": "تعذّر تحديث البطاقة الافتراضية",
+      "removeErrorTitle": "تعذّرت إزالة البطاقة",
+      "addCardInfoTitle": "أضف بطاقة عند الدفع",
+      "addCardInfoMessage": "اختر \"حفظ هذه البطاقة\" في المرة القادمة التي تدفع فيها لإضافتها هنا."
+    }
   }
 }
