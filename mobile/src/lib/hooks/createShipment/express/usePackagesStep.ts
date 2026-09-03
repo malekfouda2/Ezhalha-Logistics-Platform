@@ -187,9 +187,7 @@ export function usePackagesStep() {
       store.setConfirmData(null);
       store.setLastRatesSignature(signature);
       router.push("/createShipment/express/step-5");
-    } catch (error) {
-      console.log({error});
-      
+    } catch (error) {      
       Toast.show({
         type: "error",
         text1: t("toast.createShipment.express.rates.errorTitle"),

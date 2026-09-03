@@ -19,7 +19,6 @@ interface InvoiceRowProps {
 export function InvoiceRow({ invoice, onPress, onPay }: InvoiceRowProps) {
   const { t } = useTranslation();
   const isPaid = invoice.status === "completed";
-console.log({invoice});
 
   return (
     <Pressable onPress={onPress} style={styles.row}>

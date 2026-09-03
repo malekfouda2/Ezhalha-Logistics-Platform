@@ -122,7 +122,6 @@ export default function NotificationsScreen() {
     openNotification,
     refetch,
   } = useNotifications();
-console.log({notifications});
 
   const handleActionUrl = (actionUrl: string) => {
     try {
