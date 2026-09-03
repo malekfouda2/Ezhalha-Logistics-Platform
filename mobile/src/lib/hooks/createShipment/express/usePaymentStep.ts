@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
-import { useCreateShipmentStore } from "@/store/createShipmentStore";
+import { useCreateShipmentStore } from "@/store/createExpressShipmentStore";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
@@ -71,7 +71,7 @@ export function usePaymentStep() {
         });
         setConfirmData(confirmed);
         invalidateShipmentQueries();
-        router.push({
+        router.replace({
           pathname: "/createShipment/confirmation",
           params: { type: "express", shipmentId: data.shipmentId },
         });
@@ -122,7 +122,7 @@ export function usePaymentStep() {
       const confirmed = await confirmShipment({ shipmentId: targetShipmentId });
       setConfirmData(confirmed);
       invalidateShipmentQueries();
-      router.push({
+      router.replace({
         pathname: "/createShipment/confirmation",
         params: { type: "express", shipmentId: targetShipmentId },
       });
@@ -153,7 +153,7 @@ export function usePaymentStep() {
       });
       invalidateShipmentQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
-      router.push({
+      router.replace({
         pathname: "/createShipment/confirmation",
         params: { type: "express", shipmentId: checkoutData.shipmentId },
       });

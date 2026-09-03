@@ -35,7 +35,7 @@ import {
   HsCodeConfidence,
   HsCodeSource,
   defaultCustomsItem,
-} from "@/store/createShipmentStore";
+} from "@/store/createExpressShipmentStore";
 import { lookupHsCode, confirmHsCode } from "@/lib/services/createShipment";
 
 // Approximate combined height of the modal header, footer, and BottomSheet's

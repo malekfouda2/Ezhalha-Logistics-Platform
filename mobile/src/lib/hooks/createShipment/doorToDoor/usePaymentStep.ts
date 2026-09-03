@@ -59,7 +59,7 @@ export function usePaymentStep() {
   const goToConfirmation = () => {
     const methodLabel = transportMethod === "air" ? "Air" : transportMethod === "sea" ? "Sea" : "Land";
     const route = `${methodLabel} · ${countryLabel(originCountryCode)} → ${countryLabel(destinationCountryCode)}`;
-    router.push({
+    router.replace({
       pathname: "/createShipment/confirmation",
       params: {
         type: "freight",

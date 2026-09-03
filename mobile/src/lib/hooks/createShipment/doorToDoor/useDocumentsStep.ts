@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import * as DocumentPicker from "expo-document-picker";
 
 import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
-import { CustomsItem, TradeDocument } from "@/store/createShipmentStore";
+import { CustomsItem, TradeDocument } from "@/store/createExpressShipmentStore";
 import { extractInvoiceItems, type ExtractInvoiceItemsResponse } from "@/lib/services/createShipment";
 import { useUpload } from "../../useUpload";
 import { normalizeTradeDocumentContentType } from "@/utils/documentContentType";

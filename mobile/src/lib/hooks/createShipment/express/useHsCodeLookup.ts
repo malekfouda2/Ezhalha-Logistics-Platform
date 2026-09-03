@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Alert } from "react-native";
-import { CustomsItem, useCreateShipmentStore } from "@/store/createShipmentStore";
+import { CustomsItem, useCreateShipmentStore } from "@/store/createExpressShipmentStore";
 import { lookupHsCode, confirmHsCode } from "@/lib/services/createShipment";
 
 function isGenericItemName(name: string): boolean {

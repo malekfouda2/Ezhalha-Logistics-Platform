@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
-import { useCreateShipmentStore, Address } from "@/store/createShipmentStore";
+import { useCreateShipmentStore, Address } from "@/store/createExpressShipmentStore";
 import { AddressFormInput, addressSchema } from "@/schemas/address";
 import { AddressBookEntry } from "@/lib/services/createShipment";
 

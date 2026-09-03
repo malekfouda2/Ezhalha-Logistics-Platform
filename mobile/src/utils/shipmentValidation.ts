@@ -1,4 +1,4 @@
-import { CustomsItem, PackageItem } from "@/store/createShipmentStore";
+import { CustomsItem, PackageItem } from "@/store/createExpressShipmentStore";
 
 export const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
   "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",

@@ -1,7 +1,7 @@
 // Wraps the same shared util used on web. If you have @shared/chargeable-weight
 // available to the RN app (e.g. via a shared package), import it directly instead.
 import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
-import { PackageItem } from "@/store/createShipmentStore";
+import { PackageItem } from "@/store/createExpressShipmentStore";
 
 export function getChargeableWeightSummary(
   packages: PackageItem[],

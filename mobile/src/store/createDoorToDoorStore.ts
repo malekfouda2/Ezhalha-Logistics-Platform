@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Address, CustomsItem, TradeDocument, CheckoutResponse, ConfirmResponse, PackageItem, defaultCustomsItem } from "@/store/createShipmentStore";
+import { Address, CustomsItem, TradeDocument, CheckoutResponse, ConfirmResponse, PackageItem, defaultCustomsItem } from "@/store/createExpressShipmentStore";
 import { DdpTransportMethodValue } from "@shared/domain";
 
 export interface DdpLane {

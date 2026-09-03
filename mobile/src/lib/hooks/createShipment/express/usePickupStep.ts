@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { useCreateShipmentStore, isInternationalShipment } from "@/store/createShipmentStore";
+import { useCreateShipmentStore, isInternationalShipment } from "@/store/createExpressShipmentStore";
 import { CheckoutPayload, submitCheckout } from "@/lib/services/createShipment";
 
 const PICKUP_CUTOFF_HOUR = 15; // keep in sync with server

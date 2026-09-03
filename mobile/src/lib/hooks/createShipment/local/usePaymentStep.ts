@@ -70,7 +70,7 @@ export function useLocalPaymentStep() {
         });
         setConfirmData(confirmed);
         invalidateShipmentQueries();
-        router.push({
+        router.replace({
           pathname: "/createShipment/confirmation",
           params: { type: "local", shipmentId: data.shipmentId },
         });
@@ -121,7 +121,7 @@ export function useLocalPaymentStep() {
       const confirmed = await confirmShipment({ shipmentId: targetShipmentId });
       setConfirmData(confirmed);
       invalidateShipmentQueries();
-      router.push({
+      router.replace({
         pathname: "/createShipment/confirmation",
         params: { type: "local", shipmentId: targetShipmentId },
       });
@@ -152,7 +152,7 @@ export function useLocalPaymentStep() {
       });
       invalidateShipmentQueries();
       queryClient.invalidateQueries({ queryKey: ["/api/client/credit-invoices"] });
-      router.push({
+      router.replace({
         pathname: "/createShipment/confirmation",
         params: { type: "local", shipmentId: checkoutData.shipmentId },
       });

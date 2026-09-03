@@ -6,7 +6,7 @@ import {
     RatesResponse,
     CheckoutResponse,
     ConfirmResponse,
-} from "@/store/createShipmentStore";
+} from "@/store/createExpressShipmentStore";
 
 export interface AddressBookEntry {
     id: string;

@@ -6,10 +6,10 @@ import { useState } from "react";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
-import { useCreateShipmentStore } from "@/store/createShipmentStore";
+import { useCreateShipmentStore } from "@/store/createExpressShipmentStore";
 import { AddressBookEntry } from "@/lib/services/createShipment";
 import { AddressFormInput, addressSchema } from "@/schemas/address";
-import { Address } from "@/store/createShipmentStore";
+import { Address } from "@/store/createExpressShipmentStore";
 
 export function useSenderStep() {
   const router = useRouter();

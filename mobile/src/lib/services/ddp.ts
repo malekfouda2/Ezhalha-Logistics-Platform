@@ -1,5 +1,5 @@
 import { apiRequest } from "@/api/client";
-import { Address, TradeDocument } from "@/store/createShipmentStore";
+import { Address, TradeDocument } from "@/store/createExpressShipmentStore";
 import { DdpLane, DdpQuote } from "@/store/createDoorToDoorStore";
 import { DdpTransportMethodValue } from "@shared/domain";
 

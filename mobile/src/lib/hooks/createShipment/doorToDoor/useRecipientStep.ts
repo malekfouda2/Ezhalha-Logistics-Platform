@@ -7,7 +7,7 @@ import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
 import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
-import { Address } from "@/store/createShipmentStore";
+import { Address } from "@/store/createExpressShipmentStore";
 import { AddressFormInput, addressSchema } from "@/schemas/address";
 import { AddressBookEntry } from "@/lib/services/createShipment";
 

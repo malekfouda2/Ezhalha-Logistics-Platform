@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { RatesResponse, CheckoutResponse, ConfirmResponse } from "@/store/createShipmentStore";
+import { RatesResponse, CheckoutResponse, ConfirmResponse } from "@/store/createExpressShipmentStore";
 
 // Local (domestic KSA) shipments are a fully isolated flow — no country picker, no postal
 // code, no dimensions/customs. Mirrors the server's `localAddressSchema` in routes.ts.

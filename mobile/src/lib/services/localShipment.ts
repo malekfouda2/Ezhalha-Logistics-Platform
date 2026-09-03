@@ -1,6 +1,6 @@
 import { apiRequest } from "@/api/client";
 import { LocalAddress } from "@/store/createLocalShipmentStore";
-import { RatesResponse, CheckoutResponse } from "@/store/createShipmentStore";
+import { RatesResponse, CheckoutResponse } from "@/store/createExpressShipmentStore";
 
 export async function fetchLocalRates(payload: {
   shipper: LocalAddress;

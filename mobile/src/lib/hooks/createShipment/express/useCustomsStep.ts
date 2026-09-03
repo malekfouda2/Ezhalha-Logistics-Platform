@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { useCreateShipmentStore, CustomsItem, defaultCustomsItem } from "@/store/createShipmentStore";
+import { useCreateShipmentStore, CustomsItem, defaultCustomsItem } from "@/store/createExpressShipmentStore";
 import { extractInvoiceItems, type ExtractInvoiceItemsResponse } from "@/lib/services/createShipment";
 import { validateCustoms } from "@/utils/shipmentValidation";
 import { FEDEX_TRADE_DOCUMENT_ALLOWED_CONTENT_TYPES, FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES } from "@shared/schema";

@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
-import { useCreateShipmentStore } from "@/store/createShipmentStore";
+import { useCreateShipmentStore } from "@/store/createExpressShipmentStore";
 import { validateShipmentType } from "@/utils/shipmentValidation";
 
 export function useShipmentTypeStep() {

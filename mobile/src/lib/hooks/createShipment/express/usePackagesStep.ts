@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
-import { useCreateShipmentStore, isInternationalShipment } from "@/store/createShipmentStore";
+import { useCreateShipmentStore, isInternationalShipment } from "@/store/createExpressShipmentStore";
 import { useState } from "react";
 import { getChargeableWeightSummary } from "@/utils/chargeableWeight";
 import { extractPackageDetails, fetchRates, type ExtractPackageDetailsResponse } from "@/lib/services/createShipment";

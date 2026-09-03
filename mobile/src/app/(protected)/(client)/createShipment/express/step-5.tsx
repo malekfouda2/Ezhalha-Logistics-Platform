@@ -9,7 +9,7 @@ import { SaudiRiyal } from "lucide-react-native";
 import InfoBox from "@/components/sections/createShipment/InfoBox";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRatesStep } from "@/lib/hooks/createShipment/express/useRatesStep";
-import { RateQuote } from "@/store/createShipmentStore";
+import { RateQuote } from "@/store/createExpressShipmentStore";
 
 const CARRIER_COLORS: Record<string, string> = {
   FEDEX: "#4D148C",

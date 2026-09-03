@@ -1,7 +1,7 @@
 // app/create-shipment/confirmation.tsx
 
-import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Feather } from "@expo/vector-icons";
@@ -130,6 +130,19 @@ export default function ShipmentConfirmationScreen() {
     shipmentId?: string;
   }>();
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+
+  // A completed shipment can't be re-entered — the draft steps are already
+  // cleared, so hardware back should land on home rather than pop into them.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        router.replace("/(protected)/(client)/(tabs)/");
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, [router]);
 
   const type: ShipmentType =
     params.type === "local" || params.type === "freight"

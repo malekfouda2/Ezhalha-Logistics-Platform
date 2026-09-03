@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ShipmentDirection = "domestic" | "inbound" | "outbound";
+export type ShipmentDirection = "inbound" | "outbound";
 
 export interface Address {
   name: string;
@@ -239,18 +239,6 @@ export const useCreateShipmentStore = create<CreateShipmentState>((set, get) => 
   setShipmentType: (v, prefill) => {
     const empty = { ...emptyAddress };
     set((state) => {
-      if (v === "domestic") {
-        return {
-          shipmentType: v,
-          isDdp: false,
-          selectedQuoteId: null,
-          rates: null,
-          checkoutData: null,
-          confirmData: null,
-          shipper: { ...empty, countryCode: "SA", ...prefill?.shipper },
-          recipient: { ...empty, countryCode: "SA", ...prefill?.recipient },
-        };
-      }
       if (v === "inbound") {
         return {
           shipmentType: v,

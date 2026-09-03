@@ -9,7 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { Colors } from "@/constants/colors";
 import { Typography } from "@/constants/typography";
 import { rs, rvs } from "@/utils/responsive";
-import { CustomsItem } from "@/store/createShipmentStore";
+import { CustomsItem } from "@/store/createExpressShipmentStore";
 
 interface InvoiceItemRowProps {
   item: CustomsItem;
