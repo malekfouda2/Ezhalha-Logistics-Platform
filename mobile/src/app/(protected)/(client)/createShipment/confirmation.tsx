@@ -9,7 +9,10 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import ShipmentFooter from "@/components/sections/createShipment/ShipmentStepFooter";
-import { handleDownloadCarrierLabel, handleDownloadCommercialInvoice } from "@/utils/utils";
+import {
+  handleDownloadCarrierLabel,
+  handleDownloadCommercialInvoice,
+} from "@/utils/utils";
 
 type ShipmentType = "express" | "local" | "freight";
 
@@ -50,25 +53,15 @@ function getConfig(
         idLabel: t("createShipment.confirmation.local.idLabel"),
         idValue: "EZH552031884",
         footerTitle: t("createShipment.confirmation.local.footerTitle"),
-        onFooterPress: (r) => r.replace("/(tabs)/shipments"),
+        onFooterPress: (r) =>
+          shipmentId
+            ? r.replace(`/shipments/${shipmentId}/tracking`)
+            : r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "",
           status: "",
         },
-        docActions: [
-          {
-            key: "label",
-            label: t("createShipment.confirmation.local.docLabel"),
-            icon: "file-text",
-            onPress: () => (shipmentId ? handleDownloadCarrierLabel(shipmentId) : undefined),
-          },
-          {
-            key: "track",
-            label: t("createShipment.confirmation.local.docTrack"),
-            icon: "map-pin",
-            onPress: () => {},
-          },
-        ],
+        docActions: undefined,
       };
 
     case "freight":
@@ -78,7 +71,10 @@ function getConfig(
         idLabel: t("createShipment.confirmation.freight.idLabel"),
         idValue: params.trackingNumber || "DDP-2026-0117",
         footerTitle: t("createShipment.confirmation.freight.footerTitle"),
-        onFooterPress: (r) => (shipmentId ? r.replace(`/shipments/${shipmentId}`) : r.replace("/(tabs)/shipments")),
+        onFooterPress: (r) =>
+          shipmentId
+            ? r.replace(`/shipments/${shipmentId}/tracking`)
+            : r.replace("/(tabs)/shipments"),
         cardRow: {
           left: params.route || "Air · China → Riyadh",
           status: t("createShipment.confirmation.freight.statusUnderReview"),
@@ -94,7 +90,10 @@ function getConfig(
         idLabel: t("createShipment.confirmation.express.idLabel"),
         idValue: "EZH977158300",
         footerTitle: t("createShipment.confirmation.express.footerTitle"),
-        onFooterPress: (r) => r.replace("/(tabs)/shipments"),
+        onFooterPress: (r) =>
+          shipmentId
+            ? r.replace(`/shipments/${shipmentId}/tracking`)
+            : r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "FedEx · 7940 5613 3021",
           status: t("createShipment.confirmation.express.statusProcessing"),
@@ -104,13 +103,17 @@ function getConfig(
             key: "label",
             label: t("createShipment.confirmation.express.docLabel"),
             icon: "file-text",
-            onPress: () => (shipmentId ? handleDownloadCarrierLabel(shipmentId) : undefined),
+            onPress: () =>
+              shipmentId ? handleDownloadCarrierLabel(shipmentId) : undefined,
           },
           {
             key: "invoice",
             label: t("createShipment.confirmation.express.docInvoice"),
             icon: "file-text",
-            onPress: () => (shipmentId ? handleDownloadCommercialInvoice(shipmentId) : undefined),
+            onPress: () =>
+              shipmentId
+                ? handleDownloadCommercialInvoice(shipmentId)
+                : undefined,
           },
         ],
       };
@@ -202,14 +205,21 @@ export default function ShipmentConfirmationScreen() {
             {config.docActions.map((action) => (
               <Pressable
                 key={action.key}
-                style={({ pressed }) => [styles.docButton, pressed && styles.docButtonPressed]}
+                style={({ pressed }) => [
+                  styles.docButton,
+                  pressed && styles.docButtonPressed,
+                ]}
                 onPress={() => handleDocPress(action)}
                 disabled={downloadingKey === action.key}
               >
                 {downloadingKey === action.key ? (
                   <ActivityIndicator size="small" color={Colors.text} />
                 ) : (
-                  <Feather name={action.icon} size={rs(18)} color={Colors.text} />
+                  <Feather
+                    name={action.icon}
+                    size={rs(18)}
+                    color={Colors.text}
+                  />
                 )}
                 <Text size="medium" weight="bold" style={styles.docLabel}>
                   {action.label}

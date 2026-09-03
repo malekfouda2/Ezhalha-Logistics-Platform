@@ -8,7 +8,7 @@ import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
 
 import { rs, rvs } from "@/utils/responsive";
-import { SavedAddressSelect } from "@/components/sections/createShipment/express/SavedAddressSelect";
+import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useSenderStep } from "@/lib/hooks/createShipment/express/useSenderStep";

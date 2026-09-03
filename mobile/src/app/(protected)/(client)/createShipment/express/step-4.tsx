@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import * as DocumentPicker from "expo-document-picker";
 import { Feather } from "@expo/vector-icons";
 
-import { PackageCard } from "@/components/sections/createShipment/express/PackageCard";
+import { PackageCard } from "@/components/sections/createShipment/PackageCard";
 import { PackageTypeSelect } from "@/components/sections/createShipment/express/PackageTypeSelect";
 import { UnitToggle } from "@/components/sections/createShipment/express/UnitToggle";
 import { WeightSummaryCard } from "@/components/sections/createShipment/express/WeightSummaryCard";
@@ -20,7 +20,7 @@ import {
   packageTypes,
   weightUnitOptions,
 } from "@/constants/packageOptions";
-import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
+import { DashedActionButton } from "@/components/sections/createShipment/DashedActionButton";
 import { Colors } from "@/constants/colors";
 
 export default function PackageDetailsScreen() {

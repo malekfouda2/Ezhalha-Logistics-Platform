@@ -806,7 +806,53 @@
     },
     "local": {
       "title": "Local Delivery",
-      "description": "Last-mile delivery within Saudi Arabia via local carriers."
+      "description": "Last-mile delivery within Saudi Arabia via local carriers.",
+      "steps": {
+        "step1": {
+          "title": "Sender Details",
+          "subtitle": "Local delivery",
+          "pickupFrom": "PICK UP FROM",
+          "pickupPlaceholder": "Select a saved address",
+          "pickupEmpty": "No saved addresses yet",
+          "newAddress": "OR ENTER A NEW ADDRESS",
+          "fullName": "Full name",
+          "addressLine1": "Address line",
+          "city": "City",
+          "district": "District",
+          "shortAddress": "National address"
+        },
+        "step2": {
+          "title": "Recipient Details",
+          "subtitle": "Inside Saudi Arabia",
+          "fullName": "Full name",
+          "addressLine1": "Address line",
+          "city": "City",
+          "district": "District",
+          "shortAddress": "National address",
+          "info": "Domestic only. For cross-border use Express."
+        },
+        "step3": {
+          "title": "Package Details",
+          "subtitle": "Local delivery",
+          "numberOfPackages": "Number of packages",
+          "totalWeight": "Total weight (kg)",
+          "getRates": "Get rates"
+        },
+        "step4": {
+          "title": "Select Rate",
+          "subtitle": "Choose a carrier",
+          "continueWith": "Continue ·",
+          "info": "Rates are estimated and may vary slightly at pickup."
+        },
+        "step5": {
+          "title": "Payment",
+          "subtitle": "Order summary",
+          "delivery": "Delivery",
+          "vat": "VAT (15%)",
+          "payWith": "PAY WITH",
+          "pay": "Pay"
+        }
+      }
     },
 
     "continue": "Continue",
@@ -995,6 +1041,26 @@
           "processErrorMessage": "Please upload another file or enter the packages manually.",
           "successTitle": "Packing list processed",
           "successMessage": "{{count}} package(s) imported."
+        }
+      },
+      "local": {
+        "rates": {
+          "errorTitle": "We couldn't get rates for this shipment",
+          "errorMessage": "Please try again."
+        },
+        "checkout": {
+          "errorTitle": "Failed to process checkout",
+          "errorMessage": "Please try again."
+        },
+        "payment": {
+          "errorTitle": "Payment failed",
+          "errorMessage": "Please try again.",
+          "pendingTitle": "Payment pending",
+          "pendingMessage": "Your payment is being processed."
+        },
+        "payLater": {
+          "errorTitle": "Failed to process Pay Later",
+          "errorMessage": "Please try again."
         }
       }
     }

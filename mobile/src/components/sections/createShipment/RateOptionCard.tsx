@@ -46,7 +46,15 @@ export const RateOptionCard = ({
 
       <View style={styles.row}>
         <View style={[styles.logo, { backgroundColor: carrierColor }]}>
-          <Text size="xs" weight="bold" style={styles.logoText}>
+          <Text
+            size="xs"
+            weight="bold"
+            style={styles.logoText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            adjustsFontSizeToFit
+            minimumFontScale={0.6}
+          >
             {carrierCode}
           </Text>
         </View>
@@ -123,9 +131,11 @@ const styles = StyleSheet.create({
   },
 
   logo: {
-    width: rs(45),
+    minWidth: rs(45),
+    maxWidth: rs(72),
     height: rs(45),
-    borderRadius: rs(15),
+    paddingHorizontal: rs(6),
+    borderRadius: rs(10),
     alignItems: "center",
     justifyContent: "center",
     marginEnd: rs(10),
@@ -133,6 +143,7 @@ const styles = StyleSheet.create({
 
   logoText: {
     color: Colors.white,
+    padding: rvs(4),
   },
 
   info: {

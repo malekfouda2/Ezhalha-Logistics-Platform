@@ -6,7 +6,7 @@ import { Feather } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { DocUploadRow } from "@/components/ui/DocumentUpload";
 import { rvs } from "@/utils/responsive";
-import { DashedActionButton } from "@/components/sections/createShipment/express/DashedActionButton";
+import { DashedActionButton } from "@/components/sections/createShipment/DashedActionButton";
 import { CustomsItemCard } from "@/components/sections/createShipment/express/CustomsItemCard";
 import {
   HSCodeOption,

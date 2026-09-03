@@ -7,7 +7,7 @@ import { Controller } from "react-hook-form";
 import { Input } from "@/components/ui/Input";
 import { PhoneInput } from "@/components/ui/PhoneInput";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
-import { SavedAddressSelect } from "@/components/sections/createShipment/express/SavedAddressSelect";
+import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRecipientStep } from "@/lib/hooks/createShipment/doorToDoor/useRecipientStep";
 import { rs } from "@/utils/responsive";
