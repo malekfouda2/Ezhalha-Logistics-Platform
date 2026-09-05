@@ -1,24 +1,23 @@
-import React, { useMemo, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, TextInput, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { SaudiRiyal } from "lucide-react-native";
-import Toast from "react-native-toast-message";
+import { useMutation } from "@tanstack/react-query";
 
 import { Text } from "@/components/ui/Text";
-import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { CountrySelect } from "@/components/ui/CountrySelect";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 import { SectionLabel } from "@/components/ui/InfoCard";
-import { UnitToggle } from "@/components/sections/createShipment/express/UnitToggle";
+import { RateOptionCard } from "@/components/sections/createShipment/RateOptionCard";
 import { ScreenHeader } from "@/components/sections/profile/ScreenHeader";
 import { Colors } from "@/constants/colors";
+import { Typography } from "@/constants/typography";
 import { rs, rvs } from "@/utils/responsive";
 import { countryFlagEmoji } from "@/utils/countryFlag";
-
-type ShipmentType = "express" | "local" | "freight";
+import { ApiError } from "@/api/client";
+import { fetchQuickQuote } from "@/lib/services/quickQuote";
 
 interface RouteValue {
   code: string;
@@ -26,71 +25,87 @@ interface RouteValue {
   city: string;
 }
 
-const TYPE_CONFIG: Record<
-  ShipmentType,
-  { baseRate: number; perKg: number; minDays: number; maxDays: number; bookable: boolean }
-> = {
-  express: { baseRate: 120, perKg: 42, minDays: 2, maxDays: 3, bookable: true },
-  local: { baseRate: 25, perKg: 8, minDays: 1, maxDays: 1, bookable: true },
-  freight: { baseRate: 350, perKg: 6, minDays: 7, maxDays: 12, bookable: false },
-};
-
 export default function QuickQuoteScreen() {
   const { t } = useTranslation();
 
-  const [type, setType] = useState<ShipmentType>("express");
-  const [origin, setOrigin] = useState<RouteValue>({ code: "SA", name: "Saudi Arabia", city: "Riyadh" });
-  const [destination, setDestination] = useState<RouteValue>({ code: "GB", name: "United Kingdom", city: "London" });
-  const [weightText, setWeightText] = useState("3.0");
-  const [piecesText, setPiecesText] = useState("1");
+  const [origin, setOrigin] = useState<RouteValue>({
+    code: "SA",
+    name: "Saudi Arabia",
+    city: "",
+  });
+  const [destination, setDestination] = useState<RouteValue>({
+    code: "GB",
+    name: "United Kingdom",
+    city: "",
+  });
+  const [weightText, setWeightText] = useState("");
+  const [lengthText, setLengthText] = useState("");
+  const [widthText, setWidthText] = useState("");
+  const [heightText, setHeightText] = useState("");
+  const [piecesText, setPiecesText] = useState("");
 
-  const weight = Math.max(0.1, parseFloat(weightText) || 0.1);
-  const pieces = Math.max(1, Math.round(parseFloat(piecesText) || 1));
+  const weight = Number(weightText) || 0;
+  const canQuote = Boolean(origin.code && destination.code && weight > 0);
 
-  const config = TYPE_CONFIG[type];
+  const quote = useMutation({
+    mutationFn: fetchQuickQuote,
+  });
 
-  const estimate = useMemo(() => {
-    const subtotal = config.baseRate + weight * config.perKg + (pieces - 1) * config.baseRate * 0.15;
-    const fedexTotal = Math.round(subtotal * 1.08 * 1.15);
-    const dhlTotal = Math.round(subtotal * 1.0 * 1.15);
-    return { fedexTotal, dhlTotal };
-  }, [config, weight, pieces]);
-
-  const handleBook = () => {
-    if (!config.bookable) {
-      Toast.show({
-        type: "info",
-        text1: t("quickQuote.title"),
-        text2: t("quickQuote.freightUnavailable"),
+  const mutate = quote.mutate;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (timer.current) clearTimeout(timer.current);
+    if (!canQuote) return;
+    timer.current = setTimeout(() => {
+      mutate({
+        origin: { countryCode: origin.code, city: origin.city || undefined },
+        destination: {
+          countryCode: destination.code,
+          city: destination.city || undefined,
+        },
+        weightKg: weight,
+        length: Number(lengthText) || undefined,
+        width: Number(widthText) || undefined,
+        height: Number(heightText) || undefined,
+        pieces: Math.max(1, Number(piecesText) || 1),
       });
-      return;
-    }
-    router.push(type === "local" ? "/createShipment/local" : "/createShipment/express");
-  };
+    }, 700);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    canQuote,
+    origin,
+    destination,
+    weight,
+    lengthText,
+    widthText,
+    heightText,
+    piecesText,
+  ]);
+
+  const data = quote.data;
+  const showResults = canQuote && Boolean(data);
+  const noneAvailable =
+    showResults && data
+      ? !data.available.local && !data.available.ddp && !data.available.express
+      : false;
+
+  const days = (count: number | null) =>
+    count == null
+      ? ""
+      : t(count === 1 ? "quickQuote.days_one" : "quickQuote.days_other", {
+          count,
+        });
 
   return (
     <View style={styles.screen}>
-      <KeyboardAwareScreen
-        contentContainerStyle={styles.content}
-        footer={
-          <View style={styles.footer}>
-            <Button title={t("quickQuote.book")} onPress={handleBook} />
-          </View>
-        }
-      >
-        <ScreenHeader title={t("quickQuote.title")} subtitle={t("quickQuote.subtitle")} />
-
-        <UnitToggle
-          options={[
-            { value: "express", label: t("quickQuote.types.express") },
-            { value: "local", label: t("quickQuote.types.local") },
-            { value: "freight", label: t("quickQuote.types.freight") },
-          ]}
-          value={type}
-          onChange={(value) => setType(value as ShipmentType)}
+      <KeyboardAwareScreen contentContainerStyle={styles.content}>
+        <ScreenHeader
+          title={t("quickQuote.title")}
+          subtitle={t("quickQuote.subtitle")}
         />
-
-        <View style={styles.gap} />
 
         <SectionLabel>{t("quickQuote.route")}</SectionLabel>
         <RouteField
@@ -107,55 +122,191 @@ export default function QuickQuoteScreen() {
         />
 
         <SectionLabel>{t("quickQuote.shipment")}</SectionLabel>
-        <View style={styles.row}>
-          <View style={styles.half}>
-            <Input
-              value={weightText}
-              onChangeText={setWeightText}
-              placeholder={t("quickQuote.weightPlaceholder")}
-              keyboardType="decimal-pad"
-            />
-          </View>
-          <View style={styles.half}>
-            <Input
-              value={piecesText}
-              onChangeText={setPiecesText}
-              placeholder={t("quickQuote.piecesPlaceholder")}
-              keyboardType="number-pad"
-            />
-          </View>
+        <View style={styles.grid}>
+          <GridField
+            label={t("quickQuote.weightPlaceholder")}
+            value={weightText}
+            onChangeText={setWeightText}
+            keyboardType="decimal-pad"
+          />
+
+          <GridField
+            label={t("quickQuote.lengthPlaceholder")}
+            value={lengthText}
+            onChangeText={setLengthText}
+            keyboardType="decimal-pad"
+          />
+          <GridField
+            label={t("quickQuote.widthPlaceholder")}
+            value={widthText}
+            onChangeText={setWidthText}
+            keyboardType="decimal-pad"
+          />
+          <GridField
+            label={t("quickQuote.heightPlaceholder")}
+            value={heightText}
+            onChangeText={setHeightText}
+            keyboardType="decimal-pad"
+          />
+          <GridField
+            label={t("quickQuote.piecesPlaceholder")}
+            value={piecesText}
+            onChangeText={setPiecesText}
+            keyboardType="number-pad"
+          />
         </View>
 
-        <SectionLabel>{t("quickQuote.estimated")}</SectionLabel>
-        <RateEstimateCard
-          carrierCode="FedEx"
-          carrierColor="#4D148C"
-          serviceName={t("quickQuote.carriers.fedexPriority")}
-          days={t(config.minDays === config.maxDays ? "quickQuote.days_one" : "quickQuote.days_other", {
-            count: config.maxDays,
-          })}
-          price={estimate.fedexTotal}
-          inclVat={t("quickQuote.inclVat")}
-        />
-        <RateEstimateCard
-          carrierCode="DHL"
-          carrierColor="#FFCC00"
-          carrierTextColor="#D40511"
-          serviceName={t("quickQuote.carriers.dhlWorldwide")}
-          days={t(config.minDays === config.maxDays ? "quickQuote.days_one" : "quickQuote.days_other", {
-            count: config.minDays,
-          })}
-          price={estimate.dhlTotal}
-          inclVat={t("quickQuote.inclVat")}
-        />
+        <View style={styles.gap} />
 
-        <View style={styles.notice}>
-          <Ionicons name="time-outline" size={rs(16)} color={Colors.textSecondary} />
-          <Text size="small" dimRate="60%" style={styles.noticeText}>
-            {t("quickQuote.notice")}
+        {!canQuote && (
+          <Text size="small" dimRate="60%" style={styles.centered}>
+            {t("quickQuote.enterDetails")}
           </Text>
-        </View>
+        )}
+
+        {quote.isPending && canQuote && (
+          <View style={styles.centered}>
+            <ActivityIndicator color={Colors.primary} />
+          </View>
+        )}
+
+        {quote.isError && canQuote && (
+          <View style={styles.notice}>
+            <Ionicons
+              name="alert-circle-outline"
+              size={rs(16)}
+              color={Colors.error}
+            />
+            <Text size="small" style={styles.noticeText}>
+              {quote.error instanceof ApiError
+                ? quote.error.message
+                : t("quickQuote.quoteError")}
+            </Text>
+          </View>
+        )}
+
+        {noneAvailable && (
+          <Text size="small" dimRate="60%" style={styles.centered}>
+            {t("quickQuote.noRates")}
+          </Text>
+        )}
+
+        {showResults && data && data.available.express && (
+          <QuoteSection title={t("quickQuote.sections.express")}>
+            {data.express.map((q, i) => (
+              <RateOptionCard
+                key={`${q.carrierCode}-${q.serviceType || i}`}
+                carrierCode={q.carrierCode}
+                carrierColor={Colors.primary}
+                serviceName={q.serviceName || q.carrierName}
+                deliveryLabel={days(q.transitDays)}
+                price={String(q.clientTotal)}
+                badge={i === 0 ? "cheapest" : undefined}
+              />
+            ))}
+            <Button
+              title={t("quickQuote.continueTo.express")}
+              onPress={() => router.push("/createShipment/express")}
+            />
+          </QuoteSection>
+        )}
+
+        {showResults && data && data.available.local && (
+          <QuoteSection title={t("quickQuote.sections.local")}>
+            {data.local.map((q, i) => (
+              <RateOptionCard
+                key={q.carrierCode}
+                carrierCode={q.carrierCode}
+                carrierColor={Colors.primary}
+                serviceName={q.carrierName}
+                deliveryLabel={days(q.transitDays)}
+                price={String(q.clientTotal)}
+                badge={i === 0 ? "cheapest" : undefined}
+              />
+            ))}
+            <Button
+              title={t("quickQuote.continueTo.local")}
+              onPress={() => router.push("/createShipment/local")}
+            />
+          </QuoteSection>
+        )}
+
+        {showResults && data && data.available.ddp && (
+          <QuoteSection title={t("quickQuote.sections.ddp")}>
+            {data.ddp.map((q) => (
+              <RateOptionCard
+                key={q.transportMethod}
+                carrierCode={q.transportMethod.slice(0, 3).toUpperCase()}
+                carrierColor={Colors.primary}
+                serviceName={t(
+                  `quickQuote.transportMethods.${q.transportMethod}`,
+                )}
+                deliveryLabel={days(q.transitDays)}
+                price={String(q.clientTotal)}
+              />
+            ))}
+            <Button
+              title={t("quickQuote.continueTo.ddp")}
+              onPress={() => router.push("/createShipment/doorToDoor")}
+            />
+          </QuoteSection>
+        )}
+
+        {showResults && !noneAvailable && (
+          <View style={styles.notice}>
+            <Ionicons
+              name="time-outline"
+              size={rs(16)}
+              color={Colors.textSecondary}
+            />
+            <Text size="small" dimRate="60%" style={styles.noticeText}>
+              {t("quickQuote.notice")}
+            </Text>
+          </View>
+        )}
       </KeyboardAwareScreen>
+    </View>
+  );
+}
+
+function QuoteSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.section}>
+      <SectionLabel>{title}</SectionLabel>
+      {children}
+    </View>
+  );
+}
+
+function GridField({
+  label,
+  value,
+  onChangeText,
+  keyboardType,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  keyboardType: "decimal-pad" | "number-pad";
+}) {
+  return (
+    <View style={styles.gridItem}>
+      <Text size="xs" weight="bold" style={styles.gridLabel}>
+        {label}
+      </Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        placeholderTextColor={Colors.placeholder}
+        style={styles.gridInput}
+      />
     </View>
   );
 }
@@ -179,59 +330,12 @@ function RouteField({
       </Text>
       <CountrySelect
         value={value.code}
-        onChange={(country) => onChange({ ...value, code: country.code, name: country.name })}
+        onChange={(country) =>
+          onChange({ ...value, code: country.code, name: country.name })
+        }
         placeholder={placeholder}
         title={pickerTitle}
       />
-    </View>
-  );
-}
-
-function RateEstimateCard({
-  carrierCode,
-  carrierColor,
-  carrierTextColor = Colors.white,
-  serviceName,
-  days,
-  price,
-  inclVat,
-}: {
-  carrierCode: string;
-  carrierColor: string;
-  carrierTextColor?: string;
-  serviceName: string;
-  days: string;
-  price: number;
-  inclVat: string;
-}) {
-  return (
-    <View style={styles.rateCard}>
-      <View style={[styles.rateLogo, { backgroundColor: carrierColor }]}>
-        <Text size="xs" weight="bold" style={{ color: carrierTextColor }}>
-          {carrierCode}
-        </Text>
-      </View>
-
-      <View style={styles.rateInfo}>
-        <Text size="medium" weight="bold">
-          {serviceName}
-        </Text>
-        <Text size="xs" weight="semibold" dimRate="55%" style={styles.rateDays}>
-          {days}
-        </Text>
-      </View>
-
-      <View style={styles.ratePriceBlock}>
-        <View style={styles.ratePriceRow}>
-          <SaudiRiyal size={rs(18)} color={Colors.text} />
-          <Text size="large" weight="bold" style={styles.ratePrice}>
-            {price}
-          </Text>
-        </View>
-        <Text size="xs" dimRate="55%">
-          {inclVat}
-        </Text>
-      </View>
     </View>
   );
 }
@@ -246,21 +350,34 @@ const styles = StyleSheet.create({
     paddingTop: rvs(8),
     paddingBottom: rvs(20),
   },
-  footer: {
-    paddingHorizontal: rs(16),
-    paddingBottom: rvs(20),
-    paddingTop: rvs(8),
-    backgroundColor: Colors.background,
-  },
   gap: {
     height: rvs(16),
   },
-  row: {
+  grid: {
     flexDirection: "row",
-    gap: rs(14),
+    flexWrap: "wrap",
+    gap: rs(10),
   },
-  half: {
-    flex: 1,
+  gridItem: {
+    flexGrow: 1,
+    alignItems: "center",
+    backgroundColor: Colors.white,
+    borderRadius: rs(16),
+    paddingHorizontal: rs(10),
+    paddingTop: rvs(10),
+  },
+  gridLabel: {
+    color: Colors.secondary,
+    letterSpacing: 1,
+  },
+  gridInput: {
+    width: "100%",
+    height: rvs(40),
+    paddingHorizontal: 0,
+    textAlign: "center",
+    fontSize: Typography.size.large,
+    fontFamily: Typography.fontFamily.bold,
+    color: Colors.text,
   },
   routeField: {
     marginBottom: rvs(6),
@@ -268,38 +385,12 @@ const styles = StyleSheet.create({
   routeText: {
     marginBottom: rvs(6),
   },
-  rateCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.white,
-    borderRadius: rs(16),
-    padding: rs(14),
-    marginBottom: rvs(12),
-    gap: rs(12),
+  section: {
+    marginBottom: rvs(8),
   },
-  rateLogo: {
-    width: rs(52),
-    height: rs(40),
-    borderRadius: rs(10),
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rateInfo: {
-    flex: 1,
-  },
-  rateDays: {
-    marginTop: rvs(2),
-  },
-  ratePriceBlock: {
-    alignItems: "flex-end",
-  },
-  ratePriceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: rs(2),
-  },
-  ratePrice: {
-    color: Colors.text,
+  centered: {
+    textAlign: "center",
+    paddingVertical: rvs(24),
   },
   notice: {
     flexDirection: "row",

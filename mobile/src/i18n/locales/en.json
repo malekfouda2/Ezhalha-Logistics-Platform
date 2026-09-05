@@ -1434,28 +1434,39 @@
   "quickQuote": {
     "title": "Quick Quote",
     "subtitle": "An estimate — nothing is booked",
-    "types": {
-      "express": "Express",
-      "local": "Local Delivery",
-      "freight": "Freight"
-    },
     "route": "Route",
     "originPlaceholder": "Origin country",
     "destinationPlaceholder": "Destination country",
     "selectCountry": "Select country",
     "shipment": "Shipment",
     "weightPlaceholder": "Weight (kg)",
-    "piecesPlaceholder": "Pieces",
-    "estimated": "Estimated",
+    "lengthPlaceholder": "Length (cm)",
+    "widthPlaceholder": "Width (cm)",
+    "heightPlaceholder": "Height (cm)",
+    "piecesPlaceholder": "Packages",
     "inclVat": "incl. VAT",
     "days_one": "{{count}} business day",
     "days_other": "{{count}} business days",
-    "notice": "Final price depends on the exact address, dimensions and customs value.",
-    "book": "Book this shipment",
-    "freightUnavailable": "Freight booking isn't available in the app yet — contact support to arrange this shipment.",
-    "carriers": {
-      "fedexPriority": "International Priority",
-      "dhlWorldwide": "Express Worldwide"
+    "notice": "Prices are indicative estimates. Final pricing may vary based on actual dimensions, customs duties and destination surcharges.",
+    "enterDetails": "Enter origin, destination and weight to see rates.",
+    "calculating": "Calculating rates…",
+    "noRates": "No instant rates for this route. Contact support to arrange this shipment.",
+    "quoteError": "Could not calculate a quote. Please try again.",
+    "bestValue": "Best value",
+    "sections": {
+      "express": "Express (International & Domestic)",
+      "local": "Local Delivery (KSA)",
+      "ddp": "Door To Door Freight"
+    },
+    "continueTo": {
+      "express": "Continue to Express",
+      "local": "Continue to Local Delivery",
+      "ddp": "Continue to Door To Door Freight"
+    },
+    "transportMethods": {
+      "air": "Air Freight (D2D)",
+      "sea": "Sea Freight (D2D)",
+      "domestic": "Domestic (D2D)"
     }
   }
 }

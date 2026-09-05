@@ -15,8 +15,6 @@ interface RateOptionCardProps {
   price: string;
   currencySymbol?: string;
   badge?: "cheapest" | "selected";
-  selected?: boolean;
-  onPress: () => void;
 }
 
 export const RateOptionCard = ({
@@ -26,24 +24,11 @@ export const RateOptionCard = ({
   deliveryLabel,
   price,
   badge,
-  selected = false,
-  onPress,
 }: RateOptionCardProps) => {
   const { t } = useTranslation();
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.card, selected && styles.cardSelected]}
-    >
-      {selected ? (
-        <View style={styles.selectedBadge}>
-          <Text size="xs" weight="bold" style={styles.selectedBadgeText}>
-            {t("createShipment.express.steps.step5.selected")}
-          </Text>
-        </View>
-      ) : null}
-
+    <View style={styles.card}>
       <View style={styles.row}>
         <View style={[styles.logo, { backgroundColor: carrierColor }]}>
           <Text
@@ -91,7 +76,7 @@ export const RateOptionCard = ({
           </Text>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 };
 
@@ -104,6 +89,7 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     padding: rs(15),
     marginVertical: rvs(8),
+    marginBottom: rvs(16),
   },
 
   cardSelected: {
