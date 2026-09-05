@@ -56,9 +56,6 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "locales": {
-      "ar": "./src/i18n/locales/ar.json"
-    },
     "plugins": [
       "expo-router",
       "expo-asset",
