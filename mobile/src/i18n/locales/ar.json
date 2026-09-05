@@ -1095,7 +1095,7 @@
       "payWith": "الدفع باستخدام",
       "newCard": "بطاقة جديدة",
       "newCardSubtitle": "الدفع ببطاقة مختلفة",
-      "pay": "ادفع {{currency}} {{amount}}",
+      "pay": "ادفع",
       "successTitle": "تم الدفع بنجاح",
       "successMessage": "تم دفع الفاتورة {{number}}.",
       "errorTitle": "فشل الدفع",

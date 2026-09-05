@@ -1096,7 +1096,7 @@
       "payWith": "Pay with",
       "newCard": "New card",
       "newCardSubtitle": "Pay with a different card",
-      "pay": "Pay {{currency}} {{amount}}",
+      "pay": "Pay",
       "successTitle": "Payment successful",
       "successMessage": "Invoice {{number}} has been paid.",
       "errorTitle": "Payment failed",

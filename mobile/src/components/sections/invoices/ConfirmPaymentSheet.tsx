@@ -201,10 +201,23 @@ export function ConfirmPaymentSheet({
         />
 
         <Button
-          title={t("invoices.confirmPayment.pay", {
-            currency: invoice.currency ?? "SAR",
-            amount: formatMoney(invoice.amount),
-          })}
+          title={
+            <View style={styles.payButtonContent}>
+              <Text size="medium" weight="semibold" style={styles.payButtonText}>
+                {t("invoices.confirmPayment.pay")}
+              </Text>
+              {!invoice.currency || invoice.currency === "SAR" ? (
+                <SaudiRiyal size={rs(20)} color={Colors.white} style={styles.payRiyalIcon} />
+              ) : (
+                <Text size="medium" weight="semibold" style={[styles.payButtonText, styles.payCurrencyText]}>
+                  {invoice.currency}
+                </Text>
+              )}
+              <Text size="medium" weight="semibold" style={styles.payButtonText}>
+                {formatMoney(invoice.amount)}
+              </Text>
+            </View>
+          }
           onPress={handlePay}
           loading={isPaying}
           style={styles.payButton}
@@ -254,5 +267,20 @@ const styles = StyleSheet.create({
   },
   payButton: {
     marginTop: rvs(4),
+  },
+  payButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  payButtonText: {
+    color: Colors.white,
+  },
+  payRiyalIcon: {
+    marginStart: rs(6),
+    marginEnd: rs(2),
+  },
+  payCurrencyText: {
+    marginStart: rs(6),
+    marginEnd: rs(2),
   },
 });

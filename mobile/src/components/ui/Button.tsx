@@ -45,7 +45,7 @@ export const Button = ({
         <ActivityIndicator
           color={isOutline ? Colors.text : Colors.white}
         />
-      ) : (
+      ) : typeof title === "string" ? (
         <Text
           size="medium"
           weight="semibold"
@@ -53,6 +53,8 @@ export const Button = ({
         >
           {title}
         </Text>
+      ) : (
+        title
       )}
     </Pressable>
   );
