@@ -219,9 +219,6 @@ export default function ApplyScreen() {
         applyIfEmpty("shippingShortAddress", details.shortAddress),
       ].filter(Boolean).length;
 
-      console.log(
-        `Document extraction completed. Filled ${filledCount} fields.`,
-      );
     } catch (error) {
       console.error("Document extraction failed:", error);
     } finally {

@@ -1,7 +1,8 @@
 {
   "common": {
     "tryAgain": "حاول مرة أخرى",
-            "loading": "جارٍ التحميل..."
+    "loading": "جارٍ التحميل...",
+    "cancel": "إلغاء"
   },
   "tabs": {
     "home": "الرئيسية",
@@ -117,7 +118,6 @@
       "company": "شركة",
       "individual": "فرد"
     },
-
     "company": {
       "sectionLabel": "الشركة",
       "companyName": "اسم الشركة",
@@ -141,7 +141,6 @@
       "city": "المدينة",
       "postalCode": "الرمز البريدي"
     },
-
     "submit": "إرسال الطلب",
     "errors": {
       "fullNameRequired": "الاسم الكامل مطلوب",
@@ -167,7 +166,6 @@
   "dashboard": {
     "welcomeBack": "مرحبًا بعودتك!",
     "pricingTier": "فئة التسعير",
-
     "stats": {
       "totalShipments": "إجمالي الشحنات",
       "inTransit": "قيد الشحن",
@@ -177,15 +175,12 @@
       "delivered": "تم تسليمها",
       "increase": "زيادة"
     },
-
     "shipmentActivity": "نشاط الشحنات (آخر 6 أشهر)",
-
     "recentShipments": {
       "title": "الشحنات الأخيرة",
       "seeAll": "عرض الكل",
       "empty": "لا توجد شحنات بعد"
     },
-
     "shipmentStatus": {
       "draft": "مسودة",
       "pending": "قيد الانتظار",
@@ -210,7 +205,6 @@
     "nov": "نوفمبر",
     "dec": "ديسمبر"
   },
-
   "notifications": {
     "title": "الإشعارات",
     "markAllRead": "تحديد الكل كمقروء",
@@ -231,39 +225,31 @@
     "details": {
       "carrier": "شركة الشحن",
       "estimatedDelivery": "موعد التسليم المتوقع",
-
       "documents": "المستندات",
       "shippingLabel": "ملصق الشحن",
       "commercialInvoice": "الفاتورة التجارية",
       "download": "تحميل",
       "pdf": "PDF",
-
       "from": "من",
       "to": "إلى",
-
       "details": "التفاصيل",
       "carrierTracking": "رقم تتبع شركة الشحن",
       "packages": "الطرود",
       "pickup": "الاستلام",
       "paid": "المدفوع",
-
       "needSomethingChanged": "هل تريد تغيير شيء؟",
       "cancelShipment": "إلغاء الشحنة",
       "refundedIfNotYetCollected": "سيتم استرداد المبلغ إذا لم يتم استلام الشحنة بعد",
-
       "trackLive": "تتبع مباشر",
-
       "status": {
         "delivered": "تم التسليم",
         "attention": "يحتاج إلى الانتباه",
         "processing": "قيد المعالجة",
         "inTransit": "قيد النقل"
       },
-
       "errors": {
         "loadFailed": "تعذر تحميل هذه الشحنة."
       },
-
       "cancel": {
         "successTitle": "تم إلغاء الشحنة",
         "refundSubmitted": "تم إلغاء الشحنة وإرسال طلب استرداد المبلغ للموافقة.",
@@ -331,14 +317,12 @@
     "subtitle": "تتبّع جميع شحناتك",
     "searchPlaceholder": "ابحث برقم الشحنة أو اسم المستلم...",
     "quotationBadge": "عرض السعر",
-
     "filters": {
       "all": "الكل",
       "processing": "قيد المعالجة",
       "attention": "تحتاج إلى انتباه",
       "delivered": "تم التسليم",
       "inTransit": "قيد الشحن",
-
       "title": "الفلاتر",
       "carrier": "شركة الشحن",
       "anyCarrier": "أي شركة شحن",
@@ -350,13 +334,11 @@
       "anyOrigin": "أي بلد إرسال",
       "destination": "الوجهة",
       "anyDestination": "أي وجهة",
-
       "paymentOptions": {
         "paid": "مدفوع",
         "pending": "معلّق",
         "unpaid": "غير مدفوع"
       },
-
       "methodOptions": {
         "air": "شحن جوي",
         "sea": "شحن بحري",
@@ -364,30 +346,25 @@
         "expressImport": "استيراد سريع",
         "expressExport": "تصدير سريع"
       },
-
       "locationOptions": {
         "china": "الصين",
         "uae": "الإمارات",
         "saudiArabia": "المملكة العربية السعودية",
         "other": "أخرى"
       },
-
       "createdFrom": "تاريخ الإنشاء من",
       "createdTo": "تاريخ الإنشاء إلى",
-
       "applied": "تم تطبيق {{count}} فلتر",
       "applied_plural": "تم تطبيق {{count}} فلاتر",
       "matches": "{{count}} نتيجة",
       "clearAll": "مسح الكل",
       "apply": "تطبيق الفلاتر"
     },
-
     "empty": {
       "title": "لا توجد شحنات بعد",
       "description": "أنشئ شحنتك الأولى وستظهر هنا مع إمكانية التتبع المباشر.",
       "create": "إنشاء شحنة"
     },
-
     "cancel": {
       "title": "هل تريد إلغاء هذه الشحنة؟",
       "subtitle": "سيتم إلغاء حجز شركة الشحن وطلب الاستلام.",
@@ -400,7 +377,6 @@
       "keep": "الاحتفاظ بها"
     }
   },
-
   "createShipment": {
     "heading": "إنشاء شحنة",
     "subheading": "اختر نوع الشحنة",
@@ -456,19 +432,16 @@
         "step3": {
           "title": "بيانات المستلم",
           "subtitle": "عنوان التسليم وبيانات الاتصال",
-
           "country": {
             "title": "الدولة",
             "placeholder": "اختر الدولة"
           },
-
           "savedRecipients": {
             "title": "عناوين المستلمين المحفوظة",
             "description": "استخدم عنوان الشحن الافتراضي أو أي بيانات مستلم استخدمتها في شحنات سابقة.",
             "placeholder": "اختر عنوان مستلم محفوظ",
             "empty": "لا توجد عناوين مستلمين محفوظة حتى الآن."
           },
-
           "newAddress": {
             "title": "أو أدخل عنوانًا جديدًا",
             "phone": "رقم الهاتف",
@@ -481,22 +454,18 @@
             "stateOrProvince": "المنطقة / المحافظة (اختياري)",
             "shortAddress": "العنوان الوطني (مثال: RCTB4359)"
           },
-
           "info": "تتطلب بعض الدول أيضًا تحديد المنطقة أو المحافظة."
         },
         "step4": {
           "title": "تفاصيل الطرود",
           "subtitle": "الوزن والأبعاد",
           "getRates": "احصل على الأسعار",
-
           "package": "الطرد",
           "remove": "إزالة",
-
           "weight": "الوزن ({{unit}})",
           "length": "الطول {{unit}}",
           "width": "العرض {{unit}}",
           "height": "الارتفاع {{unit}}",
-
           "addPackage": "إضافة طرد آخر",
           "scanDocument": "مسح مستند لتعبئة البيانات",
           "packingList": "قائمة التعبئة",
@@ -505,11 +474,9 @@
           "packingListSummaryTitle_other": "تم استيراد {{count}} طرود.",
           "packingListSummaryWeight": "الوزن الإجمالي: {{weight}} {{unit}}.",
           "packingListSummaryReview": "يرجى مراجعة الطرود المستوردة قبل الحصول على الأسعار.",
-
           "actualWeight": "الوزن الفعلي",
           "volumetricWeight": "الوزن الحجمي",
           "chargeableWeight": "الوزن الخاضع للفوترة",
-
           "weightUnit": "وحدة الوزن",
           "dimensionUnit": "وحدة الأبعاد",
           "packageType": "نوع الطرد"
@@ -613,7 +580,6 @@
           }
         }
       },
-
       "payment": {
         "comingSoon": "قريبًا",
         "checkout": {
@@ -683,8 +649,14 @@
         "step1": {
           "title": "طريقة الشحن",
           "subtitle": "شحن من الباب إلى الباب",
-          "air": { "title": "جوي", "subtitle": "5–8 أيام" },
-          "sea": { "title": "بحري", "subtitle": "25–35 يومًا" },
+          "air": {
+            "title": "جوي",
+            "subtitle": "5–8 أيام"
+          },
+          "sea": {
+            "title": "بحري",
+            "subtitle": "25–35 يومًا"
+          },
           "info": "الرسوم والضرائب مدفوعة مسبقًا — لا يدفع المستلم شيئًا عند الاستلام."
         },
         "step2": {
@@ -956,10 +928,8 @@
       "formInvalidTitle": "يرجى مراجعة الحقول المظللة",
       "shipmentTypeRequired": "يرجى اختيار نوع الشحنة",
       "domesticSaudiOnly": "الشحنات المحلية يجب أن تكون داخل المملكة العربية السعودية فقط",
-
       "postalCodeRequired": "الرمز البريدي لـ{{role}} مطلوب",
       "postalCodeRequiredDescription": "يرجى إدخال رمز بريدي صالح لـ {{country}}.",
-
       "postalCodeInvalid": "يرجى التحقق من الرمز البريدي لـ{{role}}",
       "roles": {
         "sender": "المرسل",
@@ -981,26 +951,19 @@
         "ES": "الرموز البريدية الإسبانية تتكون من 5 أرقام.",
         "IT": "الرموز البريدية الإيطالية تتكون من 5 أرقام."
       },
-
       "nationalAddressRequired": "العنوان الوطني لـ{{role}} مطلوب",
       "nationalAddressRequiredDescription": "عناوين المملكة العربية السعودية تحتاج إلى رمز العنوان الوطني المختصر (مثال: RCTB4359).",
-
       "nationalAddressInvalid": "يرجى التحقق من العنوان الوطني لـ{{role}}",
       "nationalAddressInvalidDescription": "يجب أن يتكون من 4 أحرف متبوعة بـ 4 أرقام، مثال: RCTB4359.",
-
       "stateRequired": "الولاية / المقاطعة لـ{{role}} مطلوبة",
       "stateRequiredDescription": "عناوين الولايات المتحدة وكندا تحتاج إلى ولاية أو مقاطعة.",
-
       "packageDetailsRequired": "يرجى تعبئة جميع تفاصيل الطرود",
       "packageDetailsRequiredForPackage": "يرجى تعبئة جميع تفاصيل الطرد {{packageNumber}}",
-
       "shippingRateRequired": "يرجى اختيار سعر الشحن",
-
       "invoiceRequired": "يرجى رفع الفاتورة",
       "customsItemRequired": "يرجى إضافة عنصر واحد على الأقل للجمارك",
       "customsItemIncomplete": "يرجى تعبئة جميع الحقول المطلوبة لـ \"{{itemName}}\""
     },
-
     "createShipment": {
       "express": {
         "rates": {
@@ -1250,6 +1213,10 @@
       },
       "logout": {
         "title": "تسجيل الخروج"
+      },
+      "salesChannels": {
+        "title": "قنوات البيع",
+        "subtitle": "اربط متجرك واشحن بنقرات"
       }
     },
     "logoutConfirm": {
@@ -1475,6 +1442,200 @@
       "air": "شحن جوي (من الباب إلى الباب)",
       "sea": "شحن بحري (من الباب إلى الباب)",
       "domestic": "محلي (من الباب إلى الباب)"
+    }
+  },
+  "salesChannels": {
+    "title": "قنوات البيع",
+    "subtitle": "اربط متجرك واشحن بنقرات",
+    "empty": "لا توجد قنوات بيع متصلة بعد.",
+    "connectButton": "ربط قناة بيع",
+    "reauthNeeded": "انتهت صلاحية الرمز — أعد الربط",
+    "quickActions": {
+      "orders": "الطلبات",
+      "assignmentRules": "قواعد التوزيع"
+    },
+    "badge": {
+      "live": "متصل",
+      "action": "إجراء"
+    },
+    "sync": {
+      "never": "أبدًا",
+      "justNow": "الآن",
+      "minutesAgo_one": "منذ {{count}} دقيقة",
+      "minutesAgo_other": "منذ {{count}} دقيقة",
+      "hoursAgo_one": "منذ {{count}} ساعة",
+      "hoursAgo_other": "منذ {{count}} ساعة",
+      "daysAgo_one": "منذ {{count}} يوم",
+      "daysAgo_other": "منذ {{count}} يوم",
+      "synced": "تمت المزامنة {{time}}"
+    },
+    "connect": {
+      "title": "ربط قناة بيع",
+      "subtitle": "اختر منصتك",
+      "apiKey": "مفتاح API",
+      "comingSoon": "قريبًا",
+      "formTitle": "ربط {{platform}}",
+      "storeName": "اسم المتجر",
+      "storeNamePlaceholder": "متجري",
+      "storeUrl": "رابط المتجر",
+      "consumerKey": "مفتاح المستهلك",
+      "consumerSecret": "الرمز السري للمستهلك",
+      "back": "رجوع",
+      "connect": "ربط",
+      "connecting": "جارٍ الربط...",
+      "successTitle": "تم ربط المتجر",
+      "errorTitle": "فشل الربط",
+      "next": "التالي",
+      "importOrders": "استيراد أي الطلبات",
+      "importOrdersPaid": "الطلبات المدفوعة فقط (موصى به)",
+      "importOrdersAll": "جميع الطلبات",
+      "importOrdersTagged": "الطلبات الموسومة \"للشحن\" فقط",
+      "onNewOrder": "عند وصول طلب جديد",
+      "onNewOrderReview": "إضافة إلى صندوق المراجعة (موصى به)",
+      "onNewOrderAuto": "إنشاء شحنة تلقائيًا (وضع تلقائي فقط)",
+      "pickupLocation": "موقع الاستلام الافتراضي",
+      "pickupLocationDefault": "عنوان الشحن في الحساب (افتراضي)",
+      "carrierMode": "شركة الشحن",
+      "carrierModeManual": "يدوي",
+      "carrierModeManualDescription": "تختار شركة الشحن لكل طلب (افتراضي)",
+      "carrierModeAuto": "تلقائي",
+      "carrierModeAutoDescription": "استخدام قواعد التوزيع",
+      "carrierModeNote": "يمكنك تغيير هذا في أي وقت. الوضع التلقائي يستخدم قواعد التوزيع؛ اليدوي يتيح لك مقارنة شركات الشحن لكل طلب. في الحالتين تدفع عبر Tap أو الائتمان — بدون دفع عند الاستلام."
+    },
+    "detail": {
+      "syncSuccessTitle": "اكتملت المزامنة",
+      "syncImported_one": "تم سحب {{count}} طلب إلى صندوق الوارد.",
+      "syncImported_other": "تم سحب {{count}} طلب إلى صندوق الوارد.",
+      "syncNothingNew": "لا توجد طلبات جديدة منذ آخر مزامنة.",
+      "syncErrorTitle": "فشلت المزامنة",
+      "disconnectConfirmTitle": "فصل المتجر",
+      "disconnectConfirmMessage": "فصل {{name}}؟ سيتوقف سحب الطلبات الجديدة.",
+      "disconnect": "فصل المتجر",
+      "disconnectErrorTitle": "تعذر فصل المتجر",
+      "notFoundTitle": "القناة غير موجودة",
+      "connected": "متصل",
+      "lastSync": "آخر مزامنة",
+      "syncNow": "مزامنة الآن",
+      "syncing": "جارٍ المزامنة...",
+      "dangerZone": "منطقة الخطر",
+      "disconnectSubtitle": "يوقف سحب الطلبات الجديدة",
+      "channelSettingsSection": "إعدادات القناة",
+      "connectionSection": "الاتصال",
+      "saveSettings": "حفظ الإعدادات",
+      "savingSettings": "جارٍ الحفظ...",
+      "saveSuccessTitle": "تم حفظ الإعدادات",
+      "saveErrorTitle": "فشل الحفظ",
+      "storeUrl": "رابط المتجر",
+      "syncStatus": "حالة المزامنة",
+      "syncActive": "نشطة",
+      "syncNotSyncedYet": "لم تتم المزامنة بعد",
+      "autoSyncNote": "تُسحب الطلبات تلقائيًا من متجرك كل بضع دقائق باستخدام مفتاح API الذي أدخلته — لا حاجة لإعداد ويب هوك. استخدم مزامنة الآن للسحب فورًا."
+    },
+    "orders": {
+      "title": "الطلبات",
+      "subtitle": "من متاجرك المتصلة",
+      "tabs": {
+        "toFulfil": "بانتظار التنفيذ",
+        "fulfilled": "منفَّذة",
+        "all": "الكل"
+      },
+      "empty": "لا توجد طلبات هنا بعد.",
+      "unknownCustomer": "عميل غير معروف",
+      "pieces_one": "{{count}} قطعة",
+      "pieces_other": "{{count}} قطعة",
+      "carrierAssigned": "شركة الشحن: {{carrier}}",
+      "carrierPending": "لم يتم تعيين شركة شحن بعد",
+      "fulfill": "تنفيذ",
+      "track": "تتبع",
+      "status": {
+        "new": "جديد",
+        "assigned": "مُعيَّن",
+        "shipped": "تم الشحن",
+        "delivered": "تم التسليم",
+        "cancelled": "ملغى"
+      }
+    },
+    "assignmentRules": {
+      "title": "قواعد توزيع شركات الشحن",
+      "subtitle": "تُطبَّق تلقائيًا عند التنفيذ",
+      "empty": "لا توجد قواعد توزيع بعد.",
+      "newRule": "قاعدة توزيع جديدة",
+      "infoBanner": "تُنفَّذ القواعد من الأعلى للأسفل. أول تطابق يفوز.",
+      "anyOrder": "أي طلب",
+      "cheapest": "الأقل تكلفة",
+      "fastest": "الأسرع",
+      "on": "مفعّل",
+      "off": "معطّل",
+      "regions": {
+        "any": "أي منطقة",
+        "central": "الوسطى (الرياض)",
+        "western": "الغربية (جدة)",
+        "eastern": "الشرقية (الدمام)",
+        "south": "الجنوبية (أبها)"
+      },
+      "weights": {
+        "any": "أي وزن",
+        "under1": "أقل من 1 كجم",
+        "between1and5": "1–5 كجم",
+        "over5": "5 كجم فأكثر"
+      },
+      "form": {
+        "title": "قاعدة توزيع جديدة",
+        "namePlaceholder": "مثال: الطرود الثقيلة ← ناقل",
+        "destination": "عندما تكون الوجهة",
+        "weight": "والوزن",
+        "carrier": "استخدم شركة الشحن",
+        "save": "حفظ القاعدة",
+        "saving": "جارٍ الحفظ...",
+        "successTitle": "تمت إضافة القاعدة",
+        "errorTitle": "تعذّرت إضافة القاعدة"
+      },
+      "defaultFallback": {
+        "title": "الافتراضي ← الأقل تكلفة",
+        "subtitle": "عند عدم تطابق أي قاعدة · مقارنة أسعار مباشرة"
+      }
+    },
+    "gate": {
+      "title": "قنوات البيع",
+      "description": "اربط Shopify وسلة وزد وغيرها — استورد الطلبات، نفّذها كشحنات، واضبط قواعد توزيع شركات الشحن. هذه الميزة متاحة عند الطلب.",
+      "requestPendingMessage": "طلبك قيد المراجعة. سنراسلك بالبريد الإلكتروني فور الموافقة عليه.",
+      "previousDeclinedTitle": "تم رفض طلبك السابق.",
+      "reasonPlaceholder": "أخبرنا كيف ستستخدمها (اختياري)",
+      "requestAccess": "طلب الوصول",
+      "requestAgain": "إعادة الطلب",
+      "requesting": "جارٍ الإرسال...",
+      "primaryContactNote": "يمكن فقط لجهة الاتصال الأساسية في حسابك تقديم الطلب.",
+      "requestSuccessTitle": "تم إرسال الطلب",
+      "requestErrorTitle": "تعذّر إرسال الطلب"
+    },
+    "card": {
+      "orders": "الطلبات",
+      "settings": "الإعدادات"
+    }
+  },
+  "orderFulfill": {
+    "title": "طلب {{order}}",
+    "reviewOrder": "مراجعة الطلب",
+    "recipient": "المستلم",
+    "destination": "الوجهة",
+    "items": "العناصر",
+    "orderValue": "قيمة الطلب",
+    "weight": "الوزن (كجم)",
+    "selectCarrier": "اختر شركة الشحن",
+    "noRates": "لا توجد شركات شحن محلية متاحة لهذا الوزن.",
+    "delivery": "التوصيل",
+    "vat": "ضريبة القيمة المضافة (15%)",
+    "total": "الإجمالي",
+    "fulfill": "تنفيذ · {{amount}}",
+    "fulfilling": "جارٍ التنفيذ...",
+    "payLater": "الدفع لاحقًا (ائتمان)",
+    "payingLater": "جارٍ إنشاء فاتورة ائتمان...",
+    "toast": {
+      "successTitle": "تم تنفيذ الطلب",
+      "paymentErrorTitle": "فشل الدفع",
+      "fulfillErrorTitle": "تعذّر إنشاء الشحنة",
+      "payLaterErrorTitle": "فشل الدفع الآجل",
+      "paymentPendingTitle": "تم بدء عملية الدفع"
     }
   }
 }

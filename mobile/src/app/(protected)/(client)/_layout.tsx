@@ -153,6 +153,46 @@ export default function ClientLayout() {
           title: "Quick Quote",
         }}
       />
+
+      <Stack.Screen
+        name="sales-channels"
+        options={{
+          headerShown: false,
+          title: "Sales Channels",
+        }}
+      />
+
+      <Stack.Screen
+        name="sales-channels/[id]"
+        options={{
+          headerShown: false,
+          title: "Sales Channel Details",
+        }}
+      />
+
+      <Stack.Screen
+        name="sales-channels/orders"
+        options={{
+          headerShown: false,
+          title: "Orders",
+        }}
+      />
+
+      <Stack.Screen
+        name="sales-channels/orders/[id]"
+        options={{
+          headerShown: false,
+          title: "Fulfill Order",
+        }}
+      />
+
+      <Stack.Screen
+        name="sales-channels/assignment-rules"
+        options={{
+          headerShown: false,
+          title: "Assignment Rules",
+        }}
+      />
     </Stack>
   );
 }

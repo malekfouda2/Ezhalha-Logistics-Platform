@@ -1,7 +1,8 @@
 {
   "common": {
     "tryAgain": "Try again",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "cancel": "Cancel"
   },
   "tabs": {
     "home": "Home",
@@ -117,7 +118,6 @@
       "company": "Company",
       "individual": "Individual"
     },
-
     "company": {
       "sectionLabel": "Company",
       "companyName": "Company name",
@@ -141,7 +141,6 @@
       "city": "City",
       "postalCode": "Postal/ZIP code"
     },
-
     "submit": "Submit application",
     "errors": {
       "fullNameRequired": "Full name is required",
@@ -167,7 +166,6 @@
   "dashboard": {
     "welcomeBack": "Welcome back!",
     "pricingTier": "Pricing tier",
-
     "stats": {
       "totalShipments": "Total shipments",
       "inTransit": "In transit",
@@ -177,15 +175,12 @@
       "delivered": "delivered",
       "increase": "increase"
     },
-
     "shipmentActivity": "Shipment Activity (Last 6 Months)",
-
     "recentShipments": {
       "title": "Recent Shipments",
       "seeAll": "See all",
       "empty": "No shipments yet"
     },
-
     "shipmentStatus": {
       "draft": "Draft",
       "pending": "Pending",
@@ -230,39 +225,31 @@
     "details": {
       "carrier": "Carrier",
       "estimatedDelivery": "Estimated delivery",
-
       "documents": "DOCUMENTS",
       "shippingLabel": "Shipping label",
       "commercialInvoice": "Commercial invoice",
       "download": "Download",
       "pdf": "PDF",
-
       "from": "FROM",
       "to": "TO",
-
       "details": "DETAILS",
       "carrierTracking": "Carrier tracking",
       "packages": "Packages",
       "pickup": "Pickup",
       "paid": "Paid",
-
       "needSomethingChanged": "NEED SOMETHING CHANGED?",
       "cancelShipment": "Cancel shipment",
       "refundedIfNotYetCollected": "Refunded if not yet collected",
-
       "trackLive": "Track live",
-
       "status": {
         "delivered": "Delivered",
         "attention": "Attention",
         "processing": "Processing",
         "inTransit": "In Transit"
       },
-
       "errors": {
         "loadFailed": "Couldn't load this shipment."
       },
-
       "cancel": {
         "successTitle": "Shipment Cancelled",
         "refundSubmitted": "Your shipment was cancelled and a refund request was submitted for approval.",
@@ -336,7 +323,6 @@
       "attention": "Attention",
       "delivered": "Delivered",
       "inTransit": "In Transit",
-
       "title": "Filters",
       "carrier": "Carrier",
       "anyCarrier": "Any carrier",
@@ -348,13 +334,11 @@
       "anyOrigin": "Any origin",
       "destination": "Destination",
       "anyDestination": "Any destination",
-
       "paymentOptions": {
         "paid": "Paid",
         "pending": "Pending",
         "unpaid": "Unpaid"
       },
-
       "methodOptions": {
         "air": "Air freight",
         "sea": "Sea freight",
@@ -362,30 +346,25 @@
         "expressImport": "Express import",
         "expressExport": "Express export"
       },
-
       "locationOptions": {
         "china": "China",
         "uae": "UAE",
         "saudiArabia": "Saudi Arabia",
         "other": "Other"
       },
-
       "createdFrom": "Created from",
       "createdTo": "Created to",
-
       "applied": "{{count}} filter applied",
       "applied_plural": "{{count}} filters applied",
       "matches": "{{count}} matches",
       "clearAll": "Clear all",
       "apply": "Apply filters"
     },
-
     "empty": {
       "title": "No shipments yet",
       "description": "Create your first shipment and it will show up here with live tracking.",
       "create": "Create a shipment"
     },
-
     "cancel": {
       "title": "Cancel this shipment?",
       "subtitle": "The carrier booking and your pickup will both be cancelled.",
@@ -454,19 +433,16 @@
         "step3": {
           "title": "Recipient Details",
           "subtitle": "Delivery address and contact",
-
           "country": {
             "title": "COUNTRY",
             "placeholder": "Select country"
           },
-
           "savedRecipients": {
             "title": "SAVED RECIPIENT ADDRESSES",
             "description": "Reuse your default shipping address or any recipient details you used in previous shipments.",
             "placeholder": "Select a saved recipient address",
             "empty": "No saved recipient addresses yet."
           },
-
           "newAddress": {
             "title": "OR ENTER A NEW ADDRESS",
             "phone": "Phone",
@@ -479,22 +455,18 @@
             "stateOrProvince": "State / Province (optional)",
             "shortAddress": "National Address (e.g. RCTB4359)"
           },
-
           "info": "Some countries also require a state or province."
         },
         "step4": {
           "title": "Package Details",
           "subtitle": "Weight and dimensions",
           "getRates": "Get rates",
-
           "package": "Package",
           "remove": "Remove",
-
           "weight": "WEIGHT ({{unit}})",
           "length": "L {{unit}}",
           "width": "W {{unit}}",
           "height": "H {{unit}}",
-
           "addPackage": "Add another package",
           "scanDocument": "Scan a document to fill this in",
           "packingList": "Packing List",
@@ -503,11 +475,9 @@
           "packingListSummaryTitle_other": "{{count}} cartons imported.",
           "packingListSummaryWeight": "Total gross weight: {{weight}} {{unit}}.",
           "packingListSummaryReview": "Please review the imported packages before getting rates.",
-
           "actualWeight": "Actual weight",
           "volumetricWeight": "Volumetric weight",
           "chargeableWeight": "Chargeable weight",
-
           "weightUnit": "Weight Unit",
           "dimensionUnit": "Dimension Unit",
           "packageType": "Package Type"
@@ -611,7 +581,6 @@
           }
         }
       },
-
       "payment": {
         "comingSoon": "Coming soon",
         "checkout": {
@@ -674,7 +643,6 @@
         "cancel": "Cancel"
       }
     },
-
     "freight": {
       "title": "Door To Door Freight",
       "description": "Import with all duties & taxes prepaid on fixed lane pricing.",
@@ -682,8 +650,14 @@
         "step1": {
           "title": "Shipment method",
           "subtitle": "Door To Door Freight",
-          "air": { "title": "Air", "subtitle": "5–8 days" },
-          "sea": { "title": "Sea", "subtitle": "25–35 days" },
+          "air": {
+            "title": "Air",
+            "subtitle": "5–8 days"
+          },
+          "sea": {
+            "title": "Sea",
+            "subtitle": "25–35 days"
+          },
           "info": "Duties and taxes are prepaid — the recipient pays nothing on arrival."
         },
         "step2": {
@@ -854,7 +828,6 @@
         }
       }
     },
-
     "continue": "Continue",
     "confirmation": {
       "express": {
@@ -924,7 +897,6 @@
       "errorTitle": "Application failed",
       "errorMessage": "We couldn't submit your application. Please check your information and try again."
     },
-
     "otp": {
       "request": {
         "errorTitle": "Failed to send verification code",
@@ -957,10 +929,8 @@
       "formInvalidTitle": "Please check the highlighted fields",
       "shipmentTypeRequired": "Please select a shipment type",
       "domesticSaudiOnly": "Domestic shipments must be within Saudi Arabia",
-
       "postalCodeRequired": "{{role}} postal code is required",
       "postalCodeRequiredDescription": "A valid postal code is required for {{country}}.",
-
       "postalCodeInvalid": "Check the {{role}} postal code",
       "roles": {
         "sender": "Sender",
@@ -982,26 +952,19 @@
         "ES": "Spanish postal codes are 5 digits.",
         "IT": "Italian postal codes are 5 digits."
       },
-
       "nationalAddressRequired": "{{role}} National Address is required",
       "nationalAddressRequiredDescription": "KSA addresses need a National Address short code (e.g. RCTB4359).",
-
       "nationalAddressInvalid": "Check the {{role}} National Address",
       "nationalAddressInvalidDescription": "It should be 4 letters followed by 4 digits, e.g. RCTB4359.",
-
       "stateRequired": "{{role}} state / province is required",
       "stateRequiredDescription": "US and Canada addresses need a state or province.",
-
       "packageDetailsRequired": "Please fill in all package details",
       "packageDetailsRequiredForPackage": "Please fill in all details for Package {{packageNumber}}",
-
       "shippingRateRequired": "Please select a shipping rate",
-
       "invoiceRequired": "Please upload an invoice",
       "customsItemRequired": "Please add at least one item for customs",
       "customsItemIncomplete": "Please fill in all required fields for \"{{itemName}}\""
     },
-
     "createShipment": {
       "express": {
         "rates": {
@@ -1248,6 +1211,10 @@
       },
       "logout": {
         "title": "Log out"
+      },
+      "salesChannels": {
+        "title": "Sales Channels",
+        "subtitle": "Connect your store, ship in clicks"
       }
     },
     "logoutConfirm": {
@@ -1467,6 +1434,200 @@
       "air": "Air Freight (D2D)",
       "sea": "Sea Freight (D2D)",
       "domestic": "Domestic (D2D)"
+    }
+  },
+  "salesChannels": {
+    "title": "Sales channels",
+    "subtitle": "Connect your store, ship in clicks",
+    "empty": "No sales channels connected yet.",
+    "connectButton": "Connect a sales channel",
+    "reauthNeeded": "Token expired — reconnect",
+    "quickActions": {
+      "orders": "Orders",
+      "assignmentRules": "Assignment rules"
+    },
+    "badge": {
+      "live": "Live",
+      "action": "Action"
+    },
+    "sync": {
+      "never": "never",
+      "justNow": "just now",
+      "minutesAgo_one": "{{count}} min ago",
+      "minutesAgo_other": "{{count}} min ago",
+      "hoursAgo_one": "{{count}} hr ago",
+      "hoursAgo_other": "{{count}} hr ago",
+      "daysAgo_one": "{{count}} d ago",
+      "daysAgo_other": "{{count}} d ago",
+      "synced": "synced {{time}}"
+    },
+    "connect": {
+      "title": "Connect a sales channel",
+      "subtitle": "Pick your platform",
+      "apiKey": "API key",
+      "comingSoon": "Coming soon",
+      "formTitle": "Connect {{platform}}",
+      "storeName": "Store name",
+      "storeNamePlaceholder": "My Shop",
+      "storeUrl": "Store URL",
+      "consumerKey": "Consumer key",
+      "consumerSecret": "Consumer secret",
+      "back": "Back",
+      "connect": "Connect",
+      "connecting": "Connecting...",
+      "successTitle": "Store connected",
+      "errorTitle": "Connection failed",
+      "next": "Next",
+      "importOrders": "Import which orders",
+      "importOrdersPaid": "Paid orders only (recommended)",
+      "importOrdersAll": "All orders",
+      "importOrdersTagged": "Only orders tagged \"ship\"",
+      "onNewOrder": "On new order",
+      "onNewOrderReview": "Add to inbox for review (recommended)",
+      "onNewOrderAuto": "Auto-create shipment (auto mode only)",
+      "pickupLocation": "Default pickup location",
+      "pickupLocationDefault": "Account shipping address (default)",
+      "carrierMode": "Carrier",
+      "carrierModeManual": "Manual",
+      "carrierModeManualDescription": "You pick a carrier per order (default)",
+      "carrierModeAuto": "Auto",
+      "carrierModeAutoDescription": "Use assignment rules",
+      "carrierModeNote": "Change this any time. Auto uses your Assignment Rules; manual lets you compare carriers per order. Either way you pay with Tap or credit — no COD."
+    },
+    "detail": {
+      "syncSuccessTitle": "Sync complete",
+      "syncImported_one": "Pulled {{count}} order into your inbox.",
+      "syncImported_other": "Pulled {{count}} orders into your inbox.",
+      "syncNothingNew": "No new orders since last sync.",
+      "syncErrorTitle": "Sync failed",
+      "disconnectConfirmTitle": "Disconnect store",
+      "disconnectConfirmMessage": "Disconnect {{name}}? This stops pulling new orders.",
+      "disconnect": "Disconnect store",
+      "disconnectErrorTitle": "Couldn't disconnect store",
+      "notFoundTitle": "Channel not found",
+      "connected": "Connected",
+      "lastSync": "Last sync",
+      "syncNow": "Sync now",
+      "syncing": "Syncing...",
+      "dangerZone": "Danger zone",
+      "disconnectSubtitle": "Stops pulling new orders",
+      "channelSettingsSection": "Channel settings",
+      "connectionSection": "Connection",
+      "saveSettings": "Save settings",
+      "savingSettings": "Saving...",
+      "saveSuccessTitle": "Settings saved",
+      "saveErrorTitle": "Save failed",
+      "storeUrl": "Store URL",
+      "syncStatus": "Sync status",
+      "syncActive": "Active",
+      "syncNotSyncedYet": "Not synced yet",
+      "autoSyncNote": "Orders are pulled automatically from your store every few minutes using the API key you provided — no webhook setup needed. Use Sync now to pull immediately."
+    },
+    "orders": {
+      "title": "Orders",
+      "subtitle": "From your connected stores",
+      "tabs": {
+        "toFulfil": "To fulfil",
+        "fulfilled": "Fulfilled",
+        "all": "All"
+      },
+      "empty": "No orders here yet.",
+      "unknownCustomer": "Unknown customer",
+      "pieces_one": "{{count}} item",
+      "pieces_other": "{{count}} items",
+      "carrierAssigned": "Carrier: {{carrier}}",
+      "carrierPending": "Carrier not assigned yet",
+      "fulfill": "Fulfil",
+      "track": "Track",
+      "status": {
+        "new": "New",
+        "assigned": "Assigned",
+        "shipped": "Shipped",
+        "delivered": "Delivered",
+        "cancelled": "Cancelled"
+      }
+    },
+    "assignmentRules": {
+      "title": "Carrier assignment rules",
+      "subtitle": "Applied automatically when fulfilling",
+      "empty": "No assignment rules yet.",
+      "newRule": "New assignment rule",
+      "infoBanner": "Rules run top to bottom. The first match wins.",
+      "anyOrder": "Any order",
+      "cheapest": "Cheapest",
+      "fastest": "Fastest",
+      "on": "On",
+      "off": "Off",
+      "regions": {
+        "any": "Any",
+        "central": "Central (Riyadh)",
+        "western": "Western (Jeddah)",
+        "eastern": "Eastern (Dammam)",
+        "south": "South (Abha)"
+      },
+      "weights": {
+        "any": "Any",
+        "under1": "< 1 kg",
+        "between1and5": "1–5 kg",
+        "over5": "≥ 5 kg"
+      },
+      "form": {
+        "title": "New assignment rule",
+        "namePlaceholder": "e.g. Heavy parcels → Naqel",
+        "destination": "When destination is",
+        "weight": "And weight is",
+        "carrier": "Use carrier",
+        "save": "Save rule",
+        "saving": "Saving...",
+        "successTitle": "Rule added",
+        "errorTitle": "Couldn't add rule"
+      },
+      "defaultFallback": {
+        "title": "Default → Cheapest",
+        "subtitle": "When nothing matches · live rate compare"
+      }
+    },
+    "gate": {
+      "title": "Sales Channels",
+      "description": "Connect Shopify, Salla, Zid and more — import orders, fulfil them into shipments, and set carrier assignment rules. This feature is available on request.",
+      "requestPendingMessage": "Your request is under review. We'll email you once it's approved.",
+      "previousDeclinedTitle": "Your previous request was declined.",
+      "reasonPlaceholder": "Tell us how you'll use it (optional)",
+      "requestAccess": "Request access",
+      "requestAgain": "Request again",
+      "requesting": "Submitting...",
+      "primaryContactNote": "Only your account's primary contact can submit a request.",
+      "requestSuccessTitle": "Request submitted",
+      "requestErrorTitle": "Could not submit request"
+    },
+    "card": {
+      "orders": "Orders",
+      "settings": "Settings"
+    }
+  },
+  "orderFulfill": {
+    "title": "Order {{order}}",
+    "reviewOrder": "Review order",
+    "recipient": "Recipient",
+    "destination": "Destination",
+    "items": "Items",
+    "orderValue": "Order value",
+    "weight": "Weight (kg)",
+    "selectCarrier": "Select carrier",
+    "noRates": "No local carriers available for this weight.",
+    "delivery": "Delivery",
+    "vat": "VAT (15%)",
+    "total": "Total",
+    "fulfill": "Fulfil · {{amount}}",
+    "fulfilling": "Fulfilling...",
+    "payLater": "Pay later (credit)",
+    "payingLater": "Creating credit invoice...",
+    "toast": {
+      "successTitle": "Order fulfilled",
+      "paymentErrorTitle": "Payment failed",
+      "fulfillErrorTitle": "Could not create shipment",
+      "payLaterErrorTitle": "Pay Later failed",
+      "paymentPendingTitle": "Payment initiated"
     }
   }
 }

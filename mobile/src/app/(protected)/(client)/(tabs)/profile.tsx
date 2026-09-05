@@ -26,7 +26,6 @@ export default function ProfileScreen() {
 
   const language = useLanguageStore((state) => state.language);
   const { logout } = useLogout();
-console.log({user,account});
 
   const displayName = user?.username || account?.name || t("profile.noCompanyName");
   const companyLine = [ account?.name, account?.accountNumber]
@@ -119,6 +118,12 @@ console.log({user,account});
             onPress={() => router.push("/team-members")}
           />
         ) : null}
+        <SettingsRow
+          icon="storefront-outline"
+          title={t("profile.rows.salesChannels.title")}
+          subtitle={t("profile.rows.salesChannels.subtitle")}
+          onPress={() => router.push("/sales-channels")}
+        />
       </InfoCard>
 
       <SectionLabel>{t("profile.sections.security")}</SectionLabel>
