@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Feather } from "@expo/vector-icons";
-import Toast from "react-native-toast-message";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
@@ -92,13 +91,6 @@ export default function CreditBillingScreen() {
     );
   }, [creditInvoices, filter]);
 
-  const handlePay = () => {
-    Toast.show({
-      type: "info",
-      text1: t("invoices.creditBilling.settleNoticeTitle"),
-      text2: t("invoices.creditBilling.settleNotice"),
-    });
-  };
 
   const isLoading = accountLoading || accessLoading;
 
@@ -231,20 +223,7 @@ export default function CreditBillingScreen() {
             )}
           </>
         )}
-
-        <View style={{ height: rvs(20) }} />
       </ScrollView>
-
-      {creditEnabled && sortedOutstanding.length > 0 && (
-        <View style={styles.footer}>
-          <Button
-            title={t("invoices.creditBilling.pay", {
-              amount: formatMoney(sortedOutstanding[0].amount),
-            })}
-            onPress={handlePay}
-          />
-        </View>
-      )}
 
       <RequestCreditAccessSheet
         visible={requestSheetVisible}
@@ -261,8 +240,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
-    paddingBottom: rvs(100),
+    paddingTop: rvs(8),
   },
   headerRow: {
     flexDirection: "row",
@@ -336,15 +314,5 @@ const styles = StyleSheet.create({
   filterChipActive: {
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
-  },
-  footer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(20),
-    backgroundColor: Colors.background,
   },
 });

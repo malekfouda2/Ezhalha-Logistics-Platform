@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
+    paddingTop: rvs(8),
   },
   subtitle: {
     marginTop: rvs(2),
@@ -394,6 +394,7 @@ const styles = StyleSheet.create({
   },
   filtersRow: {
     paddingHorizontal: rs(16),
+    marginBottom: rvs(10),
     gap: rs(8),
   },
   filterChip: {
@@ -410,7 +411,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(12),
+    paddingTop: rvs(8),
     paddingBottom: rvs(15),
   },
 

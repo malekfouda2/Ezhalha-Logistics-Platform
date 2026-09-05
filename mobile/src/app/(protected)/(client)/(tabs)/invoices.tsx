@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
+    paddingTop: rvs(8),
   },
   linksRow: {
     flexDirection: "row",

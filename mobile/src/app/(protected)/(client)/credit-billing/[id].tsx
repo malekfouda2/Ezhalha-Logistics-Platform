@@ -4,7 +4,6 @@ import { useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { SaudiRiyal } from "lucide-react-native";
-import Toast from "react-native-toast-message";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
@@ -29,13 +28,6 @@ export default function CreditInvoiceDetailsScreen() {
     enabled: !!id,
   });
 
-  const handlePay = () => {
-    Toast.show({
-      type: "info",
-      text1: t("invoices.creditBilling.settleNoticeTitle"),
-      text2: t("invoices.creditBilling.settleNotice"),
-    });
-  };
 
   if (isLoading) {
     return (
@@ -77,6 +69,34 @@ export default function CreditInvoiceDetailsScreen() {
               {invoice.shipment?.trackingNumber ?? invoice.shipmentId}
             </Text>
           </View>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor:
+                  invoice.status === "PAID"
+                    ? "#15803D1A"
+                    : invoice.status === "OVERDUE"
+                      ? `${Colors.error}1A`
+                      : Colors.amberBackgroundColor,
+              },
+            ]}
+          >
+            <Text
+              size="xs"
+              weight="bold"
+              style={{
+                color:
+                  invoice.status === "PAID"
+                    ? "#15803D"
+                    : invoice.status === "OVERDUE"
+                      ? Colors.error
+                      : Colors.amberTextColor,
+              }}
+            >
+              {invoice.status}
+            </Text>
+          </View>
         </View>
 
         <InfoCard>
@@ -91,17 +111,6 @@ export default function CreditInvoiceDetailsScreen() {
           <InfoRow
             label={t("invoices.creditInvoiceDetails.terms")}
             value={t("invoices.creditInvoiceDetails.net30")}
-          />
-          <InfoRow
-            label={t("invoices.creditInvoiceDetails.status")}
-            value={invoice.status}
-            valueColor={
-              invoice.status === "PAID"
-                ? "#15803D"
-                : invoice.status === "OVERDUE"
-                  ? Colors.error
-                  : undefined
-            }
           />
           <InfoRow
             label={t("invoices.creditInvoiceDetails.remindersSent")}
@@ -191,18 +200,7 @@ export default function CreditInvoiceDetailsScreen() {
             </Text>
           </View>
         </View>
-
-        <View style={{ height: rvs(90) }} />
       </ScrollView>
-
-      {(invoice.status === "UNPAID" || invoice.status === "OVERDUE") && (
-        <View style={styles.footer}>
-          <Button
-            title={t("invoices.creditInvoiceDetails.payThisInvoice")}
-            onPress={handlePay}
-          />
-        </View>
-      )}
     </View>
   );
 }
@@ -220,7 +218,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
+    paddingTop: rvs(8),
   },
   headerRow: {
     flexDirection: "row",
@@ -231,6 +229,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingStart: rs(10),
   },
+  statusBadge: {
+    paddingHorizontal: rs(10),
+    paddingVertical: rvs(5),
+    borderRadius: rs(10),
+  },
   totalCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -239,7 +242,6 @@ const styles = StyleSheet.create({
     borderRadius: rs(14),
     paddingHorizontal: rs(14),
     paddingVertical: rvs(16),
-    marginBottom: rvs(20),
   },
   totalValueRow: {
     flexDirection: "row",
@@ -270,15 +272,5 @@ const styles = StyleSheet.create({
   },
   riyalIcon: {
     marginRight: rs(4),
-  },
-  footer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: rs(16),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(20),
-    backgroundColor: Colors.background,
   },
 });

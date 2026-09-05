@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: rs(16),
-    paddingTop: rvs(16),
+    paddingTop: rvs(8),
   },
 
   headerRow: {

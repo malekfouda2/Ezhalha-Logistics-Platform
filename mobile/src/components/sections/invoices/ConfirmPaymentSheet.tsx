@@ -201,7 +201,10 @@ export function ConfirmPaymentSheet({
         />
 
         <Button
-          title={t("invoices.confirmPayment.pay", { amount: formatMoney(invoice.amount) })}
+          title={t("invoices.confirmPayment.pay", {
+            currency: invoice.currency ?? "SAR",
+            amount: formatMoney(invoice.amount),
+          })}
           onPress={handlePay}
           loading={isPaying}
           style={styles.payButton}

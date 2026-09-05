@@ -220,7 +220,7 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+    // <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text size="xxl" weight="bold">
@@ -295,13 +295,14 @@ export default function NotificationsScreen() {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    // </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.background },
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.background,    paddingTop: rvs(8),
+ },
   header: {
     paddingHorizontal: rs(25),
     paddingBottom: rvs(16),
