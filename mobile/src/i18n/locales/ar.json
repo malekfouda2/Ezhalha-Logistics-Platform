@@ -1202,5 +1202,268 @@
       "addCardInfoTitle": "أضف بطاقة عند الدفع",
       "addCardInfoMessage": "اختر \"حفظ هذه البطاقة\" في المرة القادمة التي تدفع فيها لإضافتها هنا."
     }
+  },
+  "profile": {
+    "title": "إعدادات الحساب",
+    "pricingTier": "فئة التسعير",
+    "sections": {
+      "account": "الحساب",
+      "security": "الأمان",
+      "preferences": "التفضيلات"
+    },
+    "rows": {
+      "profileInformation": {
+        "title": "المعلومات الشخصية",
+        "subtitle": "الاسم، البريد الإلكتروني، الهاتف"
+      },
+      "accountDetails": {
+        "title": "تفاصيل الحساب",
+        "subtitle": "الشركة، السجل التجاري، الرقم الضريبي"
+      },
+      "defaultShippingAddress": {
+        "title": "عنوان الشحن الافتراضي",
+        "subtitle": "من أين تُشحن طلباتك"
+      },
+      "billingCurrency": {
+        "title": "عملة الفوترة",
+        "subtitle": "ريال سعودي (SAR)",
+        "subtitleUsd": "دولار أمريكي (USD)"
+      },
+      "changePassword": {
+        "title": "تغيير كلمة المرور",
+        "subtitle": "حافظ على أمان حسابك"
+      },
+      "signedInDevices": {
+        "title": "الأجهزة المسجّلة",
+        "subtitle_one": "جهاز واحد",
+        "subtitle_two": "جهازان",
+        "subtitle_few": "{{count}} أجهزة",
+        "subtitle_many": "{{count}} جهازًا",
+        "subtitle_other": "{{count}} جهاز"
+      },
+      "teamMembers": {
+        "title": "أعضاء الفريق",
+        "subtitle": "إدارة صلاحيات فريقك"
+      },
+      "language": {
+        "title": "تغيير اللغة"
+      },
+      "logout": {
+        "title": "تسجيل الخروج"
+      }
+    },
+    "logoutConfirm": {
+      "title": "تسجيل الخروج",
+      "message": "هل أنت متأكد من تسجيل الخروج؟",
+      "cancel": "إلغاء",
+      "confirm": "تسجيل الخروج"
+    },
+    "noCompanyName": "حسابك",
+    "errors": {
+      "loadFailed": "تعذّر تحميل بيانات حسابك"
+    }
+  },
+  "profileInformation": {
+    "title": "المعلومات الشخصية",
+    "subtitle": "تحديث اسم جهة الاتصال والشركة والبريد الإلكتروني ورقم الهاتف",
+    "contactNameLabel": "اسم جهة الاتصال",
+    "contactNamePlaceholder": "اسم جهة الاتصال",
+    "companyNameLabel": "اسم الشركة",
+    "companyNamePlaceholder": "اسم شركتك",
+    "emailLabel": "البريد الإلكتروني",
+    "emailPlaceholder": "you@example.com",
+    "phoneLabel": "رقم الهاتف",
+    "phonePlaceholder": "+966 5xx xxx xxx",
+    "save": "حفظ التغييرات",
+    "saving": "جارٍ الحفظ...",
+    "successTitle": "تم تحديث الملف الشخصي",
+    "successMessage": "تم حفظ معلوماتك الشخصية.",
+    "errorTitle": "تعذّر حفظ الملف الشخصي",
+    "errors": {
+      "nameRequired": "اسم جهة الاتصال مطلوب",
+      "emailInvalid": "أدخل بريدًا إلكترونيًا صالحًا",
+      "phoneRequired": "رقم الهاتف مطلوب"
+    }
+  },
+  "billingCurrency": {
+    "title": "عملة الفوترة",
+    "subtitle": "عملة العرض والدفع",
+    "sar": "ريال سعودي",
+    "usd": "دولار أمريكي",
+    "notice": "الريال السعودي هو دائمًا عملة المحاسبة. يتم تحويل العملات الأخرى عند الدفع باستخدام السعر المعروض حينها.",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ...",
+    "successTitle": "تم تحديث عملة الفوترة",
+    "errorTitle": "تعذّر تحديث العملة"
+  },
+  "defaultShippingAddress": {
+    "title": "عنوان الشحن الافتراضي",
+    "subtitle": "يُستخدم لتعبئة بيانات شحناتك مسبقًا",
+    "contactName": "اسم جهة الاتصال",
+    "contactNamePlaceholder": "اسم الشخص المسؤول",
+    "contactPhone": "هاتف جهة الاتصال",
+    "contactPhonePlaceholder": "5XX XXX XXX",
+    "country": "الدولة",
+    "stateOrProvince": "المنطقة/المحافظة",
+    "stateOrProvincePlaceholder": "المنطقة أو المحافظة",
+    "city": "المدينة",
+    "cityPlaceholder": "المدينة",
+    "postalCode": "الرمز البريدي",
+    "postalCodePlaceholder": "الرمز البريدي",
+    "addressLine1": "العنوان - السطر الأول",
+    "addressLine1Placeholder": "الشارع، المبنى، الشقة",
+    "addressLine2": "العنوان - السطر الثاني (اختياري)",
+    "addressLine2Placeholder": "تفاصيل إضافية للعنوان",
+    "arabicNotice": "يُستخدم هذا العنوان لتعبئة بيانات المرسل تلقائيًا عند إنشاء شحنة.",
+    "save": "حفظ التغييرات",
+    "saving": "جارٍ الحفظ...",
+    "successTitle": "تم تحديث عنوان الشحن",
+    "successMessage": "تم حفظ عنوان الشحن الافتراضي.",
+    "errorTitle": "تعذّر حفظ عنوان الشحن",
+    "errors": {
+      "contactNameRequired": "اسم جهة الاتصال مطلوب",
+      "contactPhoneRequired": "هاتف جهة الاتصال مطلوب",
+      "countryRequired": "الدولة مطلوبة",
+      "stateRequired": "المنطقة/المحافظة مطلوبة",
+      "cityRequired": "المدينة مطلوبة",
+      "postalCodeRequired": "الرمز البريدي مطلوب",
+      "addressLine1Required": "السطر الأول من العنوان مطلوب"
+    }
+  },
+  "teamMembers": {
+    "title": "أعضاء الفريق",
+    "subtitle_one": "عضو واحد · لجهة الاتصال الرئيسية فقط",
+    "subtitle_two": "عضوان · لجهة الاتصال الرئيسية فقط",
+    "subtitle_few": "{{count}} أعضاء · لجهة الاتصال الرئيسية فقط",
+    "subtitle_many": "{{count}} عضوًا · لجهة الاتصال الرئيسية فقط",
+    "subtitle_other": "{{count}} عضو · لجهة الاتصال الرئيسية فقط",
+    "primary": "رئيسي",
+    "allPermissions": "جميع الصلاحيات",
+    "noPermissions": "لا توجد صلاحيات",
+    "addMember": "إضافة عضو للفريق",
+    "empty": "لا يوجد أعضاء في الفريق بعد.",
+    "emptySubtitle": "أضف أعضاء الفريق للتعاون في حسابك.",
+    "accessDeniedTitle": "الوصول مرفوض",
+    "accessDeniedMessage": "ليس لديك صلاحية لإدارة أعضاء الفريق.",
+    "removeConfirmTitle": "إزالة عضو الفريق",
+    "removeConfirmMessage": "إزالة {{name}} من حسابك؟ سيفقد الوصول فورًا.",
+    "remove": "إزالة",
+    "cancel": "إلغاء",
+    "removeErrorTitle": "تعذّرت إزالة عضو الفريق",
+    "createErrorTitle": "تعذّرت إضافة عضو الفريق",
+    "createSuccessTitle": "تمت إضافة عضو الفريق",
+    "createSuccessMessage": "يمكن لـ {{name}} الآن تسجيل الدخول باسم المستخدم وكلمة المرور اللذين حددتهما.",
+    "form": {
+      "detailsSection": "التفاصيل",
+      "username": "اسم المستخدم",
+      "usernamePlaceholder": "اسم المستخدم",
+      "email": "البريد الإلكتروني",
+      "emailPlaceholder": "البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "passwordPlaceholder": "كلمة المرور",
+      "permissionsSection": "الصلاحيات",
+      "submit": "إضافة العضو",
+      "submitting": "جارٍ الإضافة...",
+      "errors": {
+        "usernameMin": "يجب أن يتكون اسم المستخدم من 3 أحرف على الأقل",
+        "usernameInvalid": "يُسمح فقط بالأحرف والأرقام والنقاط والشرطات السفلية",
+        "emailInvalid": "أدخل بريدًا إلكترونيًا صالحًا",
+        "passwordMin": "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل"
+      }
+    },
+    "permissions": {
+      "view_shipments": "عرض الشحنات",
+      "create_shipments": "إنشاء شحنات",
+      "view_invoices": "عرض الفواتير",
+      "view_payments": "عرض المدفوعات",
+      "make_payments": "إجراء المدفوعات",
+      "manage_users": "إدارة المستخدمين"
+    }
+  },
+  "editPermissions": {
+    "title": "تعديل الصلاحيات",
+    "primaryNotice": "تمتلك جهة الاتصال الرئيسية دائمًا كل الصلاحيات ولا يمكن تقييدها.",
+    "dangerZone": "منطقة الخطر",
+    "removeMember": "إزالة عضو الفريق",
+    "removeMemberSubtitle": "يُلغي الوصول فورًا",
+    "save": "حفظ الصلاحيات",
+    "saving": "جارٍ الحفظ...",
+    "successTitle": "تم تحديث الصلاحيات",
+    "errorTitle": "تعذّر تحديث الصلاحيات"
+  },
+  "signedInDevices": {
+    "title": "الأجهزة المسجّلة",
+    "subtitle": "سجّل الخروج من أي جهاز لا تتعرّف عليه",
+    "current": "الحالي",
+    "signOut": "تسجيل الخروج",
+    "thisDevice": "هذا الجهاز",
+    "notice": "تغيير كلمة المرور يسجّل الخروج من كل الأجهزة باستثناء هذا الجهاز.",
+    "empty": "لا توجد أجهزة مسجّلة.",
+    "signOutConfirmTitle": "تسجيل خروج الجهاز",
+    "signOutConfirmMessage": "تسجيل الخروج من \"{{name}}\"؟ سيحتاج لتسجيل الدخول مجددًا.",
+    "signOutErrorTitle": "تعذّر تسجيل خروج هذا الجهاز",
+    "unknownDevice": "جهاز غير معروف",
+    "justNow": "الآن"
+  },
+  "changePassword": {
+    "title": "تغيير كلمة المرور",
+    "subtitle": "اختر كلمة مرور قوية جديدة",
+    "currentPasswordLabel": "كلمة المرور الحالية",
+    "newPasswordLabel": "كلمة المرور الجديدة",
+    "confirmPasswordLabel": "تأكيد كلمة المرور الجديدة",
+    "save": "تحديث كلمة المرور",
+    "saving": "جارٍ التحديث...",
+    "successTitle": "تم تغيير كلمة المرور",
+    "successMessage": "يرجى تسجيل الدخول مجددًا بكلمة المرور الجديدة.",
+    "errorTitle": "تعذّر تغيير كلمة المرور",
+    "errors": {
+      "currentRequired": "كلمة المرور الحالية مطلوبة",
+      "passwordMin": "يجب أن تتكون كلمة المرور الجديدة من 8 أحرف على الأقل",
+      "confirmRequired": "يرجى تأكيد كلمة المرور الجديدة",
+      "passwordMismatch": "كلمتا المرور غير متطابقتين"
+    }
+  },
+  "language": {
+    "title": "تغيير اللغة",
+    "subtitle": "اختر لغتك المفضلة",
+    "english": "الإنجليزية",
+    "englishNative": "English",
+    "arabic": "العربية",
+    "arabicNative": "العربية",
+    "notice": "تغيير اللغة يعيد تشغيل التطبيق.",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ...",
+    "successTitle": "تم تحديث اللغة",
+    "errorTitle": "تعذّر تحديث اللغة"
+  },
+  "quickQuote": {
+    "title": "عرض سعر سريع",
+    "subtitle": "تقدير فقط — لا يتم حجز أي شيء",
+    "types": {
+      "express": "إكسبريس",
+      "local": "توصيل محلي",
+      "freight": "شحن بضائع"
+    },
+    "route": "المسار",
+    "originPlaceholder": "دولة المنشأ",
+    "destinationPlaceholder": "دولة الوجهة",
+    "selectCountry": "اختر الدولة",
+    "shipment": "الشحنة",
+    "weightPlaceholder": "الوزن (كجم)",
+    "piecesPlaceholder": "عدد القطع",
+    "estimated": "التقدير",
+    "inclVat": "شامل الضريبة",
+    "days_one": "يوم عمل واحد",
+    "days_two": "يومَا عمل",
+    "days_few": "{{count}} أيام عمل",
+    "days_many": "{{count}} يوم عمل",
+    "days_other": "{{count}} يوم عمل",
+    "notice": "يعتمد السعر النهائي على العنوان الدقيق والأبعاد وقيمة الجمارك.",
+    "book": "احجز هذه الشحنة",
+    "freightUnavailable": "حجز شحن البضائع غير متاح بعد داخل التطبيق — يرجى التواصل مع الدعم لترتيب هذه الشحنة.",
+    "carriers": {
+      "fedexPriority": "الأولوية الدولية",
+      "dhlWorldwide": "إكسبريس عالمي"
+    }
   }
 }

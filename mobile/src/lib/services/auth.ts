@@ -136,6 +136,17 @@ export async function resetPassword(
   });
 }
 
+/** Changes the signed-in user's password. Invalidates every issued token, this device included. */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  await apiRequest("/api/auth/change-password", {
+    method: "POST",
+    body: { currentPassword, newPassword },
+  });
+}
+
 
 
 export interface UploadedDocument {

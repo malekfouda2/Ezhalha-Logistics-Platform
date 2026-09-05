@@ -23,12 +23,14 @@ import { useTranslation } from "react-i18next";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
+import { useCurrentUser } from "@/lib/hooks/useAuth";
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
   const { data: account, isLoading: accountLoading } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
   });
+  const { data: user } = useCurrentUser();
 
   const { data: stats, isLoading: statsLoading } =
     useQuery<ClientDashboardStats>({
@@ -40,11 +42,10 @@ export default function ClientDashboard() {
   >({
     queryKey: ["/api/client/shipments/recent"],
   });
-  const { refreshing, onRefresh } = useGlobalRefresh();
 
   const { unreadCount } = useNotifications();
 
-  const displayName = account?.companyName || account?.name || "";
+  const displayName = user?.username || account?.name || t("profile.noCompanyName");
   const initials =
     displayName
       .split(" ")
@@ -124,6 +125,13 @@ export default function ClientDashboard() {
 
         <Pressable
           style={styles.notificationButton}
+          onPress={() => router.push("/quick-quote")}
+        >
+          <Ionicons name="calculator-outline" size={rs(19)} color={Colors.text} />
+        </Pressable>
+
+        <Pressable
+          style={[styles.notificationButton, styles.notificationButtonSpacing]}
           onPress={() => router.push("/notifications")}
         >
           <Ionicons
@@ -323,6 +331,9 @@ const styles = StyleSheet.create({
   userName: {
     color: "#65748B",
     marginTop: rvs(1),
+  },
+  notificationButtonSpacing: {
+    marginStart: rs(8),
   },
   notificationButton: {
     width: rs(40),

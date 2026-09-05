@@ -3,7 +3,21 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { createApplication, extractCompanyDetails, fetchCurrentUser, forgotPassword, requestLoginCode, resetPassword, signIn, signInWithCode, signOut, UploadedDocument } from "../services/auth";
+import {
+  changePassword,
+  createApplication,
+  extractCompanyDetails,
+  fetchCurrentUser,
+  forgotPassword,
+  listDevices,
+  requestLoginCode,
+  resetPassword,
+  revokeDevice,
+  signIn,
+  signInWithCode,
+  signOut,
+  UploadedDocument,
+} from "../services/auth";
 
 
 
@@ -103,5 +117,39 @@ export function useExtractCompanyDetails() {
   return useMutation({
     mutationFn: (documents: UploadedDocument[]) =>
       extractCompanyDetails(documents),
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: ({
+      currentPassword,
+      newPassword,
+    }: {
+      currentPassword: string;
+      newPassword: string;
+    }) => changePassword(currentPassword, newPassword),
+  });
+}
+
+export const deviceKeys = {
+  all: ["auth", "devices"] as const,
+};
+
+export function useDevices() {
+  return useQuery({
+    queryKey: deviceKeys.all,
+    queryFn: listDevices,
+  });
+}
+
+export function useRevokeDevice() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => revokeDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deviceKeys.all });
+    },
   });
 }

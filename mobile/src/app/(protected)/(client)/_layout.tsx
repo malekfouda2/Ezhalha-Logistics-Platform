@@ -81,6 +81,78 @@ export default function ClientLayout() {
           title: "Saved Cards",
         }}
       />
+
+      <Stack.Screen
+        name="profile-information"
+        options={{
+          headerShown: false,
+          title: "Profile Information",
+        }}
+      />
+
+      <Stack.Screen
+        name="default-shipping-address"
+        options={{
+          headerShown: false,
+          title: "Default Shipping Address",
+        }}
+      />
+
+      <Stack.Screen
+        name="billing-currency"
+        options={{
+          headerShown: false,
+          title: "Billing Currency",
+        }}
+      />
+
+      <Stack.Screen
+        name="change-password"
+        options={{
+          headerShown: false,
+          title: "Change Password",
+        }}
+      />
+
+      <Stack.Screen
+        name="language"
+        options={{
+          headerShown: false,
+          title: "Change Language",
+        }}
+      />
+
+      <Stack.Screen
+        name="signed-in-devices"
+        options={{
+          headerShown: false,
+          title: "Signed-in Devices",
+        }}
+      />
+
+      <Stack.Screen
+        name="team-members"
+        options={{
+          headerShown: false,
+          title: "Team Members",
+        }}
+      />
+
+      <Stack.Screen
+        name="team-members/[id]"
+        options={{
+          headerShown: false,
+          title: "Edit Permissions",
+        }}
+      />
+
+      <Stack.Screen
+        name="quick-quote"
+        options={{
+          headerShown: false,
+          title: "Quick Quote",
+        }}
+      />
     </Stack>
   );
 }

@@ -1203,5 +1203,259 @@
       "addCardInfoTitle": "Add a card at checkout",
       "addCardInfoMessage": "Choose \"save this card\" the next time you pay to add it here."
     }
+  },
+  "profile": {
+    "title": "Account Settings",
+    "pricingTier": "Pricing Tier",
+    "sections": {
+      "account": "Account",
+      "security": "Security",
+      "preferences": "Preferences"
+    },
+    "rows": {
+      "profileInformation": {
+        "title": "Profile Information",
+        "subtitle": "Name, email, phone"
+      },
+      "accountDetails": {
+        "title": "Account Details",
+        "subtitle": "Company, CR, VAT number"
+      },
+      "defaultShippingAddress": {
+        "title": "Default Shipping Address",
+        "subtitle": "Where your shipments ship from"
+      },
+      "billingCurrency": {
+        "title": "Billing Currency",
+        "subtitle": "SAR — Saudi Riyal",
+        "subtitleUsd": "USD — US Dollar"
+      },
+      "changePassword": {
+        "title": "Change Password",
+        "subtitle": "Keep your account secure"
+      },
+      "signedInDevices": {
+        "title": "Signed-in devices",
+        "subtitle_one": "{{count}} device",
+        "subtitle_other": "{{count}} devices"
+      },
+      "teamMembers": {
+        "title": "Team Members",
+        "subtitle": "Manage access for your team"
+      },
+      "language": {
+        "title": "Change Language"
+      },
+      "logout": {
+        "title": "Log out"
+      }
+    },
+    "logoutConfirm": {
+      "title": "Log out",
+      "message": "Are you sure you want to log out?",
+      "cancel": "Cancel",
+      "confirm": "Log out"
+    },
+    "noCompanyName": "Your account",
+    "errors": {
+      "loadFailed": "Couldn't load your account"
+    }
+  },
+  "profileInformation": {
+    "title": "Profile Information",
+    "subtitle": "Update your contact name, company, email and phone",
+    "contactNameLabel": "Contact name",
+    "contactNamePlaceholder": "Your contact name",
+    "companyNameLabel": "Company name",
+    "companyNamePlaceholder": "Your company name",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "phoneLabel": "Phone number",
+    "phonePlaceholder": "+966 5xx xxx xxx",
+    "save": "Save changes",
+    "saving": "Saving...",
+    "successTitle": "Profile updated",
+    "successMessage": "Your profile information has been saved.",
+    "errorTitle": "Couldn't save profile",
+    "errors": {
+      "nameRequired": "Contact name is required",
+      "emailInvalid": "Enter a valid email address",
+      "phoneRequired": "Phone number is required"
+    }
+  },
+  "billingCurrency": {
+    "title": "Billing Currency",
+    "subtitle": "Display and charge currency",
+    "sar": "Saudi Riyal",
+    "usd": "US Dollar",
+    "notice": "SAR is always the accounting currency. Other currencies are converted at checkout using the rate shown at the time.",
+    "save": "Save",
+    "saving": "Saving...",
+    "successTitle": "Billing currency updated",
+    "errorTitle": "Couldn't update currency"
+  },
+  "defaultShippingAddress": {
+    "title": "Default Shipping Address",
+    "subtitle": "Used to prefill your shipments",
+    "contactName": "Contact name",
+    "contactNamePlaceholder": "Contact person's name",
+    "contactPhone": "Contact phone",
+    "contactPhonePlaceholder": "5XX XXX XXX",
+    "country": "Country",
+    "stateOrProvince": "State/Province",
+    "stateOrProvincePlaceholder": "State or province",
+    "city": "City",
+    "cityPlaceholder": "City",
+    "postalCode": "Postal code",
+    "postalCodePlaceholder": "Postal code",
+    "addressLine1": "Address line 1",
+    "addressLine1Placeholder": "Street, building, apartment",
+    "addressLine2": "Address line 2 (optional)",
+    "addressLine2Placeholder": "Additional address details",
+    "arabicNotice": "This address is used to prefill sender details when you create a shipment.",
+    "save": "Save changes",
+    "saving": "Saving...",
+    "successTitle": "Shipping address updated",
+    "successMessage": "Your default shipping address has been saved.",
+    "errorTitle": "Couldn't save shipping address",
+    "errors": {
+      "contactNameRequired": "Contact name is required",
+      "contactPhoneRequired": "Contact phone is required",
+      "countryRequired": "Country is required",
+      "stateRequired": "State/Province is required",
+      "cityRequired": "City is required",
+      "postalCodeRequired": "Postal code is required",
+      "addressLine1Required": "Address line 1 is required"
+    }
+  },
+  "teamMembers": {
+    "title": "Team Members",
+    "subtitle_one": "{{count}} member · Primary contact only",
+    "subtitle_other": "{{count}} members · Primary contact only",
+    "primary": "Primary",
+    "allPermissions": "All permissions",
+    "noPermissions": "No permissions",
+    "addMember": "Add Team Member",
+    "empty": "No team members yet.",
+    "emptySubtitle": "Add team members to collaborate on your account.",
+    "accessDeniedTitle": "Access denied",
+    "accessDeniedMessage": "You don't have permission to manage team members.",
+    "removeConfirmTitle": "Remove team member",
+    "removeConfirmMessage": "Remove {{name}} from your account? They will lose access immediately.",
+    "remove": "Remove",
+    "cancel": "Cancel",
+    "removeErrorTitle": "Couldn't remove team member",
+    "createErrorTitle": "Couldn't add team member",
+    "createSuccessTitle": "Team member added",
+    "createSuccessMessage": "{{name}} can now sign in with the username and password you set.",
+    "form": {
+      "detailsSection": "Details",
+      "username": "User name",
+      "usernamePlaceholder": "User name",
+      "email": "Email address",
+      "emailPlaceholder": "Email address",
+      "password": "Password",
+      "passwordPlaceholder": "Password",
+      "permissionsSection": "Permissions",
+      "submit": "Add member",
+      "submitting": "Adding...",
+      "errors": {
+        "usernameMin": "Username must be at least 3 characters",
+        "usernameInvalid": "Only letters, numbers, dots and underscores are allowed",
+        "emailInvalid": "Enter a valid email address",
+        "passwordMin": "Password must be at least 8 characters"
+      }
+    },
+    "permissions": {
+      "view_shipments": "View shipments",
+      "create_shipments": "Create shipments",
+      "view_invoices": "View invoices",
+      "view_payments": "View payments",
+      "make_payments": "Make payments",
+      "manage_users": "Manage users"
+    }
+  },
+  "editPermissions": {
+    "title": "Edit Permissions",
+    "primaryNotice": "The primary contact always has every permission and can't be limited.",
+    "dangerZone": "Danger Zone",
+    "removeMember": "Remove Team Member",
+    "removeMemberSubtitle": "Revokes access immediately",
+    "save": "Save permissions",
+    "saving": "Saving...",
+    "successTitle": "Permissions updated",
+    "errorTitle": "Couldn't update permissions"
+  },
+  "signedInDevices": {
+    "title": "Signed-in devices",
+    "subtitle": "Sign out anywhere you don't recognise",
+    "current": "Current",
+    "signOut": "Sign out",
+    "thisDevice": "This device",
+    "notice": "Changing your password signs out every device except this one.",
+    "empty": "No signed-in devices found.",
+    "signOutConfirmTitle": "Sign out device",
+    "signOutConfirmMessage": "Sign out \"{{name}}\"? It will need to sign in again.",
+    "signOutErrorTitle": "Couldn't sign out that device",
+    "unknownDevice": "Unknown device",
+    "justNow": "just now"
+  },
+  "changePassword": {
+    "title": "Change Password",
+    "subtitle": "Choose a strong new password",
+    "currentPasswordLabel": "Current password",
+    "newPasswordLabel": "New password",
+    "confirmPasswordLabel": "Confirm new password",
+    "save": "Update password",
+    "saving": "Updating...",
+    "successTitle": "Password changed",
+    "successMessage": "Please sign in again with your new password.",
+    "errorTitle": "Couldn't change password",
+    "errors": {
+      "currentRequired": "Current password is required",
+      "passwordMin": "New password must be at least 8 characters",
+      "confirmRequired": "Please confirm your new password",
+      "passwordMismatch": "Passwords do not match"
+    }
+  },
+  "language": {
+    "title": "Change Language",
+    "subtitle": "Choose your preferred language",
+    "english": "English",
+    "englishNative": "English",
+    "arabic": "Arabic",
+    "arabicNative": "العربية",
+    "notice": "Changing the language restarts the app.",
+    "save": "Save",
+    "saving": "Saving...",
+    "successTitle": "Language updated",
+    "errorTitle": "Couldn't update language"
+  },
+  "quickQuote": {
+    "title": "Quick Quote",
+    "subtitle": "An estimate — nothing is booked",
+    "types": {
+      "express": "Express",
+      "local": "Local Delivery",
+      "freight": "Freight"
+    },
+    "route": "Route",
+    "originPlaceholder": "Origin country",
+    "destinationPlaceholder": "Destination country",
+    "selectCountry": "Select country",
+    "shipment": "Shipment",
+    "weightPlaceholder": "Weight (kg)",
+    "piecesPlaceholder": "Pieces",
+    "estimated": "Estimated",
+    "inclVat": "incl. VAT",
+    "days_one": "{{count}} business day",
+    "days_other": "{{count}} business days",
+    "notice": "Final price depends on the exact address, dimensions and customs value.",
+    "book": "Book this shipment",
+    "freightUnavailable": "Freight booking isn't available in the app yet — contact support to arrange this shipment.",
+    "carriers": {
+      "fedexPriority": "International Priority",
+      "dhlWorldwide": "Express Worldwide"
+    }
   }
 }
