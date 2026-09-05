@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { Text } from "@/components/ui/Text";
 import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
+import { GeoSuggestInput, type GeoSuggestion } from "@/components/ui/GeoSuggestInput";
 
 import { rs, rvs } from "@/utils/responsive";
 import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
@@ -32,6 +33,15 @@ export default function SenderDetailsScreen() {
   } = form;
   const countryCode = watch("countryCode");
   const senderNeedsShortAddress = countryCode === "SA";
+
+  // Fill city + postal (+ state when empty) from a picked city/postal suggestion.
+  const pickGeo = (s: GeoSuggestion) => {
+    form.setValue("city", s.city, { shouldValidate: true });
+    form.setValue("postalCode", s.postalCode, { shouldValidate: true });
+    if (!form.getValues("stateOrProvince")) {
+      form.setValue("stateOrProvince", s.state || "", { shouldValidate: true });
+    }
+  };
 
   return (
     <ShipmentStepLayout
@@ -171,10 +181,13 @@ export default function SenderDetailsScreen() {
             control={control}
             name="city"
             render={({ field }) => (
-              <Input
+              <GeoSuggestInput
+                mode="city"
+                country={countryCode}
                 placeholder={t("createShipment.express.steps.step2.city")}
                 value={field.value}
                 onChangeText={field.onChange}
+                onPick={pickGeo}
                 error={errors.city?.message}
               />
             )}
@@ -186,10 +199,13 @@ export default function SenderDetailsScreen() {
             control={control}
             name="postalCode"
             render={({ field }) => (
-              <Input
+              <GeoSuggestInput
+                mode="postal"
+                country={countryCode}
                 placeholder={t("createShipment.express.steps.step2.postalCode")}
                 value={field.value}
                 onChangeText={field.onChange}
+                onPick={pickGeo}
                 keyboardType="number-pad"
                 error={errors.postalCode?.message}
               />

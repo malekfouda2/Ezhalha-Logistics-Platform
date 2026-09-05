@@ -7,6 +7,7 @@ import { Text } from "@/components/ui/Text";
 import { rs, rvs } from "@/utils/responsive";
 import { CountrySelect } from "@/components/ui/CountrySelect";
 import { PhoneInput } from "@/components/ui/PhoneInput";
+import { GeoSuggestInput, type GeoSuggestion } from "@/components/ui/GeoSuggestInput";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
 import InfoBox from "@/components/ui/InfoBox";
@@ -28,6 +29,15 @@ export default function RecipientDetailsScreen() {
   const { control, watch, formState: { errors } } = form;
   const countryCode = watch("countryCode");
   const recipientNeedsShortAddress = countryCode === "SA";
+
+  // Fill city + postal (+ state when empty) from a picked city/postal suggestion.
+  const pickGeo = (s: GeoSuggestion) => {
+    form.setValue("city", s.city, { shouldValidate: true });
+    form.setValue("postalCode", s.postalCode, { shouldValidate: true });
+    if (!form.getValues("stateOrProvince")) {
+      form.setValue("stateOrProvince", s.state || "", { shouldValidate: true });
+    }
+  };
 
   return (
     <ShipmentStepLayout
@@ -158,10 +168,13 @@ export default function RecipientDetailsScreen() {
             control={control}
             name="city"
             render={({ field }) => (
-              <Input
+              <GeoSuggestInput
+                mode="city"
+                country={countryCode}
                 placeholder={t("createShipment.express.steps.step3.newAddress.city")}
                 value={field.value}
                 onChangeText={field.onChange}
+                onPick={pickGeo}
                 error={errors.city?.message}
               />
             )}
@@ -173,10 +186,13 @@ export default function RecipientDetailsScreen() {
             control={control}
             name="postalCode"
             render={({ field }) => (
-              <Input
+              <GeoSuggestInput
+                mode="postal"
+                country={countryCode}
                 placeholder={t("createShipment.express.steps.step3.newAddress.postalCode")}
                 value={field.value}
                 onChangeText={field.onChange}
+                onPick={pickGeo}
                 keyboardType="number-pad"
                 error={errors.postalCode?.message}
               />
