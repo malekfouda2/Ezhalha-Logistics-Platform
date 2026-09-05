@@ -1384,6 +1384,10 @@ describe("Client - Payments", () => {
       carrierTrackingNumber: null,
       carrierShipmentId: null,
       carrierStatus: "pending",
+      // A shipment that was never booked carries no booking claim either. Leaving the claim
+      // from the checkout above would be a state production never produces, and would block
+      // the reconciler for the full stale window.
+      carrierBookingClaimedAt: null,
     });
 
     const res = await clientAgent.get("/api/client/shipments");

@@ -265,6 +265,8 @@ export interface IStorage {
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
   recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
+  claimCarrierBooking(id: string): Promise<boolean>;
+  releaseCarrierBookingClaim(id: string): Promise<void>;
 
   // Invoices
   getInvoices(): Promise<Invoice[]>;
@@ -1199,6 +1201,43 @@ export class DatabaseStorage implements IStorage {
     await db.update(shipments)
       .set({ carrierStatusRepeatCount: repeatCount, carrierLastAttemptAt: new Date() })
       .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
+  }
+
+  /**
+   * Win the exclusive right to book this shipment with the carrier.
+   *
+   * Returns true only for the caller that actually took the claim. Everything that decides the
+   * outcome lives in the WHERE clause, so Postgres resolves it atomically — two requests
+   * arriving in the same millisecond cannot both be told yes. A read followed by a check, which
+   * is what this replaces, gave both of them yes and produced two waybills for one shipment.
+   *
+   * The stale window lets a crashed attempt be retried rather than wedging the shipment
+   * forever, and `carrierTrackingNumber IS NULL` means an already-booked shipment can never be
+   * claimed at all, however long ago it was booked.
+   */
+  async claimCarrierBooking(id: string): Promise<boolean> {
+    const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+    const claimed = await db.update(shipments)
+      .set({ carrierBookingClaimedAt: new Date() })
+      .where(and(
+        eq(shipments.id, id),
+        isNull(shipments.deletedAt),
+        isNull(shipments.carrierTrackingNumber),
+        or(
+          isNull(shipments.carrierBookingClaimedAt),
+          lt(shipments.carrierBookingClaimedAt, staleBefore),
+        ),
+      ))
+      .returning({ id: shipments.id });
+
+    return claimed.length > 0;
+  }
+
+  /** Hand the claim back after a failed booking so a retry is not blocked for five minutes. */
+  async releaseCarrierBookingClaim(id: string): Promise<void> {
+    await db.update(shipments)
+      .set({ carrierBookingClaimedAt: null })
+      .where(and(eq(shipments.id, id), isNull(shipments.carrierTrackingNumber)));
   }
 
   // Invoices

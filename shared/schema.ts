@@ -440,6 +440,17 @@ export const shipments = pgTable("shipments", {
   // stale-status escalation; refreshed only on real status transitions).
   statusChangedAt: timestamp("status_changed_at"),
   carrierAttempts: integer("carrier_attempts").default(0),
+  /**
+   * Set the instant one request wins the right to book this shipment with the carrier, and
+   * cleared if that attempt fails.
+   *
+   * The Tap webhook and the client's browser redirect both call the payment finaliser, and on
+   * five occasions they arrived within the same second. The "already booked?" guard reads
+   * `carrierTrackingNumber`, so both requests read null, both passed, and the carrier issued
+   * two waybills for one shipment. A claim written by a conditional UPDATE is atomic across
+   * all four pm2 workers in a way that a read-then-check never is.
+   */
+  carrierBookingClaimedAt: timestamp("carrier_booking_claimed_at"),
   carrierLabelBase64: text("carrier_label_base64"),
   carrierLabelMimeType: text("carrier_label_mime_type").default("application/pdf"),
   carrierLabelFormat: text("carrier_label_format"),

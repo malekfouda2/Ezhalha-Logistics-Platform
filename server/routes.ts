@@ -1634,8 +1634,18 @@ async function finalizePaidShipmentAfterPayment(params: {
   ipAddress?: string;
   // Tap's SAR settlement figure for a non-SAR charge (see ensureShipmentBillingArtifacts).
   settledSarAmount?: number | null;
+  /**
+   * Wait for a concurrent booking to finish instead of returning immediately.
+   *
+   * Only the browser confirm path sets this, because only there is a person waiting to see a
+   * booked shipment. The Tap webhook does not care, and the reconciler sweeps many shipments
+   * on an ordinary page load — making it wait would turn one contended shipment into a hung
+   * request for the client.
+   */
+  awaitConcurrentBooking?: boolean;
 }) {
   const { shipment, transactionId, paymentMethod, userId, ipAddress, settledSarAmount } = params;
+  const awaitConcurrentBooking = params.awaitConcurrentBooking === true;
 
   if (shipment.status === "cancelled") {
     throw new Error("Cancelled shipments cannot be finalized");
@@ -1814,6 +1824,39 @@ async function finalizePaidShipmentAfterPayment(params: {
     throw new Error(confirmAddrValidation.errors.join("; "));
   }
 
+  // Claim the booking before calling the carrier.
+  //
+  // The guard above tests `carrierTrackingNumber`, which is correct but not atomic: the
+  // shipment was read at the top of this function, so two requests that arrive together both
+  // read null and both pass. That is exactly how five shipments came to have two waybills —
+  // the Tap webhook and the client's browser redirect landing within the same second. The
+  // claim is a conditional UPDATE, so Postgres decides the winner and only one caller books.
+  const claimedBooking = await storage.claimCarrierBooking(shipment.id);
+  if (!claimedBooking) {
+    // Somebody else is booking this right now. Wait for their tracking number only when a
+    // person is watching; otherwise return at once so a bulk sweep is never held up.
+    const maxAttempts = awaitConcurrentBooking ? 20 : 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const current = await storage.getShipment(shipment.id);
+      if (current?.carrierTrackingNumber) {
+        logInfo("Skipped duplicate carrier booking; another request booked it", {
+          shipmentId: shipment.id,
+          trackingNumber: current.trackingNumber,
+          carrierTrackingNumber: current.carrierTrackingNumber,
+        });
+        return current;
+      }
+    }
+    // The winner is still working, or died mid-flight. Either way this request must not book:
+    // a second waybill is worse than a slow one. The stale window lets a retry through later.
+    logWarn("Skipped carrier booking; another request holds the claim", {
+      shipmentId: shipment.id,
+      trackingNumber: shipment.trackingNumber,
+    });
+    return (await storage.getShipment(shipment.id)) || shipment;
+  }
+
   let latestShipment = shipment;
   const carrierAdapter = getAdapterForShipment(latestShipment);
 
@@ -1901,6 +1944,11 @@ async function finalizePaidShipmentAfterPayment(params: {
       carrierAttempts: (latestShipment.carrierAttempts || 0) + 1,
       paymentStatus: "paid",
     });
+
+    // Hand the claim back so a retry is not blocked for the full stale window. Safe because
+    // it only clears while carrierTrackingNumber is still null — a booking that succeeded is
+    // never re-claimable.
+    await storage.releaseCarrierBookingClaim(latestShipment.id);
 
     throw carrierError;
   }
@@ -19025,6 +19073,7 @@ export async function registerRoutes(
           paymentMethod: "tap",
           userId: req.session.userId,
           ipAddress: req.ip,
+          awaitConcurrentBooking: true,
         });
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
