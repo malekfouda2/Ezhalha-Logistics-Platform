@@ -24,6 +24,8 @@ import { useNotifications } from "@/lib/hooks/useNotifications";
 import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { useCurrentUser } from "@/lib/hooks/useAuth";
+import { useMyPermissions } from "@/lib/hooks/useTeam";
+import { ClientPermission } from "@shared/domain";
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
@@ -31,6 +33,11 @@ export default function ClientDashboard() {
     queryKey: ["/api/client/account"],
   });
   const { data: user } = useCurrentUser();
+  const { data: myPerms } = useMyPermissions();
+
+  const canCreateShipments =
+    !!myPerms?.isPrimaryContact ||
+    !!myPerms?.permissions.includes(ClientPermission.CREATE_SHIPMENTS);
 
   const { data: stats, isLoading: statsLoading } =
     useQuery<ClientDashboardStats>({
@@ -123,12 +130,14 @@ export default function ClientDashboard() {
           </View>
         </View>
 
-        <Pressable
-          style={styles.notificationButton}
-          onPress={() => router.push("/quick-quote")}
-        >
-          <Ionicons name="calculator-outline" size={rs(19)} color={Colors.text} />
-        </Pressable>
+        {canCreateShipments && (
+          <Pressable
+            style={styles.notificationButton}
+            onPress={() => router.push("/quick-quote")}
+          >
+            <Ionicons name="calculator-outline" size={rs(19)} color={Colors.text} />
+          </Pressable>
+        )}
 
         <Pressable
           style={[styles.notificationButton, styles.notificationButtonSpacing]}

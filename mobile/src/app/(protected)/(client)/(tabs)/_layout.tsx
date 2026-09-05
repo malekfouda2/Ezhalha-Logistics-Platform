@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
+import { useMyPermissions } from "@/lib/hooks/useTeam";
+import { ClientPermission } from "@shared/domain";
 
 function CreateShipmentButton() {
   return (
@@ -37,6 +39,17 @@ function NoRippleTabButton(props: any) {
 
 export default function ClientTabsLayout() {
   const { t } = useTranslation();
+  const { data: myPerms } = useMyPermissions();
+
+  const canViewShipments =
+    !!myPerms?.isPrimaryContact ||
+    !!myPerms?.permissions.includes(ClientPermission.VIEW_SHIPMENTS);
+  const canCreateShipments =
+    !!myPerms?.isPrimaryContact ||
+    !!myPerms?.permissions.includes(ClientPermission.CREATE_SHIPMENTS);
+  const canViewInvoices =
+    !!myPerms?.isPrimaryContact ||
+    !!myPerms?.permissions.includes(ClientPermission.VIEW_INVOICES);
 
   return (
     <Tabs
@@ -94,6 +107,7 @@ export default function ClientTabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Feather name="hexagon" size={rs(size)} color={color} />
           ),
+          href: canViewShipments ? undefined : null,
         }}
       />
 
@@ -101,11 +115,15 @@ export default function ClientTabsLayout() {
         name="createShipment"
         options={{
           title: "",
-          tabBarButton: (props) => (
-            <NoRippleTabButton {...props}>
-              <CreateShipmentButton />
-            </NoRippleTabButton>
-          ),
+          // href can't be combined with a custom tabBarButton, so hide by
+          // rendering nothing instead — no flex slot is reserved for it.
+          tabBarButton: canCreateShipments
+            ? (props) => (
+                <NoRippleTabButton {...props}>
+                  <CreateShipmentButton />
+                </NoRippleTabButton>
+              )
+            : () => null,
         }}
       />
 
@@ -116,6 +134,7 @@ export default function ClientTabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Feather name="file-text" size={rs(size)} color={color} />
           ),
+          href: canViewInvoices ? undefined : null,
         }}
       />
 

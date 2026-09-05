@@ -14,6 +14,8 @@ import { InvoiceRow } from "@/components/sections/invoices/InvoiceRow";
 import { ConfirmPaymentSheet } from "@/components/sections/invoices/ConfirmPaymentSheet";
 import { formatMoney, formatShortDate } from "@/utils/invoiceFormat";
 import type { Invoice } from "@shared/schema";
+import { useMyPermissions } from "@/lib/hooks/useTeam";
+import { ClientPermission } from "@shared/domain";
 
 type FilterKey = "all" | "pending" | "paid";
 
@@ -22,6 +24,11 @@ export default function InvoicesScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const { data: myPerms } = useMyPermissions();
+
+  const canViewPayments =
+    !!myPerms?.isPrimaryContact ||
+    !!myPerms?.permissions.includes(ClientPermission.VIEW_PAYMENTS);
 
   const {
     data: invoices,
@@ -82,12 +89,14 @@ export default function InvoicesScreen() {
             </Text>
           </Pressable>
 
-          <Pressable style={styles.linkChip} onPress={() => router.push("/payments")}>
-            <Feather name="bar-chart-2" size={rs(14)} color={Colors.text} />
-            <Text size="xs" weight="semibold" style={styles.linkChipText}>
-              {t("invoices.payments.title")}
-            </Text>
-          </Pressable>
+          {canViewPayments && (
+            <Pressable style={styles.linkChip} onPress={() => router.push("/payments")}>
+              <Feather name="bar-chart-2" size={rs(14)} color={Colors.text} />
+              <Text size="xs" weight="semibold" style={styles.linkChipText}>
+                {t("invoices.payments.title")}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.filtersRow}>

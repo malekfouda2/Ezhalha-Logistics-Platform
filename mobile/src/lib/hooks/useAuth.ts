@@ -46,6 +46,14 @@ export function useSignIn() {
     }) => signIn(username, password),
 
     onSuccess: (user) => {
+      // Drop every cached query from the previous session so a different
+      // account doesn't briefly see stale data (e.g. permissions), but
+      // leave the "auth" namespace alone — clearing it here would reset
+      // the `authKeys.me()` query that AuthLayout is actively watching,
+      // racing its background refetch against the setQueryData below.
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "auth",
+      });
       queryClient.setQueryData(authKeys.me(), user);
     },
   });
@@ -70,6 +78,14 @@ export function useSignInWithCode() {
     }) => signInWithCode(email, code),
 
     onSuccess: (user) => {
+      // Drop every cached query from the previous session so a different
+      // account doesn't briefly see stale data (e.g. permissions), but
+      // leave the "auth" namespace alone — clearing it here would reset
+      // the `authKeys.me()` query that AuthLayout is actively watching,
+      // racing its background refetch against the setQueryData below.
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "auth",
+      });
       queryClient.setQueryData(authKeys.me(), user);
     },
   });
@@ -82,9 +98,7 @@ export function useSignOut() {
     mutationFn: signOut,
 
     onSuccess: () => {
-      queryClient.removeQueries({
-        queryKey: authKeys.all,
-      });
+      queryClient.clear();
     },
   });
 }
