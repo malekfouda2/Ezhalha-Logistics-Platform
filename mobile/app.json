@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "ezhalha",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/ios-icon.png",
     "userInterfaceStyle": "automatic",
     "primaryColor": "#fe5200",
     "extra": {
@@ -14,9 +14,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "co.ezhalha.app",
-      "associatedDomains": [
-        "applinks:app.ezhalha.co"
-      ],
+      "associatedDomains": ["applinks:app.ezhalha.co"],
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true
       }
@@ -29,20 +27,17 @@
         }
       },
       "adaptiveIcon": {
-        "backgroundColor": "#fe5200",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ],
+          "category": ["BROWSABLE", "DEFAULT"],
           "data": [
             {
               "scheme": "https",
@@ -78,7 +73,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.jpeg",
+          "image": "./assets/images/splash-icon.jpeg",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
