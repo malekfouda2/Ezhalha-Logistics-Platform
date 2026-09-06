@@ -47,7 +47,11 @@ function SalesChannelsScreenContent() {
             label={t("salesChannels.quickActions.assignmentRules")}
             onPress={() => router.push("/sales-channels/assignment-rules")}
           />
-          
+          <QuickActionButton
+            icon="package"
+            label={t("salesChannels.card.orders")}
+            onPress={() => router.push("/sales-channels/orders")}
+          />
         </View>
 
         {isLoading ? (
@@ -58,7 +62,6 @@ function SalesChannelsScreenContent() {
               <ChannelListItem
                 key={channel.id}
                 channel={channel}
-                onOrdersPress={() => router.push("/sales-channels/orders")}
                 onSettingsPress={() => router.push(`/sales-channels/${channel.id}`)}
               />
             ))}

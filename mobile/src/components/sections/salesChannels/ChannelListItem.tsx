@@ -1,7 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Feather, Ionicons } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { PlatformIcon } from "@/components/sections/salesChannels/PlatformIcon";
@@ -23,17 +22,20 @@ function relativeTime(iso: string | null, t: (key: string, opts?: Record<string,
 
 interface ChannelListItemProps {
   channel: SalesChannel;
-  onOrdersPress: () => void;
   onSettingsPress: () => void;
 }
 
-export function ChannelListItem({ channel, onOrdersPress, onSettingsPress }: ChannelListItemProps) {
+export function ChannelListItem({ channel, onSettingsPress }: ChannelListItemProps) {
   const { t } = useTranslation();
   const meta = platformMeta(channel.platform);
   const needsReauth = channel.status === "error";
 
   return (
-    <View style={styles.card} testID={`channel-row-${channel.id}`}>
+    <Pressable
+      onPress={onSettingsPress}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      testID={`channel-row-${channel.id}`}
+    >
       <View style={styles.row}>
         <PlatformIcon platform={channel.platform} />
 
@@ -54,29 +56,7 @@ export function ChannelListItem({ channel, onOrdersPress, onSettingsPress }: Cha
           </Text>
         </View>
       </View>
-
-      <View style={styles.actionsRow}>
-        <Pressable
-          onPress={onOrdersPress}
-          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
-        >
-          <Feather name="package" size={rs(14)} color={Colors.text} />
-          <Text size="small" weight="bold" style={styles.actionButtonLabel}>
-            {t("salesChannels.card.orders")}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={onSettingsPress}
-          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
-        >
-          <Ionicons name="settings-outline" size={rs(15)} color={Colors.text} />
-          <Text size="small" weight="bold" style={styles.actionButtonLabel}>
-            {t("salesChannels.card.settings")}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -86,6 +66,9 @@ const styles = StyleSheet.create({
     borderRadius: rs(16),
     padding: rs(14),
     marginBottom: rvs(12),
+  },
+  cardPressed: {
+    opacity: 0.7,
   },
   row: {
     flexDirection: "row",
@@ -114,28 +97,5 @@ const styles = StyleSheet.create({
   },
   badgeActionText: {
     color: Colors.error,
-  },
-  actionsRow: {
-    flexDirection: "row",
-    gap: rs(10),
-    marginTop: rvs(14),
-    paddingTop: rvs(14),
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: rs(6),
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: rs(12),
-    paddingVertical: rvs(10),
-  },
-  actionButtonPressed: {
-    opacity: 0.6,
-  },
-  actionButtonLabel: {
-    color: Colors.text,
   },
 });
