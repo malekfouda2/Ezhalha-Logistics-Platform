@@ -74,7 +74,16 @@
       ],
       "expo-secure-store",
       "expo-router",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.jpeg",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
     ]
   }
 }
