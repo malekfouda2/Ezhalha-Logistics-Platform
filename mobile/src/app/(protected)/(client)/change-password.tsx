@@ -13,13 +13,12 @@ import { ScreenHeader } from "@/components/sections/profile/ScreenHeader";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 
-import { useChangePassword, useSignOut } from "@/lib/hooks/useAuth";
+import { useChangePassword } from "@/lib/hooks/useAuth";
 
 export default function ChangePasswordScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const changePasswordMutation = useChangePassword();
-  const signOutMutation = useSignOut();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -53,8 +52,7 @@ export default function ChangePasswordScreen() {
         text1: t("changePassword.successTitle"),
         text2: t("changePassword.successMessage"),
       });
-      await signOutMutation.mutateAsync();
-      router.replace("/(auth)/login");
+      router.back();
     } catch (error) {
       Toast.show({
         type: "error",

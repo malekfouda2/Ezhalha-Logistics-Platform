@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
+import { onSessionExpired } from "@/api/client";
+import { authKeys } from "@/lib/hooks/useAuth";
 import { queryClient } from "@/lib/queryClient";
 import { useLanguageStore } from "@/store/useLanguageStore";
 import AppLayout from "@/components/layout/AppLayout";
@@ -16,6 +18,16 @@ export default function RootLayout() {
   useEffect(() => {
     init();
   }, [init]);
+
+  useEffect(() => {
+    // Tokens are already gone by the time this fires (endSession() clears them
+    // before notifying) — dropping the cached user here is what actually flips
+    // ProtectedLayout's redirect, since authKeys.me() has staleTime: Infinity
+    // and would otherwise never re-check.
+    return onSessionExpired(() => {
+      queryClient.setQueryData(authKeys.me(), null);
+    });
+  }, []);
 
   if (!isReady) {
     return null;
