@@ -1,10 +1,8 @@
 // app/payments.tsx
 import { useMemo } from "react";
-import { View, ScrollView, Pressable, StyleSheet, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
+import { View, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
 import { BackButton } from "@/components/ui/BackButton";
@@ -25,7 +23,6 @@ const MONTH_KEYS = [
 
 export default function PaymentsScreen() {
   const { t } = useTranslation();
-  const router = useRouter();
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery<Invoice[]>({
     queryKey: ["/api/client/invoices"],
@@ -117,9 +114,6 @@ export default function PaymentsScreen() {
           <Text size="xl" weight="bold" style={styles.headerTitle}>
             {t("invoices.payments.title")}
           </Text>
-          <Pressable onPress={() => router.push("/saved-cards")} style={styles.cardsButton}>
-            <Feather name="credit-card" size={rs(18)} color={Colors.text} />
-          </Pressable>
         </View>
 
         {isLoading ? (
@@ -218,19 +212,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     paddingStart: rs(10),
-  },
-  cardsButton: {
-    width: rs(40),
-    height: rs(40),
-    borderRadius: rs(12),
-    backgroundColor: Colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: Colors.black,
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
   loading: {
     marginTop: rvs(60),

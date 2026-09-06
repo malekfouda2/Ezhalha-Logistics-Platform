@@ -124,6 +124,12 @@ export default function ProfileScreen() {
           subtitle={t("profile.rows.salesChannels.subtitle")}
           onPress={() => router.push("/sales-channels")}
         />
+        <SettingsRow
+          icon="card-outline"
+          title={t("profile.rows.savedCards.title")}
+          subtitle={t("profile.rows.savedCards.subtitle")}
+          onPress={() => router.push("/saved-cards")}
+        />
       </InfoCard>
 
       <SectionLabel>{t("profile.sections.security")}</SectionLabel>

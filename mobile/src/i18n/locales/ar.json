@@ -1217,6 +1217,10 @@
       "salesChannels": {
         "title": "قنوات البيع",
         "subtitle": "اربط متجرك واشحن بنقرات"
+      },
+      "savedCards": {
+        "title": "البطاقات المحفوظة",
+        "subtitle": "إدارة بطاقات الدفع المحفوظة"
       }
     },
     "logoutConfirm": {

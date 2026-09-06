@@ -1215,6 +1215,10 @@
       "salesChannels": {
         "title": "Sales Channels",
         "subtitle": "Connect your store, ship in clicks"
+      },
+      "savedCards": {
+        "title": "Saved Cards",
+        "subtitle": "Manage your saved payment cards"
       }
     },
     "logoutConfirm": {
