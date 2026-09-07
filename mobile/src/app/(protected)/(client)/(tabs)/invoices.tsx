@@ -4,9 +4,10 @@ import { View, FlatList, Pressable, StyleSheet, RefreshControl } from "react-nat
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
+import { Input } from "@/components/ui/Input";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DarkSummaryCard } from "@/components/sections/invoices/DarkSummaryCard";
@@ -23,6 +24,7 @@ export default function InvoicesScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [search, setSearch] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const { data: myPerms } = useMyPermissions();
 
@@ -63,10 +65,16 @@ export default function InvoicesScreen() {
   }, [unpaid]);
 
   const filtered = useMemo(() => {
-    if (filter === "pending") return unpaid;
-    if (filter === "paid") return list.filter((i) => i.status === "completed");
-    return list;
-  }, [filter, list, unpaid]);
+    let result =
+      filter === "pending" ? unpaid : filter === "paid" ? list.filter((i) => i.status === "completed") : list;
+
+    const query = search.trim().toLowerCase();
+    if (query.length > 0) {
+      result = result.filter((i) => i.invoiceNumber.toLowerCase().includes(query));
+    }
+
+    return result;
+  }, [filter, list, unpaid, search]);
 
   const FILTERS: { key: FilterKey; label: string }[] = [
     { key: "all", label: t("invoices.tabs.all") },
@@ -98,6 +106,20 @@ export default function InvoicesScreen() {
             </Pressable>
           )}
         </View>
+
+        <Input
+          placeholder={t("invoices.searchPlaceholder")}
+          value={search}
+          onChangeText={setSearch}
+          leftElement={<Ionicons name="search-outline" size={rs(18)} color={Colors.placeholder} />}
+          rightElement={
+            search.length > 0 ? (
+              <Ionicons name="close-circle" size={rs(18)} color={Colors.placeholder} />
+            ) : undefined
+          }
+          onRightElementPress={() => setSearch("")}
+          style={styles.searchInput}
+        />
 
         <View style={styles.filtersRow}>
           {FILTERS.map((f) => {
@@ -195,10 +217,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: rs(16),
     paddingTop: rvs(8),
   },
+  searchInput: {
+    height: rvs(40),
+    fontSize: rs(14),
+  },
   linksRow: {
     flexDirection: "row",
     gap: rs(8),
-    marginTop: rvs(12),
+    marginVertical: rvs(12),
   },
   linkChip: {
     flexDirection: "row",
@@ -217,7 +243,7 @@ const styles = StyleSheet.create({
   filtersRow: {
     flexDirection: "row",
     gap: rs(8),
-    marginTop: rvs(14),
+    // marginTop: rvs(14),
   },
   filterChip: {
     paddingHorizontal: rs(16),

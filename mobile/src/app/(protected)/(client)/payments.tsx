@@ -1,11 +1,12 @@
 // app/payments.tsx
 import { useMemo } from "react";
-import { View, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
+import { View, StyleSheet, ActivityIndicator } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
 import { BackButton } from "@/components/ui/BackButton";
+import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { SectionLabel, InfoCard, InfoRow } from "@/components/ui/InfoCard";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
@@ -105,10 +106,7 @@ export default function PaymentsScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <RefreshableScreen contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerRow}>
           <BackButton />
           <Text size="xl" weight="bold" style={styles.headerTitle}>
@@ -190,7 +188,7 @@ export default function PaymentsScreen() {
         )}
 
         <View style={{ height: rvs(20) }} />
-      </ScrollView>
+      </RefreshableScreen>
     </View>
   );
 }

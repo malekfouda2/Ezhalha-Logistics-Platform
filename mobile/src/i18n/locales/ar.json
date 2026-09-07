@@ -1048,6 +1048,7 @@
       "pending": "قيد الانتظار",
       "paid": "مدفوعة"
     },
+    "searchPlaceholder": "ابحث برقم الفاتورة...",
     "outstandingBalance": "الرصيد المستحق",
     "invoicesOpen": "الفواتير",
     "invoicesOpenCount": "{{count}} مفتوحة",
@@ -1558,7 +1559,11 @@
         "fulfilled": "منفَّذة",
         "all": "الكل"
       },
-      "empty": "لا توجد طلبات هنا بعد.",
+      "allChannels": "كل المتاجر",
+      "empty": {
+        "title": "لا توجد طلبات بعد",
+        "description": "ستظهر الطلبات هنا تلقائيًا بمجرد إرسالها من متجر متصل."
+      },
       "unknownCustomer": "عميل غير معروف",
       "pieces_one": "{{count}} قطعة",
       "pieces_other": "{{count}} قطعة",
@@ -1572,6 +1577,13 @@
         "shipped": "تم الشحن",
         "delivered": "تم التسليم",
         "cancelled": "ملغى"
+      },
+      "filters": {
+        "title": "تصفية الطلبات",
+        "channel": "المتجر",
+        "status": "الحالة",
+        "clearAll": "مسح الكل",
+        "done": "تم"
       }
     },
     "assignmentRules": {

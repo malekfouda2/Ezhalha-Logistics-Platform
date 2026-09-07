@@ -1,6 +1,6 @@
 // app/credit-billing/index.tsx
 import { useMemo, useState } from "react";
-import { View, ScrollView, Pressable, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { BackButton } from "@/components/ui/BackButton";
+import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import InfoBox from "@/components/ui/InfoBox";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
@@ -96,10 +97,7 @@ export default function CreditBillingScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <RefreshableScreen contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerRow}>
           <BackButton />
           <View style={styles.headerTitleBlock}>
@@ -223,7 +221,7 @@ export default function CreditBillingScreen() {
             )}
           </>
         )}
-      </ScrollView>
+      </RefreshableScreen>
 
       <RequestCreditAccessSheet
         visible={requestSheetVisible}

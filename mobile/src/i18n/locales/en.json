@@ -1049,6 +1049,7 @@
       "pending": "Pending",
       "paid": "Paid"
     },
+    "searchPlaceholder": "Search by invoice number...",
     "outstandingBalance": "Outstanding balance",
     "invoicesOpen": "Invoices",
     "invoicesOpenCount": "{{count}} open",
@@ -1550,7 +1551,11 @@
         "fulfilled": "Fulfilled",
         "all": "All"
       },
-      "empty": "No orders here yet.",
+      "allChannels": "All channels",
+      "empty": {
+        "title": "No orders yet",
+        "description": "Orders appear here automatically once a connected store sends them."
+      },
       "unknownCustomer": "Unknown customer",
       "pieces_one": "{{count}} item",
       "pieces_other": "{{count}} items",
@@ -1564,6 +1569,13 @@
         "shipped": "Shipped",
         "delivered": "Delivered",
         "cancelled": "Cancelled"
+      },
+      "filters": {
+        "title": "Filter orders",
+        "channel": "Channel",
+        "status": "Status",
+        "clearAll": "Clear all",
+        "done": "Done"
       }
     },
     "assignmentRules": {
