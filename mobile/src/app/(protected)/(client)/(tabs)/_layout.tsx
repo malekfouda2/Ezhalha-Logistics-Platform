@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { Tabs, useRouter } from "expo-router";
-import { Pressable, View, StyleSheet } from "react-native";
+import { Pressable, View, StyleSheet, Modal } from "react-native";
 import { Feather, Ionicons, Octicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
-import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { useMyPermissions } from "@/lib/hooks/useTeam";
@@ -26,7 +25,7 @@ interface CreateShipmentSheetProps {
   onClose: () => void;
 }
 
-function CreateShipmentSheet({ visible, onClose }: CreateShipmentSheetProps) {
+function CreateShipmentMenu({ visible, onClose }: CreateShipmentSheetProps) {
   const { t } = useTranslation();
   const router = useRouter();
 
@@ -36,53 +35,41 @@ function CreateShipmentSheet({ visible, onClose }: CreateShipmentSheetProps) {
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
-      <Text size="large" weight="bold" style={styles.sheetTitle}>
-        {t("tabs.createShipmentMenu.title")}
-      </Text>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-      <View style={styles.sheetList}>
-        <Pressable
-          onPress={() => goTo("/createShipment")}
-          style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
-        >
-          <View style={[styles.sheetIcon, { backgroundColor: "#FDE4D6" }]}>
-            <Feather name="hexagon" size={rs(22)} color={Colors.primary} />
-          </View>
-          <View style={styles.sheetRowText}>
-            <Text size="medium" weight="bold">
+      <View style={styles.menuWrapper} pointerEvents="box-none">
+        <View style={styles.menuCard}>
+          <Pressable
+            onPress={() => goTo("/createShipment")}
+            style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+          >
+            <View style={[styles.menuIcon, { backgroundColor: "#FDE4D6" }]}>
+              <Feather name="hexagon" size={rs(16)} color={Colors.primary} />
+            </View>
+            <Text size="small" weight="bold" style={styles.menuLabel}>
               {t("tabs.createShipmentMenu.createShipment")}
             </Text>
-            <Text size="small" dimRate="55%">
-              {t("tabs.createShipmentMenu.createShipmentSubtitle")}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={rs(18)} color={Colors.textSecondary} />
-        </Pressable>
+          </Pressable>
 
-        <Pressable
-          onPress={() => goTo("/quick-quote")}
-          style={({ pressed }) => [
-            styles.sheetRow,
-            styles.sheetRowDivider,
-            pressed && styles.sheetRowPressed,
-          ]}
-        >
-          <View style={[styles.sheetIcon, { backgroundColor: "#DCE6FB" }]}>
-            <Ionicons name="calculator-outline" size={rs(22)} color="#3B6FE0" />
-          </View>
-          <View style={styles.sheetRowText}>
-            <Text size="medium" weight="bold">
+          <View style={styles.menuDivider} />
+
+          <Pressable
+            onPress={() => goTo("/quick-quote")}
+            style={({ pressed }) => [styles.menuRow, pressed && styles.menuRowPressed]}
+          >
+            <View style={[styles.menuIcon, { backgroundColor: "#DCE6FB" }]}>
+              <Ionicons name="calculator-outline" size={rs(16)} color="#3B6FE0" />
+            </View>
+            <Text size="small" weight="bold" style={styles.menuLabel}>
               {t("tabs.createShipmentMenu.quickQuote")}
             </Text>
-            <Text size="small" dimRate="55%">
-              {t("tabs.createShipmentMenu.quickQuoteSubtitle")}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={rs(18)} color={Colors.textSecondary} />
-        </Pressable>
+          </Pressable>
+        </View>
+
+        <View style={styles.menuCaret} />
       </View>
-    </BottomSheet>
+    </Modal>
   );
 }
 
@@ -222,7 +209,7 @@ export default function ClientTabsLayout() {
         />
       </Tabs>
 
-      <CreateShipmentSheet
+      <CreateShipmentMenu
         visible={showCreateSheet}
         onClose={() => setShowCreateSheet(false)}
       />
@@ -263,42 +250,72 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
 
-  sheetTitle: {
-    marginBottom: rvs(16),
+  menuWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: rvs(70) + rs(58),
+    alignItems: "center",
   },
 
-  sheetList: {
+  menuCard: {
+    width: rs(200),
     backgroundColor: Colors.white,
-    borderRadius: rs(14),
-    paddingHorizontal: rs(14),
-    marginBottom: rvs(20),
+    borderRadius: rs(16),
+    paddingVertical: rvs(4),
+
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: rvs(4),
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: rs(12),
+
+    elevation: 10,
   },
 
-  sheetRow: {
+  menuCaret: {
+    width: 0,
+    height: 0,
+    marginTop: -1,
+
+    borderLeftWidth: rs(8),
+    borderRightWidth: rs(8),
+    borderTopWidth: rs(8),
+
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: Colors.white,
+  },
+
+  menuRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: rs(12),
-    paddingVertical: rvs(13),
+    gap: rs(10),
+    paddingVertical: rvs(11),
+    paddingHorizontal: rs(14),
   },
 
-  sheetRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+  menuRowPressed: {
+    opacity: 0.6,
   },
 
-  sheetRowPressed: {
-    opacity: 0.7,
-  },
-
-  sheetIcon: {
-    width: rs(45),
-    height: rs(45),
-    borderRadius: rs(15),
+  menuIcon: {
+    width: rs(32),
+    height: rs(32),
+    borderRadius: rs(10),
     alignItems: "center",
     justifyContent: "center",
   },
 
-  sheetRowText: {
+  menuLabel: {
     flex: 1,
+  },
+
+  menuDivider: {
+    height: 1,
+    marginHorizontal: rs(14),
+    backgroundColor: Colors.border,
   },
 });

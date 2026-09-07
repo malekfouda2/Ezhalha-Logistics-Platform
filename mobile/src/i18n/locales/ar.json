@@ -10,11 +10,8 @@
     "invoices": "الفواتير",
     "profile": "الملف الشخصي",
     "createShipmentMenu": {
-      "title": "ماذا تريد أن تفعل؟",
       "createShipment": "إنشاء شحنة",
-      "createShipmentSubtitle": "ابدأ طلب شحنة جديد",
-      "quickQuote": "عرض سعر سريع",
-      "quickQuoteSubtitle": "احصل على تقدير سعر فوري"
+      "quickQuote": "عرض سعر سريع"
     }
   },
   "auth": {
