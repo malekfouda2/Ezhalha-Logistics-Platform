@@ -47,7 +47,18 @@ import { format } from "date-fns";
 // Each filter tab covers a set of carrier-synced statuses; without this a shipment sitting at
 // "picked_up" or "customs_clearance" appears only under "All".
 const statusFilterGroups: Record<string, string[]> = {
-  processing: ["draft", "payment_pending", "created", "processing"],
+  // The three dangerous goods statuses all belong here: from the client's side each one means
+  // "we are working on it and it has not shipped yet". Leaving them out put a DG shipment
+  // under "All" and nowhere else — the exact problem this map exists to prevent.
+  processing: [
+    "draft",
+    "payment_pending",
+    "created",
+    "processing",
+    "dg_review",
+    "dg_awaiting_carrier",
+    "dg_booking",
+  ],
   in_transit: ["picked_up", "in_transit", "customs_clearance", "out_for_delivery"],
   attention: ["on_hold", "returned", "carrier_error"],
   delivered: ["delivered"],
@@ -61,7 +72,7 @@ function canCancelShipment(shipment: Shipment): boolean {
   const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "on_hold", "returned", "delivered", "cancelled"];
 
   return (
-    ["created", "processing", "carrier_error", "payment_pending"].includes(shipment.status) &&
+    ["created", "processing", "carrier_error", "payment_pending", "dg_review", "dg_booking"].includes(shipment.status) &&
     !pickedUpOrLaterStatuses.includes(carrierStatus)
   );
 }
@@ -80,6 +91,7 @@ function formatShipmentKindLabel(shipment: Shipment): string {
     return "Door to Door";
   }
   if (shipment.fulfillmentType === "local") return "Local";
+  if (shipment.fulfillmentType === "dg_manual") return "Dangerous Goods";
   return "Express";
 }
 
@@ -674,7 +686,34 @@ export default function ClientShipments() {
                 )}
               </div>
 
-              {canPayShipment(selectedShipment) && (
+              {/* Dangerous goods are quoted by hand and cannot be paid from here.
+                  The client must first re-confirm the declaration as operations left it —
+                  they may have corrected addresses, weights or commodity details while
+                  arranging carriage — and the server refuses payment until they have. Offering
+                  Pay Now here produced a dead end: the card tokenized, the request went out,
+                  and the only answer was "confirm the declaration first" with nowhere to do it. */}
+              {canPayShipment(selectedShipment) && selectedShipment.fulfillmentType === "dg_manual" && (
+                <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Quotation ready</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Our team has arranged this shipment with the carrier. Review the declaration
+                    and the price, then confirm and pay.
+                  </p>
+                  <Button
+                    className="w-full"
+                    data-testid="button-open-dg-quotation"
+                    onClick={() => navigate(`/client/quotations/${selectedShipment.id}`)}
+                  >
+                    <CreditCard className="mr-2 h-4 w-4" />
+                    Review &amp; pay quotation
+                  </Button>
+                </div>
+              )}
+
+              {canPayShipment(selectedShipment) && selectedShipment.fulfillmentType !== "dg_manual" && (
                 <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
                   <div className="flex items-center gap-2">
                     <CreditCard className="h-4 w-4 text-primary" />

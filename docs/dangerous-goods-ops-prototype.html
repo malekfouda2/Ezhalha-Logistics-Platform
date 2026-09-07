@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ezhalha — Dangerous Goods in Operations (Prototype)</title>
+<style>
+  :root{
+    --pr:#fe5200; --pr-lt:#fff0eb; --pr-bd:#ffd5c9;
+    --g25:#fbfbfc; --g50:#f7f7f8; --g100:#f3f4f6; --g200:#e5e7eb;
+    --g400:#9ca3af; --g500:#6b7280; --g700:#374151; --g800:#1f2937; --g900:#111827;
+    --wh:#ffffff; --shadow:0 1px 2px rgba(15,23,42,.04);
+    --green:#16A34A; --green-lt:#F0FDF4; --green-bd:#BBF7D0;
+    --blue:#1D4ED8;  --blue-lt:#EFF6FF;  --blue-bd:#BFDBFE;
+    --amber:#D97706; --amber-lt:#FFFBEB; --amber-bd:#FDE68A;
+    --red:#B91C1C;   --red-lt:#FEF2F2;   --red-bd:#FECACA;
+    --purple:#7C3AED;--purple-lt:#F5F3FF;--purple-bd:#DDD6FE;
+    --r:8px; --rlg:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--g50);color:var(--g900);font-size:13px}
+  button,input,select,textarea{font:inherit}
+
+  /* ---- prototype-only chrome ---- */
+  .proto-bar{background:#111827;color:#fff;padding:9px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px}
+  .proto-bar b{font-size:12px}
+  .proto-bar .note{color:#9ca3af}
+  .proto-steps{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap}
+  .proto-steps button{background:#1f2937;color:#d1d5db;border:1px solid #374151;border-radius:20px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer}
+  .proto-steps button.on{background:var(--pr);border-color:var(--pr);color:#fff}
+
+  /* ---- ops shell (mirrors client/src/pages/operations/hub.tsx) ---- */
+  .ops-topbar{background:var(--wh);border-bottom:1px solid var(--g200);padding:9px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .ops-title{font-size:15px;font-weight:800;line-height:1.2}
+  .ops-sub{font-size:11px;color:var(--g400);margin-top:2px}
+  .ops-split{display:flex;min-height:calc(100vh - 96px)}
+  .list-col{width:296px;min-width:296px;border-right:1px solid var(--g200);background:var(--wh);display:flex;flex-direction:column}
+  .detail-col{flex:1;min-width:0;background:var(--g50)}
+  .lp-head{padding:11px;border-bottom:1px solid var(--g200)}
+  .lp-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+  .lp-sub{font-size:11px;color:var(--g400);margin-top:4px}
+  .view-count{color:var(--g400);font-weight:500}
+  .si{padding:10px 11px;border-bottom:1px solid var(--g100);cursor:pointer;background:transparent;width:100%;text-align:left;border-left:0;border-right:0;border-top:0;display:block}
+  .si:hover{background:var(--g50)}
+  .si.active{background:var(--pr-lt);border-right:3px solid var(--pr)}
+  .si-top{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+  .si-id{font-size:11px;font-weight:700;color:var(--pr)}
+  .si-name{font-size:12px;font-weight:700;line-height:1.35}
+  .si-meta{font-size:10px;color:var(--g400);margin-top:3px;line-height:1.45}
+  .si-money{font-size:11px;font-weight:700;margin-top:8px;text-align:right}
+
+  .dp-header{background:var(--wh);border-bottom:1px solid var(--g200);padding:10px 16px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .dp-id{font-size:12px;font-weight:700;color:var(--pr);margin-bottom:2px}
+  .dp-name{font-size:17px;font-weight:800;line-height:1.18}
+  .dp-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .dp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+  .dp-body{padding:12px 16px}
+  .dp-grid{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:12px;align-items:start}
+  @media (max-width:1100px){.dp-grid{grid-template-columns:minmax(0,1fr)}}
+
+  .card{background:var(--wh);border:1px solid var(--g200);border-radius:var(--rlg);padding:12px;margin-bottom:10px;box-shadow:var(--shadow)}
+  .card-title{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--g700);margin-bottom:10px}
+  .sc-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--g100);font-size:12px}
+  .sc-row:last-child{border-bottom:0}
+  .sc-key{color:var(--g500);flex-shrink:0}
+  .sc-val{color:var(--g900);font-weight:600;text-align:right;overflow-wrap:anywhere}
+  .sc-val.red{color:var(--red)} .sc-val.green{color:var(--green)}
+
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700}
+  .b-green{background:var(--green-lt);color:var(--green);border:1px solid var(--green-bd)}
+  .b-blue{background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd)}
+  .b-amber{background:var(--amber-lt);color:var(--amber);border:1px solid var(--amber-bd)}
+  .b-red{background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}
+  .b-purple{background:var(--purple-lt);color:var(--purple);border:1px solid var(--purple-bd)}
+  .b-gray{background:var(--g100);color:var(--g500)}
+  .b-pr{background:var(--pr-lt);color:var(--pr);border:1px solid var(--pr-bd)}
+
+  .btn{border:none;border-radius:var(--r);padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn-sm{padding:5px 10px;font-size:11px} .btn-xs{padding:3px 8px;font-size:10px}
+  .btn-pr{background:var(--pr);color:#fff} .btn-gh{background:var(--wh);border:1px solid var(--g200);color:var(--g700)}
+  .btn-green{background:var(--green-lt);color:var(--green);border:1px solid var(--green-bd)}
+  .btn-blue{background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd)}
+  .btn-amber{background:var(--amber-lt);color:var(--amber);border:1px solid var(--amber-bd)}
+  .btn-red{background:var(--red-lt);color:var(--red);border:1px solid var(--red-bd)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  .alert{display:flex;gap:8px;padding:10px 12px;border-radius:var(--r);font-size:12px;margin-bottom:10px;line-height:1.5}
+  .alert-amber{background:var(--amber-lt);border:1px solid var(--amber-bd);color:#92400e}
+  .alert-blue{background:var(--blue-lt);border:1px solid var(--blue-bd);color:#1e40af}
+  .alert-green{background:var(--green-lt);border:1px solid var(--green-bd);color:#166534}
+  .alert-red{background:var(--red-lt);border:1px solid var(--red-bd);color:#991b1b}
+
+  .progress-rail{position:relative;display:flex;justify-content:space-between;padding:4px 8px 0}
+  .progress-line{position:absolute;left:9%;top:20px;height:2px;background:var(--green);z-index:0;transition:width .3s}
+  .progress-track{position:absolute;left:9%;right:9%;top:20px;height:2px;background:var(--g200);z-index:0}
+  .progress-step{display:flex;flex-direction:column;align-items:center;flex:1;position:relative;z-index:1}
+  .progress-step-dot{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:var(--wh);border:2px solid var(--g200);color:var(--g400)}
+  .progress-step.done .progress-step-dot{background:var(--green);border-color:var(--green);color:#fff}
+  .progress-step.active .progress-step-dot{background:var(--pr);border-color:var(--pr);color:#fff}
+  .progress-step-label{font-size:10px;font-weight:600;color:var(--g400);text-align:center;margin-top:6px;max-width:84px;line-height:1.3}
+  .progress-step.active .progress-step-label{color:var(--pr)}
+
+  .stage-card{background:var(--wh);border:1px solid var(--g200);border-radius:var(--rlg);overflow:hidden;margin-bottom:10px}
+  .stage-head{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px}
+  .stage-left{display:flex;align-items:center;gap:10px;min-width:0}
+  .stage-num{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;background:var(--g100);color:var(--g500);flex-shrink:0}
+  .stage-card.done .stage-num{background:var(--green);color:#fff}
+  .stage-card.active .stage-num{background:var(--pr);color:#fff}
+  .stage-card.locked{opacity:.55}
+  .stage-title{font-size:12px;font-weight:700;line-height:1.35}
+  .stage-sub{font-size:10px;color:var(--g400);margin-top:2px}
+  .stage-body{padding:12px;border-top:1px solid var(--g100)}
+
+  .checkpoint-card{border:1px solid var(--g200);border-radius:var(--r);background:var(--g50);padding:12px;margin-bottom:10px}
+  .checkpoint-card.done{background:var(--green-lt);border-color:var(--green-bd)}
+  .checkpoint-summary{margin-top:8px;padding:8px 10px;border-radius:var(--r);background:var(--blue-lt);border:1px solid var(--blue-bd);font-size:11px;color:#1e40af}
+  .checkpoint-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  @media (max-width:720px){.checkpoint-grid{grid-template-columns:minmax(0,1fr)}}
+
+  .field-label{font-size:11px;font-weight:600;color:var(--g700);display:block;margin-bottom:4px}
+  .field-input,.field-select,.field-textarea{width:100%;border:1px solid var(--g200);border-radius:var(--r);padding:7px 10px;font-size:12px;background:var(--wh);color:var(--g900);outline:none}
+  .field-input:focus{border-color:var(--pr);box-shadow:0 0 0 2px var(--pr-lt)}
+  .field-input.missing{border-color:#f59e0b;background:#fffdf5}
+  .field-hint{font-size:11px;color:var(--g400);line-height:1.45;margin-top:4px}
+
+  .need-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .need-list li{display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:7px 9px;border-radius:var(--r);background:var(--wh);border:1px solid var(--amber-bd)}
+  .need-list li.ok{border-color:var(--green-bd);background:var(--green-lt);color:#166534}
+  .need-list .where{color:var(--g400);font-size:11px;margin-left:auto;text-align:right;flex-shrink:0}
+
+  .handover{background:#0f172a;color:#e2e8f0;border-radius:var(--r);padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.6;white-space:pre-wrap;max-height:340px;overflow:auto}
+  .money{display:flex;justify-content:space-between;padding:6px 0;font-size:12px;border-bottom:1px solid var(--g100)}
+  .money:last-child{border-bottom:0}
+  .money.total{font-weight:800;font-size:14px;padding-top:10px}
+  .money .lbl{color:var(--g500)} .money .val{font-weight:700;font-variant-numeric:tabular-nums}
+
+  .tl-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--g100)}
+  .tl-dot{width:9px;height:9px;border-radius:50%;background:var(--pr);margin-top:5px;flex-shrink:0}
+  .tl-msg{font-size:12px;font-weight:600} .tl-time{font-size:10px;color:var(--g400);margin-top:2px}
+
+  .client-view{border:2px dashed var(--blue-bd);border-radius:var(--rlg);padding:12px;background:var(--blue-lt)}
+  .client-view .tag{font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:block}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+
+<div class="proto-bar">
+  <b>PROTOTYPE</b>
+  <span class="note">Dangerous Goods — Operations Hub. Not wired to anything; click a stage to see how the page changes.</span>
+  <div class="proto-steps">
+    <button data-jump="1" class="on">1 · Review</button>
+    <button data-jump="2">2 · Handover</button>
+    <button data-jump="3">3 · Quotation</button>
+    <button data-jump="4">4 · Awaiting payment</button>
+    <button data-jump="5">5 · Live</button>
+  </div>
+</div>
+
+<div class="ops-topbar">
+  <div>
+    <div class="ops-title">Operations — Dangerous Goods</div>
+    <div class="ops-sub">Regulated shipments arranged with the carrier by email. Nothing is priced until operations quotes it.</div>
+  </div>
+  <div class="dp-actions">
+    <button class="btn btn-gh btn-sm">Export</button>
+    <button class="btn btn-gh btn-sm">Refresh</button>
+  </div>
+</div>
+
+<div class="ops-split">
+  <!-- ============ LIST ============ -->
+  <aside class="list-col">
+    <div class="lp-head">
+      <div class="lp-title">⚠️ Dangerous Goods <span class="view-count">4</span></div>
+      <div class="lp-sub">Submitted declarations awaiting review, carrier arrangement, or client payment</div>
+    </div>
+    <button class="si active">
+      <div class="si-top"><span class="si-id">EZH441207893</span><span class="badge b-amber" id="listBadge">Needs review</span></div>
+      <div class="si-name">Demo Company</div>
+      <div class="si-meta">UN1993 Flammable liquid, n.o.s. · Jeddah → Dubai</div>
+      <div class="si-money" id="listMoney">Not yet quoted</div>
+    </button>
+    <button class="si">
+      <div class="si-top"><span class="si-id">EZH558310442</span><span class="badge b-blue">With carrier</span></div>
+      <div class="si-name">Nova Retail Group</div>
+      <div class="si-meta">UN3480 Lithium ion batteries · Riyadh → Frankfurt</div>
+      <div class="si-money">Not yet quoted</div>
+    </button>
+    <button class="si">
+      <div class="si-top"><span class="si-id">EZH120944517</span><span class="badge b-purple">Awaiting payment</span></div>
+      <div class="si-name">Gulf Medical Supplies</div>
+      <div class="si-meta">UN3373 Biological substance B · Dammam → Cairo</div>
+      <div class="si-money">SAR 2,140.00</div>
+    </button>
+    <button class="si">
+      <div class="si-top"><span class="si-id">EZH903117620</span><span class="badge b-red">Quote expired</span></div>
+      <div class="si-name">Arabian Paints Co</div>
+      <div class="si-meta">UN1263 Paint · Jeddah → Amman</div>
+      <div class="si-money">SAR 3,880.00</div>
+    </button>
+  </aside>
+
+  <!-- ============ DETAIL ============ -->
+  <main class="detail-col">
+    <div class="dp-header">
+      <div>
+        <div class="dp-id">EZH441207893</div>
+        <div class="dp-name">Demo Company</div>
+        <div class="dp-meta">
+          <span class="badge b-red">⚠️ Dangerous goods</span>
+          <span class="badge b-pr" id="hdrStage">Stage 1 — Review</span>
+          <span class="badge b-gray">IATA</span>
+          <span class="badge b-gray">Export · Jeddah → Dubai</span>
+        </div>
+      </div>
+      <div class="dp-actions">
+        <button class="btn btn-gh btn-sm">Message client</button>
+        <button class="btn btn-red btn-sm">Reject declaration</button>
+      </div>
+    </div>
+
+    <div class="dp-body">
+      <div class="dp-grid">
+        <div>
+          <!-- progress -->
+          <div class="card">
+            <div class="progress-rail">
+              <div class="progress-track"></div>
+              <div class="progress-line" id="progLine" style="width:0%"></div>
+              <div class="progress-step" data-step="1"><div class="progress-step-dot">1</div><div class="progress-step-label">Review &amp; complete</div></div>
+              <div class="progress-step" data-step="2"><div class="progress-step-dot">2</div><div class="progress-step-label">Carrier handover</div></div>
+              <div class="progress-step" data-step="3"><div class="progress-step-dot">3</div><div class="progress-step-label">Quotation</div></div>
+              <div class="progress-step" data-step="4"><div class="progress-step-dot">4</div><div class="progress-step-label">Awaiting payment</div></div>
+              <div class="progress-step" data-step="5"><div class="progress-step-dot">5</div><div class="progress-step-label">Live</div></div>
+            </div>
+          </div>
+
+          <!-- ---------- STAGE 1 ---------- -->
+          <div class="stage-card" id="stage1">
+            <div class="stage-head" data-toggle="1">
+              <div class="stage-left">
+                <div class="stage-num">1</div>
+                <div>
+                  <div class="stage-title">Review &amp; complete the declaration</div>
+                  <div class="stage-sub" id="s1sub">3 things still needed before this can go to a carrier</div>
+                </div>
+              </div>
+              <span class="badge b-amber" id="s1badge">In progress</span>
+            </div>
+            <div class="stage-body" id="s1body">
+
+              <div class="alert alert-amber">
+                <span>⚠️</span>
+                <div>
+                  <b>Ezhalha signs the Shipper's Declaration for these goods.</b> Everything below is
+                  what the client declared. Check it against the safety data sheet before handing it
+                  to a carrier — once tendered, it is our declaration, not theirs.
+                </div>
+              </div>
+
+              <div class="card" style="margin-bottom:10px">
+                <div class="card-title">📋 Still needed <span class="badge b-amber" id="needCount">3</span></div>
+                <div class="field-hint">The shipment cannot move to the carrier until these are filled in. Each one links to the field below.</div>
+                <ul class="need-list" id="needList">
+                  <li data-need="emergencyPhone">⚠️ <div><b>24-hour emergency contact phone</b><br><span class="field-hint">Required on every IATA declaration.</span></div><span class="where">Declaration</span></li>
+                  <li data-need="packingInstruction">⚠️ <div><b>Packing instruction for UN1993</b><br><span class="field-hint">The SDS lists both 353 (passenger) and 364 (cargo only) — pick one.</span></div><span class="where">Entry 1</span></li>
+                  <li data-need="recipientPostal">⚠️ <div><b>Recipient postal code</b><br><span class="field-hint">Not required for AE — confirm and clear, or enter one.</span></div><span class="where">Recipient</span></li>
+                </ul>
+              </div>
+
+              <div class="checkpoint-card">
+                <div class="card-title">🧪 Declared goods</div>
+                <div class="sc-row"><span class="sc-key">Content type</span><span class="sc-val">Chemicals &amp; fully regulated</span></div>
+                <div class="sc-row"><span class="sc-key">Regulation</span><span class="sc-val">IATA</span></div>
+                <div class="sc-row"><span class="sc-key">Accessibility</span><span class="sc-val">Inaccessible</span></div>
+                <div class="sc-row"><span class="sc-key">Offeror</span><span class="sc-val">Demo Company</span></div>
+                <div class="sc-row"><span class="sc-key">Signed by</span><span class="sc-val">Malek Fouda, Compliance · Jeddah</span></div>
+
+                <div style="margin-top:12px" class="checkpoint-grid">
+                  <div>
+                    <label class="field-label">Emergency contact name</label>
+                    <input class="field-input" value="Ops desk" />
+                  </div>
+                  <div>
+                    <label class="field-label">Emergency contact phone *</label>
+                    <input class="field-input missing" id="fEmergencyPhone" placeholder="+966…" />
+                    <div class="field-hint">Must be answered 24/7, in English, for the whole journey.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="checkpoint-card">
+                <div class="card-title">☣️ Entry 1 of 1</div>
+                <div class="checkpoint-grid">
+                  <div><label class="field-label">UN number</label><input class="field-input" value="UN1993" /></div>
+                  <div><label class="field-label">Proper shipping name</label><input class="field-input" value="FLAMMABLE LIQUID, N.O.S." /></div>
+                  <div><label class="field-label">Technical name</label><input class="field-input" value="Acetone, Propan-2-ol" /></div>
+                  <div><label class="field-label">Class / division</label><input class="field-input" value="3" /></div>
+                  <div><label class="field-label">Packing group</label><input class="field-input" value="II" /></div>
+                  <div>
+                    <label class="field-label">Packing instruction *</label>
+                    <input class="field-input missing" id="fPackingInstruction" placeholder="353 or 364" />
+                    <div class="field-hint">SDS lists 353 passenger / 364 cargo aircraft only.</div>
+                  </div>
+                  <div><label class="field-label">Quantity</label><input class="field-input" value="5" /></div>
+                  <div><label class="field-label">Unit &amp; measure</label><input class="field-input" value="L · net" /></div>
+                </div>
+                <div class="checkpoint-summary">Read from <b>ACME Industrial Cleaner 400</b> safety data sheet, section 14. Quantity was entered by the client — an SDS never states it.</div>
+              </div>
+
+              <div class="checkpoint-card">
+                <div class="card-title">📍 Route &amp; packages</div>
+                <div class="checkpoint-grid">
+                  <div><label class="field-label">Sender</label><input class="field-input" value="ACME Chemicals, King Abdulaziz Rd" /></div>
+                  <div><label class="field-label">Sender city / country</label><input class="field-input" value="Jeddah, SA — 23442" /></div>
+                  <div><label class="field-label">Recipient</label><input class="field-input" value="Gulf Distribution, Sheikh Zayed Rd" /></div>
+                  <div>
+                    <label class="field-label">Recipient postal code *</label>
+                    <input class="field-input missing" id="fRecipientPostal" placeholder="leave empty for AE" />
+                    <div class="field-hint">The UAE has no postal codes — clearing this is the usual correct answer.</div>
+                  </div>
+                  <div><label class="field-label">Packages</label><input class="field-input" value="1 × 12.0 kg · 40×30×25 cm" /></div>
+                  <div><label class="field-label">Preferred collection</label><input class="field-input" value="8 September 2026" /></div>
+                </div>
+              </div>
+
+              <div class="checkpoint-card">
+                <div class="card-title">📎 Documents from the client</div>
+                <div class="sc-row"><span class="sc-key">Safety data sheet</span><span class="sc-val">acme-industrial-cleaner-400.pdf ↗</span></div>
+                <div class="sc-row"><span class="sc-key">Shipper's Declaration</span><span class="sc-val red">Not provided — we will raise it</span></div>
+                <div style="margin-top:10px"><button class="btn btn-gh btn-sm">Upload a document</button></div>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-pr" id="s1complete" disabled>Complete review → hand to carrier</button>
+                <button class="btn btn-gh">Save without completing</button>
+              </div>
+              <div class="field-hint" id="s1hint" style="margin-top:8px">Fill in the 3 outstanding items above to continue.</div>
+            </div>
+          </div>
+
+          <!-- ---------- STAGE 2 ---------- -->
+          <div class="stage-card locked" id="stage2">
+            <div class="stage-head" data-toggle="2">
+              <div class="stage-left">
+                <div class="stage-num">2</div>
+                <div>
+                  <div class="stage-title">Hand over to the carrier</div>
+                  <div class="stage-sub">Everything the carrier needs, in one block to paste into an email</div>
+                </div>
+              </div>
+              <span class="badge b-gray" id="s2badge">Locked</span>
+            </div>
+            <div class="stage-body hidden" id="s2body">
+              <div class="alert alert-blue">
+                <span>✉️</span>
+                <div>Ezhalha arranges dangerous goods with the carrier <b>outside the system</b>. Copy this, email it,
+                  and come back with a cost and an AWB.</div>
+              </div>
+
+              <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+                <button class="btn btn-blue btn-sm" id="copyBtn">Copy to clipboard</button>
+                <button class="btn btn-gh btn-sm">Download as PDF</button>
+                <button class="btn btn-gh btn-sm">Attach SDS &amp; send</button>
+              </div>
+
+<div class="handover" id="handoverText">SHIPMENT REFERENCE   EZH441207893
+CLIENT               Demo Company (EZ0001)
+
+--- DANGEROUS GOODS DECLARATION (IATA) ---
+UN number            UN1993
+Proper shipping name FLAMMABLE LIQUID, N.O.S. (Acetone, Propan-2-ol)
+Class / division     3
+Packing group        II
+Packing instruction  353
+Quantity             5 L net, 1 package
+Accessibility        Inaccessible
+Cargo aircraft only  No
+Offeror              Demo Company
+Emergency contact    Ops desk, +966 50 000 0000 (24h, English)
+
+--- ROUTE ---
+Collect from         ACME Chemicals
+                     King Abdulaziz Rd
+                     Jeddah 23442, Saudi Arabia
+                     Contact: Abdullah Nasser, +966 55 123 4567
+Deliver to           Gulf Distribution
+                     Sheikh Zayed Rd
+                     Dubai, United Arab Emirates
+                     Contact: Mohammed Ali, +971 55 987 6543
+
+--- PACKAGES ---
+1 package, 12.0 kg, 40 x 30 x 25 cm
+Preferred collection date: 8 September 2026
+
+--- CUSTOMS ---
+Commodity            Industrial cleaning solvent
+Declared value       SAR 4,200.00
+HS code              3402.90
+
+--- ATTACHED ---
+acme-industrial-cleaner-400.pdf (safety data sheet)
+
+Please confirm acceptance, the all-in cost, and the air waybill number.</div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-pr" id="s2complete">Mark as sent to carrier</button>
+              </div>
+              <div class="field-hint" style="margin-top:8px">Records who sent it and when, so the wait is visible in the queue.</div>
+            </div>
+          </div>
+
+          <!-- ---------- STAGE 3 ---------- -->
+          <div class="stage-card locked" id="stage3">
+            <div class="stage-head" data-toggle="3">
+              <div class="stage-left">
+                <div class="stage-num">3</div>
+                <div>
+                  <div class="stage-title">Enter the carrier's quotation</div>
+                  <div class="stage-sub">Cost and AWB from the carrier. The system prices it for the client.</div>
+                </div>
+              </div>
+              <span class="badge b-gray" id="s3badge">Locked</span>
+            </div>
+            <div class="stage-body hidden" id="s3body">
+              <div class="checkpoint-card">
+                <div class="checkpoint-grid">
+                  <div>
+                    <label class="field-label">Carrier *</label>
+                    <select class="field-select" id="qCarrier">
+                      <option>DHL Express</option><option>FedEx</option><option>Aramex</option>
+                    </select>
+                    <div class="field-hint">Must be an Ezhalha account, or tracking will not sync.</div>
+                  </div>
+                  <div>
+                    <label class="field-label">Air waybill number *</label>
+                    <input class="field-input" id="qAwb" placeholder="e.g. 2575108620" />
+                  </div>
+                  <div>
+                    <label class="field-label">Carrier cost, SAR (excl. VAT) *</label>
+                    <input class="field-input" id="qCost" type="number" value="1200" />
+                    <div class="field-hint">What the carrier charges us, as quoted by email.</div>
+                  </div>
+                  <div>
+                    <label class="field-label">Quote valid until *</label>
+                    <input class="field-input" id="qValid" type="date" value="2026-09-12" />
+                    <div class="field-hint">After this the shipment is flagged so you can unwind the booking.</div>
+                  </div>
+                </div>
+                <div style="margin-top:10px">
+                  <label class="field-label">Note to the client (optional)</label>
+                  <textarea class="field-textarea" rows="2" placeholder="e.g. Cargo aircraft only; collection confirmed for 8 September."></textarea>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-title">💰 What the client will be asked to pay</div>
+                <div class="money"><span class="lbl">Carrier cost</span><span class="val" id="mCost">SAR 1,200.00</span></div>
+                <div class="money"><span class="lbl">Margin — Demo Company profile, <span id="mPct">22</span>%</span><span class="val" id="mMargin">SAR 264.00</span></div>
+                <div class="money"><span class="lbl">of which VAT (15%, export — margin only, included)</span><span class="val" id="mVat">SAR 34.43</span></div>
+                <div class="money total"><span class="lbl">Client total</span><span class="val" id="mTotal">SAR 1,464.00</span></div>
+                <div class="field-hint" style="margin-top:8px">
+                  Margin comes from the client's pricing profile and VAT from the shipment's tax scenario —
+                  the same engine every other shipment uses, so this stays correct in reporting and Zoho.
+                </div>
+                <div style="margin-top:10px">
+                  <label class="field-label">Override the final total (optional)</label>
+                  <input class="field-input" id="qOverride" type="number" placeholder="leave empty to use SAR 1,464.00" />
+                  <div class="field-hint">Overriding back-solves the margin so the books still balance.</div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-pr" id="s3complete">Send quotation to client</button>
+              </div>
+              <div class="field-hint" style="margin-top:8px">Notifies the client's primary contacts by email and in-app, and unlocks payment.</div>
+            </div>
+          </div>
+
+          <!-- ---------- STAGE 4 ---------- -->
+          <div class="stage-card locked" id="stage4">
+            <div class="stage-head" data-toggle="4">
+              <div class="stage-left">
+                <div class="stage-num">4</div>
+                <div>
+                  <div class="stage-title">Awaiting the client's payment</div>
+                  <div class="stage-sub">Quoted and sent. The AWB exists, so an unpaid quote costs us money.</div>
+                </div>
+              </div>
+              <span class="badge b-gray" id="s4badge">Locked</span>
+            </div>
+            <div class="stage-body hidden" id="s4body">
+              <div class="alert alert-amber">
+                <span>⏳</span>
+                <div><b>Expires in 7 days</b> — 12 September 2026. On expiry this is flagged for you to cancel
+                  the AWB with the carrier. Nothing is cancelled automatically, because only you can unwind an
+                  external booking.</div>
+              </div>
+
+              <div class="sc-row"><span class="sc-key">Quoted</span><span class="sc-val">5 September 2026, 14:20 · by Sara Al Otaibi</span></div>
+              <div class="sc-row"><span class="sc-key">Carrier / AWB</span><span class="sc-val">DHL Express · 2575108620</span></div>
+              <div class="sc-row"><span class="sc-key">Client total</span><span class="sc-val">SAR 1,464.00</span></div>
+              <div class="sc-row"><span class="sc-key">Client notified</span><span class="sc-val green">Email + in-app, 5 Sep 14:20</span></div>
+
+              <div class="client-view" style="margin-top:12px">
+                <span class="tag">What the client sees</span>
+                <div class="card" style="margin-bottom:0">
+                  <div class="card-title">Quotation EZH441207893 — ready to pay</div>
+                  <div class="money"><span class="lbl">Dangerous goods shipment · Jeddah → Dubai</span><span class="val">SAR 1,429.57</span></div>
+                  <div class="money"><span class="lbl">VAT (15%, included)</span><span class="val">SAR 34.43</span></div>
+                  <div class="money total"><span class="lbl">Total</span><span class="val">SAR 1,464.00</span></div>
+                  <div class="alert alert-amber" style="margin:10px 0 0">
+                    <span>☑</span><div>I confirm the declared contents are accurate and correctly packed to IATA Dangerous Goods Regulations.</div>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                    <button class="btn btn-pr btn-sm">Pay SAR 1,464.00</button>
+                    <button class="btn btn-gh btn-sm">Decline this quote</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-gh btn-sm">Send a reminder</button>
+                <button class="btn btn-amber btn-sm">Revise the quote</button>
+                <button class="btn btn-red btn-sm">Client declined — cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ---------- STAGE 5 ---------- -->
+          <div class="stage-card locked" id="stage5">
+            <div class="stage-head" data-toggle="5">
+              <div class="stage-left">
+                <div class="stage-num">5</div>
+                <div>
+                  <div class="stage-title">Paid and moving</div>
+                  <div class="stage-sub">Behaves like any other shipment from here</div>
+                </div>
+              </div>
+              <span class="badge b-gray" id="s5badge">Locked</span>
+            </div>
+            <div class="stage-body hidden" id="s5body">
+              <div class="alert alert-green"><span>✅</span><div><b>Paid 6 September, 09:14</b> — invoice EZI-441207893 issued. Courier collection booked for 8 September.</div></div>
+              <div class="card">
+                <div class="card-title">📡 Carrier scans — DHL Express 2575108620</div>
+                <div class="tl-item"><div class="tl-dot"></div><div><div class="tl-msg">Shipment picked up</div><div class="tl-time">Jeddah · 8 Sep 2026 · 11:04 (UTC+03:00)</div></div></div>
+                <div class="tl-item"><div class="tl-dot"></div><div><div class="tl-msg">Processed at DHL facility</div><div class="tl-time">Jeddah · 8 Sep 2026 · 18:22 (UTC+03:00)</div></div></div>
+                <div class="tl-item"><div class="tl-dot"></div><div><div class="tl-msg">Departed facility</div><div class="tl-time">Jeddah · 9 Sep 2026 · 02:40 (UTC+03:00)</div></div></div>
+                <div class="field-hint" style="margin-top:8px">Scans come from the carrier verbatim, in the carrier's own local time — same as every express shipment.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- SIDE ---------- -->
+        <aside class="dp-side">
+          <div class="card">
+            <div class="card-title">📦 Shipment</div>
+            <div class="sc-row"><span class="sc-key">Client</span><span class="sc-val">Demo Company</span></div>
+            <div class="sc-row"><span class="sc-key">Account</span><span class="sc-val">EZ0001 · VIP</span></div>
+            <div class="sc-row"><span class="sc-key">Type</span><span class="sc-val">Dangerous goods</span></div>
+            <div class="sc-row"><span class="sc-key">Submitted</span><span class="sc-val">5 Sep 2026, 09:12</span></div>
+            <div class="sc-row"><span class="sc-key">Status</span><span class="sc-val" id="sideStatus">Awaiting review</span></div>
+            <div class="sc-row"><span class="sc-key">Payment</span><span class="sc-val" id="sidePay">Unpaid — not yet quoted</span></div>
+            <div class="sc-row"><span class="sc-key">Carrier</span><span class="sc-val" id="sideCarrier">Not yet arranged</span></div>
+            <div class="sc-row"><span class="sc-key">AWB</span><span class="sc-val" id="sideAwb">—</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">👥 Assigned</div>
+            <div class="sc-row"><span class="sc-key">Owner</span><span class="sc-val">Sara Al Otaibi</span></div>
+            <div class="sc-row"><span class="sc-key">Assigned</span><span class="sc-val">5 Sep 2026, 09:13</span></div>
+            <div style="margin-top:10px"><button class="btn btn-gh btn-sm">Reassign</button></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🕓 Activity</div>
+            <div class="tl-item"><div class="tl-dot"></div><div><div class="tl-msg">Declaration submitted</div><div class="tl-time">5 Sep 2026 · 09:12</div></div></div>
+            <div class="tl-item"><div class="tl-dot"></div><div><div class="tl-msg">Assigned to Sara Al Otaibi</div><div class="tl-time">5 Sep 2026 · 09:13</div></div></div>
+            <div class="tl-item" id="actQuote" style="display:none"><div class="tl-dot"></div><div><div class="tl-msg">Quotation sent to client</div><div class="tl-time">5 Sep 2026 · 14:20</div></div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">💬 Notes</div>
+            <textarea class="field-textarea" rows="3" placeholder="Internal note…"></textarea>
+            <div style="margin-top:8px"><button class="btn btn-gh btn-sm">Add note</button></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  var stage = 1;
+  var needs = { emergencyPhone:false, packingInstruction:false, recipientPostal:false };
+
+  function money(n){ return "SAR " + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  function recalc(){
+    var cost = parseFloat(document.getElementById("qCost").value || "0");
+    var pct = 22;
+    var margin = cost * pct/100;
+    var total = cost + margin;
+    var override = parseFloat(document.getElementById("qOverride").value || "0");
+    if (override > 0){ total = override; margin = total - cost; }
+    // Export scenario: VAT is extracted from the margin, not added on top.
+    var vat = margin - margin/1.15;
+    document.getElementById("mCost").textContent = money(cost);
+    document.getElementById("mMargin").textContent = money(margin);
+    document.getElementById("mVat").textContent = money(vat);
+    document.getElementById("mTotal").textContent = money(total);
+    document.getElementById("qOverride").placeholder = "leave empty to use " + money(cost + cost*pct/100);
+  }
+
+  function refreshNeeds(){
+    var outstanding = 0;
+    Object.keys(needs).forEach(function(k){
+      var li = document.querySelector('[data-need="'+k+'"]');
+      if (needs[k]) { li.classList.add("ok"); li.firstChild.textContent = "✅ "; }
+      else { li.classList.remove("ok"); li.firstChild.textContent = "⚠️ "; outstanding++; }
+    });
+    document.getElementById("needCount").textContent = outstanding;
+    document.getElementById("s1sub").textContent = outstanding === 0
+      ? "Everything needed is present" : outstanding + " thing" + (outstanding>1?"s":"") + " still needed before this can go to a carrier";
+    document.getElementById("s1complete").disabled = outstanding > 0;
+    document.getElementById("s1hint").textContent = outstanding === 0
+      ? "Ready. Completing this records who reviewed the declaration."
+      : "Fill in the " + outstanding + " outstanding item" + (outstanding>1?"s":"") + " above to continue.";
+    if (outstanding === 0) document.getElementById("s1badge").className = "badge b-green";
+  }
+
+  [["fEmergencyPhone","emergencyPhone"],["fPackingInstruction","packingInstruction"],["fRecipientPostal","recipientPostal"]]
+    .forEach(function(pair){
+      var el = document.getElementById(pair[0]);
+      el.addEventListener("input", function(){
+        var filled = el.value.trim().length > 0;
+        // The UAE has no postal code, so clearing it is a valid answer — mark it resolved either way
+        // once the operator has touched the field.
+        needs[pair[1]] = pair[1] === "recipientPostal" ? true : filled;
+        if (filled || pair[1] === "recipientPostal") el.classList.remove("missing"); else el.classList.add("missing");
+        refreshNeeds();
+      });
+    });
+
+  function setStage(n){
+    stage = n;
+    document.getElementById("progLine").style.width = ((n-1)/4*82) + "%";
+    document.querySelectorAll(".progress-step").forEach(function(s){
+      var i = +s.dataset.step;
+      s.classList.toggle("done", i < n);
+      s.classList.toggle("active", i === n);
+    });
+    for (var i=1;i<=5;i++){
+      var card = document.getElementById("stage"+i);
+      var body = document.getElementById("s"+i+"body");
+      var badge = document.getElementById("s"+i+"badge");
+      card.classList.toggle("locked", i > n);
+      card.classList.toggle("done", i < n);
+      card.classList.toggle("active", i === n);
+      if (body) body.classList.toggle("hidden", i !== n);
+      if (badge){
+        if (i < n){ badge.className="badge b-green"; badge.textContent="Done"; }
+        else if (i === n){ badge.className="badge b-amber"; badge.textContent="In progress"; }
+        else { badge.className="badge b-gray"; badge.textContent="Locked"; }
+      }
+    }
+    var hdr = ["Review","Carrier handover","Quotation","Awaiting payment","Live"][n-1];
+    document.getElementById("hdrStage").textContent = "Stage " + n + " — " + hdr;
+
+    var st = ["Awaiting review","With the carrier","Ready to quote","Awaiting payment","Paid — in transit"][n-1];
+    document.getElementById("sideStatus").textContent = st;
+    document.getElementById("sidePay").textContent = n >= 5 ? "Paid 6 Sep 2026" : (n >= 4 ? "Unpaid — quoted SAR 1,464.00" : "Unpaid — not yet quoted");
+    document.getElementById("sideCarrier").textContent = n >= 4 ? "DHL Express" : "Not yet arranged";
+    document.getElementById("sideAwb").textContent = n >= 4 ? "2575108620" : "—";
+    document.getElementById("listBadge").className = "badge " + ["b-amber","b-blue","b-blue","b-purple","b-green"][n-1];
+    document.getElementById("listBadge").textContent = ["Needs review","With carrier","Ready to quote","Awaiting payment","In transit"][n-1];
+    document.getElementById("listMoney").textContent = n >= 4 ? "SAR 1,464.00" : "Not yet quoted";
+    document.getElementById("actQuote").style.display = n >= 4 ? "flex" : "none";
+    document.querySelectorAll(".proto-steps button").forEach(function(b){ b.classList.toggle("on", +b.dataset.jump === n); });
+    if (n === 1) refreshNeeds();
+  }
+
+  document.querySelectorAll(".proto-steps button").forEach(function(b){
+    b.addEventListener("click", function(){ setStage(+b.dataset.jump); });
+  });
+  document.querySelectorAll(".stage-head").forEach(function(h){
+    h.addEventListener("click", function(){
+      var i = +h.dataset.toggle;
+      if (i <= stage) setStage(i);
+    });
+  });
+  ["s1complete","s2complete","s3complete"].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("click", function(){ setStage(Math.min(stage+1,5)); });
+  });
+  document.getElementById("qCost").addEventListener("input", recalc);
+  document.getElementById("qOverride").addEventListener("input", recalc);
+  document.getElementById("copyBtn").addEventListener("click", function(){
+    navigator.clipboard && navigator.clipboard.writeText(document.getElementById("handoverText").textContent);
+    this.textContent = "Copied";
+    var self = this; setTimeout(function(){ self.textContent = "Copy to clipboard"; }, 1400);
+  });
+
+  recalc();
+  setStage(1);
+</script>
+</body>
+</html>

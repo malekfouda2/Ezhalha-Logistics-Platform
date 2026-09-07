@@ -13,7 +13,7 @@ import { TapCardForm } from "@/components/tap-card-form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
-import { ArrowLeft, CreditCard, Loader2, Pencil, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Clock3, CreditCard, Loader2, Pencil, Wallet, XCircle } from "lucide-react";
 
 interface Party {
   name: string; phone: string; email: string;
@@ -23,12 +23,39 @@ interface Party {
 interface Pkg { weight: number; length: number; width: number; height: number }
 interface Item { itemName: string; category?: string; countryOfOrigin?: string; hsCode?: string; price: number; quantity: number }
 interface TradeDoc { fileName: string; documentType: string }
+// Optional throughout: operations completes the declaration, so what the client sees here is
+// whatever has been filled in by the time they are quoted.
+interface DangerousGoodsCommodity {
+  unNumber?: string; properShippingName?: string; technicalName?: string;
+  hazardClass?: string; packingGroup?: string; packingInstruction?: string;
+  quantity?: { amount?: number; units?: string; quantityType?: string };
+  cargoAircraftOnly?: boolean;
+}
+interface DangerousGoodsQuoteData {
+  declaration: {
+    regulation: string; contentKind: string; accessibility?: string; offeror?: string;
+    emergencyContact?: { name?: string; phone?: string };
+    signatory?: { name?: string; title?: string; place?: string };
+    packages: Array<{ packageIndex: number; commodities: DangerousGoodsCommodity[] }>;
+  } | null;
+  documents: Array<{ fileName: string; documentType: string }>;
+  carrierAwb: string | null;
+  quotedAt: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+  note: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+  preferredPickupDate: string | null;
+  editable: boolean;
+}
 interface Quote {
-  id: string; trackingNumber: string; type: "express" | "local" | "ddp"; status: string;
+  id: string; trackingNumber: string; type: "express" | "local" | "ddp" | "dangerous_goods"; status: string;
   paymentStatus: string; carrierName: string | null; serviceType: string | null; currency: string;
   shipper: Party; recipient: Party; packages: Pkg[]; note: string; canPay: boolean;
   items: Item[]; tradeDocuments: TradeDoc[]; supplierName: string; supplierPhone: string; specialInstructions: string;
   requiresConsent: boolean; consentAccepted: boolean;
+  dangerousGoods: DangerousGoodsQuoteData | null;
   pricing: { baseRate: number; marginAmount: number; discountSar: number; extraChargeSar: number; vatAmountSar: number; clientTotalSar: number };
 }
 interface ClientAccount { profile?: string; creditEnabled?: boolean }
@@ -102,6 +129,33 @@ export default function QuotationDetail() {
     onError: (e: Error) => toast({ title: "Could not accept", description: e.message, variant: "destructive" }),
   });
 
+  const [declarationConfirmed, setDeclarationConfirmed] = useState(false);
+  const confirmDeclaration = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/client/quotations/${id}/confirm-declaration`, {
+      declarationConfirmed: true,
+    })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/client/quotations/${id}`] });
+      toast({ title: "Declaration confirmed" });
+    },
+    onError: (e: Error) => toast({ title: "Could not confirm", description: e.message, variant: "destructive" }),
+  });
+
+  const [declineReason, setDeclineReason] = useState("");
+  const [declining, setDeclining] = useState(false);
+  const decline = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/client/quotations/${id}/decline`, {
+      reason: declineReason || undefined,
+    })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/client/quotations/${id}`] });
+      setDeclining(false);
+      toast({ title: "Quotation declined", description: "We've let our team know. Nothing has been charged." });
+      navigate("/client/shipments");
+    },
+    onError: (e: Error) => toast({ title: "Could not decline", description: e.message, variant: "destructive" }),
+  });
+
   if (isLoading || !quote || !draft) {
     return (
       <ClientLayout clientProfile={account?.profile}>
@@ -156,7 +210,7 @@ export default function QuotationDetail() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Shipment details</CardTitle>
-            {quote.canPay && !editing && (
+            {quote.canPay && !editing && quote.type !== "dangerous_goods" && (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil className="mr-2 h-4 w-4" /> Modify</Button>
             )}
           </CardHeader>
@@ -238,8 +292,101 @@ export default function QuotationDetail() {
           </Card>
         )}
 
+        {/* Dangerous goods — what was arranged, and how long the price holds */}
+        {quote.dangerousGoods && (
+          <Card className="border-amber-500/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <AlertTriangle className="h-4 w-4 text-amber-600" /> Dangerous goods
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                This price was agreed with the carrier directly for the declaration below. It is
+                not a rate-card price, so it cannot be edited here — ask our team if anything
+                needs to change.
+              </p>
+
+              {quote.dangerousGoods.expiresAt && !paid && (
+                <div className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${quote.dangerousGoods.expired ? "bg-destructive/10 text-destructive" : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200"}`}>
+                  <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {quote.dangerousGoods.expired
+                      ? `This price expired on ${new Date(quote.dangerousGoods.expiresAt).toLocaleDateString()}. Our team will re-confirm it with the carrier.`
+                      : `The carrier holds this price until ${new Date(quote.dangerousGoods.expiresAt).toLocaleDateString()}.`}
+                  </span>
+                </div>
+              )}
+
+              {quote.dangerousGoods.declaration && (
+                <div className="space-y-1">
+                  {quote.dangerousGoods.declaration.packages.flatMap((pkg) =>
+                    pkg.commodities.map((commodity, index) => (
+                      <div key={`${pkg.packageIndex}-${index}`} className="border-b py-1 last:border-0">
+                        <div className="font-medium">
+                          {[commodity.unNumber, commodity.properShippingName].filter(Boolean).join(" ") || "Classification pending"}
+                          {commodity.technicalName ? ` (${commodity.technicalName})` : ""}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {commodity.hazardClass ? `Class ${commodity.hazardClass}` : "Class pending"}
+                          {commodity.packingGroup && commodity.packingGroup !== "NONE" ? ` · PG ${commodity.packingGroup}` : ""}
+                          {commodity.packingInstruction ? ` · PI ${commodity.packingInstruction}` : ""}
+                          {commodity.quantity?.amount ? ` · ${commodity.quantity.amount} ${commodity.quantity.units || ""}`.trimEnd() : ""}
+                          {commodity.cargoAircraftOnly ? " · cargo aircraft only" : ""}
+                        </div>
+                      </div>
+                    )),
+                  )}
+                </div>
+              )}
+
+              <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                {quote.dangerousGoods.carrierAwb && (
+                  <div>Air waybill: <span className="font-mono text-foreground">{quote.dangerousGoods.carrierAwb}</span></div>
+                )}
+                {quote.dangerousGoods.preferredPickupDate && (
+                  <div>Collection: <span className="text-foreground">{quote.dangerousGoods.preferredPickupDate}</span></div>
+                )}
+              </div>
+
+              {quote.dangerousGoods.note && (
+                <div className="rounded-md bg-muted px-3 py-2 text-xs">From our team: {quote.dangerousGoods.note}</div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Dangerous goods confirmation — required before payment */}
+        {quote.canPay && quote.type === "dangerous_goods" && !quote.consentAccepted && !editing && (
+          <Card className="border-amber-500/40">
+            <CardHeader className="pb-3"><CardTitle className="text-base">Confirm the declaration</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                Our team may have corrected details while arranging carriage, so please confirm the
+                declaration as it now stands. You are the offeror of these goods.
+              </p>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={declarationConfirmed}
+                  onChange={(e) => setDeclarationConfirmed(e.target.checked)}
+                />
+                <span>
+                  I confirm the contents are fully and accurately described above, classified,
+                  packed, marked and labelled to IATA Dangerous Goods Regulations, and in proper
+                  condition for carriage by air.
+                </span>
+              </label>
+              <Button disabled={!declarationConfirmed || confirmDeclaration.isPending} onClick={() => confirmDeclaration.mutate()}>
+                {confirmDeclaration.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Confirm declaration
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* DDP consent — required before payment */}
-        {quote.canPay && quote.requiresConsent && !quote.consentAccepted && !editing && (
+        {quote.canPay && quote.requiresConsent && !quote.consentAccepted && !editing && quote.type === "ddp" && (
           <Card className="border-amber-500/40">
             <CardHeader className="pb-3"><CardTitle className="text-base">Customs declaration</CardTitle></CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -292,6 +439,40 @@ export default function QuotationDetail() {
                     {payCredit.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wallet className="mr-2 h-4 w-4" />} Pay with credit
                   </Button>
                 </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Decline — the alternative to paying */}
+        {quote.canPay && !editing && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <XCircle className="h-4 w-4 text-muted-foreground" /> Not going ahead?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {declining ? (
+                <>
+                  <p className="text-muted-foreground">
+                    Declining cancels this quotation. Nothing is charged.
+                    {quote.type === "dangerous_goods" ? " Nothing has been booked with the carrier yet, so there is nothing to cancel." : ""}
+                  </p>
+                  <Input
+                    placeholder="Why, if you'd like to tell us (optional)"
+                    value={declineReason}
+                    onChange={(e) => setDeclineReason(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="destructive" disabled={decline.isPending} onClick={() => decline.mutate()}>
+                      {decline.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Decline this quotation
+                    </Button>
+                    <Button variant="outline" onClick={() => setDeclining(false)}>Keep it</Button>
+                  </div>
+                </>
+              ) : (
+                <Button variant="outline" onClick={() => setDeclining(true)}>Decline this quotation</Button>
               )}
             </CardContent>
           </Card>

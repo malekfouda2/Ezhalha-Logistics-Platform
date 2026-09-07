@@ -144,6 +144,7 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "FEDEX_REQUIRE_HS", label: "Require HS Codes For International Shipments", placeholder: "false" },
       { key: "FEDEX_STRICT_ADDRESS", label: "Strict Address Validation", placeholder: "false" },
       { key: "FEDEX_TRACK_BASE_URL", label: "Track API Base URL", placeholder: "https://apis.fedex.com", helpText: "Base URL for the Basic Integrated Visibility (Track) project. Production: https://apis.fedex.com" },
+      { key: "FEDEX_DG_ENABLED", label: "Dangerous Goods Approved", placeholder: "false", helpText: "Turn on only once FedEx has approved this account for dangerous goods. FedEx rejects DG rate and shipment calls on an unapproved account, so leaving this off keeps DG quotes away from it entirely." },
       ...carrierContactFields("FEDEX"),
     ],
     legacySettingsKeys: legacyCarrierContactSettingKeys("FEDEX"),
@@ -163,6 +164,8 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "DHL_BASE_URL", label: "Base URL", placeholder: "https://express.api.dhl.com/mydhlapi/test" },
     ],
     settingsFields: [
+      { key: "DHL_DG_ENABLED", label: "Dangerous Goods Approved", placeholder: "false", helpText: "Turn on only once DHL has approved this account for dangerous goods. An unapproved DG shipment is not rejected by the API — it is stopped later at the DHL facility, after the client has paid." },
+      { key: "DHL_DG_CONTENT_IDS", label: "Dangerous Goods Content IDs", placeholder: "{\"FULLY_REGULATED\":\"HE1\"}", helpText: "JSON map of content kind to the content id DHL approved for THIS account, e.g. {\"FULLY_REGULATED\":\"HE1\"}. DHL validates against the contract rather than the published table, and fully regulated goods have no published id at all." },
       ...carrierContactFields("DHL"),
     ],
     legacySettingsKeys: legacyCarrierContactSettingKeys("DHL"),

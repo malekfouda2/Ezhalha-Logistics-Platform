@@ -78,6 +78,8 @@ import {
   type InsertCreditAccessRequest,
   type SalesFeatureAccessRequest,
   type InsertSalesFeatureAccessRequest,
+  type DangerousGoodsAccessRequest,
+  type InsertDangerousGoodsAccessRequest,
   type EmailLoginOtp,
   type InsertEmailLoginOtp,
   type PasswordResetToken,
@@ -141,6 +143,7 @@ import {
   emailTemplates,
   creditAccessRequests,
   salesFeatureAccessRequests,
+  dangerousGoodsAccessRequests,
   emailLoginOtps,
   passwordResetTokens,
   mobileRefreshTokens,
@@ -265,6 +268,8 @@ export interface IStorage {
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
   recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
+  claimCarrierBooking(id: string): Promise<boolean>;
+  releaseCarrierBookingClaim(id: string): Promise<void>;
 
   // Invoices
   getInvoices(): Promise<Invoice[]>;
@@ -571,6 +576,10 @@ export interface IStorage {
   getSalesFeatureAccessRequestByClient(clientAccountId: string): Promise<SalesFeatureAccessRequest | undefined>;
   createSalesFeatureAccessRequest(request: InsertSalesFeatureAccessRequest): Promise<SalesFeatureAccessRequest>;
   updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined>;
+  getDangerousGoodsAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: DangerousGoodsAccessRequest[]; total: number; page: number; totalPages: number }>;
+  getDangerousGoodsAccessRequestByClient(clientAccountId: string): Promise<DangerousGoodsAccessRequest | undefined>;
+  createDangerousGoodsAccessRequest(request: InsertDangerousGoodsAccessRequest): Promise<DangerousGoodsAccessRequest>;
+  updateDangerousGoodsAccessRequest(id: string, updates: Partial<DangerousGoodsAccessRequest>): Promise<DangerousGoodsAccessRequest | undefined>;
 
   // Credit Invoices
   getCreditInvoices(params?: {
@@ -900,20 +909,25 @@ export class DatabaseStorage implements IStorage {
   async createClientAccount(account: InsertClientAccount): Promise<ClientAccount> {
     for (let attempt = 0; attempt < 5; attempt++) {
       // Generate the next account number in format EZ0001, EZ0002, etc.
+      //
+      // Take the maximum NUMERICALLY, not by sorting the text column. `ORDER BY account_number
+      // DESC` compares strings, so once EZ10000 exists it still answers EZ9999 — '9' sorts
+      // above '1'. The generator then proposes EZ10000 forever, every insert conflicts, all
+      // five retries produce the same number, and no client account can be created again.
+      // Zero-padding hides this exactly until the 10,000th account, and it does not heal.
+      //
+      // The regexp filter keeps a hand-entered or legacy account number that is not EZ<digits>
+      // from breaking the cast for everyone else.
       const [maxResult] = await db
-        .select({ accountNumber: clientAccounts.accountNumber })
+        .select({
+          maxNumber: sql<number | null>`max(substring(${clientAccounts.accountNumber} from 3)::bigint)`,
+        })
         .from(clientAccounts)
-        .orderBy(desc(clientAccounts.accountNumber))
-        .limit(1);
+        .where(sql`${clientAccounts.accountNumber} ~ '^EZ[0-9]+$'`);
 
-      let nextNumber = 1;
-      if (maxResult?.accountNumber) {
-        const match = maxResult.accountNumber.match(/EZ(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
-      }
+      const nextNumber = Number(maxResult?.maxNumber ?? 0) + 1;
 
+      // Still padded to four, so existing numbers keep their shape; wider numbers simply grow.
       const accountNumber = `EZ${String(nextNumber).padStart(4, "0")}`;
 
       try {
@@ -1199,6 +1213,43 @@ export class DatabaseStorage implements IStorage {
     await db.update(shipments)
       .set({ carrierStatusRepeatCount: repeatCount, carrierLastAttemptAt: new Date() })
       .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
+  }
+
+  /**
+   * Win the exclusive right to book this shipment with the carrier.
+   *
+   * Returns true only for the caller that actually took the claim. Everything that decides the
+   * outcome lives in the WHERE clause, so Postgres resolves it atomically — two requests
+   * arriving in the same millisecond cannot both be told yes. A read followed by a check, which
+   * is what this replaces, gave both of them yes and produced two waybills for one shipment.
+   *
+   * The stale window lets a crashed attempt be retried rather than wedging the shipment
+   * forever, and `carrierTrackingNumber IS NULL` means an already-booked shipment can never be
+   * claimed at all, however long ago it was booked.
+   */
+  async claimCarrierBooking(id: string): Promise<boolean> {
+    const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+    const claimed = await db.update(shipments)
+      .set({ carrierBookingClaimedAt: new Date() })
+      .where(and(
+        eq(shipments.id, id),
+        isNull(shipments.deletedAt),
+        isNull(shipments.carrierTrackingNumber),
+        or(
+          isNull(shipments.carrierBookingClaimedAt),
+          lt(shipments.carrierBookingClaimedAt, staleBefore),
+        ),
+      ))
+      .returning({ id: shipments.id });
+
+    return claimed.length > 0;
+  }
+
+  /** Hand the claim back after a failed booking so a retry is not blocked for five minutes. */
+  async releaseCarrierBookingClaim(id: string): Promise<void> {
+    await db.update(shipments)
+      .set({ carrierBookingClaimedAt: null })
+      .where(and(eq(shipments.id, id), isNull(shipments.carrierTrackingNumber)));
   }
 
   // Invoices
@@ -3123,11 +3174,20 @@ export class DatabaseStorage implements IStorage {
 <h3>8. Prohibited Items</h3>
 <p>The following items are prohibited from shipping through our platform:</p>
 <ul>
-<li>Hazardous materials and dangerous goods (unless specifically authorized)</li>
+<li>Undeclared hazardous materials and dangerous goods</li>
 <li>Illegal substances and contraband</li>
 <li>Perishable goods without proper packaging and authorization</li>
 <li>Items prohibited by the laws of the origin or destination country</li>
 <li>Items restricted by carrier policies</li>
+</ul>
+
+<h4>Dangerous Goods</h4>
+<p>Dangerous goods may be shipped only by accounts we have approved for dangerous goods in advance, and only when fully declared at the time of booking. To be approved you must provide evidence of current dangerous goods training and the safety data sheets for the substances you intend to ship.</p>
+<ul>
+<li><strong>Your responsibility:</strong> You are responsible for the accuracy and completeness of every declaration, and for classifying, packing, marking and labelling the goods in accordance with the current IATA Dangerous Goods Regulations and the rules of the origin and destination countries.</li>
+<li><strong>Our review:</strong> Every dangerous goods shipment is reviewed by our operations team before it is offered to the carrier. We may reject a declaration for any reason. A rejected shipment is cancelled and refunded, and is never handed to the carrier.</li>
+<li><strong>Undeclared goods:</strong> Shipping dangerous goods without declaring them is a serious safety and legal matter. Undeclared shipments may be stopped, seized or destroyed by the carrier or the authorities, at your cost, and may result in your account being closed.</li>
+<li><strong>Carrier acceptance:</strong> Acceptance is at all times subject to the carrier's own dangerous goods approvals and to the route being available for the class of goods declared.</li>
 </ul>
 
 <h3>9. Insurance and Liability</h3>
@@ -3274,6 +3334,36 @@ export class DatabaseStorage implements IStorage {
 
   async updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined> {
     const [updated] = await db.update(salesFeatureAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(salesFeatureAccessRequests.id, id)).returning();
+    return updated;
+  }
+
+  async getDangerousGoodsAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: DangerousGoodsAccessRequest[]; total: number; page: number; totalPages: number }> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 25;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(dangerousGoodsAccessRequests.status, params.status));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [totalResult] = await db.select({ count: count() }).from(dangerousGoodsAccessRequests).where(whereClause);
+    const total = totalResult?.count || 0;
+    const requests = await db.select().from(dangerousGoodsAccessRequests).where(whereClause).orderBy(desc(dangerousGoodsAccessRequests.createdAt)).limit(limit).offset(offset);
+    return { requests, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  async getDangerousGoodsAccessRequestByClient(clientAccountId: string): Promise<DangerousGoodsAccessRequest | undefined> {
+    const [request] = await db.select().from(dangerousGoodsAccessRequests).where(eq(dangerousGoodsAccessRequests.clientAccountId, clientAccountId)).orderBy(desc(dangerousGoodsAccessRequests.createdAt)).limit(1);
+    return request;
+  }
+
+  async createDangerousGoodsAccessRequest(request: InsertDangerousGoodsAccessRequest): Promise<DangerousGoodsAccessRequest> {
+    const [created] = await db.insert(dangerousGoodsAccessRequests).values(request).returning();
+    return created;
+  }
+
+  async updateDangerousGoodsAccessRequest(id: string, updates: Partial<DangerousGoodsAccessRequest>): Promise<DangerousGoodsAccessRequest | undefined> {
+    const [updated] = await db.update(dangerousGoodsAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(dangerousGoodsAccessRequests.id, id)).returning();
     return updated;
   }
 

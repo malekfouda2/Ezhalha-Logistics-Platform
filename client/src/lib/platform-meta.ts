@@ -1,6 +1,6 @@
 // Visual + capability metadata for sales-channel platforms. Mirrors the prototype's
-// colored 3-letter icons. Only WooCommerce is fully wired end-to-end today; the others
-// are shown for parity and marked `available: false` until their OAuth apps are live.
+// colored 3-letter icons. WooCommerce (per-store keys) and Zid (OAuth) are wired end-to-end;
+// the rest are shown for parity and marked `available: false` until their apps are live.
 
 export type AuthKind = "oauth" | "keys" | "token" | "webhook";
 
@@ -15,7 +15,7 @@ export interface PlatformMeta {
 
 export const PLATFORMS: PlatformMeta[] = [
   { id: "salla", label: "Salla", code: "SAL", color: "#3fb27f", auth: "oauth", available: false },
-  { id: "zid", label: "Zid", code: "ZID", color: "#5b3df5", auth: "oauth", available: false },
+  { id: "zid", label: "Zid", code: "ZID", color: "#5b3df5", auth: "oauth", available: true },
   { id: "woocommerce", label: "WooCommerce", code: "WOO", color: "#96bf48", auth: "keys", available: true },
   { id: "shopify", label: "Shopify", code: "SHP", color: "#95bf47", auth: "oauth", available: false },
   { id: "magento", label: "Magento", code: "MAG", color: "#e2553c", auth: "token", available: false },

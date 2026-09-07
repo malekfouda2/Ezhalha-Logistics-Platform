@@ -26,6 +26,10 @@ export const OperationShipmentKind = {
   DDP: "DDP",
   EXPRESS: "EXPRESS",
   LOCAL: "LOCAL",
+  // Dangerous goods arranged by hand: operations quotes it with the carrier by email before
+  // the client ever sees a price. Its own kind because nothing about its queue, its task
+  // list, or its payment behaviour matches an express shipment.
+  DANGEROUS_GOODS: "DANGEROUS_GOODS",
 } as const;
 
 export type OperationShipmentKindValue =

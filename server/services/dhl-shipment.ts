@@ -1,4 +1,5 @@
 import { type Shipment } from "@shared/schema";
+import { shipmentDangerousGoods } from "./dangerous-goods";
 import { type CreateShipmentRequest, type ShipmentItem } from "../integrations/fedex";
 import { buildCommercialInvoiceDocument } from "./commercial-invoice";
 import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
@@ -146,6 +147,8 @@ export async function buildDhlShipmentRequestFromShipment(
     commercialInvoiceDate: internalCommercialInvoice.issueDate,
     incoterm: shipment.isDdp ? "DDP" : "DAP",
     items,
+    // Regulated goods travel declared or not at all — see server/services/dangerous-goods.ts.
+    dangerousGoods: shipmentDangerousGoods(shipment),
   };
 
   return {

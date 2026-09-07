@@ -22,6 +22,9 @@ const colorStyles: Record<StatusColor, { pill: string; dot: string }> = {
 const statusColors: Record<string, StatusColor> = {
   draft: "gray",
   payment_pending: "purple",
+  dg_review: "amber",
+  dg_awaiting_carrier: "amber",
+  dg_booking: "cyan",
   created: "cyan",
   processing: "amber",
   picked_up: "blue",
@@ -48,6 +51,12 @@ const statusColors: Record<string, StatusColor> = {
 const statusLabels: Record<string, string> = {
   draft: "Draft",
   payment_pending: "Awaiting Payment",
+  // Dangerous goods before it has a price. Deliberately not "Awaiting Payment" — there is
+  // nothing to pay yet, and showing a client a payment status they cannot act on is a lie.
+  dg_review: "Under Review",
+  dg_awaiting_carrier: "With the Carrier",
+  // Paid, but the air waybill does not exist yet — operations books the movement now.
+  dg_booking: "Booking with the Carrier",
   created: "Booked",
   processing: "Processing",
   picked_up: "Picked Up",

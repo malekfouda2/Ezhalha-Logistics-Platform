@@ -1,8 +1,41 @@
 import { logInfo } from "../services/logger";
+import { DangerousGoodsUnsupportedError } from "@shared/dangerous-goods";
 import { fedexAdapter, type CarrierAdapter } from "./fedex";
 import { dhlAdapter } from "./dhl";
 import { aramexAdapter } from "./aramex";
 import { smsaAdapter, naqelAdapter, jtAdapter, redboxAdapter, zajilAdapter, imileAdapter, fizzpaAdapter, shipoxAdapter } from "./local-carriers";
+
+/**
+ * Refuse a dangerous goods request on any carrier that has not declared DG capability.
+ *
+ * Applied at registration rather than inside each adapter so a newly added carrier is
+ * DG-refusing by default — the failure mode of forgetting the guard would be booking
+ * regulated goods as general cargo, which is a safety and legal problem, not a bug report.
+ * Aramex in particular has no DG field in its API at all: its `Details.Services` accessorial
+ * is a free-text string and no commodity structure exists, so a DG shipment sent to Aramex
+ * would travel undeclared.
+ */
+function guardDangerousGoods(adapter: CarrierAdapter): CarrierAdapter {
+  if (adapter.capabilities?.dangerousGoods?.supported) return adapter;
+
+  return new Proxy(adapter, {
+    get(target, property, receiver) {
+      if (property === "getRates" || property === "createShipment") {
+        const original = Reflect.get(target, property, receiver) as (...args: any[]) => any;
+        // async, so the refusal arrives as a rejected promise like every other adapter
+        // failure. A synchronous throw would escape the per-carrier `.catch()` in the rate
+        // fan-out and take down the whole quote instead of dropping one carrier.
+        return async (request: any, ...rest: any[]) => {
+          if (request?.dangerousGoods) {
+            throw new DangerousGoodsUnsupportedError(adapter.name);
+          }
+          return original.call(target, request, ...rest);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+}
 
 export class CarrierService {
   private adapters = new Map<string, CarrierAdapter>();
@@ -25,8 +58,9 @@ export class CarrierService {
   registerAdapter(adapter: CarrierAdapter): void {
     const codeKey = adapter.carrierCode.trim().toUpperCase();
     const nameKey = adapter.name.trim().toUpperCase();
-    this.adapters.set(codeKey, adapter);
-    this.adapters.set(nameKey, adapter);
+    const guarded = guardDangerousGoods(adapter);
+    this.adapters.set(codeKey, guarded);
+    this.adapters.set(nameKey, guarded);
     logInfo(`Registered carrier adapter: ${adapter.name} (${adapter.carrierCode}) - configured: ${adapter.isConfigured()}`);
   }
 

@@ -259,6 +259,58 @@ describe("Operations Hub", () => {
     expect(summaryRes.body.deliveredCount).toBeGreaterThanOrEqual(beforeDeliveredCount + 2);
   });
 
+  it("sorts a queue on the server, before the row cap is applied", async () => {
+    // Sorting client-side would only rearrange the page the cap already chose, so "highest
+    // amount" would mean "highest of the most recent" — which is not what an operator asked
+    // for. These two shipments differ only in price, and the cheap one is created LAST, so a
+    // list that is merely reversed by recency puts it first.
+    const { clientAccount } = await createClientWithUser();
+    const dear = await createPaidExpressShipment(clientAccount.id, {
+      finalPrice: "91234.00",
+      clientTotalAmountSar: "91234.00",
+    });
+    const cheap = await createPaidExpressShipment(clientAccount.id, {
+      finalPrice: "1.25",
+      clientTotalAmountSar: "1.25",
+    });
+
+    const byAmount = await withCookies(
+      request.get("/api/operations/shipments?queue=express&limit=200&sort=amount_desc"),
+      adminCookies,
+    );
+    expect(byAmount.status).toBe(200);
+    // Assert the ordering, not a specific winner: other suites seed their own shipments into
+    // this queue, so "is it first" would pass or fail on what else happens to exist.
+    const descending = byAmount.body.map((shipment: { finalPrice: string }) => Number(shipment.finalPrice));
+    expect(descending).toEqual([...descending].sort((a, b) => b - a));
+    const descendingIds = byAmount.body.map((shipment: { id: string }) => shipment.id);
+    expect(descendingIds).toContain(dear.id);
+    if (descendingIds.includes(cheap.id)) {
+      expect(descendingIds.indexOf(dear.id)).toBeLessThan(descendingIds.indexOf(cheap.id));
+    }
+
+    const cheapestFirst = await withCookies(
+      request.get("/api/operations/shipments?queue=express&limit=200&sort=amount_asc"),
+      adminCookies,
+    );
+    expect(cheapestFirst.status).toBe(200);
+    const ascending = cheapestFirst.body.map((shipment: { finalPrice: string }) => Number(shipment.finalPrice));
+    expect(ascending).toEqual([...ascending].sort((a, b) => a - b));
+    expect(cheapestFirst.body.map((shipment: { id: string }) => shipment.id)).toContain(cheap.id);
+
+    // An unknown key is a stale bookmark, not a client error: fall back to the queue default
+    // rather than showing an operator an error page instead of their work.
+    const bogus = await withCookies(
+      request.get("/api/operations/shipments?queue=express&limit=200&sort=not_a_real_sort"),
+      adminCookies,
+    );
+    expect(bogus.status).toBe(200);
+    // The default queue order fetches newest-first so the cap keeps current work, then flips
+    // the page so it is worked oldest-first — which is what an ascending createdAt proves.
+    const fallbackCreated = bogus.body.map((shipment: { createdAt: string }) => new Date(shipment.createdAt).getTime());
+    expect(fallbackCreated).toEqual([...fallbackCreated].sort((a, b) => a - b));
+  });
+
   it("collects returned shipments in the returned queue without pulling them out of the active queues", async () => {
     const beforeSummaryRes = await withCookies(request.get("/api/operations/summary"), adminCookies);
     expect(beforeSummaryRes.status).toBe(200);
