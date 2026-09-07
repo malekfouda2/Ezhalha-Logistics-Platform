@@ -194,9 +194,9 @@ export function StatusBadge({ status, style, textStyle }: StatusBadgeProps) {
       ]}
     >
       <Text
+        size="xs"
         weight="bold"
         style={[
-          styles.label,
           {
             color: colors.textColor,
           },
@@ -243,10 +243,5 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     position: "absolute",
-  },
-
-  label: {
-    fontSize: 12,
-    fontWeight: "600",
   },
 });

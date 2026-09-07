@@ -7,13 +7,23 @@ import { PhoneInput } from "@/components/ui/PhoneInput";
 
 import { rs, rvs } from "@/utils/responsive";
 import InfoBox from "@/components/ui/InfoBox";
+import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
+import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useLocalRecipientStep } from "@/lib/hooks/createShipment/local/useRecipientStep";
 
 export default function LocalRecipientDetailsScreen() {
   const { t } = useTranslation();
 
-  const { form, handleContinue, handleBack } = useLocalRecipientStep();
+  const {
+    form,
+    handleContinue,
+    handleBack,
+    savedRecipientAddresses,
+    isLoadingAddresses,
+    applySavedAddress,
+    selectedAddressId,
+  } = useLocalRecipientStep();
 
   const {
     control,
@@ -29,6 +39,22 @@ export default function LocalRecipientDetailsScreen() {
       onContinue={handleContinue}
       onBack={handleBack}
     >
+      <SectionTitle title={t("createShipment.local.steps.step2.deliverTo")} />
+
+      <SavedAddressSelect
+        title={t("createShipment.local.steps.step2.deliverTo")}
+        placeholder={t("createShipment.local.steps.step2.deliverPlaceholder")}
+        emptyText={t("createShipment.local.steps.step2.deliverEmpty")}
+        addresses={savedRecipientAddresses}
+        isLoading={isLoadingAddresses}
+        selectedAddressId={selectedAddressId}
+        onSelect={applySavedAddress}
+      />
+
+      <View style={styles.selectGap} />
+
+      <SectionTitle title={t("createShipment.local.steps.step2.newAddress")} />
+
       <Controller
         control={control}
         name="name"

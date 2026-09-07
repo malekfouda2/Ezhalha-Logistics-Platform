@@ -9,6 +9,7 @@ import { PhoneInput } from "@/components/ui/PhoneInput";
 import { GeoSuggestInput, type GeoSuggestion } from "@/components/ui/GeoSuggestInput";
 import SectionTitle from "@/components/sections/createShipment/SectionTitle";
 import { SavedAddressSelect } from "@/components/sections/createShipment/SavedAddressSelect";
+import { OriginCountrySelect } from "@/components/sections/createShipment/doorToDoor/OriginCountrySelect";
 import { ShipmentStepLayout } from "@/components/sections/createShipment/ShipmentStepLayout";
 import { useRecipientStep } from "@/lib/hooks/createShipment/doorToDoor/useRecipientStep";
 import { rs } from "@/utils/responsive";
@@ -24,6 +25,8 @@ export default function RecipientDetailsScreen() {
   const {
     form,
     destinationCountryCode,
+    destinationOptions,
+    selectDestination,
     savedRecipientAddresses,
     isLoadingAddresses,
     applySavedAddress,
@@ -49,10 +52,27 @@ export default function RecipientDetailsScreen() {
       step={3}
       totalSteps={9}
       title={t("createShipment.freight.steps.step3.title")}
-      subtitle={t("createShipment.freight.steps.step3.subtitle", { country: countryLabel(destinationCountryCode) })}
+      subtitle={
+        destinationCountryCode
+          ? t("createShipment.freight.steps.step3.subtitle", { country: countryLabel(destinationCountryCode) })
+          : t("createShipment.freight.steps.step3.subtitleSelect")
+      }
       onContinue={handleContinue}
       onBack={handleBack}
     >
+      <SectionTitle title={t("createShipment.freight.steps.step3.destinationCountry")} />
+
+      <OriginCountrySelect
+        value={destinationCountryCode}
+        options={destinationOptions}
+        placeholder={t("createShipment.freight.steps.step3.destinationPlaceholder")}
+        title={t("createShipment.freight.steps.step3.destinationCountry")}
+        emptyText={t("createShipment.freight.steps.step3.destinationEmpty")}
+        onSelect={selectDestination}
+      />
+
+      <View style={styles.selectGap} />
+
       <SavedAddressSelect
         title={t("createShipment.freight.steps.step3.savedRecipients.title")}
         placeholder={t("createShipment.freight.steps.step3.savedRecipients.placeholder")}

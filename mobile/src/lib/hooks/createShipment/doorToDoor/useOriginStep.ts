@@ -26,9 +26,10 @@ export function useOriginStep() {
   const selectedLane = availableLanes.find((lane) => lane.originCountryCode === originCountryCode) ?? null;
 
   const selectOrigin = (code: string) => {
+    if (code !== originCountryCode) {
+      setDestinationCountryCode("");
+    }
     setOriginCountryCode(code);
-    const lane = availableLanes.find((l) => l.originCountryCode === code);
-    setDestinationCountryCode(lane?.destinationCountryCode || "SA");
   };
 
   const handleContinue = () => {

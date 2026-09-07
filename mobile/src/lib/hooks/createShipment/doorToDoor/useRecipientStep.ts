@@ -6,24 +6,10 @@ import { useQuery } from "@tanstack/react-query";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
-import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
+import { useDoorToDoorStore, DdpLane } from "@/store/createDoorToDoorStore";
 import { Address } from "@/store/createExpressShipmentStore";
 import { AddressFormInput, addressSchema } from "@/schemas/address";
 import { AddressBookEntry } from "@/lib/services/createShipment";
-
-interface ClientAccount {
-  name: string;
-  email: string;
-  phone: string;
-  shippingContactName?: string | null;
-  shippingContactPhone?: string | null;
-  shippingCountryCode?: string | null;
-  shippingStateOrProvince?: string | null;
-  shippingCity?: string | null;
-  shippingPostalCode?: string | null;
-  shippingAddressLine1?: string | null;
-  shippingAddressLine2?: string | null;
-}
 
 export function useRecipientStep() {
   const router = useRouter();
@@ -32,8 +18,11 @@ export function useRecipientStep() {
   const hasPrefilled = useRef(false);
 
   const recipient = useDoorToDoorStore((s) => s.recipient);
+  const transportMethod = useDoorToDoorStore((s) => s.transportMethod);
+  const originCountryCode = useDoorToDoorStore((s) => s.originCountryCode);
   const destinationCountryCode = useDoorToDoorStore((s) => s.destinationCountryCode);
   const setRecipient = useDoorToDoorStore((s) => s.setRecipient);
+  const setDestinationCountryCode = useDoorToDoorStore((s) => s.setDestinationCountryCode);
 
   const form = useForm<AddressFormInput>({
     resolver: zodResolver(addressSchema),
@@ -42,7 +31,20 @@ export function useRecipientStep() {
     defaultValues: recipient,
   });
 
-  const { data: account } = useQuery<ClientAccount>({ queryKey: ["/api/client/account"] });
+  const { data: lanes = [], isLoading: isLoadingLanes } = useQuery<DdpLane[]>({
+    queryKey: ["/api/client/ddp/lanes"],
+  });
+
+  const isLaneAvailable = (lane: DdpLane) =>
+    transportMethod === "air" ? lane.airAvailable : transportMethod === "sea" ? lane.seaAvailable : lane.domesticAvailable;
+
+  const destinationOptions = Array.from(
+    new Set(
+      lanes
+        .filter((lane) => lane.originCountryCode === originCountryCode && isLaneAvailable(lane))
+        .map((lane) => lane.destinationCountryCode),
+    ),
+  );
 
   const { data: addressBookEntries = [], isLoading: isLoadingAddresses } = useQuery<AddressBookEntry[]>({
     queryKey: ["/api/client/address-book"],
@@ -53,29 +55,33 @@ export function useRecipientStep() {
 
   const savedRecipientAddresses = addressBookEntries.filter((e) => e.useForRecipient);
 
+  const selectDestination = (code: string) => {
+    setDestinationCountryCode(code);
+    form.setValue("countryCode", code, { shouldValidate: true });
+    form.setValue("country", code, { shouldValidate: true });
+  };
+
   useEffect(() => {
-    if (!account || hasPrefilled.current || recipient.name) return;
-    hasPrefilled.current = true;
-
-    const values: Address = {
-      name: account.shippingContactName || account.name || "",
-      company: "",
-      phone: account.shippingContactPhone || account.phone || "",
-      email: account.email || "",
-      countryCode: destinationCountryCode,
-      country: destinationCountryCode,
-      city: account.shippingCity || "",
-      postalCode: account.shippingPostalCode || "",
-      addressLine1: account.shippingAddressLine1 || "",
-      addressLine2: account.shippingAddressLine2 || "",
-      stateOrProvince: account.shippingStateOrProvince || "",
-      shortAddress: "",
-    };
-
-    form.reset(values);
-    setRecipient(values);
+    if (destinationCountryCode && !destinationOptions.includes(destinationCountryCode)) {
+      setDestinationCountryCode("");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account]);
+  }, [destinationOptions.join("|")]);
+
+  const buildAddressFromEntry = (entry: AddressBookEntry, countryCode: string): Address => ({
+    name: entry.name,
+    company: entry.company || "",
+    phone: entry.phone,
+    email: entry.email || "",
+    countryCode,
+    country: countryCode,
+    city: entry.city,
+    postalCode: entry.postalCode || "",
+    addressLine1: entry.addressLine1,
+    addressLine2: entry.addressLine2 || "",
+    stateOrProvince: entry.stateOrProvince || "",
+    shortAddress: entry.shortAddress || "",
+  });
 
   const handleContinue = form.handleSubmit(
     (values) => {
@@ -95,30 +101,46 @@ export function useRecipientStep() {
 
   const applySavedAddress = (entry: AddressBookEntry) => {
     setSelectedAddressId(entry.id);
-    const values: Address = {
-      name: entry.name,
-      company: entry.company || "",
-      phone: entry.phone,
-      email: entry.email || "",
-      countryCode: destinationCountryCode,
-      country: destinationCountryCode,
-      city: entry.city,
-      postalCode: entry.postalCode || "",
-      addressLine1: entry.addressLine1,
-      addressLine2: entry.addressLine2 || "",
-      stateOrProvince: entry.stateOrProvince || "",
-      shortAddress: entry.shortAddress || "",
-    };
+    const values = buildAddressFromEntry(entry, destinationCountryCode);
     form.reset(values);
     setRecipient(values);
     setTimeout(() => form.trigger(), 0);
   };
+
+  // Auto-fill from the client's default saved address as soon as it's available — including
+  // picking the destination country when the user hasn't chosen one yet — rather than requiring
+  // a manual "select saved address" tap.
+  useEffect(() => {
+    if (hasPrefilled.current || isLoadingAddresses || isLoadingLanes || recipient.name) return;
+    const defaultAddress = addressBookEntries.find(
+      (e) => e.source === "default_shipping" && e.useForRecipient,
+    );
+    if (!defaultAddress) return;
+    hasPrefilled.current = true;
+
+    const resolvedCountryCode =
+      destinationCountryCode ||
+      (destinationOptions.includes(defaultAddress.countryCode) ? defaultAddress.countryCode : destinationOptions[0] || "");
+
+    if (resolvedCountryCode && resolvedCountryCode !== destinationCountryCode) {
+      setDestinationCountryCode(resolvedCountryCode);
+    }
+
+    setSelectedAddressId(defaultAddress.id);
+    const values = buildAddressFromEntry(defaultAddress, resolvedCountryCode);
+    form.reset(values);
+    setRecipient(values);
+    setTimeout(() => form.trigger(), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressBookEntries, isLoadingAddresses, isLoadingLanes, destinationOptions.join("|")]);
 
   const handleBack = () => router.back();
 
   return {
     form,
     destinationCountryCode,
+    destinationOptions,
+    selectDestination,
     savedRecipientAddresses,
     isLoadingAddresses,
     selectedAddressId,

@@ -132,8 +132,8 @@ interface DoorToDoorState {
 const initialState = {
   transportMethod: "air" as DdpTransportMethodValue,
   originCountryCode: "",
-  destinationCountryCode: "SA",
-  recipient: { ...emptyAddress, countryCode: "SA", country: "SA" },
+  destinationCountryCode: "",
+  recipient: { ...emptyAddress },
   supplierName: "",
   supplierPhone: "",
   supplierAddress: "",
@@ -227,7 +227,7 @@ export const useDoorToDoorStore = create<DoorToDoorState>((set, get) => ({
   reset: () =>
     set({
       ...initialState,
-      recipient: { ...emptyAddress, countryCode: "SA", country: "SA" },
+      recipient: { ...emptyAddress },
       packages: [{ weight: 1, length: 10, width: 10, height: 10 }],
       items: [],
     }),

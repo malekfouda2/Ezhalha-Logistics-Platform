@@ -54,9 +54,10 @@ function getConfig(
         idValue: "EZH552031884",
         footerTitle: t("createShipment.confirmation.local.footerTitle"),
         onFooterPress: (r) =>
-          shipmentId
-            ? r.replace(`/shipments/${shipmentId}/tracking`)
-            : r.replace("/(tabs)/shipments"),
+          // shipmentId
+          //   ? r.replace(`/shipments/${shipmentId}/tracking`)
+          //   :
+             r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "",
           status: "",
@@ -73,7 +74,7 @@ function getConfig(
         footerTitle: t("createShipment.confirmation.freight.footerTitle"),
         onFooterPress: (r) =>
           shipmentId
-            ? r.replace(`/shipments/${shipmentId}/tracking`)
+            ? r.replace(`/shipments/${shipmentId}`)
             : r.replace("/(tabs)/shipments"),
         cardRow: {
           left: params.route || "Air · China → Riyadh",
@@ -91,9 +92,10 @@ function getConfig(
         idValue: "EZH977158300",
         footerTitle: t("createShipment.confirmation.express.footerTitle"),
         onFooterPress: (r) =>
-          shipmentId
-            ? r.replace(`/shipments/${shipmentId}/tracking`)
-            : r.replace("/(tabs)/shipments"),
+          // shipmentId
+          //   ? r.replace(`/shipments/${shipmentId}/tracking`)
+          //   : 
+            r.replace("/(tabs)/shipments"),
         cardRow: {
           left: "FedEx · 7940 5613 3021",
           status: t("createShipment.confirmation.express.statusProcessing"),

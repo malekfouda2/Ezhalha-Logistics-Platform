@@ -680,6 +680,10 @@
         "step3": {
           "title": "Recipient details",
           "subtitle": "Delivery in {{country}}",
+          "subtitleSelect": "Select a destination to continue",
+          "destinationCountry": "Destination country *",
+          "destinationPlaceholder": "Select an available destination",
+          "destinationEmpty": "No available destinations for this origin.",
           "savedRecipients": {
             "title": "SAVED RECIPIENTS",
             "placeholder": "Select a saved recipient address",
@@ -805,6 +809,10 @@
         "step2": {
           "title": "Recipient Details",
           "subtitle": "Inside Saudi Arabia",
+          "deliverTo": "DELIVER TO",
+          "deliverPlaceholder": "Select a saved address",
+          "deliverEmpty": "No saved addresses yet",
+          "newAddress": "OR ENTER A NEW ADDRESS",
           "fullName": "Full name",
           "addressLine1": "Address line",
           "city": "City",

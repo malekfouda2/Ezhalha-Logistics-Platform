@@ -679,6 +679,10 @@
         "step3": {
           "title": "بيانات المستلم",
           "subtitle": "التوصيل في {{country}}",
+          "subtitleSelect": "اختر وجهة للمتابعة",
+          "destinationCountry": "بلد الوجهة *",
+          "destinationPlaceholder": "اختر وجهة متاحة",
+          "destinationEmpty": "لا توجد وجهات متاحة لبلد المنشأ هذا.",
           "savedRecipients": {
             "title": "المستلمون المحفوظون",
             "placeholder": "اختر عنوان مستلم محفوظ",
@@ -804,6 +808,10 @@
         "step2": {
           "title": "بيانات المستلم",
           "subtitle": "داخل المملكة العربية السعودية",
+          "deliverTo": "التوصيل إلى",
+          "deliverPlaceholder": "اختر عنوانًا محفوظًا",
+          "deliverEmpty": "لا توجد عناوين محفوظة بعد",
+          "newAddress": "أو أدخل عنوانًا جديدًا",
           "fullName": "الاسم الكامل",
           "addressLine1": "العنوان",
           "city": "المدينة",

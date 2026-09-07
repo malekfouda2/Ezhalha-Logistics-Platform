@@ -2,7 +2,7 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 
@@ -15,6 +15,7 @@ export function useSenderStep() {
   const router = useRouter();
   const { t } = useTranslation();
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const hasPrefilled = useRef(false);
 
   const shipper = useCreateShipmentStore((s) => s.shipper);
   const shipmentType = useCreateShipmentStore((s) => s.shipmentType);
@@ -72,6 +73,17 @@ export function useSenderStep() {
     setShipper(values);
     setTimeout(() => form.trigger(), 0);
   };
+
+  useEffect(() => {
+    if (hasPrefilled.current || isLoadingAddresses || shipper.name) return;
+    const defaultAddress = addressBookEntries.find(
+      (e) => e.source === "default_shipping" && e.useForShipper,
+    );
+    if (!defaultAddress) return;
+    hasPrefilled.current = true;
+    applySavedAddress(defaultAddress);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressBookEntries, isLoadingAddresses]);
 
   return {
     form,
