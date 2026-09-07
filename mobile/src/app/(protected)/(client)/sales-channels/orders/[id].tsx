@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,8 @@ import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { TapCheckoutWebView } from "@/components/ui/TapCheckoutWebView";
+import { TapCheckoutEntry, TapCheckoutEntryHandle } from "@/components/ui/TapCheckoutEntry";
+import { PaymentMethodCard } from "@/components/sections/createShipment/PaymentMethodCard";
 import { InfoRow } from "@/components/ui/InfoCard";
 import { ScreenHeader } from "@/components/sections/profile/ScreenHeader";
 import { SalesFeatureGate } from "@/components/sections/salesChannels/SalesFeatureGate";
@@ -17,6 +19,8 @@ import { useOrderFulfillPayment } from "@/lib/hooks/useOrderFulfillPayment";
 import { parseOrderJson } from "@/lib/services/orders";
 
 const VAT_RATE = 0.15;
+
+type PaymentMethodId = "saved-card" | "new-card";
 
 export default function OrderFulfillScreen() {
   return (
@@ -33,6 +37,8 @@ function OrderFulfillScreenContent() {
   const { data: order, isLoading } = useOrder(id);
   const [weight, setWeight] = useState("");
   const [selectedCarrier, setSelectedCarrier] = useState<string | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId>("new-card");
+  const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
   useEffect(() => {
     if (order?.packageWeightKg && !weight) {
@@ -47,17 +53,26 @@ function OrderFulfillScreenContent() {
     isFulfilling,
     isPayingLater,
     creditAccess,
+    savedCards,
     checkoutWebViewUrl,
     handleFulfill,
     closeCheckoutWebView,
     handleCheckoutWebViewResult,
   } = useOrderFulfillPayment(id);
 
+  const defaultCard = savedCards.find((c) => c.isDefault) ?? savedCards[0];
+
   useEffect(() => {
     if (rateData?.rates.length && !selectedCarrier) {
       setSelectedCarrier(rateData.rates[0].carrierCode);
     }
   }, [rateData, selectedCarrier]);
+
+  useEffect(() => {
+    if (defaultCard && selectedMethod === "new-card") {
+      setSelectedMethod("saved-card");
+    }
+  }, [defaultCard]);
 
   if (isLoading || !order) {
     return (
@@ -156,6 +171,46 @@ function OrderFulfillScreenContent() {
               />
             </View>
           ) : null}
+
+          {selectedRate ? (
+            <>
+              <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.sectionLabel}>
+                {t("createShipment.express.steps.step8.payWith")}
+              </Text>
+
+              {defaultCard ? (
+                <PaymentMethodCard
+                  title={t("createShipment.express.payment.savedCard.title")}
+                  subtitle={`${defaultCard.brand ?? ""} •••• ${defaultCard.lastFour ?? ""}`.trim()}
+                  iconLabel={(defaultCard.brand ?? "CARD").slice(0, 4).toUpperCase()}
+                  iconBackground="navy"
+                  iconColor={Colors.white}
+                  selected={selectedMethod === "saved-card"}
+                  onPress={() => setSelectedMethod("saved-card")}
+                />
+              ) : null}
+
+              <PaymentMethodCard
+                title={t("createShipment.express.payment.newCard.title")}
+                subtitle={t("createShipment.express.payment.newCard.subtitle")}
+                iconLabel="+"
+                iconBackground="#F2F3F5"
+                iconColor={Colors.secondary}
+                selected={selectedMethod === "new-card"}
+                onPress={() => setSelectedMethod("new-card")}
+              />
+
+              {selectedMethod === "new-card" ? (
+                <TapCheckoutEntry
+                  ref={cardEntryRef}
+                  amount={total}
+                  currency={selectedRate?.currency}
+                  saveCard
+                  style={styles.cardEntry}
+                />
+              ) : null}
+            </>
+          ) : null}
         </View>
 
         <View style={styles.footer}>
@@ -176,7 +231,16 @@ function OrderFulfillScreenContent() {
                 ? t("orderFulfill.fulfilling")
                 : t("orderFulfill.fulfill", { amount: total.toFixed(2) })
             }
-            onPress={() => selectedCarrier && handleFulfill(selectedCarrier, effectiveWeight, "now")}
+            onPress={async () => {
+              if (!selectedCarrier) return;
+              if (selectedMethod === "saved-card" && defaultCard) {
+                handleFulfill(selectedCarrier, effectiveWeight, "now", defaultCard.tapCardId);
+                return;
+              }
+              const chargeResult = await cardEntryRef.current?.pay();
+              if (!chargeResult) return;
+              handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true, chargeResult.chargeId);
+            }}
             loading={isFulfilling}
             disabled={!selectedCarrier || isFulfilling || isPayingLater}
           />
@@ -253,6 +317,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: rs(14),
     paddingHorizontal: rs(14),
+    marginBottom: rvs(16),
+  },
+  cardEntry: {
     marginBottom: rvs(16),
   },
   footer: {

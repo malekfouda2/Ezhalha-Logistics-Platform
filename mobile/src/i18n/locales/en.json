@@ -1633,5 +1633,14 @@
       "payLaterErrorTitle": "Pay Later failed",
       "paymentPendingTitle": "Payment initiated"
     }
+  },
+  "payments": {
+    "cardEntry": {
+      "errorTitle": "Card entry failed",
+      "errorMessage": "Please try again.",
+      "incompleteMessage": "Please complete your card details.",
+      "unavailableTitle": "Card payment unavailable",
+      "unavailableMessage": "Card entry isn't set up for this account yet. Please try again later or contact support."
+    }
   }
 }

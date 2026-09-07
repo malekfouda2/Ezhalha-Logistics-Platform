@@ -1,5 +1,5 @@
 // components/sections/invoices/ConfirmPaymentSheet.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { SaudiRiyal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { PaymentMethodCard } from "@/components/sections/createShipment/PaymentMethodCard";
 import { TapCheckoutWebView, TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
+import { TapCheckoutEntry, TapCheckoutEntryHandle } from "@/components/ui/TapCheckoutEntry";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { formatMoney, formatShortDate } from "@/utils/invoiceFormat";
@@ -48,6 +49,7 @@ export function ConfirmPaymentSheet({
   const [selectedCardId, setSelectedCardId] = useState<string | "new">("new");
   const [isPaying, setIsPaying] = useState(false);
   const [checkoutWebViewUrl, setCheckoutWebViewUrl] = useState<string | null>(null);
+  const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
   const { data: savedCards = [] } = useQuery<SavedCard[]>({
     queryKey: ["/api/client/payments/tap/saved-cards"],
@@ -71,9 +73,22 @@ export function ConfirmPaymentSheet({
     setIsPaying(true);
     try {
       const selectedCard = savedCards.find((c) => c.id === selectedCardId);
+      let tapTokenId = selectedCard?.tapCardId;
+      let chargeId: string | undefined;
+
+      if (selectedCardId === "new") {
+        const chargeResult = await cardEntryRef.current?.pay();
+        if (!chargeResult) {
+          setIsPaying(false);
+          return;
+        }
+        chargeId = chargeResult.chargeId;
+      }
+
       const result = await payInvoice({
         invoiceId: invoice.id,
-        tapTokenId: selectedCard?.tapCardId,
+        tapTokenId,
+        chargeId,
       });
 
       if (result.transactionUrl) {
@@ -200,6 +215,17 @@ export function ConfirmPaymentSheet({
           onPress={() => setSelectedCardId("new")}
         />
 
+        {selectedCardId === "new" ? (
+          <TapCheckoutEntry
+            ref={cardEntryRef}
+            amount={Number(invoice.amount)}
+            currency={invoice.currency ?? undefined}
+            invoiceId={invoice.id}
+            saveCard
+            style={styles.cardEntry}
+          />
+        ) : null}
+
         <Button
           title={
             <View style={styles.payButtonContent}>
@@ -264,6 +290,9 @@ const styles = StyleSheet.create({
   sectionLabel: {
     marginBottom: rvs(10),
     letterSpacing: 0.5,
+  },
+  cardEntry: {
+    marginBottom: rvs(16),
   },
   payButton: {
     marginTop: rvs(4),

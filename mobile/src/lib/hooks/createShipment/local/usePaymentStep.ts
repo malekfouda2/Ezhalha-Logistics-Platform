@@ -47,17 +47,20 @@ export function useLocalPaymentStep() {
     queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
   };
 
-  const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean) => {
+  const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean, chargeId?: string) => {
     if (!checkoutData) return;
     setIsPaying(true);
     try {
       const data = await payShipment({
         shipmentId: checkoutData.shipmentId,
         tapTokenId,
+        chargeId,
         saveCardForFuture,
       });
 
       if (data.transactionUrl) {
+        // Fallback for cases the client-side SDKs can't finish on their own (e.g. a 3DS
+        // challenge) — Tap hands back a hosted URL to complete in a WebView instead.
         setCheckoutWebViewUrl(data.transactionUrl);
         return;
       }

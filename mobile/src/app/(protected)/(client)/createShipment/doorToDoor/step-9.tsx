@@ -1,6 +1,6 @@
 // app/create-shipment/doorToDoor/step-9.tsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
@@ -16,6 +16,7 @@ import { ShipmentStepLayout } from "@/components/sections/createShipment/Shipmen
 import { usePaymentStep } from "@/lib/hooks/createShipment/doorToDoor/usePaymentStep";
 import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
 import { TapCheckoutWebView } from "@/components/ui/TapCheckoutWebView";
+import { TapCheckoutEntry, TapCheckoutEntryHandle } from "@/components/ui/TapCheckoutEntry";
 
 type PaymentMethodId = "saved-card" | "new-card" | "pay-later";
 
@@ -23,6 +24,7 @@ export default function PaymentOptionsScreen() {
   const { t } = useTranslation();
   const quote = useDoorToDoorStore((s) => s.quote);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId>("pay-later");
+  const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
   const {
     checkoutData,
@@ -52,13 +54,15 @@ export default function PaymentOptionsScreen() {
   const vat = quote ? (quote.pricing.totalAmountSar * 0.15).toFixed(2) : undefined;
   const freight = quote ? quote.pricing.totalAmountSar.toFixed(2) : total;
 
-  const handlePay = () => {
+  const handlePay = async () => {
     if (selectedMethod === "pay-later" && canPayLater) {
       handlePayLater();
     } else if (selectedMethod === "saved-card" && defaultCard) {
       handlePayNow(defaultCard.tapCardId);
     } else if (selectedMethod === "new-card") {
-      handlePayNow(undefined, true);
+      const chargeResult = await cardEntryRef.current?.pay();
+      if (!chargeResult) return;
+      handlePayNow(undefined, true, chargeResult.chargeId);
     }
   };
 
@@ -118,6 +122,17 @@ export default function PaymentOptionsScreen() {
           onPress={() => setSelectedMethod("new-card")}
         />
 
+        {selectedMethod === "new-card" ? (
+          <TapCheckoutEntry
+            ref={cardEntryRef}
+            amount={checkoutData?.amount ?? 0}
+            currency={checkoutData?.currency}
+            shipmentId={checkoutData?.shipmentId}
+            saveCard
+            style={styles.cardEntry}
+          />
+        ) : null}
+
         {canPayLater ? (
           <PaymentMethodCard
             title={t("createShipment.express.payment.payLater.title")}
@@ -176,6 +191,10 @@ const styles = StyleSheet.create({
 
   creditAvailableText: {
     color: Colors.textSecondary,
+  },
+
+  cardEntry: {
+    marginBottom: rs(16),
   },
 
   noAccessBox: {

@@ -12,6 +12,7 @@ import {
   payShipment,
   type CreditAccessResponse,
 } from "@/lib/services/createShipment";
+import { getSavedCards, type SavedCard } from "@/lib/services/payments";
 import type { FulfillOrderResult } from "@/lib/services/orders";
 import type { TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
 
@@ -22,6 +23,7 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
 
   const fulfillMutation = useFulfillOrder();
   const [creditAccess, setCreditAccess] = useState<CreditAccessResponse | null>(null);
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [isPaying, setIsPaying] = useState(false);
   const [isPayingLater, setIsPayingLater] = useState(false);
   const [checkoutWebViewUrl, setCheckoutWebViewUrl] = useState<string | null>(null);
@@ -30,6 +32,9 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
   useEffect(() => {
     getCreditAccess()
       .then(setCreditAccess)
+      .catch(() => undefined);
+    getSavedCards()
+      .then((cards) => setSavedCards(cards.filter((c) => c.status === "active")))
       .catch(() => undefined);
   }, []);
 
@@ -52,10 +57,15 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
       text2: error instanceof Error ? error.message : undefined,
     });
 
-  const payNow = async (result: FulfillOrderResult) => {
+  const payNow = async (
+    result: FulfillOrderResult,
+    tapTokenId?: string,
+    saveCardForFuture?: boolean,
+    chargeId?: string,
+  ) => {
     setIsPaying(true);
     try {
-      const data = await payShipment({ shipmentId: result.shipmentId });
+      const data = await payShipment({ shipmentId: result.shipmentId, tapTokenId, chargeId, saveCardForFuture });
       if (data.transactionUrl) {
         setPendingShipmentId(result.shipmentId);
         setCheckoutWebViewUrl(data.transactionUrl);
@@ -88,6 +98,9 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
     carrierCode: string,
     weightKg: number | undefined,
     method: "now" | "later",
+    tapTokenId?: string,
+    saveCardForFuture?: boolean,
+    chargeId?: string,
   ) => {
     if (!orderId) return;
     try {
@@ -95,7 +108,7 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
       if (method === "later") {
         await payLaterNow(result);
       } else {
-        await payNow(result);
+        await payNow(result, tapTokenId, saveCardForFuture, chargeId);
       }
     } catch (error) {
       errorToast(error, t("orderFulfill.toast.fulfillErrorTitle"));
@@ -132,6 +145,7 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
     isFulfilling: fulfillMutation.isPending || isPaying,
     isPayingLater,
     creditAccess,
+    savedCards,
     checkoutWebViewUrl,
     handleFulfill,
     closeCheckoutWebView,

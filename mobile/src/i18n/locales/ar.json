@@ -1641,5 +1641,14 @@
       "payLaterErrorTitle": "فشل الدفع الآجل",
       "paymentPendingTitle": "تم بدء عملية الدفع"
     }
+  },
+  "payments": {
+    "cardEntry": {
+      "errorTitle": "فشل إدخال البطاقة",
+      "errorMessage": "يرجى المحاولة مرة أخرى.",
+      "incompleteMessage": "يرجى إكمال بيانات البطاقة.",
+      "unavailableTitle": "الدفع بالبطاقة غير متاح",
+      "unavailableMessage": "لم يتم تفعيل إدخال البطاقة لهذا الحساب بعد. يرجى المحاولة لاحقًا أو التواصل مع الدعم."
+    }
   }
 }

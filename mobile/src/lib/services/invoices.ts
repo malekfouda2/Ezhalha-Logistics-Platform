@@ -77,6 +77,11 @@ export interface CreateInvoiceChargeResponse {
 export async function payInvoice(payload: {
     invoiceId: string;
     tapTokenId?: string;
+    /**
+     * Backend TODO (not implemented yet): a charge id already created by checkout-react-native
+     * on the client — see the matching note on payShipment() in lib/services/createShipment.ts.
+     */
+    chargeId?: string;
     saveCardForFuture?: boolean;
 }) {
     return apiRequest<CreateInvoiceChargeResponse>("/api/client/payments/create-charge", {
