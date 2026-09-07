@@ -167,7 +167,6 @@ export function usePaymentStep() {
             ? error.message
             : t("toast.createShipment.express.payLater.errorMessage"),
       });
-      console.error("Error in handlePayLater:", error);
     } finally {
       setIsPayingLater(false);
     }
