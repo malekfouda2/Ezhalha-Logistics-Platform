@@ -237,9 +237,13 @@ function OrderFulfillScreenContent() {
                 handleFulfill(selectedCarrier, effectiveWeight, "now", defaultCard.tapCardId);
                 return;
               }
-              const chargeResult = await cardEntryRef.current?.pay();
-              if (!chargeResult) return;
-              handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true, chargeResult.chargeId);
+              const payResult = await cardEntryRef.current?.pay();
+              if (!payResult || payResult.status === "cancelled") return;
+              if (payResult.status === "fallback") {
+                handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true);
+                return;
+              }
+              handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true, payResult.chargeId);
             }}
             loading={isFulfilling}
             disabled={!selectedCarrier || isFulfilling || isPayingLater}

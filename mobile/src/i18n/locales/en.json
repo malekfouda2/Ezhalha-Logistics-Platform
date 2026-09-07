@@ -8,7 +8,14 @@
     "home": "Home",
     "shipments": "Shipments",
     "invoices": "Invoices",
-    "profile": "Profile"
+    "profile": "Profile",
+    "createShipmentMenu": {
+      "title": "What would you like to do?",
+      "createShipment": "Create Shipment",
+      "createShipmentSubtitle": "Start a new shipment request",
+      "quickQuote": "Quick Quote",
+      "quickQuoteSubtitle": "Get an instant rate estimate"
+    }
   },
   "auth": {
     "logo": "ezhalha",
@@ -1640,7 +1647,8 @@
       "errorMessage": "Please try again.",
       "incompleteMessage": "Please complete your card details.",
       "unavailableTitle": "Card payment unavailable",
-      "unavailableMessage": "Card entry isn't set up for this account yet. Please try again later or contact support."
+      "unavailableMessage": "Card entry isn't set up for this account yet. Please try again later or contact support.",
+      "fallbackMessage": "The secure card form is unavailable right now. We will continue with Tap's hosted card checkout."
     }
   }
 }

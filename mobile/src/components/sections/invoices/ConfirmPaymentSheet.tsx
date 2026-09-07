@@ -51,6 +51,17 @@ export function ConfirmPaymentSheet({
   const [checkoutWebViewUrl, setCheckoutWebViewUrl] = useState<string | null>(null);
   const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
+  // The BottomSheet below is itself a <Modal>, and so is TapCheckoutWebView — iOS won't
+  // reliably present a second modal on top of one that's still up (Android tolerates it fine,
+  // which is why this only showed up on iOS). So the sheet's visibility is tracked locally and
+  // hidden while the WebView is open, rather than driven straight off the `visible` prop — we
+  // can't just call the parent's onClose() here since that also nulls out `invoice`, which
+  // would unmount this whole component (WebView included) before it ever opens.
+  const [sheetVisible, setSheetVisible] = useState(visible);
+  useEffect(() => {
+    setSheetVisible(visible);
+  }, [visible]);
+
   const { data: savedCards = [] } = useQuery<SavedCard[]>({
     queryKey: ["/api/client/payments/tap/saved-cards"],
     enabled: visible,
@@ -77,12 +88,16 @@ export function ConfirmPaymentSheet({
       let chargeId: string | undefined;
 
       if (selectedCardId === "new") {
-        const chargeResult = await cardEntryRef.current?.pay();
-        if (!chargeResult) {
+        const payResult = await cardEntryRef.current?.pay();
+        if (!payResult || payResult.status === "cancelled") {
           setIsPaying(false);
           return;
         }
-        chargeId = chargeResult.chargeId;
+        // "fallback" leaves chargeId/tapTokenId both undefined, so payInvoice below returns a
+        // transactionUrl and we continue through the existing hosted-checkout WebView flow.
+        if (payResult.status === "success") {
+          chargeId = payResult.chargeId;
+        }
       }
 
       const result = await payInvoice({
@@ -92,6 +107,7 @@ export function ConfirmPaymentSheet({
       });
 
       if (result.transactionUrl) {
+        setSheetVisible(false);
         setCheckoutWebViewUrl(result.transactionUrl);
         return;
       }
@@ -131,6 +147,7 @@ export function ConfirmPaymentSheet({
     }
 
     if (status === "failed") {
+      setSheetVisible(true);
       Toast.show({
         type: "error",
         text1: t("invoices.confirmPayment.errorTitle"),
@@ -139,6 +156,7 @@ export function ConfirmPaymentSheet({
       return;
     }
 
+    setSheetVisible(true);
     Toast.show({
       type: "info",
       text1: t("invoices.confirmPayment.pendingTitle"),
@@ -150,7 +168,7 @@ export function ConfirmPaymentSheet({
 
   return (
     <>
-      <BottomSheet visible={visible} onClose={onClose}>
+      <BottomSheet visible={sheetVisible} onClose={onClose}>
         <Text size="xl" weight="bold" style={styles.title}>
           {t("invoices.confirmPayment.title")}
         </Text>
@@ -253,7 +271,10 @@ export function ConfirmPaymentSheet({
       <TapCheckoutWebView
         url={checkoutWebViewUrl}
         onResult={handleCheckoutResult}
-        onClose={() => setCheckoutWebViewUrl(null)}
+        onClose={() => {
+          setCheckoutWebViewUrl(null);
+          setSheetVisible(true);
+        }}
       />
     </>
   );

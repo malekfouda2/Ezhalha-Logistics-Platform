@@ -60,9 +60,13 @@ export default function PaymentOptionsScreen() {
     } else if (selectedMethod === "saved-card" && defaultCard) {
       handlePayNow(defaultCard.tapCardId);
     } else if (selectedMethod === "new-card") {
-      const chargeResult = await cardEntryRef.current?.pay();
-      if (!chargeResult) return;
-      handlePayNow(undefined, true, chargeResult.chargeId);
+      const payResult = await cardEntryRef.current?.pay();
+      if (!payResult || payResult.status === "cancelled") return;
+      if (payResult.status === "fallback") {
+        handlePayNow(undefined, true);
+        return;
+      }
+      handlePayNow(undefined, true, payResult.chargeId);
     }
   };
 

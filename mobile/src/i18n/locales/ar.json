@@ -8,7 +8,14 @@
     "home": "الرئيسية",
     "shipments": "الشحنات",
     "invoices": "الفواتير",
-    "profile": "الملف الشخصي"
+    "profile": "الملف الشخصي",
+    "createShipmentMenu": {
+      "title": "ماذا تريد أن تفعل؟",
+      "createShipment": "إنشاء شحنة",
+      "createShipmentSubtitle": "ابدأ طلب شحنة جديد",
+      "quickQuote": "عرض سعر سريع",
+      "quickQuoteSubtitle": "احصل على تقدير سعر فوري"
+    }
   },
   "auth": {
     "logo": "ezhalha",
@@ -1648,7 +1655,8 @@
       "errorMessage": "يرجى المحاولة مرة أخرى.",
       "incompleteMessage": "يرجى إكمال بيانات البطاقة.",
       "unavailableTitle": "الدفع بالبطاقة غير متاح",
-      "unavailableMessage": "لم يتم تفعيل إدخال البطاقة لهذا الحساب بعد. يرجى المحاولة لاحقًا أو التواصل مع الدعم."
+      "unavailableMessage": "لم يتم تفعيل إدخال البطاقة لهذا الحساب بعد. يرجى المحاولة لاحقًا أو التواصل مع الدعم.",
+      "fallbackMessage": "نموذج البطاقة الآمن غير متاح حاليًا. سنتابع باستخدام صفحة الدفع المستضافة من Tap."
     }
   }
 }
