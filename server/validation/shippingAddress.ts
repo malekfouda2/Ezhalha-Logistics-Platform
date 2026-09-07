@@ -1,13 +1,10 @@
 import { z } from "zod";
 import { getIntegrationEnv } from "../services/integration-runtime";
 
-export const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
-  "AE", "QA", "BH", "OM", "HK", "IE", "PA", "BO", "BS", "BZ",
-  "CM", "DJ", "DM", "ER", "FJ", "GD", "GH", "GM", "GN", "GQ",
-  "GY", "KI", "KM", "KP", "LC", "ML", "MR", "MW", "NR", "RW",
-  "SB", "SC", "SL", "SO", "SR", "ST", "SY", "TF", "TG", "TK",
-  "TL", "TO", "TV", "UG", "VU", "YE", "ZW",
-]);
+// Single source of truth in shared/postal-codes.ts — this list used to exist twice, and
+// the two copies drifted by 19 countries.
+import { POSTAL_CODE_EXEMPT_COUNTRIES } from "@shared/postal-codes";
+export { POSTAL_CODE_EXEMPT_COUNTRIES };
 
 export const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
 

@@ -21,6 +21,7 @@ import {
   type PickupResponse,
 } from "./fedex";
 import { logError, logInfo, logWarn } from "../services/logger";
+import { buildIntegrationLogResponse } from "../services/integration-log-payload";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 
@@ -308,7 +309,11 @@ export class AramexAdapter implements CarrierAdapter {
         serviceName: "aramex",
         operation: `POST ${endpoint}`,
         requestPayload: JSON.stringify(maskSensitiveData(requestBody)),
-        responsePayload: JSON.stringify(isProduction() && success ? { logged: false, reason: "production" } : maskSensitiveData(responseBody)),
+        responsePayload: JSON.stringify(buildIntegrationLogResponse({
+          responseBody,
+          success,
+          mask: maskSensitiveData,
+        })),
         statusCode,
         duration,
         success,

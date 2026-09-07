@@ -2,6 +2,14 @@ import crypto from "crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import type { InsertOrder, SalesChannel } from "@shared/schema";
+import { logWarn } from "./logger";
+import {
+  needsRefresh,
+  refreshZidCredentials,
+  zidApiUrl,
+  zidAuthHeaders,
+  type ZidCredentials,
+} from "./zid-oauth";
 
 /**
  * Sales-channel platform adapters. Each adapter knows how to (a) verify an inbound
@@ -14,7 +22,7 @@ import type { InsertOrder, SalesChannel } from "@shared/schema";
  * the same interface once their developer apps are registered.
  */
 
-export type SalesChannelPlatform = "woocommerce" | "shopify" | "salla";
+export type SalesChannelPlatform = "woocommerce" | "shopify" | "salla" | "zid";
 
 export interface NormalizedContext {
   clientAccountId: string;
@@ -26,10 +34,24 @@ export interface FetchOrdersOptions {
   credentials: Record<string, string>;
   /** Only pull orders modified since this instant (null → recent window). */
   since?: Date | null;
+  /**
+   * Called when an adapter renews its own credentials mid-pull so the caller can persist
+   * them. Without this a refreshed OAuth token would be used once and thrown away, and the
+   * channel would keep re-refreshing on every sync until the old token finally expired.
+   */
+  onCredentialsRefreshed?: (credentials: Record<string, string>) => Promise<void>;
 }
 
 export interface SalesChannelAdapter {
   platform: SalesChannelPlatform;
+  /**
+   * Whether a pull needs the merchant's own store URL.
+   *
+   * True for WooCommerce, where we call the store's domain directly. False for Zid, whose
+   * API lives at api.zid.sa and identifies the store from the OAuth token — requiring a URL
+   * there would mean inventing one just to satisfy a check.
+   */
+  requiresStoreUrl?: boolean;
   /** Constant-time HMAC check over the raw request body. Fail-closed. */
   verifySignature(rawBody: Buffer | string, signature: string | undefined, secret: string): boolean;
   /** Map a raw platform order payload to an InsertOrder (throws if unusable). */
@@ -197,6 +219,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 class WooCommerceAdapter implements SalesChannelAdapter {
   platform = "woocommerce" as const;
+  requiresStoreUrl = true;
 
   // WooCommerce signs webhooks as base64( HMAC-SHA256( rawBody, secret ) ) in the
   // `x-wc-webhook-signature` header.
@@ -309,8 +332,178 @@ class WooCommerceAdapter implements SalesChannelAdapter {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Zid
+// ---------------------------------------------------------------------------
+
+class ZidAdapter implements SalesChannelAdapter {
+  platform = "zid" as const;
+  // The store is identified by the OAuth token, not by a URL we call.
+  requiresStoreUrl = false;
+
+  /**
+   * Zid does not sign its webhooks. It authenticates with HTTP Basic using a username and
+   * password we hand it at subscription time, so the "signature" here is the whole
+   * `Authorization: Basic …` header and the "secret" is the `user:pass` pair we generated.
+   *
+   * This is weaker than WooCommerce's HMAC — the credential travels on every request instead
+   * of being proved without disclosure — which is why the ingest path treats a Zid webhook as
+   * a prompt to re-read the order from the API rather than as trusted data.
+   */
+  verifySignature(_rawBody: Buffer | string, signature: string | undefined, secret: string): boolean {
+    if (!signature || !secret) return false;
+    const expected = `Basic ${Buffer.from(secret).toString("base64")}`;
+    return timingSafeEqual(expected, signature.trim());
+  }
+
+  async fetchOrders({ credentials, since, onCredentialsRefreshed }: FetchOrdersOptions): Promise<any[]> {
+    let creds = credentials as unknown as ZidCredentials;
+    if (!creds?.authorization || !creds?.access_token) {
+      throw new Error("Zid channel is not connected — reconnect the store");
+    }
+
+    // Renew before the call rather than reacting to a 401: Zid tokens last a year, so a
+    // reactive refresh would only ever be exercised in production, a year late.
+    if (needsRefresh(creds)) {
+      try {
+        creds = await refreshZidCredentials(creds);
+        await onCredentialsRefreshed?.(creds as unknown as Record<string, string>);
+      } catch (error) {
+        // Keep going with the existing token — it may still be valid, and failing the whole
+        // sync because a pre-emptive refresh failed would be worse than a late refresh.
+        logZidRefreshFailure(error);
+      }
+    }
+
+    const headers = zidAuthHeaders(creds);
+    const perPage = 50;
+    const maxPages = 20; // hard cap: 1000 orders per sync run
+    const collected: any[] = [];
+
+    for (let page = 1; page <= maxPages; page++) {
+      const endpoint = new URL(zidApiUrl("/v1/managers/store/orders"));
+      endpoint.searchParams.set("page", String(page));
+      endpoint.searchParams.set("per_page", String(perPage));
+      // `default` is the only payload type that carries the products; `simple` omits them.
+      endpoint.searchParams.set("payload_type", "default");
+      if (since) {
+        endpoint.searchParams.set("date_attribute", "updated_at");
+        endpoint.searchParams.set("date_from", formatZidDate(since));
+      }
+
+      const { body } = await httpGetJson(endpoint.toString(), headers);
+      // Zid wraps the collection; tolerate the bare array too in case a payload type differs.
+      const batch: any[] = Array.isArray(body?.orders)
+        ? body.orders
+        : Array.isArray(body?.data)
+          ? body.data
+          : Array.isArray(body)
+            ? body
+            : [];
+
+      collected.push(...batch);
+      if (batch.length < perPage) break;
+    }
+
+    return collected;
+  }
+
+  normalizeOrder(payload: any, ctx: NormalizedContext): InsertOrder {
+    const externalOrderId = String(payload?.id ?? "").trim();
+    if (!externalOrderId) {
+      throw new Error("Zid order payload is missing an id");
+    }
+
+    const customer = payload.customer || {};
+    // Zid exposes the destination under a few names depending on payload type. Take the first
+    // that actually carries something rather than assuming one shape.
+    const ship =
+      payload.shipping?.address ||
+      payload.shipping_address ||
+      payload.address ||
+      payload.delivery_address ||
+      {};
+
+    const customerName =
+      [customer.name, customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() ||
+      ship.recipient_name ||
+      "Customer";
+
+    const rawItems: any[] = Array.isArray(payload.products)
+      ? payload.products
+      : Array.isArray(payload.items)
+        ? payload.items
+        : [];
+
+    const items = rawItems.map((item) => ({
+      name: item.name || item.product_name || "Item",
+      quantity: Number(item.quantity ?? 1),
+      price: item.price != null ? Number(item.price) : undefined,
+      sku: item.sku || undefined,
+    }));
+
+    const totalWeight = rawItems.reduce((sum, item) => {
+      const weight = Number(item.weight ?? 0) * Number(item.quantity ?? 1);
+      return sum + (Number.isFinite(weight) ? weight : 0);
+    }, 0);
+    const pieces = rawItems.reduce((sum, item) => sum + Number(item.quantity ?? 1), 0);
+
+    return {
+      clientAccountId: ctx.clientAccountId,
+      salesChannelId: ctx.salesChannelId,
+      externalOrderId,
+      externalOrderNumber: payload.code ? String(payload.code) : externalOrderId,
+      status: mapZidStatus(payload),
+      customer: JSON.stringify({
+        name: customerName,
+        phone: normalizeKsaPhone(customer.mobile || customer.phone || ship.mobile),
+        email: customer.email || "",
+      }),
+      shipTo: JSON.stringify({
+        address: [ship.street, ship.address_line, ship.district, ship.short_address]
+          .filter(Boolean)
+          .join(", "),
+        city: normalizeKsaCity(ship.city || ship.city_name),
+        region: ship.region || ship.province || "",
+        country: ship.country_code || ship.country || "SA",
+        postal: ship.postal_code || ship.zip || "",
+      }),
+      items: JSON.stringify(items),
+      packageWeightKg: totalWeight > 0 ? totalWeight.toFixed(3) : null,
+      packagePieces: pieces > 0 ? pieces : 1,
+      currency: payload.currency_code || payload.currency || "SAR",
+      orderTotal: payload.order_total != null ? String(payload.order_total) : null,
+      syncedAt: new Date(),
+    };
+  }
+}
+
+/** Zid wants `2020-01-01T00:00:00.000+0000`, which is not what toISOString produces. */
+function formatZidDate(date: Date): string {
+  return `${date.toISOString().replace("Z", "")}+0000`;
+}
+
+/** Zid order statuses → our order lifecycle. Anything shippable lands in `new`. */
+function mapZidStatus(payload: any): string {
+  const raw = String(
+    payload?.order_status?.code ?? payload?.order_status?.name ?? payload?.order_status ?? payload?.status ?? "",
+  ).toLowerCase();
+
+  if (raw.includes("cancel")) return "cancelled";
+  if (raw.includes("deliver") && !raw.includes("indeliver")) return "delivered";
+  if (raw.includes("indelivery") || raw.includes("in_delivery")) return "shipped";
+  return "new";
+}
+
+function logZidRefreshFailure(error: unknown): void {
+  logWarn("Zid token refresh failed, continuing with the existing token", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
 const ADAPTERS: Record<string, SalesChannelAdapter> = {
   woocommerce: new WooCommerceAdapter(),
+  zid: new ZidAdapter(),
 };
 
 export function getSalesChannelAdapter(platform: string): SalesChannelAdapter | undefined {
@@ -325,6 +518,9 @@ export function getSignatureHeader(platform: string, headers: Record<string, any
       return headers["x-shopify-hmac-sha256"] as string | undefined;
     case "salla":
       return headers["x-salla-signature"] as string | undefined;
+    case "zid":
+      // Zid authenticates with HTTP Basic rather than signing the body.
+      return headers["authorization"] as string | undefined;
     default:
       return undefined;
   }

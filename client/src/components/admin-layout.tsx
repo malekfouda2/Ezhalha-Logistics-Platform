@@ -51,6 +51,8 @@ interface OperationsNavSummary {
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
+  returnedCount: number;
+  dangerousGoodsCount: number;
 }
 
 const iconByHref = {
@@ -123,6 +125,8 @@ export function AdminLayout({ children }: AdminLayoutProps) {
       "/admin/operations?view=attention": operationsSummary?.attentionCount ?? 0,
       "/admin/operations?view=special": operationsSummary?.specialHandlingCount ?? 0,
       "/admin/operations?view=delivered": operationsSummary?.deliveredCount ?? 0,
+      "/admin/operations?view=returned": operationsSummary?.returnedCount ?? 0,
+      "/admin/operations?view=dangerous_goods": operationsSummary?.dangerousGoodsCount ?? 0,
     }),
     [operationsSummary],
   );

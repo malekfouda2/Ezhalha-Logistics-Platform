@@ -3,12 +3,21 @@ import crypto from "crypto";
 import { calculateChargeableWeight, convertWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { countryTimeZone } from "@shared/country-timezones";
 import {
+  isDryIceDeclaration,
+  resolveDhlDangerousGoodsCodes,
+  type DangerousGoodsDeclaration,
+  type DgContentKindValue,
+} from "@shared/dangerous-goods";
+import {
   CarrierError,
+  assertDangerousGoodsAccountApproved,
   extractUtcOffset,
+  rejectSyntheticDangerousGoodsRate,
   parseMoney,
   type AddressValidationRequest,
   type AddressValidationResponse,
   type CarrierAdapter,
+  type CarrierCapabilityProfile,
   type CreateShipmentRequest,
   type CreateShipmentResponse,
   type PostalCodeValidationRequest,
@@ -24,9 +33,10 @@ import {
   type PickupRequest,
   type PickupResponse,
 } from "./fedex";
-import { logError, logInfo } from "../services/logger";
+import { logError, logInfo, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
+import { buildIntegrationLogResponse } from "../services/integration-log-payload";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -238,17 +248,58 @@ function buildPartyDetails(address: ShippingAddress, compact: boolean = false) {
 // rate returns; the volumetric weight it implies is negligible against any real actual weight.
 const DHL_NOMINAL_DIMENSIONS = { length: 10, width: 10, height: 10 };
 
-function buildPackages(request: RateRequest | CreateShipmentRequest) {
-  return request.packages.map((pkg) => {
+function buildPackages(
+  request: RateRequest | CreateShipmentRequest,
+  dangerousGoods?: { contentId: string; declaration: DangerousGoodsDeclaration } | null,
+) {
+  return request.packages.map((pkg, index) => {
     const d = pkg.dimensions;
     const hasDims = d && Number(d.length) > 0 && Number(d.width) > 0 && Number(d.height) > 0;
+    const declaredPackage = dangerousGoods?.declaration.packages.find(
+      (entry) => entry.packageIndex === index,
+    );
     return {
       weight: pkg.weight,
       dimensions: hasDims
         ? { length: d!.length, width: d!.width, height: d!.height }
         : { ...DHL_NOMINAL_DIMENSIONS },
+      // DHL declares dangerous goods per package, keyed only by the content id its contract
+      // approved. The commodity detail rides the Shipper's Declaration, not the API call.
+      ...(declaredPackage && dangerousGoods
+        ? {
+            dangerousGoods: [{
+              contentId: dangerousGoods.contentId,
+              ...(isDryIceDeclaration(dangerousGoods.declaration) && dangerousGoods.declaration.dryIceWeightKg
+                ? { dryIceTotalNetWeight: dangerousGoods.declaration.dryIceWeightKg }
+                : {}),
+            }],
+          }
+        : {}),
     };
   });
+}
+
+/**
+ * Content ids DHL assigned to this specific account, stored as a JSON map of content kind to
+ * id on the integration account. DHL validates against the contract rather than the
+ * published table, and for fully regulated goods the published table has no id at all.
+ */
+function configuredDhlContentIds(): Partial<Record<DgContentKindValue, string>> | null {
+  const raw = getIntegrationEnv("DHL_DG_CONTENT_IDS");
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    logWarn("DHL_DG_CONTENT_IDS is not valid JSON; falling back to the published code table");
+    return null;
+  }
+}
+
+function resolveDhlDgForRequest(request: RateRequest | CreateShipmentRequest) {
+  if (!request.dangerousGoods) return null;
+  const codes = resolveDhlDangerousGoodsCodes(request.dangerousGoods, configuredDhlContentIds());
+  return { ...codes, declaration: request.dangerousGoods };
 }
 
 function buildRateChargeableWeightSummary(request: RateRequest | CreateShipmentRequest) {
@@ -760,6 +811,13 @@ export function extractTrackingResponse(trackingNumber: string, data: any): Trac
 }
 
 export class DhlAdapter implements CarrierAdapter {
+  // DHL expresses DG as a content id per package plus a value added service code. Only the
+  // IATA set is reachable through MyDHL API for our lanes.
+  readonly capabilities: CarrierCapabilityProfile = {
+    type: "international",
+    dangerousGoods: { supported: true, regulations: ["IATA"] },
+  };
+
   name = "DHL";
   carrierCode = "DHL";
 
@@ -804,7 +862,14 @@ export class DhlAdapter implements CarrierAdapter {
         serviceName: "dhl",
         operation: `${method} ${endpoint}`,
         requestPayload: JSON.stringify(requestBody ?? {}),
-        responsePayload: JSON.stringify(isProduction() && !success ? { error: responseBody?.error } : responseBody ?? {}),
+        // Failures keep the carrier's message. This previously read `responseBody?.error`,
+        // but DHL returns `{detail, title, additionalDetails}` — so it stored `{}` and the
+        // reason for every production failure was thrown away.
+        responsePayload: JSON.stringify(buildIntegrationLogResponse({
+          responseBody,
+          success,
+          mask: (data) => data,
+        })),
         statusCode,
         duration,
         success,
@@ -978,14 +1043,21 @@ export class DhlAdapter implements CarrierAdapter {
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
+    assertDangerousGoodsAccountApproved(request, "DHL");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "DHL is not configured and mock mode is disabled in production");
       }
 
+      rejectSyntheticDangerousGoodsRate(request, "DHL");
       logInfo("Using mock DHL rates (DHL not configured)");
       return this.getMockRates(request);
     }
+
+    // Resolved BEFORE the try: an unresolvable declaration must abort the quote, and the
+    // catch below falls back to mock rates whenever mocking is allowed. Resolving inside the
+    // try would turn "DHL cannot carry these goods" into a cheerful non-DG price.
+    const rateDangerousGoods = resolveDhlDgForRequest(request);
 
     try {
       const declaredValue =
@@ -1011,6 +1083,13 @@ export class DhlAdapter implements CarrierAdapter {
         packages: buildPackages(request),
       };
 
+      // Declaring the DG service on the RATE call is what makes DHL include its dangerous
+      // goods surcharge in the quoted price. Without it the client is quoted, and charged,
+      // a price that does not cover the shipment.
+      if (rateDangerousGoods) {
+        payload.valueAddedServices = [{ serviceCode: rateDangerousGoods.serviceCode }];
+      }
+
       if (request.currency) {
         payload.monetaryAmount = [
           {
@@ -1034,6 +1113,7 @@ export class DhlAdapter implements CarrierAdapter {
           ? error
           : new CarrierError("RATE_FAILED", (error as Error).message || "DHL rate request failed");
       }
+      rejectSyntheticDangerousGoodsRate(request, "DHL");
       return this.getMockRates(request);
     }
   }
@@ -1087,6 +1167,7 @@ export class DhlAdapter implements CarrierAdapter {
   }
 
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
+    assertDangerousGoodsAccountApproved(request, "DHL");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "DHL is not configured and mock mode is disabled in production");
@@ -1113,6 +1194,7 @@ export class DhlAdapter implements CarrierAdapter {
         (Number.isFinite(requestedDeclaredValue) && requestedDeclaredValue > 0
           ? Math.min(requestedDeclaredValue, MAX_DECLARED_VALUE)
           : 1);
+      const bookingDangerousGoods = resolveDhlDgForRequest(request);
       const payload: Record<string, any> = {
         productCode: request.serviceType || defaultProductCode(request),
         plannedShippingDateAndTime: formatDhlShipmentDateTime(
@@ -1138,7 +1220,7 @@ export class DhlAdapter implements CarrierAdapter {
           incoterm: request.incoterm || "DAP",
           isCustomsDeclarable: isInternational,
           description: buildCommodityDescription(request, sanitizedItems),
-          packages: buildPackages(request),
+          packages: buildPackages(request, bookingDangerousGoods),
           declaredValue: normalizeDeclaredValue(declaredValue),
           declaredValueCurrency: request.currency || "SAR",
         },
@@ -1149,6 +1231,10 @@ export class DhlAdapter implements CarrierAdapter {
         if (exportDeclaration) {
           payload.content.exportDeclaration = exportDeclaration;
         }
+      }
+
+      if (bookingDangerousGoods) {
+        payload.valueAddedServices = [{ serviceCode: bookingDangerousGoods.serviceCode }];
       }
 
       const { data } = await this.makeRequest<any>("/shipments", "POST", payload);

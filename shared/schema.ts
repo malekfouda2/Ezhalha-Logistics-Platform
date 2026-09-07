@@ -9,6 +9,7 @@ import { PricingAccountType } from "./pricing-account-types";
 // can import enum VALUES without pulling drizzle into its bundle. Re-exported here so
 // every existing `@shared/schema` import keeps working unchanged.
 export * from "./domain";
+export * from "./dangerous-goods";
 
 // `export *` re-exports without binding the names locally, and the table definitions below
 // use some of them for column defaults.
@@ -21,6 +22,14 @@ import {
   OperationSpecialHandlingStatus,
   OperationTaskStatus,
 } from "./domain";
+import {
+  DangerousGoodsDocumentType,
+  DgAccessibility,
+  DgContentKind,
+  DgPackingGroup,
+  DgQuantityType,
+  DgRegulation,
+} from "./dangerous-goods";
 
 // Users table
 export const users = pgTable("users", {
@@ -105,6 +114,10 @@ export const clientAccounts = pgTable("client_accounts", {
   // Bundled "Sales Channels" feature (Orders, Sales Channels, Assignment Rules). Off by default;
   // enabled by an admin — either directly or by approving a client's access request.
   salesFeaturesEnabled: boolean("sales_features_enabled").notNull().default(false),
+  // Dangerous goods access. Off by default and only turned on by an admin, either directly
+  // or by approving a client's access request, after the DG training certificate and safety
+  // data sheets have been checked. Mirrors the sales-features flag above.
+  dangerousGoodsEnabled: boolean("dangerous_goods_enabled").notNull().default(false),
   // Currency the client is billed/charged in. SAR is the accounting source of truth;
   // non-SAR (e.g. USD) is FX-converted at checkout with the rate snapshotted per shipment.
   preferredCurrency: text("preferred_currency").notNull().default("SAR"),
@@ -440,6 +453,17 @@ export const shipments = pgTable("shipments", {
   // stale-status escalation; refreshed only on real status transitions).
   statusChangedAt: timestamp("status_changed_at"),
   carrierAttempts: integer("carrier_attempts").default(0),
+  /**
+   * Set the instant one request wins the right to book this shipment with the carrier, and
+   * cleared if that attempt fails.
+   *
+   * The Tap webhook and the client's browser redirect both call the payment finaliser, and on
+   * five occasions they arrived within the same second. The "already booked?" guard reads
+   * `carrierTrackingNumber`, so both requests read null, both passed, and the carrier issued
+   * two waybills for one shipment. A claim written by a conditional UPDATE is atomic across
+   * all four pm2 workers in a way that a read-then-check never is.
+   */
+  carrierBookingClaimedAt: timestamp("carrier_booking_claimed_at"),
   carrierLabelBase64: text("carrier_label_base64"),
   carrierLabelMimeType: text("carrier_label_mime_type").default("application/pdf"),
   carrierLabelFormat: text("carrier_label_format"),
@@ -451,6 +475,46 @@ export const shipments = pgTable("shipments", {
   paymentStatus: text("payment_status").default("pending"),
   itemsData: text("items_data"),
   tradeDocumentsData: text("trade_documents_data"),
+  // --- Dangerous goods ---
+  // `hasDangerousGoods` is the queryable flag; the declaration itself is JSON, following the
+  // same convention as packagesData/itemsData. `dangerousGoodsStatus` is what actually holds
+  // a paid DG shipment back from the carrier until an operator has read the declaration —
+  // Ezhalha signs the Shipper's Declaration, so that review is not optional.
+  hasDangerousGoods: boolean("has_dangerous_goods").notNull().default(false),
+  dangerousGoodsStatus: text("dangerous_goods_status"),
+  dangerousGoodsRegulation: text("dangerous_goods_regulation"),
+  dangerousGoodsData: text("dangerous_goods_data"),
+  dangerousGoodsDocumentsData: text("dangerous_goods_documents_data"),
+  // Carrier codes resolved at quote time, snapshotted so ops can see exactly what was sent.
+  dangerousGoodsCarrierCodes: text("dangerous_goods_carrier_codes"),
+  dangerousGoodsReviewedByUserId: varchar("dangerous_goods_reviewed_by_user_id"),
+  dangerousGoodsReviewedAt: timestamp("dangerous_goods_reviewed_at"),
+  dangerousGoodsRejectionReason: text("dangerous_goods_rejection_reason"),
+  // --- Dangerous goods, manual ops-quoted flow (fulfillmentType "dg_manual") ---
+  // A DG shipment is not priced by a carrier API. Carriage is arranged with DHL or FedEx by
+  // email, so the client submits an unpriced declaration and operations comes back with what
+  // the carrier charged. `dgCarrierCostSar` is that figure, kept apart from `baseRate` so the
+  // operator's entry survives any later re-pricing.
+  dgCarrierCostSar: decimal("dg_carrier_cost_sar", { precision: 10, scale: 2 }),
+  dgHandoverAt: timestamp("dg_handover_at"),
+  dgQuotedAt: timestamp("dg_quoted_at"),
+  // A carrier holds a DG price for a period. On expiry the shipment is flagged for an
+  // operator; it is never auto-cancelled, because the booking to unwind lives in the
+  // carrier's system rather than this one.
+  dgQuoteExpiresAt: timestamp("dg_quote_expires_at"),
+  dgQuoteNote: text("dg_quote_note"),
+  dgQuoteExpiryFlaggedAt: timestamp("dg_quote_expiry_flagged_at"),
+  // The client re-confirms the declaration before paying. Operations may have corrected the
+  // addresses, weights or commodities after submission, so what the client signed at
+  // submission is not necessarily what is about to fly.
+  dgClientConfirmedAt: timestamp("dg_client_confirmed_at"),
+  // Declining is recorded rather than inferred from "cancelled", so an operator can tell a
+  // client who said no from a shipment cancelled for an operational reason.
+  dgDeclinedAt: timestamp("dg_declined_at"),
+  dgDeclineReason: text("dg_decline_reason"),
+  // Preferred collection date given at submission. Nothing is booked then — there is nothing
+  // to collect until the shipment is paid for and the AWB exists.
+  dgPreferredPickupDate: text("dg_preferred_pickup_date"),
   // Operations: free-form plan written in the planning stage (editable, reviewable).
   operationPlanNotes: text("operation_plan_notes"),
   // Operations: last-mile delivery carrier name + contact phone.
@@ -1329,6 +1393,33 @@ export const insertSalesFeatureAccessRequestSchema = createInsertSchema(salesFea
 export type InsertSalesFeatureAccessRequest = z.infer<typeof insertSalesFeatureAccessRequestSchema>;
 export type SalesFeatureAccessRequest = typeof salesFeatureAccessRequests.$inferSelect;
 
+// Client requests to be approved for dangerous goods. Mirrors the sales-feature and
+// credit-access request flows, with document paths for the evidence an admin has to see
+// before approving: the shipper's DG training certificate and the relevant safety data
+// sheets.
+export const dangerousGoodsAccessRequests = pgTable("dangerous_goods_access_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull(),
+  requestedByUserId: varchar("requested_by_user_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  reason: text("reason"),
+  documentPaths: text("document_paths").array(),
+  adminNotes: text("admin_notes"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertDangerousGoodsAccessRequestSchema = createInsertSchema(dangerousGoodsAccessRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDangerousGoodsAccessRequest = z.infer<typeof insertDangerousGoodsAccessRequestSchema>;
+export type DangerousGoodsAccessRequest = typeof dangerousGoodsAccessRequests.$inferSelect;
+
 // Credit Invoices table
 export const creditInvoices = pgTable("credit_invoices", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2040,6 +2131,170 @@ export const shipmentTradeDocumentSchema = z.object({
 });
 
 export type ShipmentTradeDocument = z.infer<typeof shipmentTradeDocumentSchema>;
+
+// --- Dangerous goods validation -------------------------------------------
+//
+// Domain types, the DHL code table and the carrier resolvers live in
+// `shared/dangerous-goods.ts`, which is dependency-free so the mobile bundle can import it.
+// Only the request-shape validation lives here, beside every other Zod validator.
+
+export const dangerousGoodsDocumentSchema = z.object({
+  fileName: z.string().min(1),
+  objectPath: z.string().min(1),
+  contentType: z.string().min(1),
+  size: z.number().int().positive().max(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES),
+  documentType: z.nativeEnum(DangerousGoodsDocumentType),
+  uploadedAt: z.string().optional(),
+});
+
+export type DangerousGoodsDocument = z.infer<typeof dangerousGoodsDocumentSchema>;
+
+const dgQuantitySchema = z.object({
+  amount: z.number().positive(),
+  units: z.string().min(1).max(8),
+  quantityType: z.nativeEnum(DgQuantityType),
+});
+
+const dangerousGoodsCommoditySchema = z.object({
+  // "UN1234" or "ID8000" — stored with the prefix so it prints exactly as declared.
+  unNumber: z.string().regex(/^(UN|ID)\d{4}$/i, "UN number must look like UN1234 or ID8000"),
+  properShippingName: z.string().min(1).max(200),
+  technicalName: z.string().max(200).optional(),
+  // Class or division: "3", "4.1", "9".
+  hazardClass: z.string().regex(/^[1-9](\.[1-6])?$/, "Hazard class must be 1-9, optionally with a division"),
+  subsidiaryRisks: z.array(z.string().regex(/^[1-9](\.[1-6])?$/)).max(4).optional(),
+  packingGroup: z.nativeEnum(DgPackingGroup),
+  packingInstruction: z.string().max(16).optional(),
+  quantity: dgQuantitySchema,
+  innerReceptacles: z.array(z.object({ quantity: dgQuantitySchema })).max(20).optional(),
+  cargoAircraftOnly: z.boolean().optional(),
+}).superRefine((commodity, ctx) => {
+  // A generic ("not otherwise specified") entry is not a legal declaration without the
+  // actual substance named alongside it, and the carrier rejects the shipment at acceptance.
+  if (/n\.o\.s\./i.test(commodity.properShippingName) && !commodity.technicalName?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["technicalName"],
+      message: "A technical name is required for an n.o.s. proper shipping name",
+    });
+  }
+});
+
+const dangerousGoodsPackageSchema = z.object({
+  packageIndex: z.number().int().nonnegative(),
+  containerType: z.string().max(80).optional(),
+  numberOfContainers: z.number().int().positive().max(999).optional(),
+  packingOption: z.literal("ALL_PACKED_IN_ONE").optional(),
+  commodities: z.array(dangerousGoodsCommoditySchema).min(1).max(20),
+});
+
+export const dangerousGoodsDeclarationSchema = z.object({
+  regulation: z.nativeEnum(DgRegulation),
+  // Exactly one content kind per declaration: DHL accepts a single content id per shipment,
+  // so a mixed declaration is unbookable and the client has to split it into two shipments.
+  contentKind: z.nativeEnum(DgContentKind),
+  accessibility: z.nativeEnum(DgAccessibility),
+  offeror: z.string().min(1).max(120),
+  emergencyContact: z.object({
+    name: z.string().min(1).max(120),
+    phone: z.string().min(5).max(32),
+    contractNumber: z.string().max(64).optional(),
+  }),
+  signatory: z.object({
+    name: z.string().min(1).max(120),
+    title: z.string().max(120).optional(),
+    place: z.string().min(1).max(120),
+  }),
+  packages: z.array(dangerousGoodsPackageSchema).min(1).max(50),
+  dryIceWeightKg: z.number().positive().optional(),
+  termsAcceptedAt: z.string().optional(),
+  dhlContentIdOverride: z.string().max(16).optional(),
+}).superRefine((declaration, ctx) => {
+  const seen = new Set<number>();
+  for (const pkg of declaration.packages) {
+    if (seen.has(pkg.packageIndex)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["packages"],
+        message: `Package ${pkg.packageIndex + 1} is declared more than once`,
+      });
+    }
+    seen.add(pkg.packageIndex);
+  }
+
+  if (declaration.contentKind === DgContentKind.DRY_ICE_UN1845 && !declaration.dryIceWeightKg) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["dryIceWeightKg"],
+      message: "Net dry ice weight is required for UN1845",
+    });
+  }
+});
+
+export type DangerousGoodsDeclarationInput = z.infer<typeof dangerousGoodsDeclarationSchema>;
+
+// --- The draft a client actually submits ---------------------------------
+//
+// The client chooses a content kind and uploads a safety data sheet; operations completes the
+// rest. Everything below is therefore optional except the two things the client genuinely
+// knows. Validation is not skipped, only moved: a field left blank here is reported by
+// `dangerousGoodsMissingFields` and blocks the carrier handover, which is the point at which
+// an incomplete declaration would actually cause harm.
+//
+// Where a value IS supplied it is validated exactly as strictly as on the full schema — a
+// malformed UN number is a mistake whether it was typed by a client or read off a document.
+
+const dangerousGoodsDraftQuantitySchema = z.object({
+  amount: z.number().positive().optional(),
+  units: z.string().min(1).max(8).optional(),
+  quantityType: z.nativeEnum(DgQuantityType).optional(),
+});
+
+const dangerousGoodsDraftCommoditySchema = z.object({
+  unNumber: z.string().regex(/^(UN|ID)\d{4}$/i, "UN number must look like UN1234 or ID8000").optional().or(z.literal("")),
+  properShippingName: z.string().max(200).optional(),
+  technicalName: z.string().max(200).optional(),
+  hazardClass: z.string().regex(/^[1-9](\.[1-6])?$/, "Hazard class must be 1-9, optionally with a division").optional().or(z.literal("")),
+  subsidiaryRisks: z.array(z.string().regex(/^[1-9](\.[1-6])?$/)).max(4).optional(),
+  packingGroup: z.nativeEnum(DgPackingGroup).optional(),
+  packingInstruction: z.string().max(16).optional(),
+  quantity: dangerousGoodsDraftQuantitySchema.optional(),
+  innerReceptacles: z.array(z.object({ quantity: dangerousGoodsDraftQuantitySchema })).max(20).optional(),
+  cargoAircraftOnly: z.boolean().optional(),
+});
+
+const dangerousGoodsDraftPackageSchema = z.object({
+  packageIndex: z.number().int().nonnegative(),
+  containerType: z.string().max(80).optional(),
+  numberOfContainers: z.number().int().positive().max(999).optional(),
+  packingOption: z.literal("ALL_PACKED_IN_ONE").optional(),
+  commodities: z.array(dangerousGoodsDraftCommoditySchema).min(1).max(20),
+});
+
+export const dangerousGoodsDraftDeclarationSchema = z.object({
+  regulation: z.nativeEnum(DgRegulation),
+  // The one thing the client must choose: it decides which carrier service and content id the
+  // shipment can ever be booked under, so an operator cannot infer it after the fact.
+  contentKind: z.nativeEnum(DgContentKind),
+  accessibility: z.nativeEnum(DgAccessibility).optional(),
+  offeror: z.string().max(120).optional(),
+  emergencyContact: z.object({
+    name: z.string().max(120).optional(),
+    phone: z.string().max(32).optional(),
+    contractNumber: z.string().max(64).optional(),
+  }).optional(),
+  signatory: z.object({
+    name: z.string().max(120).optional(),
+    title: z.string().max(120).optional(),
+    place: z.string().max(120).optional(),
+  }).optional(),
+  packages: z.array(dangerousGoodsDraftPackageSchema).min(1).max(50),
+  dryIceWeightKg: z.number().positive().optional(),
+  termsAcceptedAt: z.string().optional(),
+  dhlContentIdOverride: z.string().max(16).optional(),
+});
+
+export type DangerousGoodsDraftDeclarationInput = z.infer<typeof dangerousGoodsDraftDeclarationSchema>;
 
 // Shipment item interface (stored as JSON in itemsData)
 export interface ShipmentItem {

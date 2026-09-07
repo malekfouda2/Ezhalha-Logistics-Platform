@@ -7,6 +7,54 @@ vi.mock("../server/storage", () => ({
 }));
 
 import { FedExAdapter } from "../server/integrations/fedex";
+import {
+  DgAccessibility,
+  DgContentKind,
+  DgPackingGroup,
+  DgQuantityType,
+  DgRegulation,
+  type DangerousGoodsDeclaration,
+} from "../shared/dangerous-goods";
+
+const dgShipper = {
+  name: "Origin Sender", streetLine1: "100 Export Way", city: "Jeddah",
+  postalCode: "23442", countryCode: "SA", phone: "5551112222",
+};
+const dgRecipient = {
+  name: "Recipient", streetLine1: "200 Road", city: "Dubai",
+  postalCode: "00000", countryCode: "AE", phone: "5553334444",
+};
+const dgPackages = [
+  { weight: 2, weightUnit: "KG" as const, dimensions: { length: 20, width: 15, height: 10, unit: "CM" as const }, packageType: "YOUR_PACKAGING" },
+  { weight: 3, weightUnit: "KG" as const, dimensions: { length: 20, width: 15, height: 10, unit: "CM" as const }, packageType: "YOUR_PACKAGING" },
+];
+
+function dgDeclaration(
+  overrides: Partial<DangerousGoodsDeclaration> = {},
+): DangerousGoodsDeclaration {
+  return {
+    regulation: DgRegulation.IATA,
+    contentKind: DgContentKind.FULLY_REGULATED,
+    accessibility: DgAccessibility.ACCESSIBLE,
+    offeror: "Ezhalha Logistics",
+    emergencyContact: { name: "Ops desk", phone: "+966500000000" },
+    signatory: { name: "Signatory", place: "Jeddah" },
+    packages: [{
+      packageIndex: 0,
+      containerType: "Fibreboard box",
+      numberOfContainers: 2,
+      commodities: [{
+        unNumber: "UN1263",
+        properShippingName: "Paint",
+        hazardClass: "3",
+        packingGroup: DgPackingGroup.II,
+        packingInstruction: "353",
+        quantity: { amount: 5, units: "L", quantityType: DgQuantityType.NET },
+      }],
+    }],
+    ...overrides,
+  };
+}
 
 describe("FedExAdapter", () => {
   beforeEach(() => {
@@ -60,6 +108,9 @@ describe("FedExAdapter", () => {
     process.env.FEDEX_CLIENT_SECRET = "test-client-secret";
     process.env.FEDEX_ACCOUNT_NUMBER = "123456789";
     process.env.FEDEX_BASE_URL = "https://apis-sandbox.fedex.com";
+    // These tests assert the DG payload, so the account has to be past the approval gate.
+    // The gate itself is covered in tests/dangerous-goods-carrier-guard.test.ts.
+    process.env.FEDEX_DG_ENABLED = "true";
   });
 
   afterEach(() => {
@@ -68,6 +119,7 @@ describe("FedExAdapter", () => {
     delete process.env.FEDEX_CLIENT_SECRET;
     delete process.env.FEDEX_ACCOUNT_NUMBER;
     delete process.env.FEDEX_BASE_URL;
+    delete process.env.FEDEX_DG_ENABLED;
   });
 
   it("maps US full state names to carrier state codes when creating shipments", async () => {
@@ -598,5 +650,121 @@ describe("FedExAdapter", () => {
     await expect(adapter.requestPickup(request)).rejects.toThrow("PICKUP_FAILED");
     // The raw placeholder must not reach an operator.
     await expect(adapter.requestPickup(request)).rejects.not.toThrow("{FAILURE_CAUSE}");
+  });
+  it("declares dangerous goods on the package it was declared for, and only that package", async () => {
+    const adapter = new FedExAdapter();
+
+    await adapter.createShipment({
+      shipper: dgShipper,
+      recipient: dgRecipient,
+      packages: dgPackages,
+      serviceType: "FEDEX_INTERNATIONAL_PRIORITY",
+      currency: "SAR",
+      dangerousGoods: dgDeclaration(),
+    });
+
+    const shipCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/ship/v1/shipments"));
+    const body = JSON.parse(shipCall![1]!.body as string);
+    const lineItems = body.requestedShipment.requestedPackageLineItems;
+
+    expect(body.requestedShipment.shipmentSpecialServices.specialServiceTypes).toContain("DANGEROUS_GOODS");
+    expect(lineItems[0].packageSpecialServices.specialServiceTypes).toEqual(["DANGEROUS_GOODS"]);
+    expect(lineItems[1].packageSpecialServices).toBeUndefined();
+
+    const detail = lineItems[0].packageSpecialServices.dangerousGoodsDetail;
+    expect(detail.regulation).toBe("IATA");
+    expect(detail.accessibility).toBe("ACCESSIBLE");
+    expect(detail.emergencyContactNumber).toBe("+966500000000");
+    expect(detail.offeror).toBe("Ezhalha Logistics");
+    expect(detail.containers[0].numberOfContainers).toBe(2);
+    expect(detail.containers[0].hazardousCommodities[0].description).toMatchObject({
+      id: "UN1263",
+      properShippingName: "Paint",
+      hazardClass: "3",
+      packingGroup: "II",
+    });
+  });
+
+  it("keeps electronic trade documents when dangerous goods are also declared", async () => {
+    const adapter = new FedExAdapter();
+
+    await adapter.createShipment({
+      shipper: dgShipper,
+      recipient: dgRecipient,
+      packages: dgPackages,
+      serviceType: "FEDEX_INTERNATIONAL_PRIORITY",
+      currency: "SAR",
+      dangerousGoods: dgDeclaration(),
+      tradeDocuments: [{ documentType: "COMMERCIAL_INVOICE", uploadedDocumentId: "doc-1" }],
+    });
+
+    const shipCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/ship/v1/shipments"));
+    const special = JSON.parse(shipCall![1]!.body as string).requestedShipment.shipmentSpecialServices;
+
+    // Special services accumulate: this block used to be assigned wholesale for ETD, so
+    // adding dangerous goods would have silently dropped the trade documents.
+    expect(special.specialServiceTypes).toEqual(
+      expect.arrayContaining(["ELECTRONIC_TRADE_DOCUMENTS", "DANGEROUS_GOODS"]),
+    );
+    expect(special.etdDetail.attachedDocuments).toEqual([
+      { documentType: "COMMERCIAL_INVOICE", documentId: "doc-1" },
+    ]);
+  });
+
+  it("sends dry ice as a weight, not as a commodity declaration", async () => {
+    const adapter = new FedExAdapter();
+
+    await adapter.createShipment({
+      shipper: dgShipper,
+      recipient: dgRecipient,
+      packages: dgPackages,
+      serviceType: "FEDEX_INTERNATIONAL_PRIORITY",
+      currency: "SAR",
+      dangerousGoods: dgDeclaration({
+        contentKind: DgContentKind.DRY_ICE_UN1845,
+        dryIceWeightKg: 4.5,
+      }),
+    });
+
+    const shipCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/ship/v1/shipments"));
+    const lineItems = JSON.parse(shipCall![1]!.body as string).requestedShipment.requestedPackageLineItems;
+
+    expect(lineItems[0].packageSpecialServices).toEqual({
+      specialServiceTypes: ["DRY_ICE"],
+      dryIceWeight: { units: "KG", value: 4.5 },
+    });
+  });
+
+  it("leaves a non-dangerous shipment's special services untouched", async () => {
+    const adapter = new FedExAdapter();
+
+    await adapter.createShipment({
+      shipper: dgShipper,
+      recipient: dgRecipient,
+      packages: dgPackages,
+      serviceType: "FEDEX_INTERNATIONAL_PRIORITY",
+      currency: "SAR",
+    });
+
+    const shipCall = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/ship/v1/shipments"));
+    const requested = JSON.parse(shipCall![1]!.body as string).requestedShipment;
+
+    expect(requested.shipmentSpecialServices).toBeUndefined();
+    expect(requested.requestedPackageLineItems[0].packageSpecialServices).toBeUndefined();
+  });
+
+  it("refuses to invent a dangerous goods rate when the carrier cannot price it", async () => {
+    delete process.env.FEDEX_CLIENT_ID;
+    delete process.env.FEDEX_CLIENT_SECRET;
+
+    // A mock or sandbox-calculated rate cannot contain the carrier's dangerous goods
+    // surcharge, so quoting one would undercharge the client for the shipment.
+    await expect(new FedExAdapter().getRates({
+      shipper: dgShipper,
+      recipient: dgRecipient,
+      packages: dgPackages,
+      currency: "SAR",
+      dangerousGoods: dgDeclaration(),
+    })).rejects.toThrow(/dangerous goods quote must come from the carrier/i);
   });
 });

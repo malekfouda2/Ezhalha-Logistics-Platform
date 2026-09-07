@@ -4,13 +4,13 @@ import { storage } from "../storage";
 import { recordCarrierTrackingEvents } from "./carrier-tracking-events";
 import { withBoundIntegrationAccount } from "./integration-runtime";
 import { logError, logInfo } from "./logger";
+import { reportCarrierFailure } from "./carrier-failure-reporting";
 import {
-  createAttentionFlag,
   detectOperationAttentionFlags,
   getOperationShipmentKind,
   recordShipmentStatusChange,
 } from "./operations";
-import { OperationShipmentKind, type Shipment } from "@shared/schema";
+import { OperationShipmentKind, type OperationShipmentKindValue, type Shipment } from "@shared/schema";
 
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -185,8 +185,18 @@ export async function applyCarrierTrackingToShipment(
   return updated || shipment;
 }
 
-function shouldRefreshShipment(shipment: Shipment): boolean {
-  if (getOperationShipmentKind(shipment) !== OperationShipmentKind.EXPRESS) return false;
+// Kinds whose shipments travel on a real DHL/FedEx air waybill, and therefore have carrier
+// scans worth polling for. Dangerous goods belongs here even though its booking was arranged
+// by email: the AWB is on Ezhalha's own carrier account, so the tracking API answers for it
+// exactly as it does for express. Leaving it out would freeze a live DG shipment at "booked".
+const TRACKABLE_SHIPMENT_KINDS = new Set<OperationShipmentKindValue>([
+  OperationShipmentKind.EXPRESS,
+  OperationShipmentKind.DANGEROUS_GOODS,
+]);
+
+export function shouldRefreshShipment(shipment: Shipment): boolean {
+  const kind = getOperationShipmentKind(shipment);
+  if (!kind || !TRACKABLE_SHIPMENT_KINDS.has(kind)) return false;
   // A carrier tracking number means the shipment is booked with the carrier — track it regardless
   // of how it was paid. Gating on paymentStatus previously excluded credit/pending shipments
   // (real value is "pending", never "unpaid"), so their status stayed frozen at booking.
@@ -231,11 +241,15 @@ export async function refreshExpressCarrierStatuses(): Promise<number> {
           carrierCode: shipment.carrierCode,
           error: error instanceof Error ? error.message : String(error),
         });
-        await createAttentionFlag({
-          shipmentId: shipment.id,
-          issueType: "tracking_refresh_failed",
-          severity: "medium",
-          details: error instanceof Error ? error.message : "Carrier tracking refresh failed.",
+        // Was a flag carrying the raw carrier string. Tracking runs every ten minutes across
+        // every shipment, so an unexplained failure here is the easiest thing in the system to
+        // ignore — 1,498 rejected FedEx tracking calls went unnoticed for two months because
+        // the reason (a refused credential) was never decoded.
+        await reportCarrierFailure({
+          shipment,
+          operation: "tracking",
+          error,
+          context: { carrierTrackingNumber: shipment.carrierTrackingNumber },
         });
       }
     }

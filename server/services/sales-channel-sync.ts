@@ -1,5 +1,5 @@
 import { storage } from "../storage";
-import { decryptIntegrationPayload } from "./integration-apps";
+import { decryptIntegrationPayload, encryptIntegrationPayload } from "./integration-apps";
 import { getSalesChannelAdapter } from "./sales-channels";
 import { logError, logInfo } from "./logger";
 import type { SalesChannel } from "@shared/schema";
@@ -33,9 +33,26 @@ function parseSyncSettings(channel: SalesChannel): Record<string, any> {
   }
 }
 
-// A WooCommerce order counts as paid once it has a date_paid or reaches a
-// post-payment status. Used to honor the channel's "paid orders only" setting.
-function isPaidOrder(payload: any): boolean {
+/**
+ * Whether an order counts as paid, for the channel's "paid orders only" setting.
+ *
+ * Per platform on purpose. A WooCommerce order carries `date_paid` and a post-payment
+ * status; a Zid order carries `payment_status`. Judging a Zid order by WooCommerce's rules
+ * returns false every time, which would silently import nothing at all — the connection
+ * would look healthy and the inbox would just stay empty.
+ */
+function isPaidOrder(platform: string, payload: any): boolean {
+  if (platform === "zid") {
+    const paymentStatus = String(
+      payload?.payment_status?.code ?? payload?.payment_status?.name ?? payload?.payment_status ?? "",
+    ).toLowerCase();
+    if (paymentStatus) return paymentStatus === "paid";
+    // Cash on delivery is never "paid" up front, and refusing to import it would hide the
+    // most common order type in the market this platform serves.
+    const method = String(payload?.payment_method ?? "").toLowerCase();
+    return method.includes("cash");
+  }
+
   if (payload?.date_paid) return true;
   const status = String(payload?.status || "").toLowerCase();
   return status === "processing" || status === "completed";
@@ -51,7 +68,7 @@ export async function syncSalesChannel(channel: SalesChannel): Promise<{ importe
   if (!adapter?.fetchOrders) {
     throw new Error(`Platform ${channel.platform} does not support order pull`);
   }
-  if (!channel.storeUrl) {
+  if (adapter.requiresStoreUrl !== false && !channel.storeUrl) {
     throw new Error("Channel has no store URL configured");
   }
   if (!channel.credentialsEncrypted) {
@@ -69,11 +86,24 @@ export async function syncSalesChannel(channel: SalesChannel): Promise<{ importe
   // Bound the window so an incremental pull re-checks a small overlap and never
   // misses an order that was modified during the previous run.
   const runStartedAt = new Date();
-  const raw = await adapter.fetchOrders({ storeUrl: channel.storeUrl, credentials, since });
+  const raw = await adapter.fetchOrders({
+    storeUrl: channel.storeUrl || "",
+    credentials,
+    since,
+    // An adapter that renews its own OAuth token hands the new one back here. Without
+    // persisting it the refreshed token would be used for this run and discarded, and the
+    // channel would re-refresh on every sync until the original finally expired.
+    onCredentialsRefreshed: async (refreshed) => {
+      await storage.updateSalesChannel(channel.id, {
+        credentialsEncrypted: encryptIntegrationPayload(refreshed),
+      });
+      logInfo(`Refreshed OAuth credentials for ${channel.platform} channel ${channel.id}`);
+    },
+  });
 
   let imported = 0;
   for (const payload of raw) {
-    if (paidOnly && !isPaidOrder(payload)) continue;
+    if (paidOnly && !isPaidOrder(channel.platform, payload)) continue;
     try {
       const normalized = adapter.normalizeOrder(payload, {
         clientAccountId: channel.clientAccountId,
@@ -104,7 +134,10 @@ export async function syncAllSalesChannels(): Promise<number> {
     for (const channel of channels) {
       const adapter = getSalesChannelAdapter(channel.platform);
       if (!adapter?.fetchOrders) continue; // no pull support (e.g. webhook-only)
-      if (!channel.storeUrl || !channel.credentialsEncrypted) continue;
+      // Syncable means credentials plus — only where the platform needs one — a store URL.
+      // Zid has no store URL by design.
+      if (!channel.credentialsEncrypted) continue;
+      if (adapter.requiresStoreUrl !== false && !channel.storeUrl) continue;
       const settings = parseSyncSettings(channel);
       if (settings.autoSync === false) continue; // client disabled auto-sync
 

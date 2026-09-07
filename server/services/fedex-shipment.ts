@@ -1,4 +1,5 @@
 import path from "path";
+import { shipmentDangerousGoods } from "./dangerous-goods";
 import { z } from "zod";
 import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
 import {
@@ -305,6 +306,8 @@ export async function buildFedExShipmentRequestFromShipment(
     commercialInvoiceNumber: internalCommercialInvoice.invoiceNumber,
     commercialInvoiceDate: internalCommercialInvoice.issueDate,
     items: isInternational && items.length > 0 ? items : undefined,
+    // Regulated goods travel declared or not at all — see server/services/dangerous-goods.ts.
+    dangerousGoods: shipmentDangerousGoods(shipment),
   };
 
   if (storedTradeDocuments.length === 0) {
