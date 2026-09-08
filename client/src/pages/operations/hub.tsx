@@ -2540,6 +2540,157 @@ function PlanNotesEditor({ shipment, actions }: { shipment: OperationShipmentDet
   );
 }
 
+/**
+ * Replace the carrier waybill an express shipment travels on.
+ *
+ * Distinct from `TrackingNumbersEditor` below, and the two are easy to confuse. That one edits
+ * a free-text list operators keep for their own reference; this one rewrites
+ * `carrierTrackingNumber` — the number the tracking poller actually calls the carrier with.
+ * Only this one changes what the shipment is.
+ */
+function CarrierWaybillEditor({ shipment }: { shipment: OperationShipmentDetail }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [awb, setAwb] = useState("");
+  const [carrierCode, setCarrierCode] = useState(shipment.carrierCode || "FEDEX");
+  const [reason, setReason] = useState("");
+  const [previousCancelled, setPreviousCancelled] = useState(false);
+
+  useEffect(() => {
+    setOpen(false);
+    setAwb("");
+    setReason("");
+    setPreviousCancelled(false);
+    setCarrierCode(shipment.carrierCode || "FEDEX");
+  }, [shipment.id]);
+
+  const replaceMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/carrier-tracking-number`, {
+        carrierTrackingNumber: awb.trim(),
+        carrierCode,
+        carrierName: carrierCode === "DHL" ? "DHL Express" : carrierCode === "FEDEX" ? "FedEx" : carrierCode,
+        reason: reason.trim(),
+        previousWaybillCancelled: previousCancelled,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: (data: any) => {
+      // Say plainly whether the carrier answered. The operator replaced this number because
+      // they believe it is live, and "saved" alone does not tell them whether it is.
+      if (data?.trackingError) {
+        toast({
+          title: "Waybill replaced — the carrier has no scans yet",
+          description: `${data.trackingError} Tracking will retry automatically.`,
+        });
+      } else {
+        toast({ title: "Waybill replaced", description: "Tracking is now following the new number." });
+      }
+      setOpen(false);
+      setAwb("");
+      setReason("");
+      setPreviousCancelled(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not replace the waybill", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const canSubmit = awb.trim().length >= 4 && reason.trim().length >= 3 && !replaceMutation.isPending;
+
+  return (
+    <div className="card">
+      <div className="card-title"><Truck /> Carrier air waybill</div>
+
+      <div className="sc-row">
+        <span className="sc-key">Currently tracking</span>
+        <span className="sc-val">{shipment.carrierTrackingNumber || "No waybill recorded"}</span>
+      </div>
+
+      {!open ? (
+        <div style={{ marginTop: 10 }}>
+          <button className="btn btn-gh btn-sm" type="button" onClick={() => setOpen(true)}>
+            <RefreshCw /> {shipment.carrierTrackingNumber ? "Replace waybill" : "Record a waybill"}
+          </button>
+          <div className="field-hint" style={{ marginTop: 8 }}>
+            Use this when the carrier voided and reissued the waybill, when the booking was made
+            by hand outside the system, or when the number is simply wrong.
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: 10 }}>
+          <div className="alert alert-amber">
+            <AlertTriangle />
+            <div>
+              Replacing the waybill clears this shipment&rsquo;s scan history, delivery estimate
+              and stored label — they belong to the old consignment. Tracking restarts against
+              the new number.
+            </div>
+          </div>
+
+          <div className="checkpoint-grid">
+            <div>
+              <label className="field-label">Carrier</label>
+              <select className="field-select" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+                <option value="FEDEX">FedEx</option>
+                <option value="DHL">DHL Express</option>
+                <option value="ARAMEX">Aramex</option>
+              </select>
+              <div className="field-hint">Change it if the shipment moved to a different carrier.</div>
+            </div>
+            <DgField
+              label="New air waybill number"
+              value={awb}
+              onChange={setAwb}
+              placeholder="e.g. 881234567890"
+              hint="The number the carrier issued for the consignment as it stands now."
+            />
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <label className="field-label">Why is it being replaced?</label>
+            <textarea
+              className="field-textarea"
+              rows={2}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="e.g. FedEx voided 881122334455 after the address correction and reissued it."
+            />
+            <div className="field-hint">Recorded on the shipment and in the audit trail.</div>
+          </div>
+
+          {shipment.carrierTrackingNumber && (
+            <label
+              style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={previousCancelled}
+                onChange={(event) => setPreviousCancelled(event.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span className="field-hint" style={{ margin: 0 }}>
+                {shipment.carrierTrackingNumber} has already been cancelled with the carrier.
+                Leave this unticked and the shipment is flagged so someone cancels it — an
+                abandoned waybill still gets collected.
+              </span>
+            </label>
+          )}
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            <button className="btn btn-pr" disabled={!canSubmit} onClick={() => replaceMutation.mutate()}>
+              {replaceMutation.isPending ? "Replacing…" : "Replace & track"}
+            </button>
+            <button className="btn btn-gh" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TrackingNumbersEditor({ shipment, actions }: { shipment: OperationShipmentDetail; actions: OpsActions }) {
   const list = shipment.trackingNumbers || [];
   const [newValue, setNewValue] = useState("");
@@ -3488,6 +3639,7 @@ function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSync
                 </div>
                 <DangerousGoodsReview shipment={shipment} />
                 <TrackingSteps shipment={shipment} variant="express" />
+                <CarrierWaybillEditor shipment={shipment} />
                 <TrackingNumbersEditor shipment={shipment} actions={actions} />
                 <LastMileEditor shipment={shipment} actions={actions} />
               </>

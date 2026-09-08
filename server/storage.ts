@@ -268,6 +268,7 @@ export interface IStorage {
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
   recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
+  getShipmentByCarrierTrackingNumber(carrierTrackingNumber: string): Promise<Shipment | undefined>;
   claimCarrierBooking(id: string): Promise<boolean>;
   releaseCarrierBookingClaim(id: string): Promise<void>;
 
@@ -1227,6 +1228,25 @@ export class DatabaseStorage implements IStorage {
    * forever, and `carrierTrackingNumber IS NULL` means an already-booked shipment can never be
    * claimed at all, however long ago it was booked.
    */
+  /**
+   * Find a shipment by the carrier's waybill, so one waybill never ends up on two shipments.
+   *
+   * There is no unique index on the column — historical rows carry blanks and duplicates from
+   * before the double-booking fix — so this is a best-effort guard at the point of entry rather
+   * than a database constraint. Soft-deleted shipments are ignored: a waybill freed by a
+   * deletion is legitimately reusable.
+   */
+  async getShipmentByCarrierTrackingNumber(carrierTrackingNumber: string): Promise<Shipment | undefined> {
+    const trimmed = carrierTrackingNumber.trim();
+    if (!trimmed) return undefined;
+    const [shipment] = await db
+      .select()
+      .from(shipments)
+      .where(and(eq(shipments.carrierTrackingNumber, trimmed), isNull(shipments.deletedAt)))
+      .limit(1);
+    return shipment || undefined;
+  }
+
   async claimCarrierBooking(id: string): Promise<boolean> {
     const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
     const claimed = await db.update(shipments)

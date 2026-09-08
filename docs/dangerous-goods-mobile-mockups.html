@@ -1,0 +1,1563 @@
+<title>Dangerous Goods on Mobile</title>
+
+<style>
+  :root {
+    --paper: #faf9f7;
+    --paper-2: #f2efea;
+    --card: #ffffff;
+    --ink: #17161c;
+    --ink-2: #4a4650;
+    --ink-3: #7d7688;
+    --rule: #e4e0da;
+    --rule-2: #efece7;
+    --brand: #fe5200;
+    --brand-soft: #fff1e9;
+    --hazard: #b8760a;
+    --hazard-soft: #fdf5e3;
+    --steel: #5c6b7a;
+    --steel-soft: #eef1f4;
+    --good: #1c7a52;
+    --good-soft: #e6f4ed;
+    --stop: #b4271f;
+    --stop-soft: #fdeceb;
+
+    /* The app's own tokens — mobile/src/constants/colors.ts. Phone screens use
+       these and nothing else, so what is drawn here is what gets coded. */
+    --app-text: #1a1a2e;
+    --app-text-2: #8a93a3;
+    --app-bg: #f2f3f5;
+    --app-primary: #fe5200;
+    --app-border: #e5e7eb;
+    --app-white: #ffffff;
+    --app-placeholder: #9aa3b2;
+    --app-error: #ff4d4f;
+    --app-amber-bg: #fffbeb;
+    --app-amber-border: #fde68a;
+    --app-amber-text: #92400e;
+
+    --shell: #d8d3cc;
+    --measure: 62ch;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #131217;
+      --paper-2: #1b1a21;
+      --card: #1c1b22;
+      --ink: #f0eef2;
+      --ink-2: #b8b3c0;
+      --ink-3: #8b8496;
+      --rule: #2e2c36;
+      --rule-2: #26242d;
+      --brand: #ff7433;
+      --brand-soft: #2e1a10;
+      --hazard: #e0a63c;
+      --hazard-soft: #2b2211;
+      --steel: #9aabbb;
+      --steel-soft: #1e2227;
+      --good: #4dbb8b;
+      --good-soft: #12291f;
+      --stop: #f2685f;
+      --stop-soft: #2c1513;
+      --shell: #34313c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #131217;
+    --paper-2: #1b1a21;
+    --card: #1c1b22;
+    --ink: #f0eef2;
+    --ink-2: #b8b3c0;
+    --ink-3: #8b8496;
+    --rule: #2e2c36;
+    --rule-2: #26242d;
+    --brand: #ff7433;
+    --brand-soft: #2e1a10;
+    --hazard: #e0a63c;
+    --hazard-soft: #2b2211;
+    --steel: #9aabbb;
+    --steel-soft: #1e2227;
+    --good: #4dbb8b;
+    --good-soft: #12291f;
+    --stop: #f2685f;
+    --stop-soft: #2c1513;
+    --shell: #34313c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead {
+    padding: 72px 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--hazard);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 18px;
+  }
+
+  .diamond {
+    width: 15px;
+    height: 15px;
+    background: var(--hazard);
+    transform: rotate(45deg);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  h1 {
+    font-size: clamp(34px, 5.2vw, 54px);
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+    font-weight: 700;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 18px;
+    line-height: 1.62;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 40px;
+  }
+
+  .fact {
+    background: var(--card);
+    padding: 16px 18px;
+  }
+
+  .fact dt {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 6px;
+  }
+
+  .fact dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink);
+    word-break: break-word;
+  }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 64px; }
+
+  h2 {
+    font-size: 27px;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 10px;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    font-weight: 700;
+    margin: 32px 0 8px;
+  }
+
+  .lede {
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0 0 28px;
+  }
+
+  p { max-width: var(--measure); }
+
+  a { color: var(--brand); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--paper-2);
+    border: 1px solid var(--rule-2);
+    border-radius: 4px;
+    padding: 1px 5px;
+    word-break: break-word;
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  /* ---------- the spine ---------- */
+
+  .stage {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 44px;
+    padding: 44px 0;
+    border-top: 1px solid var(--rule);
+    align-items: start;
+  }
+
+  .stage:first-of-type { border-top: 0; }
+
+  .stage-spec { min-width: 0; }
+
+  .stage-num {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 10px;
+  }
+
+  .stage-num b {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .stage-num.later b { background: var(--brand); color: #fff; }
+
+  .stage h3 {
+    margin: 0 0 8px;
+    font-size: 21px;
+    letter-spacing: -0.015em;
+  }
+
+  .stage p { margin: 0 0 14px; }
+
+  /* ---------- phone ---------- */
+
+  .phone {
+    width: 300px;
+    border-radius: 34px;
+    background: var(--shell);
+    padding: 9px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.10), 0 12px 32px -12px rgb(0 0 0 / 0.28);
+    position: sticky;
+    top: 24px;
+  }
+
+  .screen {
+    background: var(--app-bg);
+    border-radius: 26px;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--app-text);
+  }
+
+  .statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--app-text);
+    background: var(--app-white);
+  }
+
+  .statusbar span:last-child { letter-spacing: 1px; }
+
+  .navbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px 12px;
+    background: var(--app-white);
+    border-bottom: 1px solid var(--app-border);
+  }
+
+  .navbar .back {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    display: grid;
+    place-items: center;
+    color: var(--app-text-2);
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .navtitle { flex: 1; min-width: 0; }
+  .navtitle b { display: block; font-size: 13px; font-weight: 700; }
+  .navtitle small { display: block; font-size: 10px; color: var(--app-text-2); }
+
+  .progress {
+    display: flex;
+    gap: 3px;
+    padding: 10px 14px 0;
+    background: var(--app-white);
+  }
+
+  .progress i {
+    height: 3px;
+    flex: 1;
+    border-radius: 2px;
+    background: var(--app-border);
+  }
+
+  .progress i.on { background: var(--app-primary); }
+
+  .body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 330px;
+  }
+
+  .body.center { justify-content: center; align-items: center; text-align: center; }
+
+  .label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--app-text-2);
+    margin-bottom: 4px;
+  }
+
+  .field {
+    background: var(--app-white);
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 12px;
+  }
+
+  .field.ph { color: var(--app-placeholder); }
+
+  .opt {
+    background: var(--app-white);
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    padding: 10px 11px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .opt.sel { border-color: var(--app-primary); background: #fff6f1; }
+  :root[data-theme="dark"] .opt.sel,
+  :root:not([data-theme="light"]) .opt.sel { background: #fff6f1; }
+
+  .opt .ico {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: #fde4d6;
+    color: var(--app-primary);
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .opt b { display: block; font-size: 12px; font-weight: 700; }
+  .opt small { display: block; font-size: 10.5px; color: var(--app-text-2); line-height: 1.35; }
+
+  .radio {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 1.5px solid var(--app-border);
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-top: 3px;
+  }
+
+  .opt.sel .radio { border: 4.5px solid var(--app-primary); }
+
+  .amber {
+    background: var(--app-amber-bg);
+    border: 1px solid var(--app-amber-border);
+    color: var(--app-amber-text);
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .amber b { font-weight: 700; }
+
+  .btn {
+    background: var(--app-primary);
+    color: #fff;
+    border-radius: 12px;
+    padding: 11px;
+    text-align: center;
+    font-size: 12.5px;
+    font-weight: 700;
+    margin-top: auto;
+  }
+
+  .btn.ghost {
+    background: var(--app-white);
+    color: var(--app-text);
+    border: 1px solid var(--app-border);
+    margin-top: 0;
+  }
+
+  .btn.dim { background: var(--app-border); color: var(--app-placeholder); }
+
+  .cardx {
+    background: var(--app-white);
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    padding: 11px;
+  }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11.5px;
+    padding: 3px 0;
+  }
+
+  .row span:first-child { color: var(--app-text-2); }
+  .row span:last-child { font-weight: 600; text-align: right; }
+  .row.total { border-top: 1px solid var(--app-border); margin-top: 5px; padding-top: 7px; }
+  .row.total span { font-size: 13px; font-weight: 700; }
+  .row.total span:last-child { color: var(--app-primary); }
+
+  .pill {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+  }
+
+  .pill.amberp { background: #fef3c7; color: #92400e; }
+  .pill.purple { background: #ede9fe; color: #5b21b6; }
+  .pill.cyan { background: #cffafe; color: #155e75; }
+  .pill.green { background: #d1fae5; color: #065f46; }
+  .pill.grey { background: #eef0f3; color: #4b5563; }
+  .pill.redp { background: #fee2e2; color: #991b1b; }
+
+  .filerow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: var(--app-white);
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 9px 11px;
+  }
+
+  .filerow .doc {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: #fde4d6; color: var(--app-primary);
+    display: grid; place-items: center; font-size: 12px; flex-shrink: 0;
+  }
+
+  .dropzone {
+    border: 1.5px dashed var(--app-border);
+    border-radius: 12px;
+    padding: 20px 12px;
+    text-align: center;
+    color: var(--app-text-2);
+    font-size: 11px;
+    background: var(--app-white);
+  }
+
+  .bigicon {
+    width: 52px; height: 52px; border-radius: 16px;
+    display: grid; place-items: center;
+    font-size: 24px; margin-bottom: 4px;
+  }
+
+  .timeline { display: flex; flex-direction: column; gap: 0; }
+
+  .tl {
+    display: flex;
+    gap: 10px;
+    font-size: 11px;
+    padding-bottom: 12px;
+    position: relative;
+  }
+
+  .tl:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 6px; top: 15px; bottom: 0;
+    width: 1.5px;
+    background: var(--app-border);
+  }
+
+  .tl i {
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid var(--app-border);
+    background: var(--app-white);
+    flex-shrink: 0; margin-top: 2px; z-index: 1;
+  }
+
+  .tl.done i { background: var(--app-primary); border-color: var(--app-primary); }
+  .tl.now i { border-color: var(--app-primary); border-width: 3px; }
+  .tl b { display: block; font-weight: 700; font-size: 11.5px; }
+  .tl small { color: var(--app-text-2); font-size: 10.5px; }
+
+  /* ---------- spec bits ---------- */
+
+  .call {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--brand);
+    border-radius: 6px;
+    padding: 7px 11px;
+    margin: 4px 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .verb {
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--brand-soft);
+    color: var(--brand);
+    flex-shrink: 0;
+  }
+
+  .verb.get { background: var(--steel-soft); color: var(--steel); }
+
+  .note {
+    border-left: 3px solid var(--rule);
+    padding: 2px 0 2px 16px;
+    margin: 16px 0;
+    color: var(--ink-2);
+    font-size: 14.5px;
+  }
+
+  .note.warn { border-color: var(--hazard); }
+  .note.stop { border-color: var(--stop); }
+  .note b { color: var(--ink); }
+
+  .tagrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: var(--paper-2);
+    border: 1px solid var(--rule-2);
+    color: var(--ink-2);
+  }
+
+  .tablewrap { overflow-x: auto; margin: 18px 0; border: 1px solid var(--rule); border-radius: 10px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 560px; }
+
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+  }
+
+  th {
+    background: var(--paper-2);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: 0; }
+  td code { white-space: nowrap; }
+
+  .trap {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 14px 0;
+  }
+
+  .trap h4 {
+    margin: 0 0 6px;
+    font-size: 15.5px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+
+  .trap h4 em {
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 11px;
+    color: var(--stop);
+    background: var(--stop-soft);
+    border-radius: 4px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+  }
+
+  .trap p { margin: 0; color: var(--ink-2); font-size: 14.5px; max-width: none; }
+
+  .mermaid { margin: 20px 0; overflow-x: auto; }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-3);
+    font-size: 13.5px;
+  }
+
+  @media (max-width: 900px) {
+    .stage { grid-template-columns: 1fr; gap: 28px; }
+    .phone { position: static; margin: 0 auto; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow"><span class="diamond"></span> Mobile handoff · Ezhalha client app</p>
+  <h1>Dangerous Goods on Mobile</h1>
+  <p class="standfirst">
+    Dangerous goods do not behave like an Express shipment. Carriage is arranged with the
+    carrier <strong>by email</strong>, so nothing is priced when the client submits — no rates,
+    no payment, no waybill. A price arrives later as a quotation, and the shipment is booked
+    only after it is paid. The wizard therefore ends where Express is barely half done, and the
+    rest of the flow happens in a different session, days later.
+  </p>
+
+  <dl class="facts">
+    <div class="fact"><dt>Base URL</dt><dd>https://staging.147-93-122-137.sslip.io</dd></div>
+    <div class="fact"><dt>Auth</dt><dd>Bearer access token (POST /api/auth/token)</dd></div>
+    <div class="fact"><dt>Live since</dt><dd>v7.4.0 · production &amp; staging</dd></div>
+    <div class="fact"><dt>Suggested route</dt><dd>createShipment/dangerousGoods/step-N.tsx</dd></div>
+  </dl>
+</header>
+
+<section>
+  <h2>What is different from Express</h2>
+  <p class="lede">
+    You have already built Express. These are the only places dangerous goods diverges — read
+    this table before anything else, because four of the six differences are things Express
+    does that dangerous goods must <em>not</em> do.
+  </p>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Express does</th><th>Dangerous goods does</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Fetches rates, client picks a service</td>
+          <td><strong>No rate step at all.</strong> There is nothing to fetch — the price comes from a human conversation with the carrier</td>
+        </tr>
+        <tr>
+          <td>Pays at the end of the wizard</td>
+          <td><strong>No payment step.</strong> The wizard ends on a submission receipt showing <code>Charged so far: nothing</code></td>
+        </tr>
+        <tr>
+          <td>Books the carrier on payment, returns a waybill and label</td>
+          <td>Payment books nothing. An operator confirms with the carrier by hand afterwards</td>
+        </tr>
+        <tr>
+          <td>Calls <code>/api/client/shipments/confirm</code> after paying</td>
+          <td><strong>Never call confirm.</strong> The server short-circuits it for a paid DG shipment</td>
+        </tr>
+        <tr>
+          <td>Anyone with <code>create_shipments</code> can start it</td>
+          <td>Gated per account — an admin must approve dangerous goods access first</td>
+        </tr>
+        <tr>
+          <td>One session, start to finish</td>
+          <td><strong>Two sessions.</strong> Submit now; come back through a notification to pay</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>The shipment's life</h2>
+  <p class="lede">
+    Six states, four of which are new to the app. Every one needs a badge in the shipment list
+    and a sensible detail screen — a shipment sitting in <code>dg_booking</code> for a day with
+    no explanation is a support call.
+  </p>
+
+  <pre class="mermaid">
+stateDiagram-v2
+    [*] --> dg_review: client submits, unpriced
+    dg_review --> dg_awaiting_carrier: ops emails the carrier
+    dg_awaiting_carrier --> payment_pending: ops enters the price
+    payment_pending --> cancelled: client declines / quote expires
+    payment_pending --> dg_booking: client pays
+    dg_booking --> created: ops records the air waybill
+    created --> [*]: normal tracking from here
+  </pre>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>status</th><th>Badge label</th><th>Colour</th><th>What the client should understand</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>dg_review</code></td><td>Under Review</td><td><span class="pill amberp">amber</span></td><td>We are checking your declaration</td></tr>
+        <tr><td><code>dg_awaiting_carrier</code></td><td>With the Carrier</td><td><span class="pill amberp">amber</span></td><td>We are getting you a price</td></tr>
+        <tr><td><code>payment_pending</code></td><td>Awaiting Payment</td><td><span class="pill purple">purple</span></td><td>Your quotation is ready — action needed</td></tr>
+        <tr><td><code>dg_booking</code></td><td>Booking with the Carrier</td><td><span class="pill cyan">cyan</span></td><td>Paid. We are confirming the booking</td></tr>
+        <tr><td><code>created</code></td><td>Booked</td><td><span class="pill cyan">cyan</span></td><td>Booked, air waybill issued</td></tr>
+        <tr><td><code>cancelled</code></td><td>Cancelled</td><td><span class="pill redp">red</span></td><td>Declined or withdrawn</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <b>Filter tabs:</b> all three <code>dg_*</code> statuses belong under <b>Processing</b>. Left
+    out of the tab groups they appear under “All” and nowhere else — which is exactly the bug
+    that shipped on web and had to be fixed.
+  </div>
+</section>
+
+<section>
+  <h2>Screens</h2>
+  <p class="lede">
+    Nine screens to submit, then five more for the part that happens later. Steps&nbsp;1–4 are
+    the Express prelude and should reuse the components you already have —
+    <code>ShipmentStepLayout</code>, <code>ShipmentStepHeader</code>,
+    <code>PackageCard</code>, <code>CustomsItemCard</code>. Only steps&nbsp;5–9 are new.
+  </p>
+
+  <!-- ============ GATE ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>New shipment</b><small>Choose a type</small></div>
+        </div>
+        <div class="body">
+          <div class="opt"><div class="ico">⬡</div><div><b>Express</b><small>Worldwide, carrier rated</small></div></div>
+          <div class="opt"><div class="ico" style="background:#dce6fb;color:#3b6fe0">◍</div><div><b>Door to Door</b><small>Freight, managed end to end</small></div></div>
+          <div class="opt"><div class="ico" style="background:#d7f0e3;color:#1c9e6e">⌖</div><div><b>Local</b><small>Inside Saudi Arabia</small></div></div>
+          <div class="opt sel"><div class="ico" style="background:#fdf0d8;color:#b8760a">◆</div><div><b>Dangerous Goods</b><small>Regulated items — quoted by our team</small></div><div class="radio"></div></div>
+          <div class="amber" style="margin-top:2px">
+            <b>Approval needed.</b> Your account is not yet approved for dangerous goods.
+            Request access and we will review your training certificate.
+          </div>
+          <div class="btn">Request access</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>0</b> Gate</p>
+      <h3>Access is per account, not per user</h3>
+      <p>
+        Check the gate before you show the tile. If the account is not approved, the tile stays
+        visible but leads to a request screen — hiding it entirely leaves a client with no way
+        to ask.
+      </p>
+      <div class="call"><span class="verb get">GET</span> /api/client/dangerous-goods</div>
+      <pre><code>{ "enabled": false, "request": { "status": "pending" } | null }</code></pre>
+      <div class="call"><span class="verb">POST</span> /api/client/dangerous-goods/request</div>
+      <p>
+        Render three states from <code>request.status</code>: <code>pending</code> (“under
+        review”, no button), <code>rejected</code> (show the reason, allow re-request), and
+        <code>null</code> (show the request form).
+      </p>
+      <div class="note stop">
+        <b>Only the primary contact</b> may request access — the endpoint is behind
+        <code>requirePrimaryContact</code>. A sub-user gets <code>403</code>. Check
+        <code>user.isPrimaryContact</code> and explain rather than letting the request fail.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 1-4 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="progress"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Packages</b><small>Step 4 of 9</small></div>
+        </div>
+        <div class="body">
+          <div class="cardx">
+            <div class="row"><span>Package 1</span><span>12 KG</span></div>
+            <div class="row"><span>Dimensions</span><span>40 × 30 × 25 CM</span></div>
+          </div>
+          <div class="btn ghost">+ Add another package</div>
+          <div class="amber">
+            <b>Heads up.</b> We will not show you a price at the end of this form. Our team
+            arranges dangerous goods with the carrier and sends you a quotation.
+          </div>
+          <div class="btn">Continue</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>1–4</b> Prelude</p>
+      <h3>Route, sender, recipient, packages</h3>
+      <p>
+        Identical to Express. Reuse the screens and the store shape; only the submit payload
+        differs at the end. Keep <code>SavedAddressSelect</code> and the package editor as they are.
+      </p>
+      <div class="tagrow">
+        <span class="tag">shipmentType: domestic | inbound | outbound</span>
+        <span class="tag">shipper</span>
+        <span class="tag">recipient</span>
+        <span class="tag">packages[]</span>
+        <span class="tag">weightUnit: KG | LB</span>
+        <span class="tag">dimensionUnit: CM | IN</span>
+      </div>
+      <p>
+        Set expectations early. The amber note on this screen is the last comfortable place to
+        tell someone they will not see a price — finding that out on the final screen feels
+        like a broken app.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ 5 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="progress"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>What are you shipping?</b><small>Step 5 of 9</small></div>
+        </div>
+        <div class="body">
+          <div class="opt"><div class="ico">🔋</div><div><b>Batteries in equipment</b><small>Cells fitted inside the device</small></div><div class="radio"></div></div>
+          <div class="opt"><div class="ico">🔌</div><div><b>Batteries with equipment</b><small>Packed alongside the device</small></div><div class="radio"></div></div>
+          <div class="opt sel"><div class="ico">⚗</div><div><b>Chemicals &amp; fully regulated</b><small>Flammables, corrosives, toxics</small></div><div class="radio"></div></div>
+          <div class="opt"><div class="ico">☣</div><div><b>Biological substance</b><small>Category B, UN3373</small></div><div class="radio"></div></div>
+          <div class="opt" style="opacity:.55"><div class="ico">🧲</div><div><b>Magnetized material</b><small>UN2807</small></div><div class="radio"></div></div>
+          <div class="btn">Continue</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>5</b> New</p>
+      <h3>Content kind — the one thing only the client can answer</h3>
+      <p>
+        This choice decides which carrier service and content id the shipment can ever be booked
+        under, so an operator cannot infer it afterwards. A single-select list, 14 options, one
+        line of plain-language description each.
+      </p>
+      <p>Sets two fields on the declaration:</p>
+      <pre><code>dangerousGoods.contentKind : DgContentKind   // required
+dangerousGoods.regulation  : "IATA" | "ADR"  // required, default IATA</code></pre>
+      <p>
+        The full list and its copy is in
+        <code>client/src/pages/client/create-shipment.tsx</code> →
+        <code>DANGEROUS_GOODS_CONTENT_KINDS</code>. Lift the labels verbatim; they were written
+        for people who do not know IATA packing instructions by number.
+      </p>
+      <div class="tagrow">
+        <span class="tag">LITHIUM_ION_PI967_SECTION_II</span>
+        <span class="tag">LITHIUM_ION_PI966_SECTION_II</span>
+        <span class="tag">LITHIUM_ION_PI965_SECTION_II</span>
+        <span class="tag">FULLY_REGULATED</span>
+        <span class="tag">BIOLOGICAL_SUBSTANCE_UN3373</span>
+        <span class="tag">CONSUMER_COMMODITY_ID8000</span>
+        <span class="tag">+ 8 more</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 6 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="progress"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Safety data sheet</b><small>Step 6 of 9</small></div>
+        </div>
+        <div class="body">
+          <div class="filerow">
+            <div class="doc">📄</div>
+            <div style="flex:1;min-width:0">
+              <b style="font-size:11.5px">01-flammable-liquid.pdf</b>
+              <small style="display:block;color:var(--app-text-2);font-size:10px">2.1 KB · uploaded</small>
+            </div>
+            <span style="color:var(--app-text-2)">×</span>
+          </div>
+          <div class="dropzone">＋<br>Add another sheet<br><span style="font-size:10px">PDF or image · up to 5 files</span></div>
+          <div class="cardx">
+            <div class="label">Read from your document</div>
+            <div class="row"><span>UN number</span><span>UN1993</span></div>
+            <div class="row"><span>Class</span><span>3 · PG II</span></div>
+            <div class="row"><span>Packing instruction</span><span>353</span></div>
+          </div>
+          <div class="amber">Some transport details were not stated. Our team will complete them.</div>
+          <div class="btn">Continue</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>6</b> New</p>
+      <h3>Upload the sheet, let the server read it</h3>
+      <p>Three calls, in order. The first two are the standard upload dance you already use for trade documents.</p>
+      <div class="call"><span class="verb">POST</span> /api/uploads/request-url</div>
+      <div class="call"><span class="verb">PUT</span> &lt;uploadURL&gt; — raw bytes, no auth header</div>
+      <div class="call"><span class="verb">POST</span> /api/client/shipments/extract-dangerous-goods</div>
+      <pre><code>// request
+{ "fileName": ..., "objectPath": ..., "contentType": ... }
+
+// response
+{
+  "commodities": [{ "unNumber": "UN1993", "hazardClass": "3",
+                    "packingGroup": "II", "missingFields": ["quantity"] }],
+  "productName": "ACME Industrial Cleaner 400",
+  "notDangerousGoods": false,
+  "warnings": ["Some transport details were not stated in this document."]
+}</code></pre>
+      <p>
+        Extraction <em>pre-fills</em>; it never blocks. Show what came back, show the warnings,
+        and let the client continue regardless — operations completes anything missing before a
+        carrier sees it.
+      </p>
+      <div class="note">
+        <b>Handle three outcomes.</b> Success with commodities; success with
+        <code>notDangerousGoods: true</code> (tell them this may not need the DG flow at all,
+        but let them proceed); and failure — the upload or the read can fail, and the client
+        must still be able to go on. A silent failure here produces a declaration nobody
+        checked.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 7 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="progress"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Customs items</b><small>Step 7 of 9 · international only</small></div>
+        </div>
+        <div class="body">
+          <div class="cardx">
+            <div class="row"><span>Industrial cleaning solvent</span><span>SAR 4,200</span></div>
+            <div class="row"><span>HS code</span><span>340290</span></div>
+            <div class="row"><span>Origin · Qty</span><span>SA · 1</span></div>
+          </div>
+          <div class="btn ghost">+ Add item</div>
+          <div class="btn">Continue</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>7</b> Conditional</p>
+      <h3>Customs items — international shipments only</h3>
+      <p>
+        Skip this screen entirely when <code>shipmentType === "domestic"</code>. Reuse
+        <code>CustomsItemCard</code>, <code>AddItemModal</code> and
+        <code>HSCodeConfirmModal</code> unchanged.
+      </p>
+      <div class="note stop">
+        <b>Server-side rule:</b> an international dangerous goods shipment with an empty
+        <code>items</code> array is rejected with <code>400 — “At least one customs line item is
+        required for an international shipment.”</code> Validate before submit so the client
+        never meets that error.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 8 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="progress"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Review &amp; submit</b><small>Step 8 of 9</small></div>
+        </div>
+        <div class="body">
+          <div class="cardx">
+            <div class="row"><span>From</span><span>Jeddah, SA</span></div>
+            <div class="row"><span>To</span><span>Dubai, AE</span></div>
+            <div class="row"><span>Packages</span><span>1 · 12 KG</span></div>
+          </div>
+          <div class="cardx">
+            <div class="label">Declaration</div>
+            <div class="row"><span>Contents</span><span>Fully regulated</span></div>
+            <div class="row"><span>UN1993</span><span>Class 3 · PG II</span></div>
+            <div class="row"><span>Sheets</span><span>1 attached</span></div>
+          </div>
+          <div class="cardx" style="border-style:dashed">
+            <div class="row"><span>Preferred collection</span><span style="color:var(--app-placeholder)">Optional</span></div>
+          </div>
+          <div class="amber"><b>Nothing is charged now.</b> We will price this with the carrier and send you a quotation.</div>
+          <div class="btn">Submit declaration</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>8</b> Submit</p>
+      <h3>One call, no price</h3>
+      <div class="call"><span class="verb">POST</span> /api/client/shipments/dangerous-goods</div>
+      <pre><code>Idempotency-Key: &lt;uuid&gt;          // strongly recommended
+
+{
+  "shipmentType": "outbound",
+  "shipper":   { ...address },
+  "recipient": { ...address },
+  "packages":  [{ "weight": 12, "length": 40, "width": 30, "height": 25 }],
+  "weightUnit": "KG", "dimensionUnit": "CM",
+  "items": [ ...customs items ],           // required if international
+  "dangerousGoods": {
+    "regulation": "IATA",
+    "contentKind": "FULLY_REGULATED",
+    "packages": [{
+      "packageIndex": 0,
+      "commodities": [{ "unNumber": "UN1993", "hazardClass": "3",
+                        "packingGroup": "II", "packingInstruction": "353" }]
+    }]
+  },
+  "dangerousGoodsDocuments": [{ "fileName": ..., "objectPath": ...,
+                                "contentType": ..., "size": 2097,
+                                "documentType": "SAFETY_DATA_SHEET" }],
+  "preferredPickupDate": "2026-09-10"      // a preference, not a booking
+}
+
+→ 201 { "shipmentId": "...", "trackingNumber": "EZH503233566",
+        "status": "dg_review" }</code></pre>
+      <p>
+        Only <code>regulation</code>, <code>contentKind</code> and at least one commodity are
+        required inside the declaration. Everything else — emergency contact, signatory,
+        accessibility, net quantities — is completed by operations. Do not build a form for
+        them.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ 9 ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="body center">
+          <div class="bigicon" style="background:#d1fae5;color:#065f46">✓</div>
+          <b style="font-size:15px">Declaration submitted</b>
+          <small style="color:var(--app-text-2)">We will come back to you with a price</small>
+          <div class="cardx" style="width:100%;text-align:left;margin-top:8px">
+            <div class="row"><span>Reference</span><span style="font-family:var(--mono)">EZH503233566</span></div>
+            <div class="row"><span>Status</span><span><span class="pill amberp">Under Review</span></span></div>
+            <div class="row"><span>Charged so far</span><span>Nothing</span></div>
+          </div>
+          <small style="color:var(--app-text-2);margin-top:6px">
+            Our team is reviewing the declaration and arranging carriage. You will be notified
+            when the quotation is ready — the shipment does not move, and you are not charged,
+            until you accept it.
+          </small>
+          <div class="btn" style="width:100%">View my shipments</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num"><b>9</b> Receipt</p>
+      <h3>The wizard ends here</h3>
+      <p>
+        No rates, no card form, no label. Say plainly that nothing has been charged and that a
+        quotation is coming — this screen is doing expectation management, and it is the last
+        thing the client sees for possibly a day or two.
+      </p>
+      <div class="note">
+        <b>Clear the draft store on unmount</b>, exactly as
+        <code>createShipment/express/_layout.tsx</code> does. A stale dangerous goods draft
+        surviving into the next shipment is worse than a stale Express one.
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:72px">…then, a day or two later</h2>
+  <p class="lede">
+    Everything below happens in a fresh session, reached from a push notification. This half is
+    the part most likely to be missed, and it is where the money is.
+  </p>
+
+  <!-- ============ A ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Notifications</b><small></small></div>
+        </div>
+        <div class="body">
+          <div class="cardx" style="border-left:3px solid var(--app-primary)">
+            <b style="font-size:12px">New quotation ready to pay</b>
+            <small style="display:block;color:var(--app-text-2);margin-top:3px;line-height:1.4">
+              Your dangerous goods shipment to Dubai, AE (EZH503233566) has been arranged with
+              the carrier — total SAR 1,035.00. The price holds until 14 Sep.
+            </small>
+            <small style="display:block;color:var(--app-placeholder);margin-top:5px">2 hours ago</small>
+          </div>
+          <div class="cardx" style="opacity:.6">
+            <b style="font-size:12px">Shipment update</b>
+            <small style="display:block;color:var(--app-text-2);margin-top:3px">EZH020031445 is out for delivery.</small>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>A</b> Re-entry</p>
+      <h3>The notification is the entry point</h3>
+      <p>
+        Operations sends this the moment a price is entered. It carries an
+        <code>actionUrl</code> of <code>/client/quotations/:shipmentId</code> — map that to your
+        quotation route in the deep-link handler.
+      </p>
+      <div class="tagrow">
+        <span class="tag">type: quotation_created</span>
+        <span class="tag">entityType: shipment</span>
+        <span class="tag">entityId: shipmentId</span>
+      </div>
+      <p>
+        The same shipment is also reachable from the shipment list, sitting at
+        <code>payment_pending</code>. Both routes must land on the same screen.
+      </p>
+      <div class="note warn">
+        The quotation has an expiry. Surface the date everywhere you surface the price — after
+        it lapses the server refuses payment and operations has to re-confirm with the carrier.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Quotation</b><small>EZH503233566</small></div>
+          <span class="pill purple">Awaiting Payment</span>
+        </div>
+        <div class="body">
+          <div class="cardx" style="border-color:var(--app-amber-border);background:var(--app-amber-bg)">
+            <b style="font-size:11.5px;color:var(--app-amber-text)">◆ Dangerous goods declaration</b>
+            <div class="row"><span style="color:#a16207">UN1993</span><span style="color:#92400e">Class 3 · PG II</span></div>
+            <div class="row"><span style="color:#a16207">Flammable liquid, n.o.s.</span><span style="color:#92400e">PI 353 · 5 L</span></div>
+          </div>
+          <div class="cardx">
+            <div class="label">Price</div>
+            <div class="row"><span>Subtotal</span><span>SAR 900.00</span></div>
+            <div class="row"><span>VAT (15%)</span><span>SAR 135.00</span></div>
+            <div class="row total"><span>Total</span><span>SAR 1,035.00</span></div>
+          </div>
+          <div class="row" style="padding:0 2px"><span>Carrier</span><span>DHL Express</span></div>
+          <div class="row" style="padding:0 2px"><span>Price holds until</span><span>14 Sep 2026</span></div>
+          <div class="btn dim">Pay SAR 1,035.00</div>
+          <small style="text-align:center;color:var(--app-text-2);font-size:10px">Confirm the declaration below to enable payment</small>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>B</b> Quotation</p>
+      <h3>Price, declaration, expiry</h3>
+      <div class="call"><span class="verb get">GET</span> /api/client/quotations/:shipmentId</div>
+      <pre><code>{
+  "trackingNumber": "EZH503233566",
+  "type": "dangerous_goods",
+  "status": "payment_pending",
+  "requiresConsent": true,
+  "consentAccepted": false,          // ← gates the Pay button
+  "canPay": true,
+  "pricing": { "baseRate": 900, "vatAmountSar": 135, "clientTotalSar": 1035 },
+  "dangerousGoods": {
+    "declaration": { ...as operations completed it },
+    "documents": [...],
+    "carrierAwb": null,              // null until it is booked — expected
+    "expiresAt": "2026-09-14T20:59:59.000Z",
+    "expired": false,
+    "editable": false                // ← never offer a Modify button
+  }
+}</code></pre>
+      <div class="note stop">
+        <b>The quotation is not editable.</b> The price came out of an email thread against a
+        declaration a carrier has already accepted. Express lets a client modify and re-price;
+        here that would replace a negotiated figure with one the system invented. Hide the
+        Modify affordance entirely when <code>type === "dangerous_goods"</code>.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Confirm declaration</b><small>Required before payment</small></div>
+        </div>
+        <div class="body">
+          <div class="amber">
+            Our team may have corrected addresses, weights or commodity details while arranging
+            carriage. Please confirm the declaration as it now stands.
+          </div>
+          <div class="cardx">
+            <div class="row"><span>Offeror</span><span>ACME Chemicals</span></div>
+            <div class="row"><span>Emergency contact</span><span>+966 50 000 0000</span></div>
+            <div class="row"><span>Accessibility</span><span>Inaccessible</span></div>
+            <div class="row"><span>Signed by</span><span>M. Fouda · Jeddah</span></div>
+          </div>
+          <div class="opt sel" style="align-items:center">
+            <div style="width:16px;height:16px;border-radius:4px;background:var(--app-primary);color:#fff;display:grid;place-items:center;font-size:11px;flex-shrink:0">✓</div>
+            <small style="font-size:10.5px;line-height:1.4">
+              I confirm this declaration is accurate and the goods are packed, marked and
+              labelled to IATA requirements.
+            </small>
+          </div>
+          <div class="btn">Confirm &amp; continue</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>C</b> Consent</p>
+      <h3>Confirm the declaration — payment is refused without it</h3>
+      <div class="call"><span class="verb">POST</span> /api/client/quotations/:id/confirm-declaration</div>
+      <pre><code>{ "declarationConfirmed": true }</code></pre>
+      <p>
+        The client is the offeror of the goods, so they re-confirm what operations left before
+        any money moves. Show the completed declaration — not the one they submitted — because
+        it may have changed.
+      </p>
+      <div class="trap">
+        <h4><em>shipped bug</em> Do not offer Pay before this is done</h4>
+        <p>
+          On web, the shipment list offered “Pay Now” for a DG quotation while
+          <code>consentAccepted</code> was still false. The card tokenised, the request went
+          out, and the only answer was <code>400 — “Please confirm the dangerous goods
+          declaration before paying.”</code> with nowhere in that screen to confirm. A complete
+          dead end. Gate every payment affordance on
+          <code>!requiresConsent || consentAccepted</code>, everywhere it appears.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ D ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>Pay</b><small>SAR 1,035.00</small></div>
+        </div>
+        <div class="body">
+          <div class="cardx">
+            <div class="label">Card payment</div>
+            <div class="field ph">Card number</div>
+            <div style="display:flex;gap:8px;margin-top:7px">
+              <div class="field ph" style="flex:1">MM / YY</div>
+              <div class="field ph" style="flex:1">CVV</div>
+            </div>
+            <small style="display:block;color:var(--app-text-2);font-size:10px;margin-top:7px">🔒 Secure card processing with Tap</small>
+          </div>
+          <div class="btn">Pay SAR 1,035.00 by card</div>
+          <div style="text-align:center;color:var(--app-text-2);font-size:10px">or</div>
+          <div class="btn ghost">Pay with credit</div>
+          <div style="text-align:center;margin-top:2px">
+            <small style="color:var(--app-text-2);font-size:10.5px;text-decoration:underline">Not going ahead? Decline this quotation</small>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>D</b> Payment</p>
+      <h3>Two ways to pay, one way to walk away</h3>
+      <div class="call"><span class="verb">POST</span> /api/client/shipments/pay</div>
+      <pre><code>{ "shipmentId": "...", "tapTokenId": "...", "returnPath": "..." }</code></pre>
+      <div class="call"><span class="verb">POST</span> /api/client/shipments/:id/pay-later</div>
+      <p>Credit only — show it when <code>creditEnabled</code> and available credit covers the total.</p>
+      <div class="call"><span class="verb">POST</span> /api/client/quotations/:id/decline</div>
+      <pre><code>{ "reason": "optional free text" }</code></pre>
+      <p>
+        Declining cancels the quotation and charges nothing. Nothing is booked with the carrier
+        at this point, so say so — “nothing to cancel” is reassuring and true.
+      </p>
+      <div class="trap">
+        <h4><em>important</em> Never call <code>/api/client/shipments/confirm</code></h4>
+        <p>
+          Express calls it after payment to trigger the carrier booking. For dangerous goods
+          there is no booking to trigger — the server short-circuits the call and returns the
+          shipment unchanged. Harmless, but it means your success handler must not wait on it,
+          and must not treat its response as “booked”.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ E ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>EZH503233566</b><small>Dangerous goods</small></div>
+          <span class="pill cyan">Booking</span>
+        </div>
+        <div class="body">
+          <div class="cardx" style="background:#ecfeff;border-color:#a5f3fc">
+            <b style="font-size:11.5px;color:#155e75">Paid — we are booking it now</b>
+            <small style="display:block;color:#0e7490;font-size:10.5px;margin-top:3px;line-height:1.4">
+              Our team is confirming the movement with DHL Express. You will get the air waybill
+              as soon as it is issued.
+            </small>
+          </div>
+          <div class="timeline">
+            <div class="tl done"><i></i><div><b>Declaration submitted</b><small>7 Sep, 16:53</small></div></div>
+            <div class="tl done"><i></i><div><b>Quotation sent</b><small>8 Sep, 11:20</small></div></div>
+            <div class="tl done"><i></i><div><b>Paid</b><small>8 Sep, 14:02 · SAR 1,035.00</small></div></div>
+            <div class="tl now"><i></i><div><b>Booking with the carrier</b><small>In progress</small></div></div>
+            <div class="tl"><i></i><div><b>Collection</b><small>Expected 10 Sep</small></div></div>
+          </div>
+          <div class="cardx">
+            <div class="row"><span>Air waybill</span><span style="color:var(--app-placeholder)">Not issued yet</span></div>
+            <div class="row"><span>Carrier</span><span>DHL Express</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>E</b> New state</p>
+      <h3><code>dg_booking</code> — paid, not yet booked</h3>
+      <p>
+        This state has no equivalent in Express and it can last hours. The client has paid and
+        is waiting on us; if the app shows a bare status string with no explanation, they will
+        call support.
+      </p>
+      <div class="tagrow">
+        <span class="tag">status: dg_booking</span>
+        <span class="tag">paymentStatus: paid</span>
+        <span class="tag">carrierTrackingNumber: null</span>
+      </div>
+      <div class="note">
+        <b>Guard every waybill and label affordance on <code>carrierTrackingNumber</code> being
+        non-null</b>, not on <code>paymentStatus === "paid"</code>. In this state the shipment
+        is paid and has no waybill, no label and no tracking events. A “Track” button here leads
+        to an empty screen.
+      </div>
+      <p>
+        Cancelling is still allowed here and is cheapest at this exact moment — nothing is
+        booked, so it is a clean refund. Keep the cancel action available.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ F ============ -->
+  <div class="stage">
+    <div class="phone">
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span>▮▮▮</span></div>
+        <div class="navbar">
+          <div class="back">‹</div>
+          <div class="navtitle"><b>EZH503233566</b><small>Dangerous goods</small></div>
+          <span class="pill cyan">Booked</span>
+        </div>
+        <div class="body">
+          <div class="cardx">
+            <div class="row"><span>Ezhalha reference</span><span style="font-family:var(--mono)">EZH503233566</span></div>
+            <div class="row"><span>Air waybill</span><span style="font-family:var(--mono)">5566778899</span></div>
+            <div class="row"><span>Carrier</span><span>DHL Express</span></div>
+            <div class="row"><span>Collection</span><span>10 Sep 2026</span></div>
+          </div>
+          <div class="timeline">
+            <div class="tl done"><i></i><div><b>Booked with the carrier</b><small>8 Sep, 15:41</small></div></div>
+            <div class="tl now"><i></i><div><b>Awaiting collection</b><small>Scheduled 10 Sep</small></div></div>
+          </div>
+          <div class="btn ghost">Track shipment</div>
+          <div class="btn ghost">Download commercial invoice</div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-spec">
+      <p class="stage-num later"><b>F</b> Live</p>
+      <h3>Booked — ordinary from here</h3>
+      <p>
+        Once operations records the air waybill the shipment becomes <code>created</code> and
+        behaves like any other: carrier tracking syncs, the pickup is booked, milestones arrive
+        as normal notifications. Reuse the Express detail screen wholesale.
+      </p>
+      <div class="note warn">
+        <b>Show both numbers, always.</b> The Ezhalha reference
+        (<code>trackingNumber</code>) and the carrier air waybill
+        (<code>carrierTrackingNumber</code>) are different things. Collapsing them — showing the
+        waybill in place of the reference once one exists — reads as the shipment being issued a
+        new number partway through its life. That bug shipped on the ops hub and had to be
+        fixed; do not repeat it here.
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Traps</h2>
+  <p class="lede">
+    Every one of these is a real defect that reached staging or production during the web build.
+    They are listed because they are cheap to avoid up front and expensive to find later.
+  </p>
+
+  <div class="trap">
+    <h4><em>1</em> No rate step, no payment step in the wizard</h4>
+    <p>Do not copy Express steps 6–8. There is no rate to fetch and nothing to pay for yet. The flow ends on a receipt.</p>
+  </div>
+  <div class="trap">
+    <h4><em>2</em> Payment lives in a different session</h4>
+    <p>If you only build the wizard, the feature does not work. The quotation, consent and payment screens are half the job.</p>
+  </div>
+  <div class="trap">
+    <h4><em>3</em> Consent gates payment everywhere</h4>
+    <p>Shipment list, quotation screen, deep link. Any surface offering Pay must check <code>consentAccepted</code> first, or it is a dead end.</p>
+  </div>
+  <div class="trap">
+    <h4><em>4</em> An expired quotation cannot be paid</h4>
+    <p>The server returns <code>400</code> once <code>dangerousGoods.expired</code> is true. Check it client-side and show “Operations will re-confirm the price” instead of a Pay button.</p>
+  </div>
+  <div class="trap">
+    <h4><em>5</em> <code>dg_booking</code> must render in the list</h4>
+    <p>An unknown status usually falls through to a grey “—” badge. Four new statuses need labels, colours, and a place in the filter tabs.</p>
+  </div>
+  <div class="trap">
+    <h4><em>6</em> Guard on the waybill, not on paid</h4>
+    <p>Between payment and booking the shipment is paid with no waybill, no label and no tracking. Anything keyed on “paid means booked” breaks in that window.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Endpoint reference</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET</code></td><td><code>/api/client/dangerous-goods</code></td><td>Access gate — <code>{ enabled, request }</code></td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/dangerous-goods/request</code></td><td>Request access · primary contact only</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/uploads/request-url</code></td><td>Reserve an upload URL for a safety data sheet</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/shipments/extract-dangerous-goods</code></td><td>Read UN number, class, packing group off the sheet</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/shipments/dangerous-goods</code></td><td>Submit the unpriced declaration</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/client/quotations/:id</code></td><td>The quotation, declaration and price breakdown</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/quotations/:id/confirm-declaration</code></td><td>Consent — required before payment</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/shipments/pay</code></td><td>Card payment via Tap</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/shipments/:id/pay-later</code></td><td>Settle on credit</td></tr>
+        <tr><td><code>POST</code></td><td><code>/api/client/quotations/:id/decline</code></td><td>Decline the quotation</td></tr>
+        <tr><td><code>GET</code></td><td><code>/api/client/shipments</code></td><td>List — must render the four new statuses</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Full request and response schemas are in <code>docs/openapi.json</code> on
+    <code>main</code>, regenerated as of v7.4.0.
+  </p>
+</section>
+
+<footer>
+  <p style="max-width:none">
+    Mockups are indicative, not pixel specs — colours are the app's own
+    <code>Colors</code> tokens from <code>mobile/src/constants/colors.ts</code>, and the phone
+    screens are drawn with them so what is shown is what gets coded. The app ships Inter; this
+    page approximates it with a system stack.
+  </p>
+  <p style="max-width:none">
+    Reference implementation: <code>client/src/pages/client/create-shipment.tsx</code> (wizard)
+    and <code>client/src/pages/client/quotation-detail.tsx</code> (quotation, consent, payment).
+    Flow rationale and the decisions behind it:
+    <code>docs/dangerous-goods-manual-flow.md</code>.
+  </p>
+</footer>
+
+</div>

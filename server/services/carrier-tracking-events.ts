@@ -138,6 +138,22 @@ export async function recordCarrierTrackingEvents(params: {
   }
 }
 
+/**
+ * Drop every stored scan for a shipment.
+ *
+ * Used when a shipment's air waybill is replaced. The events table is keyed on
+ * `(shipmentId, eventKey)` and carries no waybill of its own, so scans recorded against the old
+ * waybill would otherwise sit alongside the new one's — one timeline describing two different
+ * consignments, with the old delivery scan making a shipment that has not moved look delivered.
+ */
+export async function clearCarrierTrackingEvents(shipmentId: string): Promise<number> {
+  const deleted = await db
+    .delete(shipmentCarrierTrackingEvents)
+    .where(eq(shipmentCarrierTrackingEvents.shipmentId, shipmentId))
+    .returning({ id: shipmentCarrierTrackingEvents.id });
+  return deleted.length;
+}
+
 export async function getCarrierTrackingEvents(shipmentId: string): Promise<ShipmentCarrierTrackingEvent[]> {
   return db
     .select()

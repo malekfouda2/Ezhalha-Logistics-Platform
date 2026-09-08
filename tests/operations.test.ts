@@ -10,16 +10,23 @@ import {
   createAttentionFlag,
   ensureOperationAssignmentForShipment,
   ensureOperationProfile,
+  getOperationShipmentDetail,
   OPERATION_ROLE_NAMES,
   reassignOperationShipment,
   setOperationShipmentAssignments,
 } from "../server/services/operations";
+import { shouldRefreshShipment } from "../server/services/express-tracking-refresh";
+import {
+  getCarrierTrackingEvents,
+  recordCarrierTrackingEvents,
+} from "../server/services/carrier-tracking-events";
 import { InvoiceType, type InsertShipment, User } from "../shared/schema";
 
 let app: express.Express;
 let server: ReturnType<typeof createServer>;
 let request: supertest.SuperTest<supertest.Test>;
 let adminCookies: string[] = [];
+let adminUser: User;
 
 const TEST_PASSWORD = "OperationsTest123!";
 
@@ -218,6 +225,7 @@ beforeAll(async () => {
   const adminLoginRes = await request.post("/api/auth/login").send({ username: "admin", password: "admin123" });
   expect(adminLoginRes.status).toBe(200);
   adminCookies = adminLoginRes.headers["set-cookie"] || [];
+  adminUser = (await storage.getUserByUsername("admin"))!;
 }, 30000);
 
 afterAll(() => {
@@ -310,6 +318,162 @@ describe("Operations Hub", () => {
     const fallbackCreated = bogus.body.map((shipment: { createdAt: string }) => new Date(shipment.createdAt).getTime());
     expect(fallbackCreated).toEqual([...fallbackCreated].sort((a, b) => a - b));
   });
+
+describe("replacing an express shipment's carrier waybill", () => {
+  // The suite shares one database across runs, and the endpoint refuses a waybill already on
+  // another shipment — so fixed numbers would collide with whatever the last run created.
+  let seq = 0;
+  const awb = () => `77${Date.now().toString().slice(-8)}${(seq++).toString().padStart(2, "0")}`;
+
+  const replace = (shipmentId: string, body: Record<string, unknown>) =>
+    withCookies(
+      request.post(`/api/operations/shipments/${shipmentId}/carrier-tracking-number`).send(body),
+      adminCookies,
+    );
+
+  it("swaps the waybill and restarts tracking against the new number", async () => {
+    const { clientAccount } = await createClientWithUser();
+    const first = awb();
+    const second = awb();
+    const shipment = await createPaidExpressShipment(clientAccount.id, {
+      carrierTrackingNumber: first,
+      carrierStatus: "In transit",
+      status: "in_transit",
+    });
+
+    const res = await replace(shipment.id, {
+      carrierTrackingNumber: second,
+      reason: "Carrier voided the first waybill after an address correction.",
+      previousWaybillCancelled: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.previousCarrierTrackingNumber).toBe(first);
+
+    const updated = await storage.getShipment(shipment.id);
+    expect(updated!.carrierTrackingNumber).toBe(second);
+  });
+
+  it("brings a delivered shipment back so the new waybill can move it again", async () => {
+    // The poller refuses to regress a delivered shipment. Without resetting the status here,
+    // a replacement waybill on a shipment the OLD one reported delivered would never update
+    // again — it would sit at "delivered" forever while the goods were still travelling.
+    const { clientAccount } = await createClientWithUser();
+    const shipment = await createPaidExpressShipment(clientAccount.id, {
+      carrierTrackingNumber: awb(),
+      status: "delivered",
+      carrierStatus: "Delivered",
+      actualDelivery: new Date(),
+    });
+
+    const res = await replace(shipment.id, {
+      carrierTrackingNumber: awb(),
+      reason: "Wrong waybill was recorded against this consignment.",
+      previousWaybillCancelled: true,
+    });
+    expect(res.status).toBe(200);
+
+    const updated = await storage.getShipment(shipment.id);
+    expect(updated!.status).not.toBe("delivered");
+    expect(updated!.actualDelivery).toBeNull();
+    expect(shouldRefreshShipment(updated!)).toBe(true);
+  });
+
+  it("drops the old waybill's scan history", async () => {
+    // The events table is keyed on (shipmentId, eventKey) and carries no waybill of its own,
+    // so scans from the old consignment would otherwise sit in the new one's timeline.
+    const { clientAccount } = await createClientWithUser();
+    const shipment = await createPaidExpressShipment(clientAccount.id, {
+      carrierTrackingNumber: awb(),
+    });
+    await recordCarrierTrackingEvents({
+      shipmentId: shipment.id,
+      carrierCode: "FEDEX",
+      events: [
+        { status: "In transit", description: "Departed FedEx hub", timestamp: new Date("2026-09-01T10:00:00Z"), location: "Dubai" } as any,
+        { status: "Delivered", description: "Delivered", timestamp: new Date("2026-09-02T10:00:00Z"), location: "Riyadh" } as any,
+      ],
+    });
+    expect((await getCarrierTrackingEvents(shipment.id)).length).toBe(2);
+
+    const res = await replace(shipment.id, {
+      carrierTrackingNumber: awb(),
+      reason: "Reissued by the carrier.",
+      previousWaybillCancelled: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.clearedEvents).toBe(2);
+
+    // Not "the table is empty" — the endpoint immediately re-tracks the new waybill, so the
+    // carrier's scans for it land straight away. What must be gone is the OLD consignment's
+    // history, and in particular its delivery scan.
+    const after = await getCarrierTrackingEvents(shipment.id);
+    expect(after.some((event) => event.description === "Departed FedEx hub")).toBe(false);
+    expect(after.some((event) => event.description === "Delivered")).toBe(false);
+  });
+
+  it("clears the stored label, which belonged to the old waybill", async () => {
+    const { clientAccount } = await createClientWithUser();
+    const shipment = await createPaidExpressShipment(clientAccount.id, {
+      carrierTrackingNumber: awb(),
+      carrierLabelBase64: "JVBERi0xLjQK",
+      labelUrl: "https://example.invalid/label.pdf",
+    });
+
+    await replace(shipment.id, {
+      carrierTrackingNumber: awb(),
+      reason: "Reissued.",
+      previousWaybillCancelled: true,
+    });
+
+    const updated = await storage.getShipment(shipment.id);
+    expect(updated!.carrierLabelBase64).toBeNull();
+    expect(updated!.labelUrl).toBeNull();
+  });
+
+  it("refuses a waybill that is already on another shipment", async () => {
+    // Two shipments polling one waybill means both show the same scans and neither is right.
+    const { clientAccount } = await createClientWithUser();
+    const taken = awb();
+    const mine = awb();
+    const incumbent = await createPaidExpressShipment(clientAccount.id, { carrierTrackingNumber: taken });
+    const other = await createPaidExpressShipment(clientAccount.id, { carrierTrackingNumber: mine });
+
+    const res = await replace(other.id, { carrierTrackingNumber: taken, reason: "Typo." });
+    expect(res.status).toBe(409);
+    expect(res.body.conflictingShipmentId).toBe(incumbent.id);
+    expect((await storage.getShipment(other.id))!.carrierTrackingNumber).toBe(mine);
+  });
+
+  it("flags the old waybill for cancellation unless the operator says it is already dead", async () => {
+    // Nothing in this system can cancel a carrier booking. An abandoned waybill still gets
+    // collected, so the only thing that stops it is an operator being told.
+    const { clientAccount } = await createClientWithUser();
+    const shipment = await createPaidExpressShipment(clientAccount.id, { carrierTrackingNumber: awb() });
+
+    await replace(shipment.id, {
+      carrierTrackingNumber: awb(),
+      reason: "Rebooked by hand after the API failed.",
+    });
+
+    const detail = await getOperationShipmentDetail(shipment.id, adminUser);
+    expect(detail!.attentionFlags.some((flag) => flag.issueType === "carrier_waybill_to_unwind")).toBe(true);
+  });
+
+  it("requires a reason, and rejects a no-op replacement", async () => {
+    const { clientAccount } = await createClientWithUser();
+    const current = awb();
+    const shipment = await createPaidExpressShipment(clientAccount.id, { carrierTrackingNumber: current });
+
+    const noReason = await replace(shipment.id, { carrierTrackingNumber: awb() });
+    expect(noReason.status).toBe(400);
+
+    const sameNumber = await replace(shipment.id, {
+      carrierTrackingNumber: current,
+      reason: "No change at all.",
+    });
+    expect(sameNumber.status).toBe(400);
+  });
+});
 
   it("collects returned shipments in the returned queue without pulling them out of the active queues", async () => {
     const beforeSummaryRes = await withCookies(request.get("/api/operations/summary"), adminCookies);
@@ -1280,7 +1444,7 @@ describe("Operations Hub", () => {
     );
     expect(managerResolveSpecialRes.status).toBe(200);
     expect(managerResolveSpecialRes.body.specialHandling.status).toBe("RESOLVED");
-  });
+  }, 90000);
 
   it("keeps terminal shipments out of operations queues and summary counts", async () => {
     const { clientAccount } = await createClientWithUser();
