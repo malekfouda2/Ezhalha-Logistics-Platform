@@ -109,6 +109,7 @@ import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 import { extractPackageDetailsFromDocument } from "./services/package-extraction";
 import { extractCompanyDetailsFromDocuments, isGeminiCompanyExtractionConfigured } from "./services/gemini-company-extraction";
 import { applyCarrierTrackingToShipment } from "./services/express-tracking-refresh";
+import { clearCarrierTrackingEvents } from "./services/carrier-tracking-events";
 import {
   hasCommercialInvoiceData,
   renderCommercialInvoiceHtml,
@@ -165,6 +166,7 @@ import {
   ensureOperationProfile,
   getOperationRoleNames,
   getOperationShipmentDetail,
+  getOperationShipmentKind,
   updateOperationTaskMetadata,
   getOperationSummary,
   getOperationViewerScope,
@@ -7581,6 +7583,175 @@ export async function registerRoutes(
       res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
     } catch (error) {
       logError("Failed to delete tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Replace the carrier air waybill an express shipment travels on.
+   *
+   * Carriers void and reissue waybills, bookings get made by hand outside the system when an
+   * API call fails, and numbers get typed wrong. Until now none of that could be corrected: the
+   * waybill was written once at booking and never again, so a shipment on a dead number simply
+   * stopped tracking and an operator had nothing to do about it.
+   *
+   * The delicate part is not the write, it is everything the OLD waybill left behind. Scan
+   * history, delivery estimates, the stored label and the carrier status all describe a
+   * different consignment, and every one of them has to go — otherwise the shipment shows one
+   * timeline built from two waybills, and a stale "delivered" scan freezes it permanently,
+   * because the poller refuses to regress a delivered shipment.
+   */
+  app.post("/api/operations/shipments/:id/carrier-tracking-number", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const parsed = z.object({
+        carrierTrackingNumber: z.string().trim().min(4, "Enter the waybill the carrier issued.").max(64),
+        carrierCode: z.string().trim().min(1).max(32).optional(),
+        carrierName: z.string().trim().max(80).optional(),
+        // Required, not optional: this rewrites the identity of a shipment already in a
+        // client's hands, and "why" is the first thing anyone asks afterwards.
+        reason: z.string().trim().min(3, "Say why the waybill is being replaced.").max(500),
+        // Answered at the one moment the operator actually knows. A waybill that is still live
+        // with the carrier and no longer referenced by anything is how consignments get
+        // collected that nobody is expecting.
+        previousWaybillCancelled: z.boolean().optional().default(false),
+      }).parse(req.body || {});
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) return res.status(404).json({ error: "Shipment not found" });
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+
+      const kind = getOperationShipmentKind(shipment);
+      if (kind !== OperationShipmentKind.EXPRESS) {
+        return res.status(400).json({
+          error: kind === OperationShipmentKind.DANGEROUS_GOODS
+            ? "Use the dangerous goods booking step to record this shipment's air waybill."
+            : "Only express shipments can have their carrier waybill replaced here.",
+        });
+      }
+
+      if (shipment.status === "cancelled") {
+        return res.status(400).json({ error: "This shipment is cancelled. Reinstate it before giving it a new waybill." });
+      }
+
+      const previous = shipment.carrierTrackingNumber?.trim() || null;
+      if (previous && previous === parsed.carrierTrackingNumber) {
+        return res.status(400).json({ error: `This shipment is already on waybill ${previous}.` });
+      }
+
+      // Two shipments polling one waybill means both show the same scans and neither is right.
+      const clash = await storage.getShipmentByCarrierTrackingNumber(parsed.carrierTrackingNumber);
+      if (clash && clash.id !== shipment.id) {
+        return res.status(409).json({
+          error: `Waybill ${parsed.carrierTrackingNumber} is already on shipment ${clash.trackingNumber}.`,
+          conflictingShipmentId: clash.id,
+          conflictingTrackingNumber: clash.trackingNumber,
+        });
+      }
+
+      const clearedEvents = await clearCarrierTrackingEvents(shipment.id);
+
+      const previousStatus = shipment.status;
+      const updated = await storage.updateShipment(shipment.id, {
+        carrierTrackingNumber: parsed.carrierTrackingNumber,
+        ...(parsed.carrierCode ? { carrierCode: parsed.carrierCode } : {}),
+        ...(parsed.carrierName ? { carrierName: parsed.carrierName } : {}),
+        // Back to "booked, not yet scanned". Leaving a tracking-derived status in place stops
+        // the poller dead: it will not move a shipment out of delivered, so a replacement
+        // waybill on a previously-delivered shipment would never update again.
+        status: "created",
+        carrierStatus: "created",
+        carrierStatusRepeatCount: 0,
+        estimatedDelivery: null,
+        actualDelivery: null,
+        carrierErrorCode: null,
+        carrierErrorMessage: null,
+        carrierLastAttemptAt: null,
+        // The stored label belongs to the old waybill. Serving it after a replacement hands
+        // the client a label for a consignment that is no longer theirs.
+        carrierShipmentId: null,
+        carrierLabelBase64: null,
+        carrierLabelFormat: null,
+        labelUrl: null,
+      }) || shipment;
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "carrier_waybill_replaced",
+        title: previous ? "Air waybill replaced" : "Air waybill recorded",
+        description: previous
+          ? `${previous} → ${parsed.carrierTrackingNumber} on ${updated.carrierName || updated.carrierCode || "the carrier"}. ${parsed.reason} Cleared ${clearedEvents} scan(s) from the old waybill.`
+          : `${parsed.carrierTrackingNumber} recorded on ${updated.carrierName || updated.carrierCode || "the carrier"}. ${parsed.reason}`,
+        audience: OperationEventAudience.INTERNAL,
+      });
+
+      // The old waybill may still be live. Nothing in this system can cancel it, so the only
+      // thing that stops it being collected is an operator remembering — which is what a flag
+      // is for.
+      if (previous && !parsed.previousWaybillCancelled) {
+        await upsertOpenAttentionFlag({
+          shipmentId: shipment.id,
+          issueType: "carrier_waybill_to_unwind",
+          severity: "high",
+          details: `Waybill ${previous} was replaced by ${parsed.carrierTrackingNumber} and may still be open with ${shipment.carrierName || shipment.carrierCode || "the carrier"}. Cancel it by email — nothing in the system can.`,
+        });
+      }
+
+      await recordShipmentStatusChange({
+        shipment: updated,
+        previousStatus,
+        nextStatus: updated.status,
+        actorUserId: user.id,
+        source: "carrier_waybill_replaced",
+        notifyClient: false,
+      });
+
+      await logAudit(user.id, "replace_carrier_tracking_number", "shipment", shipment.id,
+        `Replaced carrier waybill on ${shipment.trackingNumber}: ${previous || "(none)"} → ${parsed.carrierTrackingNumber}. Reason: ${parsed.reason}`, req.ip);
+
+      // Pull the new waybill straight away. The operator asked for this number because they
+      // believe it is live; showing them within the second whether the carrier agrees is the
+      // difference between a fix and a hopeful edit. A failure here is not fatal — carriers
+      // routinely do not know a waybill for a while after it is issued.
+      let tracking: Awaited<ReturnType<CarrierAdapter["trackShipment"]>> | null = null;
+      let trackingError: string | null = null;
+      try {
+        const adapter = getAdapterForShipment(updated);
+        tracking = await withShipmentIntegrationAccount(
+          getIntegrationAppKeyForCarrier(adapter.carrierCode),
+          {
+            shipperCountryCode: updated.senderCountry,
+            recipientCountryCode: updated.recipientCountry,
+          },
+          () => adapter.trackShipment(parsed.carrierTrackingNumber),
+        );
+        await applyCarrierTrackingToShipment(updated, tracking, "carrier_waybill_replaced");
+      } catch (error: any) {
+        trackingError = error instanceof CarrierError
+          ? error.carrierMessage || error.message
+          : error?.message || "The carrier did not answer for this waybill.";
+        logError("Tracking failed immediately after a waybill replacement", {
+          shipmentId: shipment.id,
+          error: trackingError,
+        });
+      }
+
+      res.json({
+        success: true,
+        previousCarrierTrackingNumber: previous,
+        clearedEvents,
+        tracking,
+        trackingError,
+        detail: await getOperationShipmentDetail(shipment.id, user),
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Failed to replace carrier tracking number", { error: error.message });
       res.status(500).json({ error: "Internal server error" });
     }
   });
