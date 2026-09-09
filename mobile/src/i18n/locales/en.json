@@ -843,6 +843,225 @@
         }
       }
     },
+    "dangerousGoods": {
+      "title": "Dangerous Goods",
+      "description": "Regulated items — quoted by our team, not priced automatically.",
+      "tile": {
+        "requestAccess": "Request access",
+        "pending": "Request under review"
+      },
+      "gate": {
+        "title": "Request dangerous goods access",
+        "description": "Tell us what you need to ship. We'll ask for your dangerous goods training certificate and the safety data sheets before approving the account.",
+        "requestPendingMessage": "Your request is with our team. We'll let you know as soon as it's reviewed.",
+        "reasonLabel": "What do you need to ship?",
+        "reasonPlaceholder": "e.g. lithium ion batteries in equipment, monthly to the UAE",
+        "requestAccess": "Send request",
+        "requesting": "Sending...",
+        "requestSuccessTitle": "Request sent",
+        "requestSuccessMessage": "We'll review your dangerous goods training and safety data sheets and come back to you.",
+        "requestErrorTitle": "Couldn't send the request",
+        "requestErrorMessage": "Please try again."
+      },
+      "steps": {
+        "step1": {
+          "title": "Shipment Type",
+          "subtitle": "Select the shipment direction",
+          "direction": {
+            "title": "DIRECTION",
+            "domestic": {
+              "title": "Domestic",
+              "description": "Inside Saudi Arabia"
+            },
+            "import": {
+              "title": "Import",
+              "description": "International shipping into a country (inbound)"
+            },
+            "export": {
+              "title": "Export",
+              "description": "International shipping out of a country (outbound)"
+            }
+          },
+          "info": "Direction decides which customs steps you'll see later."
+        },
+        "step2": {
+          "title": "Shipper Details",
+          "subtitle": "Where the goods are collected from",
+          "savedAddresses": {
+            "title": "SAVED SENDER ADDRESSES",
+            "description": "Reuse your default shipping address or any sender details you used in previous shipments.",
+            "placeholder": "Select a saved sender address",
+            "empty": "No saved sender addresses yet."
+          },
+          "newAddress": "OR ENTER A NEW ADDRESS",
+          "country": "Select country",
+          "senderFullName": "Sender's full name",
+          "senderCompany": "Sender company",
+          "addressLine1": "Address line 1",
+          "addressLine2": "Address Line 2",
+          "city": "City",
+          "postalCode": "Postal code",
+          "stateOrProvince": "State / Province (optional)",
+          "shortAddress": "National Address (e.g. RCTB4359)"
+        },
+        "step3": {
+          "title": "Recipient Details",
+          "subtitle": "Delivery address and contact",
+          "country": {
+            "placeholder": "Select country"
+          },
+          "savedRecipients": {
+            "title": "SAVED RECIPIENT ADDRESSES",
+            "description": "Reuse your default shipping address or any recipient details you used in previous shipments.",
+            "placeholder": "Select a saved recipient address",
+            "empty": "No saved recipient addresses yet."
+          },
+          "newAddress": {
+            "title": "OR ENTER A NEW ADDRESS",
+            "recipientFullName": "Recipient's full name",
+            "recipientCompany": "Recipient company",
+            "addressLine1": "Address line 1",
+            "addressLine2": "Address Line 2",
+            "city": "City",
+            "postalCode": "Postal code",
+            "stateOrProvince": "State / Province (optional)",
+            "shortAddress": "National Address (e.g. RCTB4359)"
+          },
+          "info": "Some countries also require a state or province."
+        },
+        "step4": {
+          "title": "Package Details",
+          "subtitle": "Weight and dimensions",
+          "addPackage": "Add another package",
+          "priceWarning": "Heads up. We will not show you a price at the end of this form. Our team arranges dangerous goods with the carrier and sends you a quotation."
+        },
+        "step5": {
+          "title": "What are you shipping?",
+          "subtitle": "Choose the content that matches your declaration",
+          "selectRequired": "Please choose a content kind to continue.",
+          "footnote": "Not sure which applies? Section 14 of your safety data sheet names the substance and its UN number.",
+          "contentKinds": {
+            "LITHIUM_ION_PI967_SECTION_II": {
+              "label": "Batteries in equipment",
+              "description": "Lithium ion cells fitted inside the device — phones, laptops, power tools."
+            },
+            "LITHIUM_ION_PI966_SECTION_II": {
+              "label": "Batteries with equipment",
+              "description": "Lithium ion batteries packed alongside the device they power."
+            },
+            "LITHIUM_ION_PI965_SECTION_II": {
+              "label": "Batteries on their own",
+              "description": "Loose lithium ion cells or battery packs shipped by themselves."
+            },
+            "LITHIUM_METAL_PI970_SECTION_II": {
+              "label": "Lithium metal in equipment",
+              "description": "Non-rechargeable lithium metal cells fitted inside the device."
+            },
+            "LITHIUM_METAL_PI969_SECTION_II": {
+              "label": "Lithium metal with equipment",
+              "description": "Non-rechargeable lithium metal cells packed alongside the device."
+            },
+            "FULLY_REGULATED": {
+              "label": "Chemicals & fully regulated",
+              "description": "Flammables, corrosives, toxics and anything else needing a full declaration."
+            },
+            "LIMITED_QUANTITIES_ADR": {
+              "label": "Limited quantities",
+              "description": "Small retail-sized quantities packed to the limited quantity exception."
+            },
+            "CONSUMER_COMMODITY_ID8000": {
+              "label": "Consumer commodity",
+              "description": "Retail aerosols, cosmetics and toiletries shipped as ID8000."
+            },
+            "BIOLOGICAL_SUBSTANCE_UN3373": {
+              "label": "Biological substance",
+              "description": "Category B diagnostic or clinical specimens shipped as UN3373."
+            },
+            "EXEMPT_SPECIMENS": {
+              "label": "Exempt specimens",
+              "description": "Human or animal specimens with a minimal likelihood of pathogens."
+            },
+            "MAGNETIZED_MATERIAL_UN2807": {
+              "label": "Magnetized material",
+              "description": "Speakers, motors and magnets strong enough to affect aircraft instruments."
+            },
+            "PRESSURIZED_ARTICLES_UN3164": {
+              "label": "Pressurized articles",
+              "description": "Shock absorbers, gas struts and other articles held under pressure."
+            },
+            "LITHIUM_FULLY_REGULATED": {
+              "label": "Fully regulated lithium",
+              "description": "Large or damaged lithium batteries outside the Section II allowances."
+            },
+            "GENETICALLY_MODIFIED_ORGANISMS": {
+              "label": "Genetically modified organisms",
+              "description": "GMOs and genetically modified micro-organisms shipped as UN3245."
+            }
+          }
+        },
+        "step6": {
+          "title": "Safety Data Sheet",
+          "subtitle": "Upload the sheet, we'll read it",
+          "sdsLabel": "Safety Data Sheet",
+          "uploadSheet": "Upload safety data sheet",
+          "addAnotherSheet": "Add another sheet",
+          "sdsAttachedCount_one": "{{count}} file attached",
+          "sdsAttachedCount_other": "{{count}} files attached",
+          "fileHint": "PDF or image · up to {{max}} files",
+          "maxFilesTitle": "You can attach up to {{max}} files.",
+          "extractionCardTitle": "READ FROM YOUR DOCUMENT",
+          "unNumber": "UN number",
+          "classAndGroup": "Class",
+          "packingInstruction": "Packing instruction",
+          "notDangerousGoodsTitle": "This may not need the dangerous goods flow",
+          "notDangerousGoodsMessage": "Our reading of your document suggests these items may not be dangerous goods. You can still continue, or start over as a regular shipment.",
+          "notDangerousGoodsMessagePart1": "That document says the product is",
+          "notDangerousGoodsEmphasis": "not regulated",
+          "notDangerousGoodsMessagePart2": "for transport. If that's right, send it as a normal express shipment instead — you'll get a price immediately and it will cost less. If you're not sure, carry on and our team will confirm it.",
+          "switchToExpress": "Switch to an express shipment",
+          "extractionSuccessTitle": "Safety data sheet processed",
+          "declarationLabel": "Add the Shipper's Declaration too (optional)",
+          "declarationHint": "If you already have one prepared. We don't read it — it goes to our operations team with the shipment.",
+          "uploadRequiredTitle": "Upload the safety data sheet",
+          "uploadRequiredMessage": "We read the transport classification off it so you don't have to type it in."
+        },
+        "step7": {
+          "title": "Customs Items",
+          "subtitle": "International only",
+          "noItemsYet": "No customs items yet.",
+          "addItem": "Add item"
+        },
+        "step8": {
+          "title": "Review & Submit",
+          "subtitle": "One last check before we send this to our team",
+          "from": "From",
+          "to": "To",
+          "packages": "Packages",
+          "packagesValue_one": "{{count}} · {{weight}} KG",
+          "packagesValue_other": "{{count}} · {{weight}} KG",
+          "declarationLabel": "DECLARATION",
+          "contents": "Contents",
+          "notClassified": "Not yet classified",
+          "sheets": "Sheets",
+          "sheetsAttached_one": "{{count}} attached",
+          "sheetsAttached_other": "{{count}} attached",
+          "preferredPickupDate": "Preferred collection (optional)",
+          "nothingChargedNow": "Nothing is charged now. We will price this with the carrier and send you a quotation.",
+          "submit": "Submit declaration"
+        },
+        "step9": {
+          "title": "Declaration submitted",
+          "subtitle": "We will come back to you with a price",
+          "reference": "Reference",
+          "status": "Status",
+          "underReview": "Under Review",
+          "chargedSoFar": "Charged so far",
+          "nothing": "Nothing",
+          "note": "Our team is reviewing the declaration and arranging carriage. You will be notified when the quotation is ready — the shipment does not move, and you are not charged, until you accept it.",
+          "viewShipments": "View my shipments"
+        }
+      }
+    },
     "continue": "Continue",
     "confirmation": {
       "express": {
@@ -1019,6 +1238,20 @@
           "processErrorMessage": "Please upload another file or enter the packages manually.",
           "successTitle": "Packing list processed",
           "successMessage": "{{count}} package(s) imported."
+        }
+      },
+      "dangerousGoods": {
+        "sds": {
+          "uploadFailedTitle": "Safety data sheet upload failed",
+          "unsupportedFormatTitle": "Unsupported file format",
+          "unsupportedFormatMessage": "Upload a PDF, JPG, or PNG safety data sheet.",
+          "tooLargeTitle": "Document is too large",
+          "tooLargeMessage": "The file exceeds the {{limit}}MB limit.",
+          "processErrorTitle": "Could not read the safety data sheet"
+        },
+        "submit": {
+          "errorTitle": "Could not submit declaration",
+          "errorMessage": "Please try again."
         }
       },
       "local": {

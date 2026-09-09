@@ -14,7 +14,7 @@ import {
   handleDownloadCommercialInvoice,
 } from "@/utils/utils";
 
-type ShipmentType = "express" | "local" | "freight";
+type ShipmentType = "express" | "local" | "freight" | "dangerousGoods";
 
 type DocAction = {
   key: string;
@@ -23,18 +23,37 @@ type DocAction = {
   onPress: () => void | Promise<void>;
 };
 
+/** One line in the uniform "rows" card style (dangerous goods) — label left, value right. */
+type ConfigRow = {
+  label: string;
+  value: string;
+  pill?: boolean;
+};
+
 type ShipmentConfig = {
   title: string;
   subtitle: string;
-  idLabel: string;
-  idValue: string;
   footerTitle: string;
   onFooterPress: (router: ReturnType<typeof useRouter>) => void;
-  cardRow: {
+  docActions?: DocAction[];
+  /**
+   * The original big-centered-ID card: idLabel/idValue up top, then an optional divider and
+   * one left-text/right-pill row. Used by express/local/freight.
+   */
+  idLabel?: string;
+  idValue?: string;
+  cardRow?: {
     left: string;
     status: string;
   };
-  docActions?: DocAction[];
+  /**
+   * The uniform stacked-rows card (dangerous goods' own design from its old step-9): every
+   * row is a plain label/value pair, optionally shown as a pill. Takes over the whole card
+   * when set — idLabel/idValue/cardRow are ignored.
+   */
+  rows?: ConfigRow[];
+  /** Explanatory text shown below the card. */
+  note?: string;
 };
 
 function getConfig(
@@ -80,6 +99,31 @@ function getConfig(
           left: params.route || "Air · China → Riyadh",
           status: t("createShipment.confirmation.freight.statusUnderReview"),
         },
+        docActions: undefined,
+      };
+
+    case "dangerousGoods":
+      return {
+        title: t("createShipment.dangerousGoods.steps.step9.title"),
+        subtitle: t("createShipment.dangerousGoods.steps.step9.subtitle"),
+        footerTitle: t("createShipment.dangerousGoods.steps.step9.viewShipments"),
+        onFooterPress: (r) => r.replace("/(tabs)/shipments"),
+        rows: [
+          {
+            label: t("createShipment.dangerousGoods.steps.step9.reference"),
+            value: params.trackingNumber || "",
+          },
+          {
+            label: t("createShipment.dangerousGoods.steps.step9.status"),
+            value: t("createShipment.dangerousGoods.steps.step9.underReview"),
+            pill: true,
+          },
+          {
+            label: t("createShipment.dangerousGoods.steps.step9.chargedSoFar"),
+            value: t("createShipment.dangerousGoods.steps.step9.nothing"),
+          },
+        ],
+        note: t("createShipment.dangerousGoods.steps.step9.note"),
         docActions: undefined,
       };
 
@@ -147,7 +191,7 @@ export default function ShipmentConfirmationScreen() {
   }, [router]);
 
   const type: ShipmentType =
-    params.type === "local" || params.type === "freight"
+    params.type === "local" || params.type === "freight" || params.type === "dangerousGoods"
       ? params.type
       : "express";
 
@@ -156,7 +200,7 @@ export default function ShipmentConfirmationScreen() {
     route: params.route,
     shipmentId: params.shipmentId,
   });
-  const showCardRow = config.cardRow.left.length > 0;
+  const showCardRow = !!config.cardRow && config.cardRow.left.length > 0;
 
   const handleDocPress = async (action: DocAction) => {
     if (downloadingKey) return;
@@ -183,37 +227,70 @@ export default function ShipmentConfirmationScreen() {
           {config.subtitle}
         </Text>
 
-        <View style={styles.idCard}>
-          <Text size="xs" weight="bold" style={styles.idLabel}>
-            {config.idLabel}
-          </Text>
-
-          <Text size="medium" weight="bold" style={styles.idValue}>
-            {config.idValue}
-          </Text>
-
-          {showCardRow && (
-            <>
-              <View style={styles.divider} />
-
-              <View style={styles.trackingRow}>
-                <Text
-                  size="small"
-                  weight="semibold"
-                  style={styles.trackingText}
-                >
-                  {config.cardRow.left}
+        {config.rows ? (
+          <View style={styles.idCard}>
+            {config.rows.map((row, index) => (
+              <View
+                key={row.label}
+                style={[styles.row, index > 0 && styles.rowSpacing]}
+              >
+                <Text size="small" style={styles.rowLabel}>
+                  {row.label}
                 </Text>
 
-                <View style={styles.statusPill}>
-                  <Text size="xs" weight="bold" style={styles.statusText}>
-                    {config.cardRow.status}
+                {row.pill ? (
+                  <View style={styles.statusPill}>
+                    <Text size="xs" weight="bold" style={styles.statusText}>
+                      {row.value}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text size="small" weight="bold" style={styles.rowValue}>
+                    {row.value}
                   </Text>
-                </View>
+                )}
               </View>
-            </>
-          )}
-        </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.idCard}>
+            <Text size="xs" weight="bold" style={styles.idLabel}>
+              {config.idLabel}
+            </Text>
+
+            <Text size="medium" weight="bold" style={styles.idValue}>
+              {config.idValue}
+            </Text>
+
+            {showCardRow && (
+              <>
+                <View style={styles.divider} />
+
+                <View style={styles.trackingRow}>
+                  <Text
+                    size="small"
+                    weight="semibold"
+                    style={styles.trackingText}
+                  >
+                    {config.cardRow!.left}
+                  </Text>
+
+                  <View style={styles.statusPill}>
+                    <Text size="xs" weight="bold" style={styles.statusText}>
+                      {config.cardRow!.status}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            )}
+          </View>
+        )}
+
+        {config.note ? (
+          <Text size="small" dimRate="60%" style={styles.note}>
+            {config.note}
+          </Text>
+        ) : null}
 
         {config.docActions && config.docActions.length > 0 && (
           <View style={styles.docRow}>
@@ -327,6 +404,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+
+  row: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  rowSpacing: {
+    marginTop: rvs(6),
+  },
+
+  rowLabel: {
+    color: Colors.textSecondary,
+  },
+
+  rowValue: {
+    color: Colors.text,
+  },
+
+  note: {
+    textAlign: "center",
+    marginTop: rvs(4),
+    marginBottom: rvs(10),
   },
 
   trackingText: {

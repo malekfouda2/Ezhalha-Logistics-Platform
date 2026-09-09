@@ -11,12 +11,15 @@ import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { ReactNode } from "react";
+import { TextSize } from "@/constants/typography";
 
 export interface ButtonProps extends PressableProps {
   title: string | ReactNode;
   variant?: "primary" | "outline";
   loading?: boolean;
   style?: ViewStyle;
+  /** Overrides the title's text size. Defaults to "medium". */
+  fontSize?: TextSize | number;
 }
 
 export const Button = ({
@@ -25,6 +28,7 @@ export const Button = ({
   loading = false,
   disabled,
   style,
+  fontSize = "medium",
   ...otherProps
 }: ButtonProps) => {
   const isOutline = variant === "outline";
@@ -47,7 +51,7 @@ export const Button = ({
         />
       ) : typeof title === "string" ? (
         <Text
-          size="medium"
+          size={fontSize}
           weight="semibold"
           style={isOutline ? styles.outlineText : styles.primaryText}
         >

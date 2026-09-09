@@ -1,7 +1,7 @@
 // app/create-shipment.tsx
-import { useRouter } from "expo-router";
+import { useCallback } from "react";
+import { useRouter, useFocusEffect } from "expo-router";
 import {
-  ScrollView,
   View,
   StyleSheet,
   Pressable,
@@ -10,9 +10,11 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
+import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Feather, MaterialIcons, Fontisto, Ionicons } from "@expo/vector-icons";
+import { useDangerousGoodsAccessStatus } from "@/lib/hooks/useDangerousGoodsAccessGate";
 
 type ShipmentTypeIcon =
   | {
@@ -69,6 +71,16 @@ const SHIPMENT_TYPES: ShipmentType[] = [
     iconBg: "#D7F0E3",
     route: "/createShipment/local",
   },
+  {
+    id: "dangerousGoods",
+    icon: {
+      library: "ionicons",
+      name: "warning-outline",
+    },
+    iconColor: "#B8760A",
+    iconBg: "#FDF0D8",
+    route: "/createShipment/dangerousGoods",
+  },
 ];
 
 export default function CreateShipmentScreen() {
@@ -76,12 +88,23 @@ export default function CreateShipmentScreen() {
   const { t } = useTranslation();
   const isRTL = I18nManager.isRTL;
 
+  const { data: dangerousGoodsAccess, refetch: refetchDangerousGoodsAccess } =
+    useDangerousGoodsAccessStatus();
+  const dangerousGoodsLocked = !(dangerousGoodsAccess?.enabled ?? false);
+  const dangerousGoodsPending = dangerousGoodsAccess?.request?.status === "pending";
+
+  // Approval can land while the client is elsewhere in the app (this tab stays mounted, so
+  // the query alone wouldn't refetch just from switching back to it) — re-check every time
+  // this screen gains focus so a freshly-approved account doesn't still show "locked".
+  useFocusEffect(
+    useCallback(() => {
+      refetchDangerousGoodsAccess();
+    }, [refetchDangerousGoodsAccess]),
+  );
+
   return (
     <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <RefreshableScreen contentContainerStyle={styles.scrollContent}>
         <Text size="xl" weight="bold">
           {t("createShipment.heading")}
         </Text>
@@ -89,66 +112,93 @@ export default function CreateShipmentScreen() {
           {t("createShipment.subheading")}
         </Text>
 
-        {SHIPMENT_TYPES.map((item) => (
-          <View key={item.id} style={styles.card}>
-            <View
-              style={[styles.iconWrapper, { backgroundColor: item.iconBg }]}
-            >
-              {item.icon.library === "feather" ? (
-                <Feather
-                  name={item.icon.name}
-                  size={rs(28)}
-                  color={item.iconColor}
-                />
-              ) : item.icon.library === "materialIcons" ? (
-                <MaterialIcons
-                  name={item.icon.name}
-                  size={rs(28)}
-                  color={item.iconColor}
-                />
-              ) : item.icon.library === "fontisto" ? (
-                <Fontisto
-                  name={item.icon.name}
-                  size={rs(28)}
-                  color={item.iconColor}
-                />
-              ) : (
-                <Ionicons
-                  name={item.icon.name}
-                  size={rs(28)}
-                  color={item.iconColor}
-                />
-              )}
-            </View>
+        {SHIPMENT_TYPES.map((item) => {
+          // Dangerous goods is gated per account — the tile stays visible so a client can
+          // discover and request the service, but its footer swaps to a lock state until an
+          // admin approves. Tapping still navigates through either way: the wizard's own
+          // index route shows the request screen when locked. Mirrors the web chooser
+          // (client/src/pages/client/create-shipment-select.tsx).
+          const locked = item.id === "dangerousGoods" && dangerousGoodsLocked;
 
-            <Text size="medium" weight="bold">
-              {t(`createShipment.${item.id}.title`)}
-            </Text>
+          return (
+            <View key={item.id} style={styles.card}>
+              <View
+                style={[styles.iconWrapper, { backgroundColor: item.iconBg }]}
+              >
+                {item.icon.library === "feather" ? (
+                  <Feather
+                    name={item.icon.name}
+                    size={rs(28)}
+                    color={item.iconColor}
+                  />
+                ) : item.icon.library === "materialIcons" ? (
+                  <MaterialIcons
+                    name={item.icon.name}
+                    size={rs(28)}
+                    color={item.iconColor}
+                  />
+                ) : item.icon.library === "fontisto" ? (
+                  <Fontisto
+                    name={item.icon.name}
+                    size={rs(28)}
+                    color={item.iconColor}
+                  />
+                ) : (
+                  <Ionicons
+                    name={item.icon.name}
+                    size={rs(28)}
+                    color={item.iconColor}
+                  />
+                )}
+              </View>
 
-            <Text size="xs" dimRate="60%" style={styles.cardDescription}>
-              {t(`createShipment.${item.id}.description`)}
-            </Text>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.continueRow,
-                pressed && { opacity: 0.6 },
-              ]}
-              onPress={() => router.push(item.route as any)}
-            >
-              <Text size="medium" weight="semibold" style={styles.continueText}>
-                {t("createShipment.continue")}
+              <Text size="medium" weight="bold">
+                {t(`createShipment.${item.id}.title`)}
               </Text>
-              <Feather
-                name={isRTL ? "arrow-left" : "arrow-right"}
-                size={rs(18)}
-                color={Colors.primary}
-                style={styles.continueIcon}
-              />
-            </Pressable>
-          </View>
-        ))}
-      </ScrollView>
+
+              <Text size="xs" dimRate="60%" style={styles.cardDescription}>
+                {t(`createShipment.${item.id}.description`)}
+              </Text>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.continueRow,
+                  pressed && { opacity: 0.6 },
+                ]}
+                onPress={() => router.push(item.route as any)}
+              >
+                {locked ? (
+                  <>
+                    <Feather
+                      name="lock"
+                      size={rs(16)}
+                      color={Colors.primary}
+                      style={styles.lockIcon}
+                    />
+                    <Text size="medium" weight="semibold" style={styles.continueText}>
+                      {dangerousGoodsPending
+                        ? t("createShipment.dangerousGoods.tile.pending")
+                        : t("createShipment.dangerousGoods.tile.requestAccess")}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text size="medium" weight="semibold" style={styles.continueText}>
+                      {t("createShipment.continue")}
+                    </Text>
+                    <Feather
+                      name={isRTL ? "arrow-left" : "arrow-right"}
+                      size={rs(18)}
+                      color={Colors.primary}
+                      style={styles.continueIcon}
+                    />
+                  </>
+                )}
+              </Pressable>
+            </View>
+          );
+        })}
+      </RefreshableScreen>
     </View>
   );
 }
@@ -191,5 +241,8 @@ const styles = StyleSheet.create({
   },
   continueIcon: {
     marginStart: rs(6),
+  },
+  lockIcon: {
+    marginEnd: rs(6),
   },
 });
