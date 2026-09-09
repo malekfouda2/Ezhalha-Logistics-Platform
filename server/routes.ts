@@ -73,6 +73,7 @@ import {
 } from "@shared/internal-users";
 import {
   normalizePricingAccountType,
+  PricingAccountType,
   PRICING_ACCOUNT_TYPES,
   type PricingAccountTypeValue,
 } from "@shared/pricing-account-types";
@@ -618,7 +619,7 @@ class EmailInUseError extends Error {
 async function approveClientApplication(
   application: ClientApplication,
   options: { profile?: string; reviewedByUserId?: string; reviewNotes?: string; ipAddress?: string; auditAction?: string },
-): Promise<ClientAccount> {
+): Promise<{ clientAccount: ClientAccount; user: User }> {
   const existingUser = await storage.getUserByEmail(application.email);
   if (existingUser) {
     throw new EmailInUseError();
@@ -699,7 +700,10 @@ async function approveClientApplication(
 
   await sendPasswordSetupEmail(createdUser, "onboard");
 
-  return clientAccount;
+  // The created user is returned so an auto-approved individual can be signed in on the spot.
+  // The onboard email still goes out: it is how they get back in on their next visit, since no
+  // password was chosen here.
+  return { clientAccount, user: createdUser };
 }
 
 // Issue a one-time token and email a set/reset-password link. purpose "onboard" (7-day) for new
@@ -3630,6 +3634,18 @@ const companyExtractionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Guest rating on the public `/api/public/guest/*` endpoints. Every request here spends a live
+// call to FedEx/DHL/Aramex or a local carrier with no account behind it, so this is deliberately
+// tighter than the authenticated client path: enough to walk the wizard and re-rate a few times,
+// not enough to scrape a rate card.
+const guestRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: { error: "Too many rate requests. Please wait a few minutes, or create an account." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Email-OTP login: throttle per email address rather than per IP, for the carrier-NAT
 // reason above. The handler additionally caps codes per email in the database (4 per 10
 // minutes), and authIpCeilingLimiter bounds the whole endpoint per network.
@@ -3691,6 +3707,7 @@ function clearFailedLogins(identifier: string) {
 import {
   loginSchema,
   applicationFormSchema,
+  guestShipmentDraftSchema,
   createShipmentSchema,
   TASK_PERMISSION_NAMES,
   mobileDeviceSchema,
@@ -10015,6 +10032,10 @@ export async function registerRoutes(
       }
       
       const data = applicationFormSchema.parse(req.body);
+      // A shipment the applicant built as a guest, carried over so registering does not cost
+      // them the work. Opaque here — only the wizard understands its shape — so it is length-
+      // capped and stored verbatim rather than validated field by field.
+      const shipmentDraft = guestShipmentDraftSchema.parse(req.body.shipmentDraft ?? null);
       if (data.accountType === "company") {
         const missingDocumentTypes = getMissingCompanyApplicationDocumentTypes(data.documents);
         if (missingDocumentTypes.length > 0) {
@@ -10036,18 +10057,35 @@ export async function registerRoutes(
         ...data,
         country,
         documents: data.documents || null,
+        shipmentDraft: shipmentDraft ? JSON.stringify(shipmentDraft) : null,
         status: "pending",
       });
 
       // Individual applicants are auto-approved — no manual review. Companies stay pending for
       // an admin to review their documents.
       let autoApproved = false;
+      let sessionEstablished = false;
       if (data.accountType === "individual") {
         try {
-          await approveClientApplication(application, {
+          const { user: createdUser } = await approveClientApplication(application, {
             auditAction: "auto_approve_application",
           });
           autoApproved = true;
+
+          // Signed in immediately. Approval creates the user with a deliberately unusable
+          // random password (they set a real one from the emailed link), so without this the
+          // applicant would be approved and still locked out — and would lose the shipment
+          // they just built waiting for an email.
+          const sessionResult = await establishUserSession(req, createdUser, "auto_approval");
+          if ("error" in sessionResult) {
+            logWarn("Auto-approved applicant could not be signed in", {
+              applicationId: application.id,
+              reason: sessionResult.error,
+            });
+          } else {
+            sessionEstablished = true;
+          }
+
           logInfo("Individual application auto-approved", { applicationId: application.id, email: data.email });
         } catch (error) {
           if (!(error instanceof EmailInUseError)) {
@@ -10077,7 +10115,8 @@ export async function registerRoutes(
       });
 
       // Return the current application state (approved for auto-approved individuals).
-      const response = (await storage.getClientApplication(application.id)) || application;
+      const applicationState = (await storage.getClientApplication(application.id)) || application;
+      const response = { ...applicationState, autoApproved, authenticated: sessionEstablished };
 
       // Store idempotency record
       if (idempotencyKey) {
@@ -11219,7 +11258,7 @@ export async function registerRoutes(
 
       if (action === "approve") {
         try {
-          const clientAccount = await approveClientApplication(application, {
+          const { clientAccount } = await approveClientApplication(application, {
             profile,
             reviewedByUserId: req.session.userId,
             reviewNotes: notes,
@@ -17754,6 +17793,56 @@ export async function registerRoutes(
   });
 
   // Client - Get Current User's Permissions
+  // A shipment the client built as a guest before they registered, handed back once their
+  // account exists. Individuals pick theirs up from the browser and never hit this; it is the
+  // company path that needs it, because approval can take days and the browser copy may be gone.
+  app.get("/api/client/pending-draft", requireClient, async (req, res) => {
+    try {
+      const account = req.currentClientAccount;
+      if (!account) {
+        return res.json({ draft: null });
+      }
+
+      const application = await storage.getApprovedApplicationWithDraft(account.email);
+      if (!application?.shipmentDraft) {
+        return res.json({ draft: null });
+      }
+
+      let draft: unknown;
+      try {
+        draft = JSON.parse(application.shipmentDraft);
+      } catch {
+        // A draft we cannot parse is a draft we cannot replay. Drop it rather than hand the
+        // client a banner that leads nowhere.
+        await storage.updateClientApplication(application.id, { shipmentDraft: null });
+        return res.json({ draft: null });
+      }
+
+      res.json({ draft, applicationId: application.id });
+    } catch (error) {
+      logError("Failed to load pending shipment draft", error);
+      res.status(500).json({ error: "Failed to load pending shipment draft" });
+    }
+  });
+
+  // Consuming the draft clears it, so a refresh cannot replay the same shipment twice.
+  app.post("/api/client/pending-draft/dismiss", requireClient, async (req, res) => {
+    try {
+      const account = req.currentClientAccount;
+      if (!account) {
+        return res.json({ success: true });
+      }
+      const application = await storage.getApprovedApplicationWithDraft(account.email);
+      if (application) {
+        await storage.updateClientApplication(application.id, { shipmentDraft: null });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      logError("Failed to clear pending shipment draft", error);
+      res.status(500).json({ error: "Failed to clear pending shipment draft" });
+    }
+  });
+
   app.get("/api/client/my-permissions", requireClient, async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -19153,6 +19242,314 @@ export async function registerRoutes(
   });
 
   // STEP 1: Rate Discovery - Get rates from all carriers
+  // ── GUEST RATING (public) ─────────────────────────────────────────────────────
+  // A visitor who has not registered can walk the create-shipment wizard and see a real live
+  // rate. These two endpoints are the ONLY unauthenticated surface guest mode adds.
+  //
+  // They mirror the client handlers immediately below/above them, with the per-client inputs
+  // replaced by constants, and they differ from them in three deliberate ways:
+  //
+  //  1. They persist NOTHING. `shipment_rate_quotes.clientAccountId` is NOT NULL, and a guest
+  //     has no account — so, exactly like `/api/client/quick-quote`, no quote row is written.
+  //     The returned figure is indicative and is re-priced for real once the visitor registers.
+  //  2. They price at the standard `regular` profile and the INDIVIDUAL account type. A guest
+  //     has not chosen a type yet, and individual is the one they can actually get today
+  //     without waiting for approval.
+  //  3. Dangerous goods are refused outright: DG needs a per-client approval flag and an
+  //     approved carrier account, neither of which a guest can have.
+  //
+  // Carrier selection still works without an account: `clientAccountId` is optional in
+  // IntegrationAccountRoutingOptions, and the default country basis is the shipping country,
+  // so a guest reaches the same carrier accounts a real client on this lane would.
+  const GUEST_PRICING_PROFILE = "regular";
+  const GUEST_ACCOUNT_TYPE = PricingAccountType.INDIVIDUAL;
+
+  app.post("/api/public/guest/express-rates", guestRateLimiter, async (req, res) => {
+    try {
+      // Checked before the schema, deliberately: dangerous goods are refused for a guest whether
+      // or not the declaration is well-formed. Validating first would answer a malformed DG
+      // payload with a field error, implying it would be quoted once corrected.
+      if (req.body?.dangerousGoods) {
+        return res.status(403).json({
+          error: "Dangerous goods shipments need an approved account. Please create one to continue.",
+        });
+      }
+
+      const data = shipmentInputSchema.parse(req.body);
+
+      if (data.isDdp) {
+        return res.status(400).json({
+          error: "Door-to-door freight is arranged with our team. Please create an account.",
+        });
+      }
+
+      const addrValidation = validateShippingAddresses(data.shipper, data.recipient);
+      if (!addrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: addrValidation.errors });
+      }
+
+      const pricingRule = await storage.getPricingRuleByProfile(GUEST_PRICING_PROFILE);
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+
+      const carrierAdapters = data.carrier?.trim()
+        ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
+        : carrierService.getSupportedCarriers();
+
+      const rateRequest = {
+        shipper: {
+          name: data.shipper.name,
+          streetLine1: data.shipper.addressLine1,
+          streetLine2: data.shipper.addressLine2,
+          streetLine3: data.shipper.shortAddress,
+          city: data.shipper.city,
+          stateOrProvince: data.shipper.stateOrProvince,
+          postalCode: data.shipper.postalCode,
+          countryCode: data.shipper.countryCode,
+          phone: data.shipper.phone,
+          email: data.shipper.email,
+        },
+        recipient: {
+          name: data.recipient.name,
+          streetLine1: data.recipient.addressLine1,
+          streetLine2: data.recipient.addressLine2,
+          streetLine3: data.recipient.shortAddress,
+          city: data.recipient.city,
+          stateOrProvince: data.recipient.stateOrProvince,
+          postalCode: data.recipient.postalCode,
+          countryCode: data.recipient.countryCode,
+          phone: data.recipient.phone,
+          email: data.recipient.email,
+        },
+        packages: data.packages.map((pkg) => ({
+          weight: pkg.weight,
+          weightUnit: data.weightUnit,
+          dimensions: {
+            length: pkg.length,
+            width: pkg.width,
+            height: pkg.height,
+            unit: data.dimensionUnit,
+          },
+          packageType: data.packageType,
+        })),
+        serviceType: data.serviceType,
+        packagingType: data.packageType,
+        currency: data.currency,
+        shipDate: data.shipDate,
+      };
+
+      const carrierRateResults = await Promise.all(
+        carrierAdapters.map(async (carrierAdapter) => {
+          const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
+          const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, {
+            shipperCountryCode: data.shipper.countryCode,
+            recipientCountryCode: data.recipient.countryCode,
+          });
+
+          const accountRateResults = await Promise.all(
+            managedAccounts.map(async (integrationAccount) => {
+              try {
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: await withIntegrationAccount(
+                    integrationAccount,
+                    () => carrierAdapter.getRates(rateRequest),
+                  ),
+                };
+              } catch (error) {
+                logError("Guest carrier account rate lookup failed", {
+                  carrierCode: carrierAdapter.carrierCode,
+                  integrationAccountId: integrationAccount.id,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>>,
+                };
+              }
+            }),
+          );
+
+          if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
+            try {
+              accountRateResults.push({
+                integrationAccountId: `env:${appKey}`,
+                carrierRates: await carrierAdapter.getRates(rateRequest),
+              });
+            } catch (error) {
+              logError("Guest carrier environment rate lookup failed", {
+                carrierCode: carrierAdapter.carrierCode,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          const winningAccountResult = selectCheapestCarrierAccountPortfolio(accountRateResults);
+          return {
+            carrierAdapter,
+            carrierRates: winningAccountResult?.carrierRates || [],
+          };
+        }),
+      );
+
+      const availableCarriers = carrierRateResults
+        .filter((result) => result.carrierRates.length > 0)
+        .map(({ carrierAdapter }) => ({ code: carrierAdapter.carrierCode, name: carrierAdapter.name }));
+
+      const quotes: Array<Record<string, unknown>> = [];
+      let quoteIndex = 0;
+
+      for (const { carrierAdapter, carrierRates } of carrierRateResults) {
+        for (const rate of carrierRates) {
+          const marginPercentage = pricingRule
+            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, GUEST_ACCOUNT_TYPE)
+            : defaultMarginPercentage;
+          const marginAmount = rate.baseRate * (marginPercentage / 100);
+          const accountingSnapshot = calculateShipmentAccounting({
+            shipmentType: data.shipmentType,
+            isDdp: data.isDdp,
+            recipientCountryCode: data.recipient.countryCode,
+            baseRate: rate.baseRate,
+            marginAmount,
+          });
+
+          const chargeableWeightDetails =
+            rate.chargeableWeightDetails
+            || buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode);
+
+          quotes.push({
+            // Not a `shipment_rate_quotes` id — nothing was stored. The id exists only so the
+            // wizard can key its rate list, and it is discarded on registration.
+            quoteId: `guest-${quoteIndex++}`,
+            carrierCode: carrierAdapter.carrierCode,
+            carrierName: carrierAdapter.name,
+            serviceType: rate.serviceType,
+            serviceName: rate.serviceName,
+            finalPrice: accountingSnapshot.clientTotalAmountSar,
+            currency: "SAR",
+            transitDays: rate.transitDays,
+            estimatedDelivery: rate.deliveryDate,
+            actualWeight: chargeableWeightDetails.actualWeight,
+            dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+            chargeableWeight: chargeableWeightDetails.chargeableWeight,
+            chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+            chargeableWeightSource: rate.chargeableWeightSource || "system",
+          });
+        }
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({ error: "No carrier rates were available for this shipment." });
+      }
+
+      res.json({ quotes, availableCarriers, indicative: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get guest express rates", error);
+      res.status(500).json({ error: "Failed to get shipping rates" });
+    }
+  });
+
+  app.post("/api/public/guest/local-rates", guestRateLimiter, async (req, res) => {
+    try {
+      const data = localShipmentInputSchema.parse(req.body);
+
+      const totalWeightKg = data.weightUnit === "LB" ? data.weight * 0.453592 : data.weight;
+      const localCarriers = carrierService.getLocalCarriers("SA");
+      const localPricingRule = await storage.getPricingRuleByProfile(GUEST_PRICING_PROFILE);
+
+      const quotes: Array<Record<string, unknown>> = [];
+      const availableCarriers: Array<{ code: string; name: string }> = [];
+      let quoteIndex = 0;
+
+      const pushQuote = (
+        carrierCode: string,
+        carrierName: string,
+        serviceName: string,
+        baseRate: number,
+        marginAmount: number,
+      ) => {
+        const accountingSnapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate,
+          marginAmount,
+        });
+        availableCarriers.push({ code: carrierCode, name: carrierName });
+        quotes.push({
+          quoteId: `guest-${quoteIndex++}`,
+          carrierCode,
+          carrierName,
+          serviceType: "LOCAL",
+          serviceName,
+          finalPrice: accountingSnapshot.clientTotalAmountSar,
+          currency: "SAR",
+          transitDays: 2,
+          actualWeight: totalWeightKg,
+          chargeableWeight: totalWeightKg,
+          chargeableWeightUnit: "KG",
+          chargeableWeightSource: "system",
+        });
+      };
+
+      for (const carrierAdapter of localCarriers) {
+        const liveBaseRateSar = await resolveLiveLocalBaseRate(
+          carrierAdapter,
+          data.shipper.city,
+          data.recipient.city,
+          totalWeightKg,
+        );
+        const liveFallbackMarginPercent =
+          liveBaseRateSar != null && liveBaseRateSar > 0
+            ? localPricingRule
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, GUEST_ACCOUNT_TYPE)
+              : 20
+            : null;
+        const local = await resolveLocalRate({
+          carrierCode: carrierAdapter.carrierCode,
+          weightKg: totalWeightKg,
+          clientProfile: GUEST_PRICING_PROFILE,
+          liveBaseRateSar,
+          liveFallbackMarginPercent,
+        });
+        if (!local) continue;
+        pushQuote(
+          carrierAdapter.carrierCode,
+          carrierAdapter.name,
+          `${carrierAdapter.name} Domestic`,
+          local.baseRate,
+          local.marginAmount,
+        );
+      }
+
+      const virtualCarrierList = await storage.listVirtualCarriers(true);
+      for (const vc of virtualCarrierList) {
+        const local = await resolveLocalRate({
+          carrierCode: vc.code,
+          weightKg: totalWeightKg,
+          clientProfile: GUEST_PRICING_PROFILE,
+          liveBaseRateSar: null,
+        });
+        if (!local) continue;
+        pushQuote(vc.code, vc.name, vc.name, local.baseRate, local.marginAmount);
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({ error: "No local carrier rates available for this weight." });
+      }
+
+      res.json({ quotes, availableCarriers, indicative: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get guest local rates", error);
+      res.status(500).json({ error: "Failed to get local rates" });
+    }
+  });
+
   app.post("/api/client/shipments/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);

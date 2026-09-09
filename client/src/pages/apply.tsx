@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { applicationFormSchema, type ApplicationFormData } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import { getGuestDraft, type GuestDraft } from "@/lib/guest-mode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
@@ -42,8 +43,48 @@ interface UploadedDocument {
   contentType: string;
 }
 
+/**
+ * Seed the default shipping address from a guest-built shipment's sender.
+ *
+ * Only the express and local wizards produce a draft, and both put the sender under
+ * `formData.shipper` — but the draft is stored opaquely (the server never validates its shape),
+ * so every field is read defensively and anything missing simply stays blank.
+ */
+function draftShippingDefaults(draft: GuestDraft | null) {
+  const blank = {
+    shippingContactName: "",
+    shippingContactPhone: "",
+    shippingCountryCode: "",
+    shippingStateOrProvince: "",
+    shippingCity: "",
+    shippingPostalCode: "",
+    shippingAddressLine1: "",
+    shippingAddressLine2: "",
+    shippingShortAddress: "",
+  };
+
+  const shipper = (draft?.formData as { shipper?: Record<string, unknown> } | undefined)?.shipper;
+  if (!shipper) return blank;
+
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  return {
+    ...blank,
+    shippingContactPhone: text(shipper.phone),
+    // Local shipments are domestic by definition and carry no country on the address.
+    shippingCountryCode: text(shipper.countryCode) || (draft?.kind === "local" ? "SA" : ""),
+    shippingStateOrProvince: text(shipper.stateOrProvince),
+    shippingCity: text(shipper.city),
+    shippingPostalCode: text(shipper.postalCode),
+    shippingAddressLine1: text(shipper.addressLine1),
+    shippingAddressLine2: text(shipper.addressLine2),
+    shippingShortAddress: text(shipper.shortAddress),
+  };
+}
+
 export default function ApplyPage() {
   const [, navigate] = useLocation();
+  // Read once on mount: the draft is cleared as it is replayed, and this is only a notice.
+  const [pendingDraft] = useState(() => getGuestDraft());
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -157,20 +198,18 @@ export default function ApplyPage() {
   const form = useForm<ApplicationFormData>({
     resolver: zodResolver(applicationFormSchema),
     defaultValues: {
-      accountType: "company",
+      // Arriving with a guest-built shipment defaults to Individual: that is the rate they were
+      // quoted at, and it is the only account type that clears instantly — a company applicant
+      // waits days for document review before they can pay for the shipment they just built.
+      // Someone registering a business simply switches it back.
+      accountType: pendingDraft ? "individual" : "company",
       name: "",
       email: "",
       phone: "",
       companyName: "",
-      shippingContactName: "",
-      shippingContactPhone: "",
-      shippingCountryCode: "",
-      shippingStateOrProvince: "",
-      shippingCity: "",
-      shippingPostalCode: "",
-      shippingAddressLine1: "",
-      shippingAddressLine2: "",
-      shippingShortAddress: "",
+      // The sender address from the guest shipment is this applicant's own address. Re-typing it
+      // is the kind of friction that loses the registration the whole flow exists to win.
+      ...draftShippingDefaults(pendingDraft),
     },
   });
 
@@ -262,10 +301,43 @@ export default function ApplyPage() {
           }),
         ),
       };
-      const res = await apiRequest("POST", "/api/applications", applicationData);
-      const created = (await res.json().catch(() => null)) as { status?: string } | null;
+      // A shipment built as a guest travels with the application. Individuals get it straight
+      // back from their own browser; companies wait for approval, so it is held server-side
+      // where a cleared browser or a different device cannot lose it.
+      const guestDraft = getGuestDraft();
+      const res = await apiRequest("POST", "/api/applications", {
+        ...applicationData,
+        ...(guestDraft
+          ? {
+              shipmentDraft: {
+                kind: guestDraft.kind,
+                formData: guestDraft.formData,
+                indicativeQuote: guestDraft.indicativeQuote,
+              },
+            }
+          : {}),
+      });
+      const created = (await res.json().catch(() => null)) as
+        | { status?: string; authenticated?: boolean }
+        | null;
       const approved = created?.status === "approved";
       setIsAutoApproved(approved);
+
+      // Individuals are approved and signed in by the same request, so we go straight back to
+      // the shipment instead of stopping at a "check your email" screen they do not need.
+      if (approved && created?.authenticated) {
+        const target = guestDraft?.kind === "local" ? "/client/local/new" : "/client/create-shipment";
+
+        // A full page load, not a client-side navigate. Two reasons, both of which broke this
+        // in testing: the in-app route change raced the auth state update, so `ProtectedRoute`
+        // still saw a null user, bounced to "/" and landed the new client on the dashboard with
+        // their shipment abandoned; and the React Query cache was still full of the canned
+        // guest responses (`staleTime: Infinity`), so the freshly-created account would have
+        // been shown the Guest placeholder account. Booting fresh settles both.
+        window.location.assign(target);
+        return;
+      }
+
       setIsSubmitted(true);
       toast({
         title: approved ? "Account created!" : "Application submitted!",
@@ -346,6 +418,24 @@ export default function ApplyPage() {
           </CardHeader>
 
           <CardContent className="pt-4">
+            {/* Arriving from a guest-built shipment: say plainly that it survives this form. */}
+            {pendingDraft && (
+              <div
+                className="mb-5 rounded-lg border border-primary/30 bg-primary/5 p-4"
+                data-testid="apply-draft-notice"
+              >
+                <p className="text-sm font-medium">Your shipment is saved</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {pendingDraft.indicativeQuote
+                    ? `${pendingDraft.indicativeQuote.carrierName} · ${pendingDraft.indicativeQuote.serviceName}. `
+                    : ""}
+                  Individual accounts are approved straight away, so you'll come back to it
+                  immediately. Company accounts are reviewed first — we'll email you, and your
+                  shipment will be waiting.
+                </p>
+              </div>
+            )}
+
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
+import { useGuestMode } from "@/lib/guest-mode";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -82,6 +83,7 @@ const shipmentTypes: ShipmentTypeOption[] = [
 export default function CreateShipmentSelect() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { isGuest } = useGuestMode();
   const { data: account } = useQuery<ClientAccount>({ queryKey: ["/api/client/account"] });
   const { data: dangerousGoodsAccess } = useQuery<DangerousGoodsAccess>({
     queryKey: ["/api/client/dangerous-goods"],
@@ -147,12 +149,22 @@ export default function CreateShipmentSelect() {
             // goods, but it is locked until an admin has approved the account. Hiding it
             // outright would leave clients with no way to discover or ask for the service.
             const locked = isDangerousGoods && !dangerousGoodsEnabled;
+            // Guests can price Local and Express themselves. Door-to-door freight and dangerous
+            // goods both end at an operations handoff rather than a checkout, so there is
+            // nothing for a guest to complete — they are shown, and they ask for an account.
+            const needsAccount = isGuest && (type.key === "ddp" || isDangerousGoods);
 
             return (
               <Card
                 key={type.key}
                 className="group hover-elevate active-elevate-2 cursor-pointer"
-                onClick={() => (locked ? setRequestOpen(true) : navigate(type.href))}
+                onClick={() =>
+                  needsAccount
+                    ? navigate("/apply?resume=1")
+                    : locked
+                      ? setRequestOpen(true)
+                      : navigate(type.href)
+                }
                 data-testid={`card-shipment-type-${type.key}`}
               >
                 <CardContent className="p-6 flex flex-col h-full">
@@ -161,12 +173,19 @@ export default function CreateShipmentSelect() {
                   </div>
                   <h3 className="font-semibold mb-1">{type.label}</h3>
                   <p className="text-sm text-muted-foreground flex-1">
-                    {locked
-                      ? "Regulated goods need approval before you can ship them. We'll check your dangerous goods training and safety data sheets."
-                      : type.description}
+                    {needsAccount
+                      ? `${type.description} Arranged with our team, so it needs an account.`
+                      : locked
+                        ? "Regulated goods need approval before you can ship them. We'll check your dangerous goods training and safety data sheets."
+                        : type.description}
                   </p>
                   <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary">
-                    {locked ? (
+                    {needsAccount ? (
+                      <>
+                        <Lock className="h-4 w-4" />
+                        Create an account
+                      </>
+                    ) : locked ? (
                       <>
                         <Lock className="h-4 w-4" />
                         {dangerousGoodsPending ? "Request under review" : "Request access"}
