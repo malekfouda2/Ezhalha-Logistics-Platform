@@ -10,8 +10,11 @@
     "invoices": "Invoices",
     "profile": "Profile",
     "createShipmentMenu": {
+      "title": "What would you like to do?",
       "createShipment": "Create Shipment",
-      "quickQuote": "Quick Quote"
+      "createShipmentSubtitle": "Start a new shipment request",
+      "quickQuote": "Quick Quote",
+      "quickQuoteSubtitle": "Get an instant rate estimate"
     }
   },
   "auth": {
