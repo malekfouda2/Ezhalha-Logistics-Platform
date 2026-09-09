@@ -108,6 +108,17 @@ const statusColors: Record<string, StatusColor> = {
   paid: "green",
   unpaid: "amber",
   refunded: "blue",
+
+  // Dangerous goods manual flow (shared/dangerous-goods.ts) — dg_review/dg_awaiting_carrier
+  // are pre-quote waiting states (amber, same bucket as payment_pending); dg_booking is paid
+  // and waiting on an operator to record the air waybill, same bucket as "created".
+  dg_review: "amber",
+  dg_awaiting_carrier: "amber",
+  dg_booking: "cyan",
+
+  // Door-to-door manual flow (shared/domain.ts DdpShipmentStatus) — paid, waiting on an
+  // operator to review before booking with the supplier.
+  awaiting_review: "amber",
 };
 
 const statusLabels: Record<string, string> = {
@@ -134,6 +145,12 @@ const statusLabels: Record<string, string> = {
   paid: "Paid",
   unpaid: "Unpaid",
   refunded: "Refunded",
+
+  dg_review: "Under Review",
+  dg_awaiting_carrier: "With the Carrier",
+  dg_booking: "Booking with the Carrier",
+
+  awaiting_review: "Awaiting Review",
 };
 
 const liveStatuses = new Set([
@@ -143,6 +160,9 @@ const liveStatuses = new Set([
   "out_for_delivery",
   "payment_pending",
   "pending",
+  "dg_review",
+  "dg_awaiting_carrier",
+  "awaiting_review",
 ]);
 
 export function StatusBadge({ status, style, textStyle }: StatusBadgeProps) {

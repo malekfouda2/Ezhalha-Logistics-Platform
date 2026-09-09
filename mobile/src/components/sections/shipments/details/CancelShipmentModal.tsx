@@ -2,12 +2,12 @@
 
 import { View, StyleSheet, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { SaudiRiyal } from "lucide-react-native";
 
 import { Text } from "@/components/ui/Text";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Shipment } from "@shared/schema";
+import { describeCancellationConsequences } from "@shared/cancellation";
 import { useTranslation } from "react-i18next";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
@@ -15,7 +15,6 @@ export interface CancelShipmentModalProps {
   visible: boolean;
   shipment: Shipment | null;
   isPending: boolean;
-  cardLast4?: string;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -24,15 +23,21 @@ export function CancelShipmentModal({
   visible,
   shipment,
   isPending,
-  cardLast4 = "4242",
   onConfirm,
   onClose,
 }: CancelShipmentModalProps) {
   if (!shipment) return null;
   const { t } = useTranslation();
-  const paid = parseFloat(shipment.finalPrice as any) || 0;
-  const cancellationFee = 0;
-  const refund = paid - cancellationFee;
+
+  // Same wording the web client shows (client/src/components/cancel-shipment-dialog.tsx) —
+  // shared/cancellation.ts exists specifically so the automatic-refund vs.
+  // refund-request-for-approval claim can't drift between the two clients or fall out of
+  // sync with the server's own branch.
+  const { effects } = describeCancellationConsequences({
+    carrierStatus: shipment.carrierStatus,
+    carrierName: shipment.carrierName,
+    hasPickupBooked: Boolean(shipment.pickupConfirmationNumber),
+  });
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
@@ -40,76 +45,28 @@ export function CancelShipmentModal({
         <Feather name="alert-triangle" size={rs(22)} color="#DC2626" />
       </View>
       <Text size="medium" weight="bold" style={styles.title}>
-        {t("shipments.cancel.title")}
+        {t("shipments.cancel.title", { trackingNumber: shipment.trackingNumber })}
       </Text>
 
       <Text size="small" dimRate="65%" style={styles.subtitle}>
         {t("shipments.cancel.subtitle")}
       </Text>
+
       <View style={styles.card}>
-        <View style={styles.row}>
-          <Text size="small" dimRate="65%">
-            {t("shipments.cancel.paid")}
-          </Text>
-          <View style={styles.valueRow}>
-            <SaudiRiyal
-              size={rs(13)}
-              color={Colors.text}
-              style={styles.riyalIcon}
-            />
-            <Text size="medium" weight="bold">
-              {paid.toFixed(2)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.row}>
-          <Text size="small" dimRate="65%">
-            {t("shipments.cancel.cancellationFee")}
-          </Text>
-          <View style={styles.valueRow}>
-            <SaudiRiyal
-              size={rs(13)}
-              color={Colors.text}
-              style={styles.riyalIcon}
-            />
-            <Text size="medium" weight="bold">
-              {cancellationFee.toFixed(2)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.row}>
-          <Text size="medium" weight="bold">
-            {t("shipments.cancel.refund")}
-          </Text>
-          <View style={styles.valueRow}>
-            <SaudiRiyal
-              size={rs(15)}
-              color={Colors.primary}
-              style={styles.riyalIcon}
-            />
-            <Text size="large" weight="bold" style={{ color: Colors.primary }}>
-              {refund.toFixed(2)}
-            </Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.infoBox}>
-        <Feather
-          name="info"
-          size={rs(16)}
-          color="#B45309"
-          style={styles.infoIcon}
-        />
-        <Text size="xs" style={styles.infoText}>
-          {t("shipments.cancel.refundInfo", {
-            last4: cardLast4,
-          })}
+        <Text size="small" weight="bold" style={styles.cardTitle}>
+          {t("shipments.cancel.whatHappensNext")}
         </Text>
+
+        {effects.map((effect, index) => (
+          <View key={index} style={styles.effectRow}>
+            <View style={styles.bullet} />
+            <Text size="small" style={styles.effectText}>
+              {effect}
+            </Text>
+          </View>
+        ))}
       </View>
+
       <Pressable
         style={({ pressed }) => [
           styles.confirmButton,
@@ -139,34 +96,6 @@ export function CancelShipmentModal({
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: rs(28),
-    borderTopRightRadius: rs(28),
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(10),
-    paddingBottom: rvs(30),
-  },
-
-  grabber: {
-    width: rs(40),
-    height: rs(4),
-    borderRadius: rs(2),
-    backgroundColor: Colors.border,
-    alignSelf: "center",
-    marginBottom: rvs(20),
-  },
-
   iconWrap: {
     width: rs(45),
     height: rs(45),
@@ -187,58 +116,33 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    backgroundColor: "white",
-    borderRadius: rs(20),
-    padding: rs(16),
-    marginBottom: rvs(16),
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: rvs(4) },
-    shadowOpacity: 0.1,
-    shadowRadius: rs(6),
-    elevation: 4,
+    backgroundColor: Colors.background,
+    borderRadius: rs(16),
+    padding: rs(14),
+    marginBottom: rvs(20),
   },
 
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: rvs(4),
+  cardTitle: {
+    marginBottom: rvs(8),
   },
 
-  valueRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  riyalIcon: {
-    marginRight: rs(3),
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginVertical: rvs(6),
-  },
-
-  infoBox: {
+  effectRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "#fdf6ef",
-    borderRadius: rs(12),
-    padding: rs(12),
-    marginBottom: rvs(20),
     gap: rs(8),
-    borderWidth: 1,
-    borderColor: "#fdebda",
+    marginBottom: rvs(6),
   },
 
-  infoIcon: {
-    marginTop: rvs(2),
+  bullet: {
+    width: rs(4),
+    height: rs(4),
+    borderRadius: rs(2),
+    backgroundColor: Colors.textSecondary,
+    marginTop: rvs(7),
   },
 
-  infoText: {
+  effectText: {
     flex: 1,
-    color: "#B45309",
     lineHeight: rvs(18),
   },
 

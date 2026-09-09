@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 
 export interface ShipmentFilters {
+  type: string | null;
   carrier: string | null;
   paymentStatus: string | null;
   method: string | null;
@@ -23,6 +24,7 @@ export interface ShipmentFilters {
 }
 
 export const EMPTY_FILTERS: ShipmentFilters = {
+  type: null,
   carrier: null,
   paymentStatus: null,
   method: null,
@@ -37,6 +39,7 @@ export function countActiveFilters(filters: ShipmentFilters): number {
 }
 
 type OptionField =
+  | "type"
   | "carrier"
   | "paymentStatus"
   | "method"
@@ -47,6 +50,15 @@ interface Option {
   label: string;
   value: string;
 }
+
+// Mirrors the web client's formatShipmentKindLabel (client/src/pages/client/shipments.tsx) —
+// the shipment's fulfillmentType, not its shipmentType (which is direction, not product).
+const TYPE_OPTIONS: Option[] = [
+  { label: "shipments.filters.typeOptions.express", value: "express" },
+  { label: "shipments.filters.typeOptions.local", value: "local" },
+  { label: "shipments.filters.typeOptions.freight", value: "freight" },
+  { label: "shipments.filters.typeOptions.dangerousGoods", value: "dangerousGoods" },
+];
 
 const CARRIER_OPTIONS: Option[] = [
   { label: "FedEx", value: "fedex" },
@@ -100,6 +112,11 @@ const FIELD_CONFIG: Record<
   OptionField,
   { label: string; placeholder: string; options: Option[] }
 > = {
+  type: {
+    label: "shipments.filters.type",
+    placeholder: "shipments.filters.anyType",
+    options: TYPE_OPTIONS,
+  },
   carrier: {
     label: "shipments.filters.carrier",
     placeholder: "shipments.filters.anyCarrier",
@@ -320,6 +337,13 @@ export function FiltersModal({
             contentContainerStyle={styles.bodyContent}
             showsVerticalScrollIndicator={false}
           >
+            <SelectField
+              field="type"
+              value={draft.type}
+              active={openField === "type"}
+              onOpen={setOpenField}
+            />
+
             <SelectField
               field="carrier"
               value={draft.carrier}

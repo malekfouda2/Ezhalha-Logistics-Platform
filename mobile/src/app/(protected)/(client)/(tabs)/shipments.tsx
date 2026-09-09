@@ -45,7 +45,18 @@ const FILTERS: { key: FilterKey; labelKey: string }[] = [
 
 const STATUS_MAP: Record<FilterKey, string[]> = {
   all: [],
-  processing: ["draft", "payment_pending", "created", "processing"],
+  // Dangerous goods' three manual-flow statuses (shared/dangerous-goods.ts) belong here too —
+  // left out, they'd only ever show under "All", which is exactly the bug the web client
+  // shipped and had to fix.
+  processing: [
+    "draft",
+    "payment_pending",
+    "created",
+    "processing",
+    "dg_review",
+    "dg_awaiting_carrier",
+    "dg_booking",
+  ],
   in_transit: [
     "picked_up",
     "in_transit",
@@ -59,6 +70,29 @@ const STATUS_MAP: Record<FilterKey, string[]> = {
 // Maps a shipment's shipmentType to the "method" filter options used in FiltersModal
 function matchesMethod(shipment: Shipment, method: string) {
   return shipment.shipmentType?.toLowerCase() === method.toLowerCase();
+}
+
+// Mirrors the web client's formatShipmentKindLabel (client/src/pages/client/shipments.tsx) —
+// the shipment's product type (Express/Local/Door to Door/Dangerous Goods), driven by
+// fulfillmentType, not the "method" filter above (which is really transport direction).
+function matchesShipmentKind(shipment: Shipment, kind: string): boolean {
+  const fulfillmentType = shipment.fulfillmentType;
+  switch (kind) {
+    case "local":
+      return fulfillmentType === "local";
+    case "freight":
+      return fulfillmentType === "ddp_manual" || shipment.isDdp === true;
+    case "dangerousGoods":
+      return fulfillmentType === "dg_manual";
+    case "express":
+    default:
+      return (
+        fulfillmentType !== "local" &&
+        fulfillmentType !== "ddp_manual" &&
+        fulfillmentType !== "dg_manual" &&
+        shipment.isDdp !== true
+      );
+  }
 }
 
 function matchesOrigin(shipment: Shipment, origin: string) {
@@ -132,6 +166,10 @@ export default function ShipmentsScreen() {
           s.recipientCity.toLowerCase().includes(q) ||
           s.senderName.toLowerCase().includes(q),
       );
+    }
+
+    if (appliedFilters.type) {
+      list = list.filter((s) => matchesShipmentKind(s, appliedFilters.type!));
     }
 
     if (appliedFilters.carrier) {

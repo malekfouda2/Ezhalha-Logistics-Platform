@@ -331,6 +331,14 @@
       "delivered": "Delivered",
       "inTransit": "In Transit",
       "title": "Filters",
+      "type": "Shipment type",
+      "anyType": "Any type",
+      "typeOptions": {
+        "express": "Express",
+        "local": "Local",
+        "freight": "Door to Door",
+        "dangerousGoods": "Dangerous Goods"
+      },
       "carrier": "Carrier",
       "anyCarrier": "Any carrier",
       "payment": "Payment",
@@ -373,15 +381,12 @@
       "create": "Create a shipment"
     },
     "cancel": {
-      "title": "Cancel this shipment?",
-      "subtitle": "The carrier booking and your pickup will both be cancelled.",
-      "paid": "Paid",
-      "cancellationFee": "Cancellation fee",
-      "refund": "Refund",
-      "refundInfo": "Refunded to card •••• {{last4}} within 5–10 business days.",
+      "title": "Cancel shipment {{trackingNumber}}?",
+      "subtitle": "This cannot be undone. A cancelled shipment cannot be reinstated — it has to be created again from scratch.",
+      "whatHappensNext": "What happens next",
       "cancelling": "Cancelling...",
-      "confirm": "Yes, cancel shipment",
-      "keep": "Keep it"
+      "confirm": "Cancel shipment",
+      "keep": "Keep shipment"
     }
   },
   "createShipment": {

@@ -12,14 +12,22 @@ import { useReviewStep } from "@/lib/hooks/createShipment/dangerousGoods/useRevi
 import { Colors } from "@/constants/colors";
 import { rvs } from "@/utils/responsive";
 
+// Both directions stay in local time deliberately — `new Date("yyyy-mm-dd")` and
+// `date.toISOString()` both go through UTC, which silently shifts the date by a day in any
+// timezone ahead of or behind UTC (exactly the "picks the day before" bug this was causing).
 function parseDateInput(value: string): Date | null {
   if (!value) return null;
-  const parsed = new Date(value);
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const parsed = new Date(year, month - 1, day);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function formatDateInput(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function DangerousGoodsReviewScreen() {

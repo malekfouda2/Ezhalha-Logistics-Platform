@@ -94,7 +94,11 @@ function CalendarModal({
   const cells = buildMonthGrid(viewYear, viewMonth);
 
   const currentYear = new Date().getFullYear();
-  const startYear = 1900;
+  // Bounded by minimumDate/maximumDate when given (e.g. "today" for a pickup date) — without
+  // this the year picker and month arrows still offered every year back to 1900, even though
+  // every day in them was disabled.
+  const startYear = minimumDate ? minimumDate.getFullYear() : 1900;
+  const endYear = maximumDate ? maximumDate.getFullYear() : currentYear;
   const { t, i18n } = useTranslation();
   const isRTL = i18n.dir() === "rtl";
   const WEEKDAY_LABELS = [
@@ -121,13 +125,23 @@ function CalendarModal({
     t("datePicker.months.november"),
     t("datePicker.months.december"),
   ];
-  // 1900 -> current year
   const years = Array.from(
-    { length: currentYear - startYear + 1 },
+    { length: endYear - startYear + 1 },
     (_, index) => startYear + index,
   );
 
+  const isAtMinimumMonth =
+    !!minimumDate &&
+    viewYear === minimumDate.getFullYear() &&
+    viewMonth === minimumDate.getMonth();
+
+  const isAtMaximumMonth =
+    !!maximumDate &&
+    viewYear === maximumDate.getFullYear() &&
+    viewMonth === maximumDate.getMonth();
+
   const goToPrevMonth = () => {
+    if (isAtMinimumMonth) return;
     if (viewMonth === 0) {
       setViewMonth(11);
       setViewYear((year) => year - 1);
@@ -137,6 +151,7 @@ function CalendarModal({
   };
 
   const goToNextMonth = () => {
+    if (isAtMaximumMonth) return;
     if (viewMonth === 11) {
       setViewMonth(0);
       setViewYear((year) => year + 1);
@@ -195,12 +210,13 @@ function CalendarModal({
             <Pressable
               style={styles.navButton}
               onPress={goToPrevMonth}
+              disabled={isAtMinimumMonth}
               hitSlop={8}
             >
               <Ionicons
                 name={isRTL ? "chevron-forward" : "chevron-back"}
                 size={rs(20)}
-                color={Colors.text}
+                color={isAtMinimumMonth ? Colors.placeholder : Colors.text}
               />
             </Pressable>
 
@@ -224,12 +240,13 @@ function CalendarModal({
             <Pressable
               style={styles.navButton}
               onPress={goToNextMonth}
+              disabled={isAtMaximumMonth}
               hitSlop={8}
             >
               <Ionicons
                 name={isRTL ? "chevron-back" : "chevron-forward"}
                 size={rs(20)}
-                color={Colors.text}
+                color={isAtMaximumMonth ? Colors.placeholder : Colors.text}
               />
             </Pressable>
           </View>

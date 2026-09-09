@@ -45,6 +45,25 @@ function formatDate(value?: string | null): string {
   return `${weekday}, ${day} ${month} · ${time}`;
 }
 
+// Mirrors web's canCancelShipment (client/src/pages/client/shipments.tsx) — a UI-only
+// best-effort mirror of the server's authoritative check (server/routes.ts
+// canShipmentBeCancelled). Kept in sync by hand rather than shared since web's own version
+// is a local, un-exported function too.
+const CANCELLABLE_STATUSES = ["created", "processing", "carrier_error", "payment_pending", "dg_review", "dg_booking"];
+const PICKED_UP_OR_LATER_CARRIER_STATUSES = ["picked_up", "in_transit", "out_for_delivery", "on_hold", "returned", "delivered", "cancelled"];
+
+function canCancelShipment(shipment: Shipment): boolean {
+  const carrierStatus = String(shipment.carrierStatus || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  return (
+    CANCELLABLE_STATUSES.includes(shipment.status) &&
+    !PICKED_UP_OR_LATER_CARRIER_STATUSES.includes(carrierStatus)
+  );
+}
+
 function formatPickupWindow(shipment: Shipment): string {
   if (!shipment.pickupDate) return "—";
   const d = new Date(shipment.pickupDate);
@@ -357,7 +376,7 @@ export default function ShipmentDetailScreen() {
         </InfoCard>
 
         {/* Need something changed */}
-        {shipment.status.toLowerCase() === "processing" ? (
+        {canCancelShipment(shipment) ? (
           <>
             <SectionLabel>
               {t("shipments.details.needSomethingChanged")}
