@@ -80,7 +80,6 @@ function formatPickupWindow(shipment: Shipment): string {
 
 export default function ShipmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [cancelling, setCancelling] = useState(false);
   const { t, i18n } = useTranslation();
   const isRTL = i18n.dir() === "rtl";
   const {
@@ -97,12 +96,18 @@ export default function ShipmentDetailScreen() {
 
   const cancelMutation = useMutation({
     mutationFn: async (shipmentId: string) => {
-      return apiRequest<{ refundRequest?: boolean }>(
+      return apiRequest<{ shipment?: Shipment; refundRequest?: boolean }>(
         `/api/client/shipments/${shipmentId}/cancel`,
         { method: "POST" },
       );
     },
     onSuccess: (data) => {
+      if (data?.shipment) {
+        queryClient.setQueryData([`/api/client/shipments/${id}`], data.shipment);
+      }
+      queryClient.invalidateQueries({
+        queryKey: [`/api/client/shipments/${id}`],
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
       queryClient.invalidateQueries({
         queryKey: ["/api/client/shipments/recent"],
@@ -388,7 +393,6 @@ export default function ShipmentDetailScreen() {
                 pressed && { opacity: 0.9 },
               ]}
               onPress={() => setCancelModalVisible(true)}
-              disabled={cancelling}
             >
               <View style={styles.cancelIconWrap}>
                 <Ionicons name="close" size={rs(18)} color={Colors.error} />
