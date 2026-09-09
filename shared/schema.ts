@@ -165,6 +165,15 @@ export const clientApplications = pgTable("client_applications", {
   shippingAddressLine2: text("shipping_address_line2"),
   shippingShortAddress: text("shipping_short_address"), // Short address code for KSA
   documents: text("documents").array(), // Array of document object paths
+  /**
+   * A shipment the applicant had already built as a guest, carried across registration as JSON.
+   *
+   * It is held here rather than in `shipments` on purpose: a shipment row would be NOT NULL on
+   * `clientAccountId` (which does not exist yet) and would land in the admin Abandoned queue
+   * immediately, since that queue has no age threshold. Materialised into a real shipment only
+   * after the account exists and the price has been re-quoted.
+   */
+  shipmentDraft: text("shipment_draft"),
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
@@ -1217,6 +1226,36 @@ export const mobileTokenRequestSchema = mobileDeviceSchema.extend({
 export const mobileRefreshRequestSchema = z.object({
   refreshToken: z.string().min(20, "refreshToken is required"),
 });
+
+/**
+ * A guest-built shipment carried across registration.
+ *
+ * The payload is the create-shipment wizard's own form state, which only the wizard understands,
+ * so it is accepted opaquely rather than validated field by field — it is re-validated properly
+ * by the real rate/checkout endpoints when it is replayed. What IS enforced is a size ceiling:
+ * this arrives on an unauthenticated endpoint and is stored as text.
+ */
+export const guestShipmentDraftSchema = z
+  .object({
+    kind: z.enum(["express", "local"]),
+    formData: z.unknown(),
+    indicativeQuote: z
+      .object({
+        carrierName: z.string().max(120),
+        serviceName: z.string().max(120),
+        totalSar: z.number(),
+        currency: z.string().max(8),
+      })
+      .optional(),
+  })
+  .refine(
+    (value) => JSON.stringify(value).length <= 200_000,
+    { message: "Shipment draft is too large" },
+  )
+  .nullable()
+  .optional();
+
+export type GuestShipmentDraft = NonNullable<z.infer<typeof guestShipmentDraftSchema>>;
 
 // Application form schema
 export const applicationFormSchema = z.object({

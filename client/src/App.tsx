@@ -67,6 +67,7 @@ import ClientUsers from "@/pages/client/users";
 import ClientBilling from "@/pages/client/billing";
 import ClientDdp from "@/pages/client/ddp";
 import { getPostLoginPath } from "@/lib/auth-routing";
+import { useGuestMode } from "@/lib/guest-mode";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { ADMIN_ROUTE_PERMISSIONS, getFirstAccessibleAdminPath } from "@/lib/admin-navigation";
 
@@ -85,9 +86,17 @@ function ProtectedRoute({
 }) {
   const { user, isLoading } = useAuth();
   const adminAccess = useAdminAccess();
+  const { isGuest } = useGuestMode();
 
   if (isLoading) {
     return <LoadingScreen message="Authenticating..." />;
+  }
+
+  // Guests browse the client portal with no session at all. Only the client surface opens up —
+  // admin and operations routes stay closed, and every mutation behind these pages still 401s
+  // server-side, so this grants visibility and nothing else.
+  if (!user && isGuest && requiredUserType === "client") {
+    return <Component />;
   }
 
   if (!user) {
@@ -131,6 +140,7 @@ function ProtectedRoute({
 
 function AuthRedirect() {
   const { user, isLoading } = useAuth();
+  const { isGuest } = useGuestMode();
 
   if (isLoading) {
     return <LoadingScreen message="Loading..." />;
@@ -138,6 +148,11 @@ function AuthRedirect() {
 
   if (user) {
     return <Redirect to={getPostLoginPath(user)} />;
+  }
+
+  // A real session always wins over guest mode, so this sits below the check above.
+  if (isGuest) {
+    return <Redirect to="/client" />;
   }
 
   return <LoginPage />;

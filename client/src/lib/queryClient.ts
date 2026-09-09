@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { getGuestQueryResponse, isGuestActive } from "./guest-mode";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -51,7 +52,19 @@ export const getQueryFn = <T>(options: {
 }): QueryFunction<T> =>
   async ({ queryKey }) => {
     const unauthorizedBehavior = options.on401;
-    const res = await fetch(queryKey.join("/") as string, {
+    const path = queryKey.join("/") as string;
+
+    // Guests hold no session, so every /api/client/* read would 401 and throw. Answering them
+    // here — once, centrally — lets every existing client page render its own empty state
+    // unmodified, instead of teaching each page what a guest is.
+    if (isGuestActive()) {
+      const guestResponse = getGuestQueryResponse(path);
+      if (guestResponse !== undefined) {
+        return guestResponse as T;
+      }
+    }
+
+    const res = await fetch(path, {
       credentials: "include",
     });
 

@@ -163,21 +163,29 @@ import {
   resolveProfileDefaultMargin,
   type PricingAccountTypeValue,
 } from "@shared/pricing-account-types";
-import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
+import { eq, desc, isNull, isNotNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
 const SALT_ROUNDS = 10;
 
 function isClientAccountNumberConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
+  // Walk the cause chain. Drizzle wraps the driver error in its own `Failed query: ...` Error,
+  // so the Postgres `code` and `constraint` sit on `error.cause`, not on the error thrown at
+  // us. Reading only the top level made this always return false, which silently disabled the
+  // retry loop below: two accounts created in the same moment both read the same max, both
+  // proposed the same EZ number, and the loser got a 500 instead of the next number.
+  let current: unknown = error;
+  for (let depth = 0; current && typeof current === "object" && depth < 5; depth++) {
+    const dbError = current as { code?: string; constraint?: string; cause?: unknown };
+    if (
+      dbError.code === "23505" &&
+      dbError.constraint === "client_accounts_account_number_unique"
+    ) {
+      return true;
+    }
+    current = dbError.cause;
   }
-
-  const dbError = error as { code?: string; constraint?: string };
-  return (
-    dbError.code === "23505" &&
-    dbError.constraint === "client_accounts_account_number_unique"
-  );
+  return false;
 }
 
 export interface IStorage {
@@ -236,6 +244,7 @@ export interface IStorage {
     status?: string;
   }): Promise<{ applications: ClientApplication[]; total: number; page: number; totalPages: number }>;
   getClientApplication(id: string): Promise<ClientApplication | undefined>;
+  getApprovedApplicationWithDraft(email: string): Promise<ClientApplication | undefined>;
   createClientApplication(application: InsertClientApplication): Promise<ClientApplication>;
   updateClientApplication(id: string, updates: Partial<ClientApplication>): Promise<ClientApplication | undefined>;
 
@@ -1009,6 +1018,29 @@ export class DatabaseStorage implements IStorage {
 
   async getClientApplication(id: string): Promise<ClientApplication | undefined> {
     const [application] = await db.select().from(clientApplications).where(eq(clientApplications.id, id));
+    return application || undefined;
+  }
+
+  /**
+   * The approved application for this email that still carries a guest-built shipment draft.
+   *
+   * Used to hand a company applicant their shipment back once an admin approves them — the wait
+   * can run for days, long enough for the browser copy to be gone. Newest first, since a client
+   * can apply more than once.
+   */
+  async getApprovedApplicationWithDraft(email: string): Promise<ClientApplication | undefined> {
+    const [application] = await db
+      .select()
+      .from(clientApplications)
+      .where(
+        and(
+          eq(clientApplications.email, email),
+          eq(clientApplications.status, "approved"),
+          isNotNull(clientApplications.shipmentDraft),
+        ),
+      )
+      .orderBy(desc(clientApplications.createdAt))
+      .limit(1);
     return application || undefined;
   }
 

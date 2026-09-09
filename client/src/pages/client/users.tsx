@@ -4,6 +4,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ClientLayout } from "@/components/client-layout";
+import { GuestPagePlaceholder } from "@/components/guest-gate";
+import { useGuestMode } from "@/lib/guest-mode";
 import { LoadingScreen, LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -93,6 +95,8 @@ const updatePermissionsSchema = z.object({
 type UpdatePermissionsFormData = z.infer<typeof updatePermissionsSchema>;
 
 export default function ClientUsers() {
+  const { isGuest } = useGuestMode();
+
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<ClientUser | null>(null);
@@ -203,6 +207,20 @@ export default function ClientUsers() {
     setEditingUser(user);
     editForm.reset({ permissions: user.permissions });
   };
+
+  // A guest has no account to administer, so this page shows what it is for rather than an
+  // empty team list and an Add button that can only 401. Placed below every hook: an early
+  // return above them would change the hook count the moment a guest signs in on this page.
+  if (isGuest) {
+    return (
+      <ClientLayout>
+        <GuestPagePlaceholder
+          title="Invite your team"
+          description="Add colleagues and choose what each of them can see and do. Available once you have an account."
+        />
+      </ClientLayout>
+    );
+  }
 
   if (permsLoading) {
     return <LoadingScreen />;

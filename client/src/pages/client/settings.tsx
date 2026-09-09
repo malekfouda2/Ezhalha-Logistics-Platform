@@ -4,6 +4,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ClientLayout } from "@/components/client-layout";
+import { GuestPagePlaceholder } from "@/components/guest-gate";
+import { useGuestMode } from "@/lib/guest-mode";
 import { ProfileBadge } from "@/components/profile-badge";
 import { LoadingScreen, LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -83,6 +85,8 @@ const shippingAddressSchema = z.object({
 type ShippingAddressFormData = z.infer<typeof shippingAddressSchema>;
 
 export default function ClientSettings() {
+  const { isGuest } = useGuestMode();
+
   const { toast } = useToast();
   const { user, checkAuth } = useAuth();
 
@@ -247,6 +251,20 @@ export default function ClientSettings() {
 
   const watchedShippingCountry = shippingForm.watch("shippingCountryCode");
   const showShortAddress = watchedShippingCountry === "SA";
+
+  // A guest has no account to administer, so this page shows what it is for rather than
+  // editable forms over placeholder data. Placed below every hook: an early return above
+  // them would change the hook count the moment a guest signs in on this page.
+  if (isGuest) {
+    return (
+      <ClientLayout>
+        <GuestPagePlaceholder
+          title="Account settings live here"
+          description="Your contact details, default shipping address and billing currency — all editable once you have an account."
+        />
+      </ClientLayout>
+    );
+  }
 
   if (isLoading) {
     return (
