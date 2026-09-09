@@ -7,6 +7,39 @@ vi.mock("../server/storage", () => ({
 }));
 
 import { DhlAdapter } from "../server/integrations/dhl";
+import {
+  DgAccessibility,
+  DgContentKind,
+  DgPackingGroup,
+  DgQuantityType,
+  DgRegulation,
+  type DangerousGoodsDeclaration,
+} from "../shared/dangerous-goods";
+
+function dgDeclaration(
+  overrides: Partial<DangerousGoodsDeclaration> = {},
+): DangerousGoodsDeclaration {
+  return {
+    regulation: DgRegulation.IATA,
+    contentKind: DgContentKind.LITHIUM_ION_PI965_SECTION_II,
+    accessibility: DgAccessibility.INACCESSIBLE,
+    offeror: "Ezhalha Logistics",
+    emergencyContact: { name: "Ops desk", phone: "+966500000000" },
+    signatory: { name: "Signatory", place: "Jeddah" },
+    packages: [{
+      packageIndex: 0,
+      commodities: [{
+        unNumber: "UN3480",
+        properShippingName: "Lithium ion batteries",
+        hazardClass: "9",
+        packingGroup: DgPackingGroup.NONE,
+        packingInstruction: "965",
+        quantity: { amount: 2, units: "KG", quantityType: DgQuantityType.NET },
+      }],
+    }],
+    ...overrides,
+  };
+}
 
 describe("DhlAdapter", () => {
   beforeEach(() => {
@@ -47,6 +80,9 @@ describe("DhlAdapter", () => {
     process.env.DHL_API_KEY = "test-key";
     process.env.DHL_API_SECRET = "test-secret";
     process.env.DHL_ACCOUNT_NUMBER = "123456789";
+    // These tests assert the DG payload, so the account has to be past the approval gate.
+    // The gate itself is covered in tests/dangerous-goods-carrier-guard.test.ts.
+    process.env.DHL_DG_ENABLED = "true";
   });
 
   afterEach(() => {
@@ -55,6 +91,7 @@ describe("DhlAdapter", () => {
     delete process.env.DHL_API_KEY;
     delete process.env.DHL_API_SECRET;
     delete process.env.DHL_ACCOUNT_NUMBER;
+    delete process.env.DHL_DG_ENABLED;
   });
 
   it("should request DHL rates for the next business day and include full compact addresses", async () => {
@@ -360,5 +397,195 @@ describe("DhlAdapter", () => {
     // Latest meaningful milestone wins; "Success" is the API envelope and must never be the status.
     expect(tracking.status).toBe("Shipment has departed from a DHL facility");
     expect(tracking.events).toHaveLength(3);
+  });
+
+  it("asks DHL for per-event GMT offsets and the checkpoint remarks", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      calls.push(String(url));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            shipments: [{
+              shipmentTrackingNumber: "1234567890",
+              status: "Success",
+              events: [{
+                date: "2026-08-15", time: "13:06:00", GMTOffset: "+09:00",
+                typeCode: "PU", description: "Shipment picked up",
+                serviceArea: [{ code: "BNE", description: "Brisbane-AU" }],
+                remarks: [{ value: "On its way." }],
+              }],
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    // Without requestGMTOffsetPerEvent DHL sends a bare local time with no zone, and the scan
+    // cannot be placed on a real timeline.
+    expect(calls[0]).toContain("requestGMTOffsetPerEvent=true");
+    expect(calls[0]).toContain("trackingView=all-checkpoints-with-remarks");
+    expect(calls).toHaveLength(1);
+    expect(result.events[0].description).toBe("Shipment picked up");
+    expect(result.events[0].utcOffset).toBe("+09:00");
+    expect(result.events[0].remarks).toBe("On its way.");
+  });
+
+  it("falls through to the proven trackingView when a variant answers 200 with no checkpoints", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      calls.push(String(url));
+      // This is the failure mode the candidate list exists for: HTTP 200, zero scans.
+      const body = String(url).includes("all-checkpoints-with-remarks")
+        ? { shipments: [{ shipmentTrackingNumber: "1234567890", status: "Success", events: [] }] }
+        : {
+            shipments: [{
+              shipmentTrackingNumber: "1234567890",
+              status: "Success",
+              events: [{ date: "2026-08-15", time: "13:06:00", GMTOffset: "+03:00", typeCode: "PU", description: "Shipment picked up" }],
+            }],
+          };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    expect(result.events).toHaveLength(1);
+    expect(calls[1]).toContain("trackingView=all-checkpoints&");
+  });
+
+  it("stops after two calls when a waybill genuinely has no scans yet", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ shipments: [{ shipmentTrackingNumber: "1234567890", status: "Success", events: [] }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new DhlAdapter().trackShipment("1234567890");
+
+    // A pre-transit shipment is polled every 10 minutes; walking every candidate on empty would
+    // multiply our DHL call volume for every shipment that has not moved yet.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.events).toHaveLength(0);
+  });
+  it("declares the dangerous goods service on the RATE call so the surcharge is quoted", async () => {
+    const adapter = new DhlAdapter();
+
+    await adapter.getRates({
+      shipper: {
+        name: "Shipper", streetLine1: "1 Street", city: "Jeddah", postalCode: "23442",
+        countryCode: "SA", phone: "5551112222",
+      },
+      recipient: {
+        name: "Receiver", streetLine1: "2 Street", city: "Dubai", postalCode: "00000",
+        countryCode: "AE", phone: "5553334444",
+      },
+      packages: [{ weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      currency: "SAR",
+      dangerousGoods: dgDeclaration(),
+    });
+
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(body.valueAddedServices).toEqual([{ serviceCode: "HB" }]);
+  });
+
+  it("attaches the content id to the declared package when booking", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        shipmentTrackingNumber: "9876543210",
+        documents: [{ typeCode: "waybillDoc", content: "UERGREFUQQ==" }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new DhlAdapter().createShipment({
+      shipper: {
+        name: "Shipper", streetLine1: "1 Street", city: "Jeddah", postalCode: "23442",
+        countryCode: "SA", phone: "5551112222",
+      },
+      recipient: {
+        name: "Receiver", streetLine1: "2 Street", city: "Dubai", postalCode: "00000",
+        countryCode: "AE", phone: "5553334444",
+      },
+      packages: [
+        { weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING" },
+        { weight: 3, weightUnit: "KG", packageType: "YOUR_PACKAGING" },
+      ],
+      serviceType: "P",
+      currency: "SAR",
+      dangerousGoods: dgDeclaration(),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    expect(body.valueAddedServices).toEqual([{ serviceCode: "HB" }]);
+    // Only the package that actually carries the goods is declared; the second box is plain
+    // freight and declaring it would misstate the shipment to DHL.
+    expect(body.content.packages[0].dangerousGoods).toEqual([{ contentId: "965" }]);
+    expect(body.content.packages[1].dangerousGoods).toBeUndefined();
+  });
+
+  it("prefers the account's contracted content id over the published table", async () => {
+    process.env.DHL_DG_CONTENT_IDS = JSON.stringify({ FULLY_REGULATED: "HE7" });
+    try {
+      const adapter = new DhlAdapter();
+      await adapter.getRates({
+        shipper: {
+          name: "Shipper", streetLine1: "1 Street", city: "Jeddah", postalCode: "23442",
+          countryCode: "SA", phone: "5551112222",
+        },
+        recipient: {
+          name: "Receiver", streetLine1: "2 Street", city: "Dubai", postalCode: "00000",
+          countryCode: "AE", phone: "5553334444",
+        },
+        packages: [{ weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+        currency: "SAR",
+        dangerousGoods: dgDeclaration({ contentKind: DgContentKind.FULLY_REGULATED }),
+      });
+
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+      expect(body.valueAddedServices).toEqual([{ serviceCode: "HE" }]);
+    } finally {
+      delete process.env.DHL_DG_CONTENT_IDS;
+    }
+  });
+
+  it("refuses to quote fully regulated goods when no content id is configured", async () => {
+    await expect(new DhlAdapter().getRates({
+      shipper: {
+        name: "Shipper", streetLine1: "1 Street", city: "Jeddah", postalCode: "23442",
+        countryCode: "SA", phone: "5551112222",
+      },
+      recipient: {
+        name: "Receiver", streetLine1: "2 Street", city: "Dubai", postalCode: "00000",
+        countryCode: "AE", phone: "5553334444",
+      },
+      packages: [{ weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      currency: "SAR",
+      dangerousGoods: dgDeclaration({ contentKind: DgContentKind.FULLY_REGULATED }),
+    })).rejects.toThrow(/assigns the content id/i);
+  });
+
+  it("leaves a non-dangerous shipment's payload untouched", async () => {
+    const adapter = new DhlAdapter();
+    await adapter.getRates({
+      shipper: {
+        name: "Shipper", streetLine1: "1 Street", city: "Jeddah", postalCode: "23442",
+        countryCode: "SA", phone: "5551112222",
+      },
+      recipient: {
+        name: "Receiver", streetLine1: "2 Street", city: "Dubai", postalCode: "00000",
+        countryCode: "AE", phone: "5553334444",
+      },
+      packages: [{ weight: 2, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      currency: "SAR",
+    });
+
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+    expect(body.valueAddedServices).toBeUndefined();
+    expect(body.packages[0].dangerousGoods).toBeUndefined();
   });
 });

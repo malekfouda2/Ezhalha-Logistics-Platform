@@ -1,4 +1,5 @@
 import { type Shipment } from "@shared/schema";
+import { shipmentDangerousGoods } from "./dangerous-goods";
 import { type CreateShipmentRequest, type ShipmentItem } from "../integrations/fedex";
 import { buildCommercialInvoiceDocument } from "./commercial-invoice";
 import { CARRIER_CONTACT_EMAIL } from "./carrier-constants";
@@ -145,6 +146,10 @@ export async function buildGenericCarrierShipmentRequestFromShipment(
       // Virtual-carrier routing note — tells an aggregator provider (Fizzpa/Shipox) which
       // downstream courier to assign. Null for ordinary carriers, which ignore it.
       note: shipment.carrierAssignmentNote || undefined,
+      // Carried so the registry guard can refuse the booking. None of the carriers routed
+      // through this builder can declare dangerous goods, and a loud refusal is the only
+      // acceptable outcome — the alternative is regulated goods travelling undeclared.
+      dangerousGoods: shipmentDangerousGoods(shipment),
     },
     tradeDocumentsData: shipment.tradeDocumentsData ?? null,
   };

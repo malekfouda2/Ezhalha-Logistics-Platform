@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Sheet,
   SheetContent,
@@ -37,7 +38,7 @@ import { useQuotationMode } from "@/lib/quotation-mode";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { humanizeError } from "@/lib/friendly-error";
 import { GeoSuggestInput, type GeoSuggestion } from "@/components/geo-suggest-input";
-import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X, Percent } from "lucide-react";
+import { ArrowLeft, Package, MapPin, Truck, Check, CreditCard, Clock, Plus, Trash2, Search, AlertTriangle, CheckCircle, Pencil, Upload, FileText, X, Percent, Battery, BatteryCharging, Biohazard, Cylinder, FlaskConical, Magnet, Package as PackageIcon, ShieldAlert, TestTube, Wind, Zap, Sparkles } from "lucide-react";
 import { SarSymbol, SarAmount } from "@/components/sar-symbol";
 import { Link } from "wouter";
 import { COUNTRY_CODE_SELECT_OPTIONS } from "@/lib/countries";
@@ -52,6 +53,21 @@ import {
   FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES,
   ItemCategory,
 } from "@shared/schema";
+import type { DangerousGoodsDocument } from "@shared/schema";
+import {
+  DangerousGoodsDocumentType,
+  DgAccessibility,
+  DgContentKind,
+  DgPackingGroup,
+  DgQuantityType,
+  DgRegulation,
+  type DgAccessibilityValue,
+  type DgContentKindValue,
+  type DgPackingGroupValue,
+  type DgQuantityTypeValue,
+  type DgRegulationValue,
+} from "@shared/dangerous-goods";
+import { isPostalCodeRequired } from "@shared/postal-codes";
 import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { format } from "date-fns";
 
@@ -237,6 +253,281 @@ const defaultItem: ItemFormData = {
   hsManualEntry: false,
 };
 
+/**
+ * The declaration as the form holds it.
+ *
+ * Numbers live as strings while the user types, exactly like the item price fields above —
+ * a partially typed "0." is not a number and coercing on every keystroke fights the user.
+ * `toDangerousGoodsPayload` converts once, at submit.
+ */
+interface DangerousGoodsCommodityFormData {
+  unNumber: string;
+  properShippingName: string;
+  technicalName: string;
+  hazardClass: string;
+  packingGroup: DgPackingGroupValue;
+  packingInstruction: string;
+  quantityAmount: string;
+  quantityUnits: string;
+  quantityType: DgQuantityTypeValue;
+  cargoAircraftOnly: boolean;
+  /** Set when this entry came out of the uploaded safety data sheet rather than being typed. */
+  fromDocument?: boolean;
+  /** Fields the document did not state, highlighted so the client knows what to complete. */
+  missingFields?: string[];
+}
+
+interface DangerousGoodsExtractionResponse {
+  commodities: Array<{
+    unNumber: string;
+    properShippingName: string;
+    technicalName: string;
+    hazardClass: string;
+    subsidiaryRisks: string[];
+    packingGroup: DgPackingGroupValue;
+    packingInstruction: string;
+    cargoAircraftOnly: boolean;
+    missingFields: string[];
+  }>;
+  productName: string;
+  notDangerousGoods: boolean;
+  warnings: string[];
+}
+
+/**
+ * What the client tells us about the goods — which is deliberately not much.
+ *
+ * The content kind, and a safety data sheet. Everything else on a Shipper's Declaration is
+ * completed by operations: the accessibility, the offeror, the 24-hour emergency contact, the
+ * signatory, and the net quantity per package (which an SDS never states, because it describes
+ * a substance rather than a shipment). Those are not details a shipper can be expected to get
+ * right from a form, and a declaration filled in wrongly reads as authoritative right up until
+ * the carrier refuses the consignment at acceptance.
+ *
+ * `commodities` is still here because the safety data sheet extraction pre-fills it and it is
+ * worth passing on — but it is a hint for the operator, not something the client confirms.
+ */
+interface DangerousGoodsFormData {
+  regulation: DgRegulationValue;
+  contentKind: DgContentKindValue;
+  dryIceWeightKg: string;
+  /** Index into `packages`; DHL and FedEx both declare goods per package, not per shipment. */
+  packageIndex: number;
+  commodities: DangerousGoodsCommodityFormData[];
+}
+
+const defaultDangerousGoodsCommodity: DangerousGoodsCommodityFormData = {
+  unNumber: "",
+  properShippingName: "",
+  technicalName: "",
+  hazardClass: "",
+  packingGroup: DgPackingGroup.NONE,
+  packingInstruction: "",
+  quantityAmount: "",
+  quantityUnits: "KG",
+  quantityType: DgQuantityType.NET,
+  cargoAircraftOnly: false,
+};
+
+const defaultDangerousGoods: DangerousGoodsFormData = {
+  regulation: DgRegulation.IATA,
+  contentKind: DgContentKind.FULLY_REGULATED,
+  dryIceWeightKg: "",
+  packageIndex: 0,
+  commodities: [{ ...defaultDangerousGoodsCommodity }],
+};
+
+/**
+ * The content types a client picks from, in the order they are most likely to want them.
+ *
+ * Each maps to exactly one DHL (serviceCode, contentId) pair, so this choice is what decides
+ * how the shipment is declared to the carrier — not a cosmetic grouping.
+ */
+const DANGEROUS_GOODS_CONTENT_KINDS: Array<{
+  value: DgContentKindValue;
+  label: string;
+  description: string;
+  icon: typeof Battery;
+}> = [
+  {
+    value: DgContentKind.LITHIUM_ION_PI967_SECTION_II,
+    label: "Batteries in equipment",
+    description: "Lithium ion cells fitted inside the device — phones, laptops, power tools.",
+    icon: BatteryCharging,
+  },
+  {
+    value: DgContentKind.LITHIUM_ION_PI966_SECTION_II,
+    label: "Batteries with equipment",
+    description: "Lithium ion batteries packed alongside the device they power.",
+    icon: Battery,
+  },
+  {
+    value: DgContentKind.LITHIUM_ION_PI965_SECTION_II,
+    label: "Batteries on their own",
+    description: "Loose lithium ion cells or battery packs shipped by themselves.",
+    icon: Zap,
+  },
+  {
+    value: DgContentKind.LITHIUM_METAL_PI970_SECTION_II,
+    label: "Lithium metal in equipment",
+    description: "Non-rechargeable lithium metal cells fitted inside the device.",
+    icon: BatteryCharging,
+  },
+  {
+    value: DgContentKind.LITHIUM_METAL_PI969_SECTION_II,
+    label: "Lithium metal with equipment",
+    description: "Non-rechargeable lithium metal cells packed alongside the device.",
+    icon: Battery,
+  },
+  {
+    value: DgContentKind.FULLY_REGULATED,
+    label: "Chemicals & fully regulated",
+    description: "Flammables, corrosives, toxics and anything else needing a full declaration.",
+    icon: FlaskConical,
+  },
+  {
+    value: DgContentKind.LIMITED_QUANTITIES_ADR,
+    label: "Limited quantities",
+    description: "Small retail-sized quantities packed to the limited quantity exception.",
+    icon: PackageIcon,
+  },
+  {
+    value: DgContentKind.CONSUMER_COMMODITY_ID8000,
+    label: "Consumer commodity",
+    description: "Retail aerosols, cosmetics and toiletries shipped as ID8000.",
+    icon: Wind,
+  },
+  {
+    value: DgContentKind.BIOLOGICAL_SUBSTANCE_UN3373,
+    label: "Biological substance",
+    description: "Category B diagnostic or clinical specimens shipped as UN3373.",
+    icon: Biohazard,
+  },
+  {
+    value: DgContentKind.EXEMPT_SPECIMENS,
+    label: "Exempt specimens",
+    description: "Human or animal specimens with a minimal likelihood of pathogens.",
+    icon: TestTube,
+  },
+  {
+    value: DgContentKind.MAGNETIZED_MATERIAL_UN2807,
+    label: "Magnetized material",
+    description: "Speakers, motors and magnets strong enough to affect aircraft instruments.",
+    icon: Magnet,
+  },
+  {
+    value: DgContentKind.PRESSURIZED_ARTICLES_UN3164,
+    label: "Pressurized articles",
+    description: "Shock absorbers, gas struts and other articles held under pressure.",
+    icon: Cylinder,
+  },
+  {
+    value: DgContentKind.LITHIUM_FULLY_REGULATED,
+    label: "Fully regulated lithium",
+    description: "Large or damaged lithium batteries outside the Section II allowances.",
+    icon: ShieldAlert,
+  },
+  {
+    value: DgContentKind.GENETICALLY_MODIFIED_ORGANISMS,
+    label: "Genetically modified organisms",
+    description: "GMOs and genetically modified micro-organisms shipped as UN3245.",
+    icon: Biohazard,
+  },
+];
+
+const DG_PACKING_GROUPS: Array<{ value: DgPackingGroupValue; label: string }> = [
+  { value: DgPackingGroup.NONE, label: "None" },
+  { value: DgPackingGroup.I, label: "I — high danger" },
+  { value: DgPackingGroup.II, label: "II — medium danger" },
+  { value: DgPackingGroup.III, label: "III — low danger" },
+];
+
+const DG_QUANTITY_UNITS = ["KG", "G", "L", "ML"];
+
+/** Convert the form's strings into the declaration the API expects. */
+/**
+ * The declaration as the client can honestly state it: a content kind, and whatever the safety
+ * data sheet gave up. Operations completes the rest before any carrier sees it.
+ *
+ * Blank commodity fields are sent as undefined rather than empty strings so the server's draft
+ * schema treats them as "not stated" instead of "stated to be nothing" — the ops hub then
+ * lists each one as outstanding, and the carrier handover stays blocked until they are filled.
+ */
+function toDangerousGoodsPayload(form: DangerousGoodsFormData) {
+  const trimmed = (value: string) => value.trim() || undefined;
+  return {
+    regulation: form.regulation,
+    contentKind: form.contentKind,
+    packages: [{
+      packageIndex: form.packageIndex,
+      commodities: form.commodities.map((commodity) => ({
+        unNumber: trimmed(commodity.unNumber.toUpperCase()),
+        properShippingName: trimmed(commodity.properShippingName),
+        technicalName: trimmed(commodity.technicalName),
+        hazardClass: trimmed(commodity.hazardClass),
+        packingGroup: commodity.packingGroup === DgPackingGroup.NONE ? undefined : commodity.packingGroup,
+        packingInstruction: trimmed(commodity.packingInstruction),
+        quantity: Number(commodity.quantityAmount) > 0
+          ? {
+              amount: Number(commodity.quantityAmount),
+              units: commodity.quantityUnits,
+              quantityType: commodity.quantityType,
+            }
+          : undefined,
+        cargoAircraftOnly: commodity.cargoAircraftOnly || undefined,
+      })),
+    }],
+    dryIceWeightKg: form.dryIceWeightKg ? Number(form.dryIceWeightKg) : undefined,
+  };
+}
+
+/**
+ * The customs value, stated plainly with its currency.
+ *
+ * A client declared a 100 USD item and never touched the currency selector, so it went to
+ * customs as 100 SAR — roughly a quarter of its real value. Nothing converted anything; the
+ * currency simply defaulted and the small grey "100 SAR" in the item row was easy to read
+ * past. This says the total out loud, in the currency it will actually be declared in, on the
+ * last screen before the client pays.
+ */
+function DeclaredValueSummary({ items }: { items: ItemFormData[] }) {
+  const priced = items.filter((item) => item.itemName.trim() && Number(item.price) > 0);
+  if (priced.length === 0) return null;
+
+  // Grouped by currency rather than summed blindly: adding SAR to USD would produce a
+  // confident, meaningless number.
+  const totals = new Map<string, number>();
+  for (const item of priced) {
+    const currency = item.currency || "SAR";
+    totals.set(currency, (totals.get(currency) || 0) + Number(item.price) * Number(item.quantity || 1));
+  }
+
+  const entries = Array.from(totals.entries());
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium">
+            Declared customs value:{" "}
+            {entries.map(([currency, total], index) => (
+              <span key={currency} data-testid={`text-declared-total-${currency}`}>
+                {index > 0 && " + "}
+                {total.toFixed(2)} {currency}
+              </span>
+            ))}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            This is the value declared to customs. Check the currency is right — if your prices
+            are in another currency, set it on each item. We do not convert it.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ShipmentFormData {
   shipmentType: "domestic" | "inbound" | "outbound";
   isDdp: boolean;
@@ -277,6 +568,11 @@ interface ShipmentFormData {
   }>;
   items: ItemFormData[];
   tradeDocuments: ShipmentTradeDocument[];
+  // Declared before rates are fetched, because the carrier's dangerous goods surcharge is
+  // only included in a quote that declares the goods.
+  hasDangerousGoods: boolean;
+  dangerousGoods: DangerousGoodsFormData;
+  dangerousGoodsDocuments: DangerousGoodsDocument[];
   weightUnit: "LB" | "KG";
   dimensionUnit: "IN" | "CM";
   packageType: string;
@@ -407,13 +703,7 @@ interface AddressBookEntry {
   shortAddress?: string | null;
 }
 
-const POSTAL_CODE_EXEMPT_COUNTRIES = new Set([
-  "AE", "QA", "BH", "OM", "HK", "IE", "AG", "AW", "BS", "BZ", "BJ", "BW",
-  "BF", "BI", "CM", "CF", "TD", "KM", "CG", "CD", "CI", "DJ", "DM", "GQ",
-  "ER", "FJ", "GA", "GM", "GH", "GD", "GN", "GW", "GY", "KI", "KP", "LY",
-  "MW", "ML", "MR", "NA", "NR", "PA", "RW", "KN", "LC", "ST", "SC",
-  "SL", "SB", "SO", "SR", "SY", "TL", "TG", "TO", "TV", "UG", "VU", "YE", "ZW",
-]);
+// Shared with the server validator — see shared/postal-codes.ts.
 
 const STATE_REQUIRED_COUNTRIES = new Set(["US", "CA"]);
 
@@ -556,6 +846,10 @@ function computeDefaultPickup(now: Date = new Date()): { date: string; sameDay: 
 export default function CreateShipment() {
   const [, navigate] = useLocation();
   const searchString = useSearch();
+  // Dangerous goods is picked on the "Create a shipment" chooser, exactly like Local,
+  // Express and Door To Door. `?dg=1` is that choice arriving here — it is not a mode the
+  // client can switch on halfway through, because it changes what we quote.
+  const isDangerousGoodsFlow = new URLSearchParams(searchString).get("dg") === "1";
   const { toast } = useToast();
   // Admin quotation mode — when present, this same flow is being used by an admin to build a
   // quote for the selected client; endpoints swap to admin on-behalf-of variants and the final
@@ -619,6 +913,9 @@ export default function CreateShipment() {
     ],
     items: [{ ...defaultItem }],
     tradeDocuments: [],
+    hasDangerousGoods: isDangerousGoodsFlow,
+    dangerousGoods: { ...defaultDangerousGoods },
+    dangerousGoodsDocuments: [],
     weightUnit: "KG",
     dimensionUnit: "CM",
     packageType: "YOUR_PACKAGING",
@@ -632,6 +929,9 @@ export default function CreateShipment() {
   const [customsInputMode, setCustomsInputMode] = useState<"invoice" | "manual">("manual");
   const [invoiceExtractionSummary, setInvoiceExtractionSummary] = useState<InvoiceExtractionResponse["summary"] | null>(null);
   const [isExtractingInvoice, setIsExtractingInvoice] = useState(false);
+  const [isExtractingDangerousGoods, setIsExtractingDangerousGoods] = useState(false);
+  const [dangerousGoodsExtraction, setDangerousGoodsExtraction] =
+    useState<DangerousGoodsExtractionResponse | null>(null);
   const [packageListDocument, setPackageListDocument] = useState<{
     fileName: string;
     objectPath: string;
@@ -645,6 +945,16 @@ export default function CreateShipment() {
     onError: (error) => {
       toast({
         title: "Invoice upload failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const { uploadFile: uploadDangerousGoodsFile, isUploading: isUploadingDangerousGoodsDoc } = useUpload({
+    onError: (error) => {
+      toast({
+        title: "Document upload failed",
         description: error.message,
         variant: "destructive",
       });
@@ -801,6 +1111,9 @@ export default function CreateShipment() {
         dimensionUnit: data.dimensionUnit,
         packageType: data.packageType,
         currency: data.currency,
+        // Sent at rate time on purpose: the carrier only includes its dangerous goods
+        // surcharge in a quote that declares the goods.
+        ...(data.hasDangerousGoods ? { dangerousGoods: toDangerousGoodsPayload(data.dangerousGoods) } : {}),
       };
       const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
       return res.json() as Promise<RatesResponse>;
@@ -810,7 +1123,7 @@ export default function CreateShipment() {
       setRates(data);
       setCheckoutData(null);
       setConfirmData(null);
-      setStep(5);
+      setStep(rateStep);
     },
     onError: (error) => {
       toast({
@@ -1019,13 +1332,40 @@ export default function CreateShipment() {
     queryKey: ["/api/client/credit-access"],
   });
 
+  // Gates the whole dangerous goods flow. Off unless an admin approved this account, so a
+  // client who has not been through DG onboarding never sees the option.
+  const { data: dangerousGoodsAccess } = useQuery<{ enabled: boolean; request: any }>({
+    queryKey: ["/api/client/dangerous-goods"],
+  });
+
   const invoiceDocument = formData.tradeDocuments[0] ?? null;
   const isInternationalShipment =
     formData.shipmentType === "inbound" || formData.shipmentType === "outbound";
-  const customsStep = 6; // international only
-  const pickupStep = isInternationalShipment ? 7 : 6;
-  const paymentStep = isInternationalShipment ? 8 : 7;
-  const confirmationStep = paymentStep + 1;
+  // Step numbering is computed, not hardcoded, because the dangerous goods step only exists
+  // when the client declares regulated goods — and it has to come BEFORE rates, since the
+  // carrier's dangerous goods surcharge is only in a quote that declares them.
+  // The declaration is three steps, not one: pick what you're shipping, hand us the safety
+  // data sheet, then check what we read off it. Asking a shipper to fill a blank IATA form
+  // is what makes dangerous goods hard, so the form arrives mostly filled in.
+  const dangerousGoodsContentStep = 5;
+  const dangerousGoodsDocumentsStep = 6;
+  const showDangerousGoodsStep = isDangerousGoodsFlow;
+  // A dangerous goods shipment is never priced in this wizard. Carriage is arranged with the
+  // carrier by email, so there is no rate to select and nothing to pay for yet — the flow ends
+  // at a submission, and the price arrives later as a quotation from operations. `rateStep` is
+  // -1 rather than a real number so any stale comparison against it simply never matches.
+  const rateStep = showDangerousGoodsStep ? -1 : 5;
+  const lastStepBeforeRoute = showDangerousGoodsStep ? dangerousGoodsDocumentsStep : rateStep;
+  const customsStep = lastStepBeforeRoute + 1; // international only
+  const stepAfterRoute = isInternationalShipment ? customsStep + 1 : lastStepBeforeRoute + 1;
+  // Dangerous goods has no pickup step. Nobody knows when the goods can be collected until the
+  // carrier has accepted the declaration and said so — asking the client to choose a date here
+  // would be asking them to guess at an answer only DHL or FedEx can give, days later. The
+  // collection date is agreed by operations during the handover and recorded with the quote.
+  const pickupStep = showDangerousGoodsStep ? -1 : stepAfterRoute;
+  const dangerousGoodsSubmitStep = showDangerousGoodsStep ? stepAfterRoute : -1;
+  const paymentStep = showDangerousGoodsStep ? -1 : pickupStep + 1;
+  const confirmationStep = showDangerousGoodsStep ? dangerousGoodsSubmitStep + 1 : paymentStep + 1;
   const selectedQuote = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId) ?? null;
   const selectedCarrierCode = selectedQuote?.carrierCode || formData.carrier || "";
   const checkoutExtraChargeableWeight = Math.max(
@@ -1079,6 +1419,86 @@ export default function CreateShipment() {
       serviceType: selectedQuote.serviceType,
     }));
   }, [selectedQuote]);
+
+  // ── Dangerous goods: submit, unpriced ──────────────────────────────────────────
+  //
+  // No rate, no checkout, no payment. The declaration goes to operations, who arrange
+  // carriage with the carrier by email and come back with a quotation the client can pay.
+  const [dangerousGoodsSubmission, setDangerousGoodsSubmission] = useState<{
+    shipmentId: string;
+    trackingNumber: string;
+  } | null>(null);
+
+  const dangerousGoodsSubmitMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        shipmentType: formData.shipmentType,
+        shipper: formData.shipper,
+        recipient: formData.recipient,
+        packages: formData.packages.map((pkg) => ({
+          weight: Number(pkg.weight),
+          length: Number(pkg.length),
+          width: Number(pkg.width),
+          height: Number(pkg.height),
+        })),
+        weightUnit: formData.weightUnit,
+        dimensionUnit: formData.dimensionUnit,
+        packageType: formData.packageType,
+        currency: formData.currency,
+        dangerousGoods: toDangerousGoodsPayload(formData.dangerousGoods),
+        dangerousGoodsDocuments: formData.dangerousGoodsDocuments,
+        ...(isInternationalShipment
+          ? {
+              items: formData.items
+                .filter((item) => item.itemName.trim() !== "")
+                .map((item) => ({
+                  itemName: item.itemName,
+                  itemDescription: item.itemDescription || undefined,
+                  category: item.category,
+                  material: item.material || undefined,
+                  countryOfOrigin: item.countryOfOrigin,
+                  hsCode: item.hsCode || undefined,
+                  hsCodeSource: item.hsCodeSource || undefined,
+                  hsCodeConfidence: item.hsCodeConfidence || undefined,
+                  hsCodeCandidates: item.hsCodeCandidates.length > 0 ? item.hsCodeCandidates : undefined,
+                  price: item.price,
+                  currency: item.currency,
+                  quantity: item.quantity,
+                })),
+              tradeDocuments: customsInputMode === "invoice" ? formData.tradeDocuments : [],
+            }
+          : {}),
+      };
+      const res = await apiRequest("POST", "/api/client/shipments/dangerous-goods", payload);
+      return (await res.json()) as { shipmentId: string; trackingNumber: string };
+    },
+    onSuccess: (data) => {
+      setDangerousGoodsSubmission(data);
+      setStep(confirmationStep);
+    },
+    onError: (error) => {
+      toast({
+        title: "We couldn't submit this declaration",
+        description: humanizeError(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  // `?dg=1` is a URL, so it can be typed. The server refuses the quote anyway (403), but
+  // sending the client back to the chooser is a better answer than letting them fill in a
+  // declaration and hit a wall at the rate step.
+  useEffect(() => {
+    if (!isDangerousGoodsFlow || quoteMode) return;
+    if (dangerousGoodsAccess && !dangerousGoodsAccess.enabled) {
+      toast({
+        title: "Dangerous goods needs approval first",
+        description: "Request access from the Create a shipment page and we'll review it.",
+        variant: "destructive",
+      });
+      navigate("/client/shipments/new");
+    }
+  }, [dangerousGoodsAccess, isDangerousGoodsFlow, quoteMode, navigate, toast]);
 
   // Permission check - show access denied if user lacks create_shipments permission
   if (permsLoading) {
@@ -1630,12 +2050,132 @@ export default function CreateShipment() {
     } catch {}
   };
 
-  const isPostalRequired = (countryCode: string) => {
-    return countryCode && !POSTAL_CODE_EXEMPT_COUNTRIES.has(countryCode.toUpperCase());
-  };
+  const isPostalRequired = (countryCode: string) => isPostalCodeRequired(countryCode);
 
   const isStateRequired = (countryCode: string) => {
     return STATE_REQUIRED_COUNTRIES.has(countryCode.toUpperCase());
+  };
+
+  const updateDangerousGoods = <K extends keyof DangerousGoodsFormData>(
+    field: K,
+    value: DangerousGoodsFormData[K],
+  ) => {
+    setFormData((prev) => ({ ...prev, dangerousGoods: { ...prev.dangerousGoods, [field]: value } }));
+  };
+
+  const handleDangerousGoodsUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    documentType: typeof DangerousGoodsDocumentType[keyof typeof DangerousGoodsDocumentType],
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES) {
+      toast({
+        title: "Document is too large",
+        description: `The file exceeds the ${Math.round(FEDEX_TRADE_DOCUMENT_MAX_SIZE_BYTES / (1024 * 1024))}MB limit.`,
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+
+    const uploadResponse = await uploadDangerousGoodsFile(file);
+    e.target.value = "";
+    if (!uploadResponse) return;
+
+    const contentType = uploadResponse.metadata.contentType || file.type || "application/octet-stream";
+
+    setFormData((prev) => ({
+      ...prev,
+      dangerousGoodsDocuments: [
+        ...prev.dangerousGoodsDocuments,
+        {
+          fileName: uploadResponse.metadata.name,
+          objectPath: uploadResponse.objectPath,
+          contentType,
+          size: file.size,
+          documentType,
+          uploadedAt: new Date().toISOString(),
+        },
+      ],
+    }));
+
+    // Only the safety data sheet is machine-read. A Shipper's Declaration is the output of
+    // this process, not an input to it — reading one back would just echo the client's own
+    // paperwork into the form we are asking them to check.
+    if (documentType !== DangerousGoodsDocumentType.SAFETY_DATA_SHEET) return;
+
+    setIsExtractingDangerousGoods(true);
+    try {
+      const res = await apiRequest("POST", "/api/client/shipments/extract-dangerous-goods", {
+        fileName: uploadResponse.metadata.name,
+        objectPath: uploadResponse.objectPath,
+        contentType,
+      });
+      const extraction = await res.json() as DangerousGoodsExtractionResponse;
+      setDangerousGoodsExtraction(extraction);
+
+      if (extraction.commodities.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          dangerousGoods: {
+            ...prev.dangerousGoods,
+            commodities: extraction.commodities.map((commodity) => ({
+              unNumber: commodity.unNumber,
+              properShippingName: commodity.properShippingName,
+              technicalName: commodity.technicalName,
+              hazardClass: commodity.hazardClass,
+              packingGroup: commodity.packingGroup,
+              packingInstruction: commodity.packingInstruction,
+              // Never extracted — an SDS describes the substance, not the shipment.
+              quantityAmount: "",
+              quantityUnits: "KG",
+              quantityType: DgQuantityType.NET,
+              cargoAircraftOnly: commodity.cargoAircraftOnly,
+              fromDocument: true,
+              missingFields: commodity.missingFields,
+            })),
+          },
+        }));
+      }
+
+      toast({
+        title: extraction.commodities.length > 0 ? "Safety data sheet read" : "Nothing to import",
+        description: extraction.commodities.length > 0
+          ? "Our team will check it against the sheet and complete the declaration."
+          : "We couldn't find a transport classification in it. Our team will classify it by hand.",
+      });
+      // Straight on. Whatever we read off the document goes to operations, who check it
+      // against the sheet themselves — showing the client a classification to approve would
+      // be asking them to rubber-stamp a reading they have no way to verify.
+      //
+      // One exception, and it is the client's call rather than ours: if the sheet says the
+      // product is not regulated for transport, they are in the wrong flow entirely. Stop and
+      // say so, because an express shipment is quoted instantly and costs less.
+      if (extraction.notDangerousGoods) return;
+      setStep(isInternationalShipment ? customsStep : dangerousGoodsSubmitStep);
+    } catch (error) {
+      // A failed read is not a failed upload: the document is attached and the client can
+      // still type the declaration in. Blocking here would make the AI a hard dependency —
+      // so we still advance, and the toast says what they have to do when they land.
+      // Not fatal, and not the client's problem to fix: the document is attached, and an
+      // operator reads it by hand. Blocking here would make the AI a hard dependency.
+      toast({
+        title: "We saved your document",
+        description: "We couldn't read it automatically, so our team will classify it by hand.",
+      });
+      setStep(isInternationalShipment ? customsStep : dangerousGoodsSubmitStep);
+    } finally {
+      setIsExtractingDangerousGoods(false);
+    }
+  };
+
+  const removeDangerousGoodsDocument = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      dangerousGoodsDocuments: prev.dangerousGoodsDocuments.filter((_, i) => i !== index),
+    }));
   };
 
   const validateStep = (currentStep: number): boolean => {
@@ -1722,9 +2262,18 @@ export default function CreateShipment() {
           return false;
         }
       }
-    } else if (currentStep === 5) {
-      if (!selectedQuoteId || !selectedQuote) {
-        toast({ title: "Please select a shipping rate", variant: "destructive" });
+    } else if (currentStep === dangerousGoodsContentStep && showDangerousGoodsStep) {
+      if (!formData.dangerousGoods.contentKind) {
+        toast({ title: "Choose what you're shipping", variant: "destructive" });
+        return false;
+      }
+    } else if (currentStep === dangerousGoodsDocumentsStep && showDangerousGoodsStep) {
+      if (formData.dangerousGoodsDocuments.length === 0) {
+        toast({
+          title: "Upload the safety data sheet",
+          description: "We read the transport classification off it so you don't have to type it in.",
+          variant: "destructive",
+        });
         return false;
       }
     } else if (currentStep === customsStep && isInternationalShipment) {
@@ -1771,10 +2320,17 @@ export default function CreateShipment() {
         quantity: number;
       }>;
       tradeDocuments?: ShipmentTradeDocument[];
+      dangerousGoodsDocuments?: DangerousGoodsDocument[];
       pickup?: { requested: boolean; date?: string; readyTime?: string; closeTime?: string; location?: string; instructions?: string };
     } = {
       quoteId: selectedQuoteId,
     };
+
+    // The declaration itself is already on the quote (it was needed to price the shipment);
+    // only the paperwork is uploaded at checkout.
+    if (formData.hasDangerousGoods && formData.dangerousGoodsDocuments.length > 0) {
+      payload.dangerousGoodsDocuments = formData.dangerousGoodsDocuments;
+    }
 
     // Express shipments are always booked for a carrier pickup. Send a custom date/window only
     // when the client explicitly chose one; otherwise the server applies the cutoff-based default.
@@ -1822,6 +2378,11 @@ export default function CreateShipment() {
       dimensionUnit: formData.dimensionUnit,
       packageType: formData.packageType,
       currency: formData.currency,
+      // Included so editing the declaration re-quotes: a different content kind is a
+      // different surcharge, and reusing the old quote would undercharge the client.
+      dangerousGoods: formData.hasDangerousGoods
+        ? toDangerousGoodsPayload(formData.dangerousGoods)
+        : null,
     });
 
   const submitCheckout = () => {
@@ -1842,12 +2403,31 @@ export default function CreateShipment() {
       return;
     }
 
-    if (step === 4) {
+    // Packages → dangerous goods (when declared) before rates are ever requested.
+    if (step === 4 && showDangerousGoodsStep) {
+      setStep(dangerousGoodsContentStep);
+      return;
+    }
+
+    if (step === dangerousGoodsContentStep && showDangerousGoodsStep) {
+      setStep(dangerousGoodsDocumentsStep);
+      return;
+    }
+
+    // Dangerous goods skips rates entirely: after the safety data sheet it goes straight to
+    // customs (international) or the pickup preference, and ends at a submission.
+    if (showDangerousGoodsStep && step === dangerousGoodsDocumentsStep) {
+      setStep(isInternationalShipment ? customsStep : dangerousGoodsSubmitStep);
+      return;
+    }
+
+    const isLastStepBeforeRates = !showDangerousGoodsStep && step === 4;
+    if (isLastStepBeforeRates) {
       if (getRatesMutation.isPending) return;
       // Reuse existing quotes when the rate inputs are unchanged (back → forward), keeping the
       // quote IDs + any checkout stable so no duplicate shipment is created.
       if (rates && ratesSignature() === lastRatesSignatureRef.current) {
-        setStep(5);
+        setStep(rateStep);
         return;
       }
       lastRatesSignatureRef.current = ratesSignature();
@@ -1855,14 +2435,14 @@ export default function CreateShipment() {
       return;
     }
 
-    if (step === 5) {
+    if (step === rateStep) {
       // Rate selected → customs (international) or straight to the pickup step (domestic).
       setStep(isInternationalShipment ? customsStep : pickupStep);
       return;
     }
 
     if (step === customsStep && isInternationalShipment) {
-      setStep(pickupStep);
+      setStep(showDangerousGoodsStep ? dangerousGoodsSubmitStep : pickupStep);
       return;
     }
 
@@ -1878,28 +2458,18 @@ export default function CreateShipment() {
     setStep(step - 1);
   };
 
-  const stepTitles = isInternationalShipment
-    ? [
-        "Shipment Type",
-        "Sender Details",
-        "Recipient Details",
-        "Package Details",
-        "Select Rate",
-        "Customs Details",
-        "Pickup",
-        "Payment",
-        "Confirmation",
-      ]
-    : [
-        "Shipment Type",
-        "Sender Details",
-        "Recipient Details",
-        "Package Details",
-        "Select Rate",
-        "Pickup",
-        "Payment",
-        "Confirmation",
-      ];
+  // Built rather than listed, so the titles cannot drift out of step with the computed step
+  // numbers above when the dangerous goods step appears or disappears.
+  const stepTitles = [
+    "Shipment Type",
+    "Sender Details",
+    "Recipient Details",
+    "Package Details",
+    ...(showDangerousGoodsStep ? ["Content Type", "Safety Data Sheet"] : ["Select Rate"]),
+    ...(isInternationalShipment ? ["Customs Details"] : []),
+    ...(showDangerousGoodsStep ? ["Submit"] : ["Pickup", "Payment"]),
+    "Confirmation",
+  ];
 
   const senderNeedsShortAddress = formData.shipper.countryCode === "SA";
   const recipientNeedsShortAddress = formData.recipient.countryCode === "SA";
@@ -1910,13 +2480,27 @@ export default function CreateShipment() {
 
   return (
     <QuoteShell quoteMode={quoteMode} profile={account?.profile}>
-      <div className={`p-6 mx-auto ${step === 5 ? "max-w-7xl" : "max-w-3xl"}`}>
+      <div className={`p-6 mx-auto ${step === rateStep ? "max-w-7xl" : "max-w-3xl"}`}>
         <Link href={backHref}>
           <Button variant="ghost" className="mb-6" data-testid="button-back">
             <ArrowLeft className="mr-2 h-4 w-4" />
             {backLabel}
           </Button>
         </Link>
+
+        {showDangerousGoodsStep && (
+          <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-medium">Dangerous goods shipment</p>
+              <p className="text-sm text-muted-foreground">
+                There is no instant price for regulated goods — we arrange the movement with the
+                carrier directly, then send you a quotation to accept or decline. You will not be
+                charged anything for submitting this declaration.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-center mb-8">
           {stepTitles.map((_, index) => {
@@ -2710,12 +3294,15 @@ export default function CreateShipment() {
                   Add Package
                 </Button>
               </div>
+
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
               <Button variant="outline" onClick={prevStep} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} disabled={getRatesMutation.isPending} data-testid="button-get-rates">
                 {getRatesMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Getting Rates...</>
+                ) : showDangerousGoodsStep ? (
+                  "Next: Dangerous Goods"
                 ) : (
                   "Get Shipping Rates"
                 )}
@@ -2724,7 +3311,192 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === 5 && rates && (
+        {step === dangerousGoodsContentStep && showDangerousGoodsStep && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                What are you shipping?
+              </CardTitle>
+              <CardDescription>
+                Pick the closest match. This decides how the shipment is declared to the carrier,
+                so choose by what is actually in the box rather than what it is used for.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {DANGEROUS_GOODS_CONTENT_KINDS.map((kind) => {
+                  const Icon = kind.icon;
+                  const selected = formData.dangerousGoods.contentKind === kind.value;
+                  return (
+                    <button
+                      key={kind.value}
+                      type="button"
+                      onClick={() => updateDangerousGoods("contentKind", kind.value)}
+                      className={`flex gap-3 rounded-lg border p-4 text-left transition-colors hover-elevate ${
+                        selected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border"
+                      }`}
+                      data-testid={`card-dg-kind-${kind.value}`}
+                    >
+                      <div
+                        className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center ${
+                          selected ? "bg-primary/15" : "bg-muted"
+                        }`}
+                      >
+                        <Icon className={`h-5 w-5 ${selected ? "text-primary" : "text-muted-foreground"}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{kind.label}</span>
+                          {selected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{kind.description}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p className="text-xs text-muted-foreground mt-4">
+                Not sure which applies? Section 14 of your safety data sheet names the substance
+                as it must be declared for transport.
+              </p>
+            </CardContent>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
+              <Button onClick={nextStep} data-testid="button-next">Next: Safety Data Sheet</Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === dangerousGoodsDocumentsStep && showDangerousGoodsStep && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Safety data sheet
+              </CardTitle>
+              <CardDescription>
+                Upload the SDS for what you're shipping. Our operations team classifies it
+                against the sheet and completes the IATA declaration for you — you do not need
+                to fill in UN numbers, packing groups or an emergency contact.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-dashed p-6 text-center">
+                <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
+                <Label
+                  htmlFor="dg-sds-upload"
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium"
+                >
+                  {isUploadingDangerousGoodsDoc || isExtractingDangerousGoods
+                    ? "Reading document..."
+                    : "Upload safety data sheet"}
+                </Label>
+                <input
+                  id="dg-sds-upload"
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt,image/*"
+                  disabled={isUploadingDangerousGoodsDoc || isExtractingDangerousGoods}
+                  onChange={(e) => handleDangerousGoodsUpload(e, DangerousGoodsDocumentType.SAFETY_DATA_SHEET)}
+                  data-testid="input-dg-sds-file"
+                />
+                <p className="text-xs text-muted-foreground mt-3">
+                  PDF, Word, plain text or a photo of the document.
+                </p>
+              </div>
+
+              {isExtractingDangerousGoods && (
+                <div className="flex items-center gap-2 rounded-lg border p-4">
+                  <LoadingSpinner size="sm" />
+                  <span className="text-sm">Reading section 14 of the safety data sheet...</span>
+                </div>
+              )}
+
+              {dangerousGoodsExtraction?.notDangerousGoods && !isExtractingDangerousGoods && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <div className="text-sm">
+                    <p className="font-medium">This may not need the dangerous goods flow</p>
+                    <p className="mt-1 text-muted-foreground">
+                      That document says the product is <strong>not regulated</strong> for
+                      transport. If that's right, send it as a normal express shipment instead —
+                      you'll get a price immediately and it will cost less. If you're not sure,
+                      carry on and our team will confirm it.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => navigate("/client/create-shipment")}
+                      data-testid="button-switch-to-express"
+                    >
+                      Switch to an express shipment
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {formData.dangerousGoodsDocuments.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Attached documents</Label>
+                  {formData.dangerousGoodsDocuments.map((document, index) => (
+                    <div key={index} className="flex items-center justify-between rounded border px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 shrink-0" />
+                        <span className="text-sm truncate">{document.fileName}</span>
+                        <Badge variant="secondary" className="shrink-0">
+                          {document.documentType === DangerousGoodsDocumentType.SHIPPERS_DECLARATION
+                            ? "Declaration"
+                            : document.documentType === DangerousGoodsDocumentType.SAFETY_DATA_SHEET
+                              ? "SDS"
+                              : "Other"}
+                        </Badge>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeDangerousGoodsDocument(index)}
+                        data-testid={`button-remove-dg-doc-${index}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="rounded-lg border p-4">
+                <Label
+                  htmlFor="dg-declaration-upload"
+                  className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium"
+                >
+                  <Upload className="h-4 w-4" />
+                  Add the Shipper&apos;s Declaration too (optional)
+                </Label>
+                <input
+                  id="dg-declaration-upload"
+                  type="file"
+                  className="hidden"
+                  disabled={isUploadingDangerousGoodsDoc || isExtractingDangerousGoods}
+                  onChange={(e) => handleDangerousGoodsUpload(e, DangerousGoodsDocumentType.SHIPPERS_DECLARATION)}
+                  data-testid="input-dg-declaration-file"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  If you already have one prepared. We don't read it — it goes to our operations
+                  team with the shipment.
+                </p>
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(dangerousGoodsContentStep)} data-testid="button-prev">Back</Button>
+              <Button onClick={nextStep} data-testid="button-next">Continue</Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === rateStep && rates && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2871,7 +3643,13 @@ export default function CreateShipment() {
               })()}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep(4)} data-testid="button-prev">Back</Button>
+              <Button
+                variant="outline"
+                onClick={() => setStep(showDangerousGoodsStep ? dangerousGoodsDocumentsStep : 4)}
+                data-testid="button-prev"
+              >
+                Back
+              </Button>
               <Button
                 onClick={nextStep}
                 disabled={!selectedQuoteId}
@@ -3157,9 +3935,11 @@ export default function CreateShipment() {
                   </div>
                 )}
               </div>
+
+              <DeclaredValueSummary items={formData.items} />
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep(5)} data-testid="button-prev">Back</Button>
+              <Button variant="outline" onClick={() => setStep(lastStepBeforeRoute)} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} data-testid="button-next">
                 Continue to Pickup
               </Button>
@@ -3220,7 +4000,7 @@ export default function CreateShipment() {
               )}
             </CardContent>
             <CardFooter className="flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep(isInternationalShipment ? customsStep : 5)} data-testid="button-prev">Back</Button>
+              <Button variant="outline" onClick={() => setStep(isInternationalShipment ? customsStep : lastStepBeforeRoute)} data-testid="button-prev">Back</Button>
               <Button onClick={nextStep} disabled={checkoutMutation.isPending} data-testid="button-checkout">
                 {checkoutMutation.isPending ? (
                   <><LoadingSpinner size="sm" className="mr-2" />Processing...</>
@@ -3229,6 +4009,118 @@ export default function CreateShipment() {
                 ) : (
                   <>Proceed to Payment</>
                 )}
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === dangerousGoodsSubmitStep && showDangerousGoodsStep && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Submit for review
+              </CardTitle>
+              <CardDescription>
+                Dangerous goods are not priced automatically. We arrange carriage with the
+                carrier directly, then send you a quotation to accept or decline — nothing is
+                charged until you do.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 p-4 text-sm space-y-2">
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Route</span>
+                  <span className="font-medium text-right">
+                    {formData.shipper.city}, {formData.shipper.countryCode} → {formData.recipient.city}, {formData.recipient.countryCode}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Packages</span>
+                  <span className="font-medium text-right">
+                    {formData.packages.length} · {formData.packages.reduce((sum, pkg) => sum + Number(pkg.weight || 0), 0)} {formData.weightUnit}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Declared</span>
+                  <span className="font-medium text-right">
+                    {formData.dangerousGoods.commodities
+                      .map((commodity) => `${commodity.unNumber} ${commodity.properShippingName}`)
+                      .filter((entry) => entry.trim())
+                      .join(", ") || "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Documents</span>
+                  <span className="font-medium text-right">
+                    {formData.dangerousGoodsDocuments.length || "none"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <div className="text-sm">
+                  <p className="font-medium">What happens next</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Our team checks the declaration against your safety data sheet and arranges
+                    the movement with the carrier. You'll get a quotation by email — usually
+                    within one business day — with the full price, the collection date the
+                    carrier has agreed, and how long the price holds.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-between gap-2">
+              <Button variant="outline" onClick={() => setStep(isInternationalShipment ? customsStep : dangerousGoodsDocumentsStep)} data-testid="button-prev">Back</Button>
+              <Button
+                onClick={() => dangerousGoodsSubmitMutation.mutate()}
+                disabled={dangerousGoodsSubmitMutation.isPending}
+                data-testid="button-submit-dangerous-goods"
+              >
+                {dangerousGoodsSubmitMutation.isPending ? (
+                  <><LoadingSpinner size="sm" className="mr-2" />Submitting...</>
+                ) : (
+                  <>Submit declaration</>
+                )}
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {step === confirmationStep && showDangerousGoodsStep && dangerousGoodsSubmission && (
+          <Card>
+            <CardHeader className="text-center">
+              <div className="mx-auto w-12 h-12 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center mb-4">
+                <Check className="h-6 w-6 text-green-600 dark:text-green-400" />
+              </div>
+              <CardTitle>Declaration submitted</CardTitle>
+              <CardDescription>We'll come back to you with a price</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg bg-muted p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Reference</span>
+                  <span className="font-mono">{dangerousGoodsSubmission.trackingNumber}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Status</span>
+                  <span>Awaiting review</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Charged so far</span>
+                  <span className="font-medium">Nothing</span>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Our team is reviewing the declaration and arranging carriage with the carrier.
+                You'll be emailed a quotation to accept or decline — the shipment does not move,
+                and you are not charged, until you accept it.
+              </p>
+            </CardContent>
+            <CardFooter className="flex justify-center">
+              <Button onClick={() => navigate("/client/shipments")} data-testid="button-done">
+                View All Shipments
               </Button>
             </CardFooter>
           </Card>

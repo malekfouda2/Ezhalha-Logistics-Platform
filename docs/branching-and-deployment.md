@@ -208,19 +208,58 @@ the next release.
 
 ## The mobile app
 
-The mobile developer follows the same flow: short `feat/mobile-*` branches off `main`, PR,
-review, merge. **No long-lived `mobile` branch.**
+The mobile app has its own long-lived integration branch, **`mobile`**. It is the only
+long-lived branch other than `main`.
 
-This is safe because `mobile/` never reaches production: `script/build.ts` bundles only
-`server/index.ts` plus the Vite client, and the root `tsconfig` covers only `client/src`,
-`shared`, and `server`. Unfinished mobile code on `main` is inert.
+```
+feat/mobile-login ─┐
+feat/mobile-rates ─┼──▶  mobile  ──────▶  main  ──▶  tag  ──▶  production
+feat/mobile-track ─┘      ▲                 │
+                          └── weekly merge ─┘
+```
 
-A long-lived branch would be actively worse — the Arabic/i18n work will touch `shared/`,
-`server/`, and most of `client/`, so a branch living through M1 would spend a day a week
-resolving conflicts.
+**Day to day**, the mobile developer branches off `mobile`, not `main`:
 
-The one real coupling is `shared/`, which she consumes and you change. Frequent small
-merges surface that in hours rather than months.
+```bash
+git checkout mobile && git pull
+git checkout -b feat/mobile-login
+# … work, commit …
+git push -u origin feat/mobile-login
+# PR into `mobile`
+```
+
+**Into `main`** at the end of each M1 phase: one PR from `mobile`, reviewed as a whole
+milestone rather than screen by screen. That is the point of the branch — the phase is the
+unit of review.
+
+**Back from `main` weekly**, without exception:
+
+```bash
+git checkout mobile && git pull
+git merge origin/main          # resolve here, never on a feature branch
+git push
+```
+
+### Why this is safe, and where the real risk is
+
+Textual conflicts are close to zero: the mobile app only touches `mobile/`, and nothing else
+in the repo does. Server, web client and `shared/` changes merge straight in.
+
+The real risk is **semantic drift** — `main` changes an API contract or a type in `shared/`,
+`mobile` does not notice for weeks, and the integration cost arrives all at once at merge
+time. The weekly merge from `main` is what prevents that, and it is not optional. A `mobile`
+branch that has not seen `main` in a month is the failure mode this structure has instead of
+conflicts.
+
+Nothing on `mobile` can reach production by accident: `script/build.ts` bundles only
+`server/index.ts` plus the Vite client, and the root `tsconfig` covers `client/src`,
+`shared`, and `server` only. Production deploys a tag cut from `main`.
+
+### If `shared/` needs to change
+
+`shared/` is the one place both sides touch. A mobile need that requires a schema or type
+change goes in as its own small PR **into `main`**, then arrives on `mobile` with the weekly
+merge. Never change `shared/` on the `mobile` branch — that is how the two diverge.
 
 ---
 

@@ -15,6 +15,15 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import {
+  CARRIER_CONTACT_TYPES,
+  legacyCarrierContactKeys,
+  parseCarrierContactChannels,
+  serializeCarrierContactChannels,
+  withLegacyCarrierContacts,
+  type CarrierContactChannel,
+  type CarrierContactType,
+} from "@shared/carrier-contact-channels";
+import {
   Bot,
   Check,
   CheckCircle2,
@@ -47,7 +56,145 @@ type FieldDefinition = {
   secret?: boolean;
   placeholder?: string;
   helpText?: string;
+  /** "carrier-contacts" renders the labelled phone/WhatsApp/email repeater. */
+  kind?: "carrier-contacts";
 };
+
+/**
+ * Build the settings form state for an account.
+ *
+ * Only keys the app still declares are loaded, so a save writes exactly the current field set.
+ * That would silently drop the three retired `_SUPPORT_PHONE`/`_EMAIL`/`_WHATSAPP` values the
+ * first time an admin saved a carrier — so they are folded into the labelled contact list here
+ * instead. The admin opens the account and sees the old numbers already listed and labelled;
+ * saving persists them in the new shape.
+ */
+function buildSettingsFormState(
+  app: IntegrationApp,
+  account?: IntegrationAccount | null,
+): Record<string, string> {
+  const stored = account?.settings || {};
+  const entries = (app.settingsFields || []).map((field) => {
+    if (field.kind !== "carrier-contacts") {
+      return [field.key, stored[field.key] || ""] as const;
+    }
+    const carrierCode = field.key.replace(/_SUPPORT_CONTACTS$/, "");
+    const legacyKeys = legacyCarrierContactKeys(carrierCode);
+    const channels = withLegacyCarrierContacts(parseCarrierContactChannels(stored[field.key]), {
+      phone: stored[legacyKeys.phone],
+      email: stored[legacyKeys.email],
+      whatsapp: stored[legacyKeys.whatsapp],
+    });
+    return [field.key, channels.length > 0 ? serializeCarrierContactChannels(channels) : ""] as const;
+  });
+  return Object.fromEntries(entries);
+}
+
+const CONTACT_TYPE_LABELS: Record<CarrierContactType, string> = {
+  phone: "Phone",
+  whatsapp: "WhatsApp",
+  email: "Email",
+};
+
+/**
+ * Labelled contact channels for a carrier. Stored as a JSON array in one settings key, so the
+ * whole list is edited here and serialized on every change — the parent form only ever sees a
+ * string, exactly like the other settings fields.
+ */
+function CarrierContactsField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  // Rows live in local state rather than being re-parsed from `value` on every render. The
+  // parser drops entries with no value yet — correct for storage, fatal for an editor, because
+  // a freshly added blank row would vanish before it could be typed into and "Add contact"
+  // would appear to do nothing.
+  const [channels, setChannels] = useState<CarrierContactChannel[]>(() => parseCarrierContactChannels(value));
+  // Tracks what this field last pushed upward, so an external change (opening a different
+  // account) resyncs the rows while our own edits do not clobber a half-typed row.
+  const lastEmitted = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (value === lastEmitted.current) return;
+    setChannels(parseCarrierContactChannels(value));
+  }, [value]);
+
+  const commit = (next: CarrierContactChannel[]) => {
+    setChannels(next);
+    // Incomplete rows are intentionally not serialized upward: the form should never post a
+    // half-typed contact, and the server rejects one anyway.
+    const serialized = next.some((channel) => channel.value.trim())
+      ? serializeCarrierContactChannels(next.filter((channel) => channel.value.trim()))
+      : "";
+    lastEmitted.current = serialized;
+    onChange(serialized);
+  };
+
+  const update = (index: number, patch: Partial<CarrierContactChannel>) =>
+    commit(channels.map((channel, i) => (i === index ? { ...channel, ...patch } : channel)));
+
+  return (
+    <div className="space-y-3">
+      {channels.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          No contacts yet. Add the carrier's service line, account manager, or claims mailbox —
+          operators pick from these by label in the Operations Hub.
+        </p>
+      ) : (
+        channels.map((channel, index) => (
+          <div key={index} className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
+            <Input
+              value={channel.label}
+              onChange={(event) => update(index, { label: event.target.value })}
+              placeholder="Who this reaches, e.g. Jeddah account manager"
+              className="min-w-[180px] flex-1"
+              data-testid={`input-contact-label-${index}`}
+            />
+            <select
+              value={channel.type}
+              onChange={(event) => update(index, { type: event.target.value as CarrierContactType })}
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              data-testid={`select-contact-type-${index}`}
+            >
+              {CARRIER_CONTACT_TYPES.map((type) => (
+                <option key={type} value={type}>{CONTACT_TYPE_LABELS[type]}</option>
+              ))}
+            </select>
+            <Input
+              value={channel.value}
+              onChange={(event) => update(index, { value: event.target.value })}
+              placeholder={channel.type === "email" ? "support@carrier.com" : "+9665XXXXXXXX"}
+              className="min-w-[180px] flex-1"
+              data-testid={`input-contact-value-${index}`}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => commit(channels.filter((_, i) => i !== index))}
+              data-testid={`button-remove-contact-${index}`}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        ))
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => commit([...channels, { label: "", type: "phone", value: "" }])}
+        data-testid="button-add-contact"
+      >
+        <Plus className="h-4 w-4 mr-1" />
+        Add contact
+      </Button>
+    </div>
+  );
+}
 
 type IntegrationAccount = {
   id: string;
@@ -362,7 +509,7 @@ export default function AdminApps() {
         isActive: account.isActive,
         isDefault: true,
         credentials: Object.fromEntries(app.credentialFields.map((field) => [field.key, ""])),
-        settings: Object.fromEntries((app.settingsFields || []).map((field) => [field.key, account.settings?.[field.key] || ""])),
+        settings: buildSettingsFormState(app, account),
       });
     } else {
       setEditingAccount(account);
@@ -376,7 +523,7 @@ export default function AdminApps() {
         isActive: account.isActive,
         isDefault: account.isDefault,
         credentials: Object.fromEntries(app.credentialFields.map((field) => [field.key, account.credentials?.[field.key] || ""])),
-        settings: Object.fromEntries((app.settingsFields || []).map((field) => [field.key, account.settings?.[field.key] || ""])),
+        settings: buildSettingsFormState(app, account),
       });
     }
     setSelectedAppKey(app.key);
@@ -855,7 +1002,20 @@ export default function AdminApps() {
                     {(selectedApp.settingsFields || []).map((field) => (
                       <div key={field.key} className="space-y-2">
                         <Label>{field.label}</Label>
-                        {field.placeholder === "false" || field.placeholder === "true" ? (
+                        {field.helpText && (
+                          <p className="text-xs text-muted-foreground">{field.helpText}</p>
+                        )}
+                        {field.kind === "carrier-contacts" ? (
+                          <CarrierContactsField
+                            value={formState.settings[field.key] || ""}
+                            onChange={(next) =>
+                              setFormState({
+                                ...formState,
+                                settings: { ...formState.settings, [field.key]: next },
+                              })
+                            }
+                          />
+                        ) : field.placeholder === "false" || field.placeholder === "true" ? (
                           <div className="flex items-center justify-between rounded-lg border p-3">
                             <p className="text-sm text-muted-foreground">Enable this setting</p>
                             <Switch

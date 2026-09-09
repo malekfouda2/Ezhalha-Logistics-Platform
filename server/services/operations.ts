@@ -1,6 +1,22 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { storage } from "../storage";
+import { getCarrierTrackingEvents } from "./carrier-tracking-events";
+import { parseDangerousGoodsDeclaration } from "./dangerous-goods";
+import {
+  buildCarrierHandoverText,
+  dangerousGoodsMissingFields,
+  describeDangerousGoodsShipment,
+  type DangerousGoodsMissingField,
+} from "./dangerous-goods-manual";
+import {
+  carrierContactsSettingKey,
+  firstCarrierContactOfType,
+  legacyCarrierContactKeys,
+  parseCarrierContactChannels,
+  withLegacyCarrierContacts,
+  type CarrierContactChannel,
+} from "@shared/carrier-contact-channels";
 import { sendEmail } from "./email";
 import { getRenderedTemplate } from "./email-templates";
 import { logError, logInfo } from "./logger";
@@ -15,6 +31,9 @@ import {
   OperationNoteVisibility,
   OperationShipmentKind,
   OperationSpecialHandlingStatus,
+  DangerousGoodsStatus,
+  DG_MANUAL_FULFILLMENT_TYPE,
+  isDangerousGoodsAwaitingBooking,
   OperationTaskStatus,
   rolePermissions,
   roles,
@@ -29,6 +48,8 @@ import {
   users,
   userRoles,
   type ClientAccount,
+  type DangerousGoodsDocument,
+  type DangerousGoodsDraftDeclaration,
   type Notification,
   type OperationShipmentKindValue,
   type Shipment,
@@ -151,6 +172,8 @@ export type OperationShipmentSummary = {
   attentionCount: number;
   carrierStatusRepeatCount: number;
   duplicateStatus: boolean;
+  hasDangerousGoods: boolean;
+  dangerousGoodsStatus: string | null;
   statusChangedAt: Date | null;
   sender: {
     name: string;
@@ -175,6 +198,25 @@ export type OperationShipmentSummary = {
 
 export type OperationShipmentDetail = OperationShipmentSummary & {
   operationEvents: ShipmentOperationEvent[];
+  /**
+   * The carrier's own scan history, verbatim. Newest first. Distinct from `operationEvents`,
+   * which is OUR internal audit trail — these are the carrier's words and the carrier's clock,
+   * and nothing in this list is authored by us.
+   */
+  carrierTrackingEvents: Array<{
+    id: string;
+    carrierCode: string;
+    eventCode: string | null;
+    description: string;
+    occurredAt: Date;
+    carrierLocalTime: string | null;
+    carrierUtcOffset: string | null;
+    location: string | null;
+    exceptionCode: string | null;
+    exceptionDescription: string | null;
+    signedBy: string | null;
+    remarks: string | null;
+  }>;
   operationTasks: ShipmentOperationTask[];
   operationNotes: Array<ShipmentOperationNote & { authorName: string | null }>;
   operationPlanNotes: string | null;
@@ -215,7 +257,17 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
     attempts: Array<{ at: Date; outcome: "booked" | "failed" | "scheduled"; detail: string | null }>;
   };
   // Carrier contact channels configured on the carrier's integration app (Apps tab).
-  carrierContact: { phone: string | null; email: string | null; whatsapp: string | null } | null;
+  carrierContact: {
+    /** Every labelled channel configured for this carrier, in the admin's own order. */
+    channels: CarrierContactChannel[];
+    /**
+     * First phone / email / WhatsApp from `channels`. Retained so callers written against the
+     * single-value shape keep working; new UI should read `channels` so labels are not lost.
+     */
+    phone: string | null;
+    email: string | null;
+    whatsapp: string | null;
+  } | null;
   ddpChargeConfig?: {
     billingUnit: "KG" | "CBM";
     chargeLabel: string;
@@ -228,6 +280,30 @@ export type OperationShipmentDetail = OperationShipmentSummary & {
     extraCostAmountSar: string;
     customChargesAmountSar: string;
     totalAdjustmentsAmountSar: string;
+  };
+  /**
+   * Everything the Dangerous Goods panel needs, present only for that kind.
+   *
+   * `missingFields` is the important one: `ShipmentDetailsPanel` omits null rows entirely, so
+   * without an explicit list an operator cannot tell "the client left this blank" from "we
+   * don't show that here" — and the difference decides whether the carrier will accept it.
+   */
+  dangerousGoods?: {
+    declaration: DangerousGoodsDraftDeclaration | null;
+    declarationSummary: string;
+    documents: unknown[];
+    regulation: string | null;
+    missingFields: DangerousGoodsMissingField[];
+    carrierHandoverText: string;
+    preferredPickupDate: string | null;
+    handoverAt: Date | null;
+    quotedAt: Date | null;
+    quoteExpiresAt: Date | null;
+    quoteNote: string | null;
+    carrierCostSar: string | null;
+    declinedAt: Date | null;
+    declineReason: string | null;
+    awaitingBooking: boolean;
   };
   financialBreakdown?: {
     baseRate: string;
@@ -268,6 +344,14 @@ export function getOperationShipmentKind(shipment: Shipment): OperationShipmentK
   // carry a carrierCode (the local carrier), so the discriminator is fulfillmentType.
   if (shipment.fulfillmentType === "local") {
     return OperationShipmentKind.LOCAL;
+  }
+
+  // Dangerous goods, likewise before the EXPRESS fallback. Once operations has entered the
+  // carrier's quote the shipment carries a carrierCode and an AWB, so the fallback would
+  // otherwise reclassify it as Express mid-flow and move it out of the queue the operator
+  // is working it in.
+  if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE) {
+    return OperationShipmentKind.DANGEROUS_GOODS;
   }
 
   if (shipment.carrierCode || shipment.carrierName || shipment.carrierTrackingNumber) {
@@ -680,6 +764,23 @@ function getDefaultTasksForShipment(shipment: Shipment): Array<{
       { taskKey: "ddp_destination_customs_cleared", stageKey: "shipping", title: "Customs clearance - destination" },
       { taskKey: "ddp_last_mile_delivery", stageKey: "shipping", title: "Last-mile delivery" },
       { taskKey: "ddp_delivery_confirmation", stageKey: "delivery", title: "Upload photo / POD", description: "Upload proof of delivery photos or signed POD files" },
+    ];
+  }
+
+  if (getOperationShipmentKind(shipment) === OperationShipmentKind.DANGEROUS_GOODS) {
+    // Six stages, mirroring the actual sequence of work: read what the client declared and
+    // fill the gaps, hand it to the carrier by email, type in what they charged, wait for the
+    // client to pay, book the movement and record the waybill, then run it like any other
+    // shipment. Booking is deliberately after payment — see the booking endpoint.
+    return [
+      { taskKey: "dg_review_declaration", stageKey: "review", title: "Review the declaration", description: "Check UN numbers, packing groups and quantities against the safety data sheet" },
+      { taskKey: "dg_complete_missing", stageKey: "review", title: "Complete missing details", description: "Fill in anything the client left out before the carrier sees it" },
+      { taskKey: "dg_carrier_handover", stageKey: "handover", title: "Send to the carrier", description: "Email the declaration and packing details to DHL or FedEx" },
+      { taskKey: "dg_enter_quotation", stageKey: "quotation", title: "Enter the carrier quotation", description: "Record the carrier cost and how long the price holds — no waybill yet" },
+      { taskKey: "dg_payment_followup", stageKey: "payment", title: "Confirm the client has paid", description: "Chase before the quote expires — nothing is booked until the money arrives" },
+      { taskKey: "dg_book_carrier", stageKey: "booking", title: "Book the movement and record the air waybill", description: "Confirm with the carrier now that the client has paid, then enter the waybill they issue" },
+      { taskKey: "dg_monitor_transit", stageKey: "shipping", title: "Monitor carrier transit updates" },
+      { taskKey: "dg_delivery_followup", stageKey: "shipping", title: "Confirm delivery" },
     ];
   }
 
@@ -1300,13 +1401,30 @@ async function resolveCarrierContact(shipment: Shipment): Promise<OperationShipm
       ordered.push(acc);
     }
 
+    const legacyKeys = legacyCarrierContactKeys(code);
     for (const acc of ordered) {
       let settings: Record<string, string> = {};
       try { settings = acc.settings ? JSON.parse(acc.settings) : {}; } catch { settings = {}; }
-      const phone = (settings[`${code}_SUPPORT_PHONE`] || "").trim() || null;
-      const email = (settings[`${code}_SUPPORT_EMAIL`] || "").trim() || null;
-      const whatsapp = (settings[`${code}_SUPPORT_WHATSAPP`] || "").trim() || null;
-      if (phone || email || whatsapp) return { phone, email, whatsapp };
+
+      // Labelled channels first; the three pre-split single-value keys fill in any type the
+      // labelled list does not already cover, so accounts configured before the change keep
+      // their contacts without an admin having to re-enter them.
+      const channels = withLegacyCarrierContacts(
+        parseCarrierContactChannels(settings[carrierContactsSettingKey(code)]),
+        {
+          phone: settings[legacyKeys.phone],
+          email: settings[legacyKeys.email],
+          whatsapp: settings[legacyKeys.whatsapp],
+        },
+      );
+      if (channels.length === 0) continue;
+
+      return {
+        channels,
+        phone: firstCarrierContactOfType(channels, "phone"),
+        email: firstCarrierContactOfType(channels, "email"),
+        whatsapp: firstCarrierContactOfType(channels, "whatsapp"),
+      };
     }
     return null;
   } catch (error) {
@@ -1333,6 +1451,7 @@ async function buildShipmentSummary(
     trackingNumbersRows,
     expenseRows,
     pickupAuditLogs,
+    carrierTrackingEventRows,
   ] = await Promise.all([
     storage.getClientAccount(shipment.clientAccountId),
     getAssignedTeamMembersForShipment(shipment.id),
@@ -1349,6 +1468,7 @@ async function buildShipmentSummary(
     storage.listShipmentTrackingNumbers(shipment.id),
     storage.listShipmentExpenses(shipment.id),
     storage.getAuditLogsForEntity("shipment", shipment.id),
+    getCarrierTrackingEvents(shipment.id),
   ]);
 
   // Pickup attempt history is derived from audit logs (pickup_booked / pickup_failed /
@@ -1402,6 +1522,8 @@ async function buildShipmentSummary(
     duplicateStatus:
       shipmentKind === OperationShipmentKind.EXPRESS &&
       (shipment.carrierStatusRepeatCount ?? 0) >= DUPLICATE_STATUS_MIN_REPEATS,
+    hasDangerousGoods: shipment.hasDangerousGoods ?? false,
+    dangerousGoodsStatus: shipment.dangerousGoodsStatus ?? null,
     statusChangedAt: shipment.statusChangedAt ?? null,
     createdAt: shipment.createdAt,
     updatedAt: shipment.updatedAt,
@@ -1423,6 +1545,20 @@ async function buildShipmentSummary(
     estimatedDelivery: shipment.estimatedDelivery,
     actualDelivery: shipment.actualDelivery,
     operationEvents: events,
+    carrierTrackingEvents: carrierTrackingEventRows.map((row) => ({
+      id: row.id,
+      carrierCode: row.carrierCode,
+      eventCode: row.eventCode,
+      description: row.description,
+      occurredAt: row.occurredAt,
+      carrierLocalTime: row.carrierLocalTime,
+      carrierUtcOffset: row.carrierUtcOffset,
+      location: row.location,
+      exceptionCode: row.exceptionCode,
+      exceptionDescription: row.exceptionDescription,
+      signedBy: row.signedBy,
+      remarks: row.remarks,
+    })),
     operationTasks: tasks,
     operationNotes: notes.map((row) => ({ ...row.note, authorName: row.author?.username || row.author?.email || null })),
     operationPlanNotes: shipment.operationPlanNotes ?? null,
@@ -1496,6 +1632,40 @@ async function buildShipmentSummary(
       extraCostAmountSar: formatNumericValue(extraCostAmountSar, 2),
       customChargesAmountSar: formatNumericValue(customChargesAmountSar, 2),
       totalAdjustmentsAmountSar: formatNumericValue(totalAdjustmentsAmountSar, 2),
+    };
+  }
+
+  if (shipmentKind === OperationShipmentKind.DANGEROUS_GOODS) {
+    const declaration = parseDangerousGoodsDeclaration(shipment.dangerousGoodsData);
+    let documents: unknown[] = [];
+    try {
+      documents = shipment.dangerousGoodsDocumentsData ? JSON.parse(shipment.dangerousGoodsDocumentsData) : [];
+    } catch {
+      documents = [];
+    }
+
+    summary.dangerousGoods = {
+      declaration,
+      declarationSummary: describeDangerousGoodsShipment(declaration),
+      documents: Array.isArray(documents) ? documents : [],
+      regulation: shipment.dangerousGoodsRegulation ?? null,
+      missingFields: dangerousGoodsMissingFields(shipment, declaration),
+      carrierHandoverText: buildCarrierHandoverText(
+        shipment,
+        declaration,
+        (Array.isArray(documents) ? documents : []) as DangerousGoodsDocument[],
+      ),
+      preferredPickupDate: shipment.dgPreferredPickupDate ?? null,
+      handoverAt: shipment.dgHandoverAt ?? null,
+      quotedAt: shipment.dgQuotedAt ?? null,
+      quoteExpiresAt: shipment.dgQuoteExpiresAt ?? null,
+      quoteNote: shipment.dgQuoteNote ?? null,
+      carrierCostSar: shipment.dgCarrierCostSar ?? null,
+      declinedAt: shipment.dgDeclinedAt ?? null,
+      declineReason: shipment.dgDeclineReason ?? null,
+      // Paid, but the operator has not booked it with the carrier yet. The panel opens on the
+      // booking stage when this is true.
+      awaitingBooking: isDangerousGoodsAwaitingBooking(shipment.status),
     };
   }
 
@@ -1619,6 +1789,8 @@ async function buildShipmentListSummaries(
       attentionFlags,
       attentionCount: attentionFlags.length,
       carrierStatusRepeatCount: shipment.carrierStatusRepeatCount ?? 0,
+      hasDangerousGoods: shipment.hasDangerousGoods ?? false,
+      dangerousGoodsStatus: shipment.dangerousGoodsStatus ?? null,
       duplicateStatus:
         shipmentKind === OperationShipmentKind.EXPRESS &&
         (shipment.carrierStatusRepeatCount ?? 0) >= DUPLICATE_STATUS_MIN_REPEATS,
@@ -1672,12 +1844,82 @@ function getLocalShipmentSqlCondition() {
   return sql`(${shipments.fulfillmentType} = 'local')`;
 }
 
+function getDangerousGoodsShipmentSqlCondition() {
+  return sql`(${shipments.fulfillmentType} = ${DG_MANUAL_FULFILLMENT_TYPE})`;
+}
+
+/**
+ * What the Dangerous Goods queue shows.
+ *
+ * Two things, not one. The manually-quoted shipments this queue exists for, plus any
+ * carrier-quoted shipment still held at PENDING_REVIEW — the older path, where a paid express
+ * shipment waits for an operator to sign the declaration before it is tendered. Those are
+ * Express shipments by kind and keep their Express panel; they surface here as an overlay so
+ * that a declaration awaiting sign-off is never only visible to whoever thinks to look.
+ */
+function getDangerousGoodsQueueSqlCondition() {
+  return sql`(${getDangerousGoodsShipmentSqlCondition()}
+    or (coalesce(${shipments.hasDangerousGoods}, false) = true
+        and ${shipments.dangerousGoodsStatus} = ${DangerousGoodsStatus.PENDING_REVIEW}))`;
+}
+
 function getExpressShipmentSqlCondition() {
-  // Express = has a carrier identity but is neither DDP nor LOCAL (both of which also
-  // set a carrierCode). Mirrors getOperationShipmentKind precedence.
+  // Express = has a carrier identity but is none of DDP, LOCAL or DANGEROUS_GOODS (all of
+  // which also set a carrierCode). Mirrors getOperationShipmentKind precedence — a quoted DG
+  // shipment has both a carrierCode and an AWB, so without this exclusion it would appear in
+  // the Express queue as well as its own.
   return sql`((${shipments.carrierCode} is not null or ${shipments.carrierName} is not null or ${shipments.carrierTrackingNumber} is not null)
     and not (${shipments.fulfillmentType} = 'ddp_manual' or coalesce(${shipments.isDdp}, false) = true or ${shipments.carrierCode} = 'DDP')
-    and ${shipments.fulfillmentType} is distinct from 'local')`;
+    and ${shipments.fulfillmentType} is distinct from 'local'
+    and ${shipments.fulfillmentType} is distinct from ${DG_MANUAL_FULFILLMENT_TYPE})`;
+}
+
+/**
+ * How an operations queue can be ordered.
+ *
+ * Sorting belongs on the server because every queue is capped. Ordering a page client-side
+ * would only rearrange the 200 rows the cap already chose, so "longest untouched" would
+ * quietly mean "longest untouched among the most recent" — the opposite of what an operator
+ * asked for.
+ *
+ * `queue` is the historical default and is deliberately not `asc(createdAt)`: it fetches
+ * newest-first so the cap keeps current work, then reverses the page so operators work it
+ * oldest-first. A true ascending sort would fill the page with the oldest shipments on the
+ * platform, which nobody is working.
+ */
+export const OPERATION_SORT_KEYS = [
+  "queue",
+  "newest",
+  "updated",
+  "stale",
+  "amount_desc",
+  "amount_asc",
+] as const;
+
+export type OperationSortKey = (typeof OPERATION_SORT_KEYS)[number];
+
+function operationSortOrder(sort: OperationSortKey) {
+  switch (sort) {
+    case "newest":
+      return desc(shipments.createdAt);
+    case "updated":
+      return desc(shipments.updatedAt);
+    case "stale":
+      return asc(shipments.updatedAt);
+    case "amount_desc":
+      return desc(shipments.finalPrice);
+    case "amount_asc":
+      return asc(shipments.finalPrice);
+    case "queue":
+    default:
+      return desc(shipments.createdAt);
+  }
+}
+
+export function normalizeOperationSort(value?: string | null): OperationSortKey {
+  return (OPERATION_SORT_KEYS as readonly string[]).includes(String(value || ""))
+    ? (value as OperationSortKey)
+    : "queue";
 }
 
 async function queryOperationsEligibleShipments(params: {
@@ -1685,6 +1927,7 @@ async function queryOperationsEligibleShipments(params: {
   queue?: string;
   search?: string;
   limit?: number;
+  sort?: OperationSortKey;
 }): Promise<Shipment[]> {
   const visibleShipmentIds = await getVisibleOperationShipmentIds(params.viewer);
   if (visibleShipmentIds && visibleShipmentIds.size === 0) {
@@ -1707,6 +1950,7 @@ async function queryOperationsEligibleShipments(params: {
   const ddpCondition = getDdpShipmentSqlCondition();
   const expressCondition = getExpressShipmentSqlCondition();
   const localCondition = getLocalShipmentSqlCondition();
+  const dangerousGoodsCondition = getDangerousGoodsShipmentSqlCondition();
   const conditions = [
     isNull(shipments.deletedAt),
     ne(shipments.status, "cancelled"),
@@ -1717,13 +1961,23 @@ async function queryOperationsEligibleShipments(params: {
         ? expressCondition
         : params.queue === "local"
           ? localCondition
-          : sql`(${ddpCondition} or ${expressCondition} or ${localCondition})`,
+          : params.queue === "dangerous_goods"
+            ? getDangerousGoodsQueueSqlCondition()
+            : sql`(${ddpCondition} or ${expressCondition} or ${localCondition} or ${dangerousGoodsCondition})`,
   ];
 
   if (isDeliveredQueue) {
     conditions.push(eq(shipments.status, "delivered"));
   } else {
     conditions.push(ne(shipments.status, "delivered"));
+  }
+
+  // Returned is an overlay queue, not an exclusive one: a shipment travelling back to the
+  // shipper still needs an operator to close the loop (refund, re-ship, tell the client), so
+  // it stays in its own D2D/Express/Local queue as well. Delivered is the opposite — nothing
+  // is left to do there, which is why that queue subtracts from the active ones.
+  if (params.queue === "returned") {
+    conditions.push(eq(shipments.status, "returned"));
   }
 
   if (visibleShipmentIds) {
@@ -1757,13 +2011,14 @@ async function queryOperationsEligibleShipments(params: {
     );
   }
 
-  // Fetch newest-first so a capped page always contains the most recent shipments; the list
-  // endpoint reverses the page to present it oldest→newest (FIFO) for the operators.
+  // Fetch in the requested order so the cap keeps the rows that order is about. The default
+  // (`queue`) is newest-first; the list endpoint then reverses the page to present it
+  // oldest→newest (FIFO) for the operators.
   const baseQuery = db
     .select()
     .from(shipments)
     .where(and(...conditions))
-    .orderBy(desc(shipments.createdAt));
+    .orderBy(operationSortOrder(params.sort || "queue"));
 
   return typeof params.limit === "number"
     ? baseQuery.limit(params.limit)
@@ -1775,10 +2030,14 @@ export async function listOperationShipments(params: {
   queue?: string;
   search?: string;
   limit?: number;
+  sort?: OperationSortKey;
 }): Promise<OperationShipmentSummary[]> {
-  // Query returns newest-first (so the cap keeps recent shipments); present oldest→newest.
-  const shipmentsList = await queryOperationsEligibleShipments(params);
-  return buildShipmentListSummaries([...shipmentsList].reverse());
+  const sort = params.sort || "queue";
+  const shipmentsList = await queryOperationsEligibleShipments({ ...params, sort });
+  // Only the FIFO default is reversed: it queries newest-first so the cap keeps current work,
+  // then flips the page so operators work the oldest of it first. Every other sort already
+  // arrives in the order it was asked for, and reversing it would invert the operator's choice.
+  return buildShipmentListSummaries(sort === "queue" ? [...shipmentsList].reverse() : shipmentsList);
 }
 
 export async function getOperationShipmentDetail(
@@ -1818,6 +2077,8 @@ export async function getOperationSummary(viewer: User) {
   let attentionCount = 0;
   let specialHandlingCount = 0;
   let deliveredCount = 0;
+  let returnedCount = 0;
+  let dangerousGoodsCount = 0;
 
   for (const shipment of activeShipments) {
     const kind = getOperationShipmentKind(shipment);
@@ -1829,6 +2090,18 @@ export async function getOperationSummary(viewer: User) {
       expressCount += 1;
     } else if (kind === OperationShipmentKind.LOCAL) {
       localCount += 1;
+    } else if (kind === OperationShipmentKind.DANGEROUS_GOODS) {
+      dangerousGoodsCount += 1;
+    }
+
+    // The older carrier-quoted hold counts here too: it is an Express shipment by kind, but a
+    // declaration nobody has signed off is dangerous goods work whatever queue it lives in.
+    if (
+      kind !== OperationShipmentKind.DANGEROUS_GOODS &&
+      shipment.hasDangerousGoods &&
+      shipment.dangerousGoodsStatus === DangerousGoodsStatus.PENDING_REVIEW
+    ) {
+      dangerousGoodsCount += 1;
     }
 
     if (shipment.status === "carrier_error" || attentionShipmentIds.has(shipment.id)) {
@@ -1837,6 +2110,10 @@ export async function getOperationSummary(viewer: User) {
 
     if (specialShipmentIds.has(shipment.id)) {
       specialHandlingCount += 1;
+    }
+
+    if (shipment.status === "returned") {
+      returnedCount += 1;
     }
   }
 
@@ -1853,6 +2130,8 @@ export async function getOperationSummary(viewer: User) {
     attentionCount,
     specialHandlingCount,
     deliveredCount,
+    returnedCount,
+    dangerousGoodsCount,
     operationsUserCount: usersList.filter((user) => user.isActive).length,
   };
 }
@@ -2169,6 +2448,36 @@ export async function resolveAttentionFlags(params: {
   }
 
   return resolved;
+}
+
+/**
+ * Resolve only the open flags of one issue type.
+ *
+ * Distinct from `resolveAttentionFlags`, which clears everything open on a shipment. When one
+ * specific thing has been dealt with — an operator recorded the air waybill a paid dangerous
+ * goods shipment was waiting for — clearing an unrelated address or customs flag at the same
+ * time would quietly hide work nobody has done.
+ */
+export async function resolveAttentionFlagsOfType(params: {
+  shipmentId: string;
+  issueType: string;
+  actorUserId?: string | null;
+}) {
+  const resolvedAt = new Date();
+  return db
+    .update(shipmentAttentionFlags)
+    .set({
+      status: OperationAttentionStatus.RESOLVED,
+      resolvedByUserId: params.actorUserId || null,
+      resolvedAt,
+      updatedAt: resolvedAt,
+    })
+    .where(and(
+      eq(shipmentAttentionFlags.shipmentId, params.shipmentId),
+      eq(shipmentAttentionFlags.issueType, params.issueType),
+      eq(shipmentAttentionFlags.status, OperationAttentionStatus.OPEN),
+    ))
+    .returning();
 }
 
 export async function resolveSpecialHandling(params: {

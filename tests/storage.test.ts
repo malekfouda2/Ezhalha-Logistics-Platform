@@ -185,7 +185,7 @@ describe("Storage - Pricing Rules", () => {
       isActive: true,
     });
 
-    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 50)).toBe(18);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 50, "company")).toBe(18);
 
     const baseTier = await storage.createDdpPricingTier({
       profileId: rule.id,
@@ -200,12 +200,16 @@ describe("Storage - Pricing Rules", () => {
       marginPercentage: "8.00",
     });
 
-    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 499)).toBe(12);
-    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 500)).toBe(8);
-    expect(await storage.getDdpMarginForQuantity(rule.id, "CBM", 500)).toBe(18);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 499, "company")).toBe(12);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 500, "company")).toBe(8);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "CBM", 500, "company")).toBe(18);
 
     await storage.updateDdpPricingTier(higherTier.id, { marginPercentage: "7.50" });
-    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 900)).toBe(7.5);
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 900, "company")).toBe(7.5);
+
+    // These tiers belong to the company set. An individual account must not see them — it
+    // takes the profile's own individual default instead.
+    expect(await storage.getDdpMarginForQuantity(rule.id, "KG", 900, "individual")).toBe(18);
 
     await storage.deleteDdpPricingTier(baseTier.id);
     await storage.deletePricingRule(rule.id);

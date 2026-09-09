@@ -40,7 +40,7 @@ All DB access flows through Drizzle ([server/db.ts](server/db.ts)). Prefer the `
 Carrier adapters (FedEx, DHL, Aramex) register via `server/integrations/carriers.ts`. Tap is the current payment integration (Stripe references are legacy). Zoho Books handles customer/invoice sync with bilingual fields. Integration account credentials are encrypted with `INTEGRATION_CONFIG_SECRET` — keep that secret stable across deploys or existing credentials become unreadable.
 
 ### Background schedulers
-Start after the HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh. Disable individually with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`.
+Start after the HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry. Disable individually with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`.
 
 ## Environment
 

@@ -5,9 +5,11 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
 import { startCreditReminderScheduler } from "./services/credit-reminder";
+import { startIntegrationHealthDigestScheduler } from "./services/integration-health-digest";
 import { startAbandonedRecoveryScheduler } from "./services/abandoned-recovery";
 import { startExpressTrackingRefreshScheduler } from "./services/express-tracking-refresh";
 import { startSalesChannelSyncScheduler } from "./services/sales-channel-sync";
+import { startDangerousGoodsQuoteExpiryScheduler } from "./services/dangerous-goods-quote-expiry";
 import { validateFedExEnvOnStartup } from "./integrations/fedex";
 import { validateAramexEnvOnStartup } from "./integrations/aramex";
 import { loadDefaultIntegrationAccountsIntoEnv } from "./services/integration-apps";
@@ -146,9 +148,11 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
       startCreditReminderScheduler();
+      startIntegrationHealthDigestScheduler();
       startAbandonedRecoveryScheduler();
       startExpressTrackingRefreshScheduler();
       startSalesChannelSyncScheduler();
+      startDangerousGoodsQuoteExpiryScheduler();
       if (typeof process.send === "function") {
         process.send("ready");
       }

@@ -41,6 +41,14 @@ import {
   ShipmentRefundRequestActorType,
   ShipmentRefundRequestStatus,
   shipmentTradeDocumentSchema,
+  dangerousGoodsDeclarationSchema,
+  dangerousGoodsDraftDeclarationSchema,
+  dangerousGoodsDocumentSchema,
+  DANGEROUS_GOODS_DOCUMENT_MAX_FILES,
+  DangerousGoodsStatus,
+  DangerousGoodsShipmentStatus,
+  DG_MANUAL_FULFILLMENT_TYPE,
+  summarizeDangerousGoods,
   ShipmentExtraFeeType,
   DdpTransportMethod,
   type DdpTransportMethodValue,
@@ -63,6 +71,11 @@ import {
   UserInvitationStatus,
   type RoleHierarchyLevelValue,
 } from "@shared/internal-users";
+import {
+  normalizePricingAccountType,
+  PRICING_ACCOUNT_TYPES,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 import { logInfo, logWarn, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
 import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
@@ -76,6 +89,8 @@ import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
+import { isCarrierStatusStillBooked } from "@shared/domain";
+import { SHIPMENT_FILTER_ALL } from "@shared/shipment-filters";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
   calculateShipmentAccounting,
@@ -94,6 +109,7 @@ import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 import { extractPackageDetailsFromDocument } from "./services/package-extraction";
 import { extractCompanyDetailsFromDocuments, isGeminiCompanyExtractionConfigured } from "./services/gemini-company-extraction";
 import { applyCarrierTrackingToShipment } from "./services/express-tracking-refresh";
+import { clearCarrierTrackingEvents } from "./services/carrier-tracking-events";
 import {
   hasCommercialInvoiceData,
   renderCommercialInvoiceHtml,
@@ -113,6 +129,7 @@ import {
   sanitizeIntegrationCredentials,
   sanitizeIntegrationSettings,
   serializeIntegrationAccount,
+  IntegrationFieldValidationError,
   serializeIntegrationAccountSafely,
 } from "./services/integration-apps";
 import {
@@ -139,6 +156,9 @@ import {
   OPERATION_ROLE_NAMES,
   canViewOperationFinancialBreakdown,
   completeOperationTask,
+  createAttentionFlag,
+  upsertOpenAttentionFlag,
+  resolveAttentionFlagsOfType,
   createOperationEvent,
   createOperationNote,
   ensureDefaultOperationTasks,
@@ -146,6 +166,7 @@ import {
   ensureOperationProfile,
   getOperationRoleNames,
   getOperationShipmentDetail,
+  getOperationShipmentKind,
   updateOperationTaskMetadata,
   getOperationSummary,
   getOperationViewerScope,
@@ -153,6 +174,7 @@ import {
   getUnreadNotificationCount,
   listNotificationsForUser,
   listOperationShipments,
+  normalizeOperationSort,
   markAllNotificationsRead,
   markNotificationRead,
   notifyUser,
@@ -166,6 +188,24 @@ import {
   upsertSpecialHandling,
   validateDdpStageTransition,
 } from "./services/operations";
+import { isPostalCodeRequired } from "@shared/postal-codes";
+import { parseDangerousGoodsDeclaration } from "./services/dangerous-goods";
+import {
+  buildCarrierHandoverText,
+  dangerousGoodsMissingFields,
+  defaultDangerousGoodsQuoteExpiry,
+} from "./services/dangerous-goods-manual";
+import { reportCarrierFailure } from "./services/carrier-failure-reporting";
+import { getIntegrationHealth } from "./services/integration-health";
+import {
+  buildZidAuthorizeUrl,
+  exchangeZidAuthorizationCode,
+  generateZidWebhookCredential,
+  getZidRedirectUri,
+  isZidConfigured,
+  registerZidWebhooks,
+} from "./services/zid-oauth";
+import { extractDangerousGoodsFromDocument, readStoredFileBuffer } from "./services/dangerous-goods-extraction";
 import {
   TaskPermissionError,
   TaskStateError,
@@ -1427,6 +1467,57 @@ function isBookablePickupDate(dateStr: string | null | undefined, now: Date = ne
  * Pickup columns for an EXPRESS shipment. Pickup is always requested; the client may supply a
  * custom date/window, otherwise the cutoff-based default is used.
  */
+// A customs line item as the client sends it. Module scope because both the client create
+// flow and the operations dangerous goods editor validate against it, and those two live at
+// opposite ends of this file.
+const shipmentItemInputSchema = z.object({
+  itemName: z.string().min(1),
+  itemDescription: z.string().optional(),
+  category: z.string().min(1),
+  material: z.string().optional(),
+  countryOfOrigin: z.string().length(2),
+  hsCode: z.string().optional(),
+  hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
+  hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
+  hsCodeCandidates: z.array(z.object({
+    code: z.string(),
+    description: z.string(),
+    confidence: z.number(),
+  })).optional(),
+  price: z.number().nonnegative(),
+  quantity: z.number().int().positive(),
+  currency: z.string().optional(),
+});
+
+/**
+ * Columns a dangerous goods declaration writes onto a new shipment.
+ *
+ * Every DG shipment is created as PENDING_REVIEW. That status is what stops
+ * `finalizePaidShipmentAfterPayment` from booking the carrier: Ezhalha signs the Shipper's
+ * Declaration on its own carrier account, so an operator reads the declaration before the
+ * goods are tendered. A shipment without dangerous goods records NOT_APPLICABLE rather than
+ * null, so the column never has to be read as "unknown".
+ */
+function dangerousGoodsInsertFields(
+  declaration?: z.infer<typeof dangerousGoodsDraftDeclarationSchema> | null,
+  documents?: z.infer<typeof dangerousGoodsDocumentSchema>[] | null,
+) {
+  if (!declaration) {
+    return {
+      hasDangerousGoods: false,
+      dangerousGoodsStatus: DangerousGoodsStatus.NOT_APPLICABLE,
+    };
+  }
+
+  return {
+    hasDangerousGoods: true,
+    dangerousGoodsStatus: DangerousGoodsStatus.PENDING_REVIEW,
+    dangerousGoodsRegulation: declaration.regulation,
+    dangerousGoodsData: JSON.stringify(declaration),
+    dangerousGoodsDocumentsData: documents?.length ? JSON.stringify(documents) : undefined,
+  };
+}
+
 function expressPickupInsertFields(pickup?: z.infer<typeof pickupInputSchema>) {
   const custom = pickup?.date && isBookablePickupDate(pickup.date) ? pickup.date : null;
   const date = custom || computeDefaultPickupDate().date;
@@ -1568,6 +1659,20 @@ async function bookCarrierPickupIfRequested(
       pickupStatus: "failed",
       pickupError: errorMessage,
     });
+    // Raise the decoded reason where an operator will actually see it. Storing the raw
+    // carrier string alone is what let a pickup be retried fourteen times against an error
+    // that said, on the very first attempt, that the collection date was the problem.
+    await reportCarrierFailure({
+      shipment,
+      operation: "pickup",
+      error,
+      context: {
+        pickupDate: effectivePickupDate,
+        readyTime: shipment.pickupReadyTime || "09:00",
+        closeTime: shipment.pickupCloseTime || "17:00",
+        senderCountry: shipment.senderCountry,
+      },
+    });
     await logAudit(
       actorUserId,
       "pickup_failed",
@@ -1626,8 +1731,18 @@ async function finalizePaidShipmentAfterPayment(params: {
   ipAddress?: string;
   // Tap's SAR settlement figure for a non-SAR charge (see ensureShipmentBillingArtifacts).
   settledSarAmount?: number | null;
+  /**
+   * Wait for a concurrent booking to finish instead of returning immediately.
+   *
+   * Only the browser confirm path sets this, because only there is a person waiting to see a
+   * booked shipment. The Tap webhook does not care, and the reconciler sweeps many shipments
+   * on an ordinary page load — making it wait would turn one contended shipment into a hung
+   * request for the client.
+   */
+  awaitConcurrentBooking?: boolean;
 }) {
   const { shipment, transactionId, paymentMethod, userId, ipAddress, settledSarAmount } = params;
+  const awaitConcurrentBooking = params.awaitConcurrentBooking === true;
 
   if (shipment.status === "cancelled") {
     throw new Error("Cancelled shipments cannot be finalized");
@@ -1663,6 +1778,165 @@ async function finalizePaidShipmentAfterPayment(params: {
       actorUserId: userId,
       reason: "payment_confirmed",
     });
+    if (shipment.status !== updatedShipment.status) {
+      await recordShipmentStatusChange({
+        shipment: updatedShipment,
+        previousStatus: shipment.status,
+        nextStatus: updatedShipment.status,
+        actorUserId: userId,
+        source: "payment_finalization",
+      });
+    }
+
+    return updatedShipment;
+  }
+
+  // Dangerous goods, manual flow: payment unlocks the booking, it does not perform one.
+  //
+  // This branch has to come BEFORE the review hold below, and before anything that books a
+  // carrier. A DG consignment is arranged by a person in an email thread, against a price the
+  // carrier already agreed — the system has no API call that could produce that booking, and
+  // must not invent one. So payment moves the shipment to `dg_booking` and stops: an operator
+  // books the movement, records the waybill the carrier issues, and the shipment goes live
+  // from there.
+  if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE) {
+    // Tap replays successful charges, sometimes days later, and this function runs again on
+    // every replay. Once an operator has recorded the air waybill, re-running the branch below
+    // would drag a consignment that is physically moving back into the booking queue and ask
+    // a second operator to book it again — two Shipper's Declarations for one shipment.
+    //
+    // The guard is the waybill, not the status: status is edited by carrier tracking, by
+    // operators, and by the client cancelling, so it is not a durable record of "this was
+    // booked". A waybill exists only because a person put it there.
+    if (shipment.carrierTrackingNumber) {
+      await ensureShipmentBillingArtifacts({
+        shipment,
+        transactionId,
+        paymentMethod,
+        invoiceStatus: "paid",
+        settledSarAmount,
+      });
+      return shipment;
+    }
+
+    const updatedShipment =
+      (await storage.updateShipment(shipment.id, {
+        status: DangerousGoodsShipmentStatus.AWAITING_BOOKING,
+        carrierStatus: DangerousGoodsShipmentStatus.AWAITING_BOOKING,
+        paymentStatus: "paid",
+        dgDeclinedAt: null,
+        dgDeclineReason: null,
+      })) || shipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+      settledSarAmount,
+    });
+
+    // No pickup is booked here. There is nothing for a courier to collect against until the
+    // air waybill exists, and the pickup endpoints of every carrier we use want one.
+
+    await logAudit(
+      userId,
+      "confirm_dangerous_goods_shipment",
+      "shipment",
+      updatedShipment.id,
+      `Paid dangerous goods shipment ${updatedShipment.trackingNumber} — awaiting the operator's carrier booking and air waybill`,
+      ipAddress,
+    );
+
+    // The client has paid and is now waiting on us, so this is time-critical in a way the
+    // queue position alone does not convey. The flag clears when the waybill is recorded.
+    // Upsert rather than insert: a replayed charge must not stack a second identical flag on
+    // an operator's Needs Attention list.
+    await upsertOpenAttentionFlag({
+      shipmentId: updatedShipment.id,
+      issueType: "dangerous_goods_awaiting_booking",
+      severity: "high",
+      details: `${updatedShipment.trackingNumber} has been paid. Confirm the movement with ${updatedShipment.carrierName || updatedShipment.carrierCode || "the carrier"} and record the air waybill.`,
+    });
+
+    // Only on the transition, so a replay does not re-announce a payment that landed days ago.
+    if (shipment.status !== updatedShipment.status) {
+      await createOperationEvent({
+        shipmentId: updatedShipment.id,
+        actorUserId: userId,
+        eventType: "dangerous_goods_paid",
+        title: "Client paid — book the movement",
+        description: `Payment settled. ${updatedShipment.carrierName || updatedShipment.carrierCode || "The carrier"} quoted this consignment by email; book it now and record the air waybill.`,
+        audience: OperationEventAudience.INTERNAL,
+      });
+    }
+
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
+    });
+
+    if (shipment.status !== updatedShipment.status) {
+      await recordShipmentStatusChange({
+        shipment: updatedShipment,
+        previousStatus: shipment.status,
+        nextStatus: updatedShipment.status,
+        actorUserId: userId,
+        source: "payment_finalization",
+      });
+    }
+
+    return updatedShipment;
+  }
+
+  // Dangerous goods: paid, but NOT tendered to the carrier.
+  //
+  // Ezhalha books on its own carrier accounts, which makes Ezhalha the shipper of record and
+  // the signatory on the Shipper's Declaration for Dangerous Goods. An operator therefore
+  // reads the declaration before the goods are offered for transport. Approving the review
+  // books the carrier through the existing retry path; rejecting it refunds the client.
+  if (shipment.hasDangerousGoods && shipment.dangerousGoodsStatus === DangerousGoodsStatus.PENDING_REVIEW) {
+    const updatedShipment =
+      (await storage.updateShipment(shipment.id, {
+        status: "awaiting_review",
+        carrierStatus: "awaiting_dangerous_goods_review",
+        paymentStatus: "paid",
+      })) || shipment;
+
+    await ensureShipmentBillingArtifacts({
+      shipment: updatedShipment,
+      transactionId,
+      paymentMethod,
+      invoiceStatus: "paid",
+      settledSarAmount,
+    });
+
+    const declaration = parseDangerousGoodsDeclaration(updatedShipment.dangerousGoodsData);
+    await createAttentionFlag({
+      shipmentId: updatedShipment.id,
+      issueType: "dangerous_goods_review_required",
+      severity: "high",
+      details: declaration
+        ? `Dangerous goods declaration awaiting review: ${summarizeDangerousGoods(declaration)}`
+        : "Dangerous goods declaration awaiting review.",
+    });
+
+    await logAudit(
+      userId,
+      "hold_dangerous_goods_shipment",
+      "shipment",
+      updatedShipment.id,
+      `Held dangerous goods shipment ${updatedShipment.trackingNumber} for operations review before carrier booking`,
+      ipAddress,
+    );
+
+    await ensureOperationAssignmentForShipment({
+      shipment: updatedShipment,
+      actorUserId: userId,
+      reason: "payment_confirmed",
+    });
+
     if (shipment.status !== updatedShipment.status) {
       await recordShipmentStatusChange({
         shipment: updatedShipment,
@@ -1806,6 +2080,39 @@ async function finalizePaidShipmentAfterPayment(params: {
     throw new Error(confirmAddrValidation.errors.join("; "));
   }
 
+  // Claim the booking before calling the carrier.
+  //
+  // The guard above tests `carrierTrackingNumber`, which is correct but not atomic: the
+  // shipment was read at the top of this function, so two requests that arrive together both
+  // read null and both pass. That is exactly how five shipments came to have two waybills —
+  // the Tap webhook and the client's browser redirect landing within the same second. The
+  // claim is a conditional UPDATE, so Postgres decides the winner and only one caller books.
+  const claimedBooking = await storage.claimCarrierBooking(shipment.id);
+  if (!claimedBooking) {
+    // Somebody else is booking this right now. Wait for their tracking number only when a
+    // person is watching; otherwise return at once so a bulk sweep is never held up.
+    const maxAttempts = awaitConcurrentBooking ? 20 : 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const current = await storage.getShipment(shipment.id);
+      if (current?.carrierTrackingNumber) {
+        logInfo("Skipped duplicate carrier booking; another request booked it", {
+          shipmentId: shipment.id,
+          trackingNumber: current.trackingNumber,
+          carrierTrackingNumber: current.carrierTrackingNumber,
+        });
+        return current;
+      }
+    }
+    // The winner is still working, or died mid-flight. Either way this request must not book:
+    // a second waybill is worse than a slow one. The stale window lets a retry through later.
+    logWarn("Skipped carrier booking; another request holds the claim", {
+      shipmentId: shipment.id,
+      trackingNumber: shipment.trackingNumber,
+    });
+    return (await storage.getShipment(shipment.id)) || shipment;
+  }
+
   let latestShipment = shipment;
   const carrierAdapter = getAdapterForShipment(latestShipment);
 
@@ -1892,6 +2199,20 @@ async function finalizePaidShipmentAfterPayment(params: {
       carrierLastAttemptAt: new Date(),
       carrierAttempts: (latestShipment.carrierAttempts || 0) + 1,
       paymentStatus: "paid",
+    });
+
+    // Hand the claim back so a retry is not blocked for the full stale window. Safe because
+    // it only clears while carrierTrackingNumber is still null — a booking that succeeded is
+    // never re-claimable.
+    await storage.releaseCarrierBookingClaim(latestShipment.id);
+
+    // The client has paid at this point, so a booking failure is the most urgent kind there
+    // is. Flag it with the decoded reason before rethrowing.
+    await reportCarrierFailure({
+      shipment: latestShipment,
+      operation: "booking",
+      error: carrierError,
+      context: { carrierErrorCode: errCode, attempts: (latestShipment.carrierAttempts || 0) + 1 },
     });
 
     throw carrierError;
@@ -2620,7 +2941,7 @@ async function calculateDdpExtraWeightCharge(params: {
   const account = await storage.getClientAccount(params.shipment.clientAccountId);
   const pricingRule = account ? await storage.getPricingRuleByProfile(account.profile) : undefined;
   const markupPercentage = pricingRule
-    ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+    ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
     : 0;
   const pricedQuote = calculateDdpPrice({
     lane,
@@ -3114,6 +3435,10 @@ function serializeFinancialShipment(
     realNetProfitAmountSar: effective.realNetProfitAmountSar,
     weightValue: effective.weightValue,
     carrierTrackingId: shipment.carrierTrackingNumber || null,
+    // Needed by the cancel confirmation, which tells the operator whether cancelling refunds the
+    // client automatically or opens a refund request — a distinction it must not guess at.
+    carrierStatus: shipment.carrierStatus || null,
+    pickupConfirmationNumber: shipment.pickupConfirmationNumber || null,
     carrierPaymentAmountSar,
     carrierPaymentReference: shipment.carrierPaymentReference || null,
     carrierPaymentNote: shipment.carrierPaymentNote || null,
@@ -4088,6 +4413,15 @@ const CANCELLABLE_SHIPMENT_STATUSES = new Set([
   "processing",
   "carrier_error",
   "payment_pending",
+  // A dangerous goods declaration the client has submitted but nobody has acted on yet.
+  // Nothing has been arranged, nothing has been charged, and without this the client is stuck
+  // with a submission they cannot withdraw. `dg_awaiting_carrier` is deliberately NOT here:
+  // by then an operator has emailed a carrier, and only that operator can unwind it.
+  DangerousGoodsShipmentStatus.REVIEW,
+  // Paid, but the operator has not booked it yet — the one moment in a dangerous goods
+  // shipment's life when cancelling costs nothing but a refund. Withholding cancellation here
+  // would be perverse: waiting makes it strictly harder to unwind.
+  DangerousGoodsShipmentStatus.AWAITING_BOOKING,
 ]);
 
 const NON_CANCELLABLE_CARRIER_STATUSES = new Set([
@@ -4120,19 +4454,10 @@ function canShipmentBeCancelled(shipment: Shipment): boolean {
 // Carrier statuses that mean the parcel has left the shipper (collected or moving). A shipment
 // that has NOT reached one of these is "still booked" — its cancellation refund is issued
 // automatically; anything beyond booked routes through the manual approval workflow.
-const COLLECTED_OR_MOVING_CARRIER_STATUSES = new Set([
-  "picked_up",
-  "in_transit",
-  "out_for_delivery",
-  "delivered",
-]);
-
+// The rule itself lives in shared/domain.ts so the web and mobile clients can warn the user with
+// exactly the rule this server will apply when they confirm.
 function isShipmentStillBooked(shipment: Shipment): boolean {
-  const normalizedCarrierStatus = (shipment.carrierStatus || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return !COLLECTED_OR_MOVING_CARRIER_STATUSES.has(normalizedCarrierStatus);
+  return isCarrierStatusStillBooked(shipment.carrierStatus);
 }
 
 function isShipmentRefundApprovalSatisfied(status: string | null | undefined): boolean {
@@ -4340,6 +4665,10 @@ async function ensureShipmentRefundRequestForCancellation(params: {
 type ShipmentRefundRequestSummary = ShipmentRefundRequest & {
   shipmentTrackingNumber: string | null;
   carrierTrackingNumber: string | null;
+  // Carried so the admin UI can turn the carrier tracking number into a link to the carrier's
+  // own tracking page — the URL differs per carrier, so the number alone is not enough.
+  carrierCode: string | null;
+  carrierName: string | null;
   shipmentStatus: string | null;
   clientName: string;
   clientAccountNumber: string | null;
@@ -4367,6 +4696,8 @@ async function serializeShipmentRefundRequestForAdmin(
     ...request,
     shipmentTrackingNumber: shipment?.trackingNumber || null,
     carrierTrackingNumber: shipment?.carrierTrackingNumber || null,
+    carrierCode: shipment?.carrierCode || null,
+    carrierName: shipment?.carrierName || null,
     shipmentStatus: shipment?.status || null,
     clientName: clientAccount?.name || "Unknown Client",
     clientAccountNumber: clientAccount?.accountNumber || null,
@@ -5635,6 +5966,10 @@ export const DEFAULT_PERMISSIONS = [
   { resource: "sales-feature-requests", action: "approve", description: "Approve Sales Channels feature access" },
   { resource: "sales-feature-requests", action: "reject", description: "Reject Sales Channels feature requests" },
   { resource: "sales-feature-requests", action: "revoke", description: "Revoke Sales Channels feature access" },
+  { resource: "dangerous-goods-requests", action: "read", description: "View dangerous goods access requests" },
+  { resource: "dangerous-goods-requests", action: "approve", description: "Approve dangerous goods access" },
+  { resource: "dangerous-goods-requests", action: "reject", description: "Reject dangerous goods access requests" },
+  { resource: "dangerous-goods-requests", action: "revoke", description: "Revoke dangerous goods access" },
 
   // Credit Invoices
   { resource: "credit-invoices", action: "read", description: "View credit invoices" },
@@ -6938,7 +7273,10 @@ export async function registerRoutes(
       // to the default instead of 500ing on a typo'd query string.
       const requestedLimit = Number(req.query.limit);
       const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
-      res.json(await listOperationShipments({ viewer: user, queue, search, limit }));
+      // Unknown sort keys fall back to the queue default rather than 400ing: a stale bookmark
+      // carrying an old key should still show an operator their queue.
+      const sort = normalizeOperationSort(typeof req.query.sort === "string" ? req.query.sort : undefined);
+      res.json(await listOperationShipments({ viewer: user, queue, search, limit, sort }));
     } catch (error) {
       logError("Failed to fetch operations shipments", error);
       res.status(500).json({ error: "Internal server error" });
@@ -7245,6 +7583,175 @@ export async function registerRoutes(
       res.json({ detail: await getOperationShipmentDetail(req.params.id, user) });
     } catch (error) {
       logError("Failed to delete tracking number", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Replace the carrier air waybill an express shipment travels on.
+   *
+   * Carriers void and reissue waybills, bookings get made by hand outside the system when an
+   * API call fails, and numbers get typed wrong. Until now none of that could be corrected: the
+   * waybill was written once at booking and never again, so a shipment on a dead number simply
+   * stopped tracking and an operator had nothing to do about it.
+   *
+   * The delicate part is not the write, it is everything the OLD waybill left behind. Scan
+   * history, delivery estimates, the stored label and the carrier status all describe a
+   * different consignment, and every one of them has to go — otherwise the shipment shows one
+   * timeline built from two waybills, and a stale "delivered" scan freezes it permanently,
+   * because the poller refuses to regress a delivered shipment.
+   */
+  app.post("/api/operations/shipments/:id/carrier-tracking-number", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const parsed = z.object({
+        carrierTrackingNumber: z.string().trim().min(4, "Enter the waybill the carrier issued.").max(64),
+        carrierCode: z.string().trim().min(1).max(32).optional(),
+        carrierName: z.string().trim().max(80).optional(),
+        // Required, not optional: this rewrites the identity of a shipment already in a
+        // client's hands, and "why" is the first thing anyone asks afterwards.
+        reason: z.string().trim().min(3, "Say why the waybill is being replaced.").max(500),
+        // Answered at the one moment the operator actually knows. A waybill that is still live
+        // with the carrier and no longer referenced by anything is how consignments get
+        // collected that nobody is expecting.
+        previousWaybillCancelled: z.boolean().optional().default(false),
+      }).parse(req.body || {});
+
+      const visibleShipment = await getOperationShipmentDetail(req.params.id, user);
+      if (!visibleShipment) return res.status(404).json({ error: "Shipment not found" });
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+
+      const kind = getOperationShipmentKind(shipment);
+      if (kind !== OperationShipmentKind.EXPRESS) {
+        return res.status(400).json({
+          error: kind === OperationShipmentKind.DANGEROUS_GOODS
+            ? "Use the dangerous goods booking step to record this shipment's air waybill."
+            : "Only express shipments can have their carrier waybill replaced here.",
+        });
+      }
+
+      if (shipment.status === "cancelled") {
+        return res.status(400).json({ error: "This shipment is cancelled. Reinstate it before giving it a new waybill." });
+      }
+
+      const previous = shipment.carrierTrackingNumber?.trim() || null;
+      if (previous && previous === parsed.carrierTrackingNumber) {
+        return res.status(400).json({ error: `This shipment is already on waybill ${previous}.` });
+      }
+
+      // Two shipments polling one waybill means both show the same scans and neither is right.
+      const clash = await storage.getShipmentByCarrierTrackingNumber(parsed.carrierTrackingNumber);
+      if (clash && clash.id !== shipment.id) {
+        return res.status(409).json({
+          error: `Waybill ${parsed.carrierTrackingNumber} is already on shipment ${clash.trackingNumber}.`,
+          conflictingShipmentId: clash.id,
+          conflictingTrackingNumber: clash.trackingNumber,
+        });
+      }
+
+      const clearedEvents = await clearCarrierTrackingEvents(shipment.id);
+
+      const previousStatus = shipment.status;
+      const updated = await storage.updateShipment(shipment.id, {
+        carrierTrackingNumber: parsed.carrierTrackingNumber,
+        ...(parsed.carrierCode ? { carrierCode: parsed.carrierCode } : {}),
+        ...(parsed.carrierName ? { carrierName: parsed.carrierName } : {}),
+        // Back to "booked, not yet scanned". Leaving a tracking-derived status in place stops
+        // the poller dead: it will not move a shipment out of delivered, so a replacement
+        // waybill on a previously-delivered shipment would never update again.
+        status: "created",
+        carrierStatus: "created",
+        carrierStatusRepeatCount: 0,
+        estimatedDelivery: null,
+        actualDelivery: null,
+        carrierErrorCode: null,
+        carrierErrorMessage: null,
+        carrierLastAttemptAt: null,
+        // The stored label belongs to the old waybill. Serving it after a replacement hands
+        // the client a label for a consignment that is no longer theirs.
+        carrierShipmentId: null,
+        carrierLabelBase64: null,
+        carrierLabelFormat: null,
+        labelUrl: null,
+      }) || shipment;
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "carrier_waybill_replaced",
+        title: previous ? "Air waybill replaced" : "Air waybill recorded",
+        description: previous
+          ? `${previous} → ${parsed.carrierTrackingNumber} on ${updated.carrierName || updated.carrierCode || "the carrier"}. ${parsed.reason} Cleared ${clearedEvents} scan(s) from the old waybill.`
+          : `${parsed.carrierTrackingNumber} recorded on ${updated.carrierName || updated.carrierCode || "the carrier"}. ${parsed.reason}`,
+        audience: OperationEventAudience.INTERNAL,
+      });
+
+      // The old waybill may still be live. Nothing in this system can cancel it, so the only
+      // thing that stops it being collected is an operator remembering — which is what a flag
+      // is for.
+      if (previous && !parsed.previousWaybillCancelled) {
+        await upsertOpenAttentionFlag({
+          shipmentId: shipment.id,
+          issueType: "carrier_waybill_to_unwind",
+          severity: "high",
+          details: `Waybill ${previous} was replaced by ${parsed.carrierTrackingNumber} and may still be open with ${shipment.carrierName || shipment.carrierCode || "the carrier"}. Cancel it by email — nothing in the system can.`,
+        });
+      }
+
+      await recordShipmentStatusChange({
+        shipment: updated,
+        previousStatus,
+        nextStatus: updated.status,
+        actorUserId: user.id,
+        source: "carrier_waybill_replaced",
+        notifyClient: false,
+      });
+
+      await logAudit(user.id, "replace_carrier_tracking_number", "shipment", shipment.id,
+        `Replaced carrier waybill on ${shipment.trackingNumber}: ${previous || "(none)"} → ${parsed.carrierTrackingNumber}. Reason: ${parsed.reason}`, req.ip);
+
+      // Pull the new waybill straight away. The operator asked for this number because they
+      // believe it is live; showing them within the second whether the carrier agrees is the
+      // difference between a fix and a hopeful edit. A failure here is not fatal — carriers
+      // routinely do not know a waybill for a while after it is issued.
+      let tracking: Awaited<ReturnType<CarrierAdapter["trackShipment"]>> | null = null;
+      let trackingError: string | null = null;
+      try {
+        const adapter = getAdapterForShipment(updated);
+        tracking = await withShipmentIntegrationAccount(
+          getIntegrationAppKeyForCarrier(adapter.carrierCode),
+          {
+            shipperCountryCode: updated.senderCountry,
+            recipientCountryCode: updated.recipientCountry,
+          },
+          () => adapter.trackShipment(parsed.carrierTrackingNumber),
+        );
+        await applyCarrierTrackingToShipment(updated, tracking, "carrier_waybill_replaced");
+      } catch (error: any) {
+        trackingError = error instanceof CarrierError
+          ? error.carrierMessage || error.message
+          : error?.message || "The carrier did not answer for this waybill.";
+        logError("Tracking failed immediately after a waybill replacement", {
+          shipmentId: shipment.id,
+          error: trackingError,
+        });
+      }
+
+      res.json({
+        success: true,
+        previousCarrierTrackingNumber: previous,
+        clearedEvents,
+        tracking,
+        trackingError,
+        detail: await getOperationShipmentDetail(shipment.id, user),
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Failed to replace carrier tracking number", { error: error.message });
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -7585,6 +8092,814 @@ export async function registerRoutes(
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  // ============================================
+  // OPERATIONS - DANGEROUS GOODS REVIEW
+  // ============================================
+  // A paid dangerous goods shipment sits in `awaiting_review` and is deliberately NOT booked
+  // with the carrier. Approving here is the moment Ezhalha offers the goods for transport as
+  // shipper of record, so the operator is signing off on the declaration, not just clicking
+  // through a queue.
+  app.get("/api/operations/shipments/:id/dangerous-goods", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (!shipment.hasDangerousGoods) {
+        return res.status(404).json({ error: "This shipment carries no dangerous goods." });
+      }
+
+      const declaration = parseDangerousGoodsDeclaration(shipment.dangerousGoodsData);
+      let documents: unknown = [];
+      try {
+        documents = shipment.dangerousGoodsDocumentsData
+          ? JSON.parse(shipment.dangerousGoodsDocumentsData)
+          : [];
+      } catch {
+        documents = [];
+      }
+
+      res.json({
+        status: shipment.dangerousGoodsStatus,
+        regulation: shipment.dangerousGoodsRegulation,
+        summary: declaration ? summarizeDangerousGoods(declaration) : null,
+        // Null when the stored JSON did not parse. Surfaced rather than hidden so the
+        // operator rejects the shipment instead of approving something unreadable.
+        declaration,
+        documents,
+        rejectionReason: shipment.dangerousGoodsRejectionReason,
+        reviewedAt: shipment.dangerousGoodsReviewedAt,
+      });
+    } catch (error: any) {
+      logError("Error loading dangerous goods declaration", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/dangerous-goods/approve", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const { id } = req.params;
+      const shipment = await storage.getShipment(id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (!shipment.hasDangerousGoods) {
+        return res.status(400).json({ error: "This shipment carries no dangerous goods." });
+      }
+      if (shipment.dangerousGoodsStatus !== DangerousGoodsStatus.PENDING_REVIEW) {
+        return res.status(400).json({ error: "This declaration has already been reviewed." });
+      }
+      if (shipment.paymentStatus !== "paid") {
+        return res.status(400).json({ error: "This shipment has not been paid for yet." });
+      }
+      // Refuse to approve a declaration nobody can read. The carrier payload is built from
+      // this JSON, so an unparseable declaration would book the goods undeclared.
+      if (!parseDangerousGoodsDeclaration(shipment.dangerousGoodsData)) {
+        return res.status(422).json({
+          error: "The stored declaration could not be read. Reject this shipment and ask the client to re-declare.",
+        });
+      }
+
+      const approved = await storage.updateShipment(id, {
+        dangerousGoodsStatus: DangerousGoodsStatus.APPROVED,
+        dangerousGoodsReviewedByUserId: user.id,
+        dangerousGoodsReviewedAt: new Date(),
+        dangerousGoodsRejectionReason: null,
+      }) || shipment;
+
+      const carrierAdapter = getAdapterForShipment(approved);
+      let carrierResponse;
+      try {
+        const preparedShipment = await buildCarrierShipmentRequestFromShipment(approved, carrierAdapter);
+        if (preparedShipment.tradeDocumentsData !== approved.tradeDocumentsData) {
+          await storage.updateShipment(id, { tradeDocumentsData: preparedShipment.tradeDocumentsData });
+        }
+        carrierResponse = await withBoundIntegrationAccount(
+          getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+          approved.carrierIntegrationAccountId,
+          getShipmentIntegrationRoutingOptions(approved),
+          () => carrierAdapter.createShipment(preparedShipment.carrierRequest),
+        );
+      } catch (carrierError) {
+        const isCarrierErr = carrierError instanceof CarrierError;
+        const errCode = isCarrierErr ? (carrierError as CarrierError).code : "UNKNOWN";
+        const errMsg = isCarrierErr ? (carrierError as CarrierError).carrierMessage : (carrierError as Error).message;
+
+        // The approval stands — the operator did read and accept the declaration — but the
+        // shipment goes to carrier_error so the failure is visible and retryable.
+        await storage.updateShipment(id, {
+          status: "carrier_error",
+          carrierStatus: "error",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+          carrierLastAttemptAt: new Date(),
+          carrierAttempts: (approved.carrierAttempts || 0) + 1,
+        });
+
+        logError("Dangerous goods carrier booking failed after approval", carrierError);
+        return res.status(502).json({
+          error: "Carrier rejected the dangerous goods booking",
+          carrierErrorCode: errCode,
+          carrierErrorMessage: errMsg,
+        });
+      }
+
+      const booked = await storage.updateShipment(id, {
+        status: "created",
+        carrierStatus: "created",
+        carrierTrackingNumber: carrierResponse.carrierTrackingNumber || carrierResponse.trackingNumber,
+        carrierShipmentId: carrierResponse.trackingNumber,
+        labelUrl: carrierResponse.labelUrl,
+        carrierLabelBase64: carrierResponse.labelData || null,
+        carrierLabelMimeType: "application/pdf",
+        carrierLabelFormat: "PDF",
+        estimatedDelivery: carrierResponse.estimatedDelivery,
+        carrierErrorCode: null,
+        carrierErrorMessage: null,
+        carrierLastAttemptAt: new Date(),
+        carrierAttempts: (approved.carrierAttempts || 0) + 1,
+      });
+
+      await bookCarrierPickupIfRequested(
+        booked || approved,
+        carrierAdapter,
+        getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode),
+      );
+
+      await resolveAttentionFlags({
+        shipmentId: id,
+        actorUserId: user.id,
+        resolutionNote: "Dangerous goods declaration reviewed",
+      });
+
+      await recordShipmentStatusChange({
+        shipment: booked || approved,
+        previousStatus: shipment.status,
+        nextStatus: "created",
+        actorUserId: user.id,
+        source: "dangerous_goods_review",
+      });
+
+      await logAudit(user.id, "approve_dangerous_goods_shipment", "shipment", id,
+        `Approved dangerous goods declaration and booked ${shipment.trackingNumber} with ${carrierAdapter.name}`, req.ip);
+
+      res.json({ success: true, shipment: booked || approved });
+    } catch (error: any) {
+      logError("Error approving dangerous goods shipment", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/operations/shipments/:id/dangerous-goods/reject", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const { id } = req.params;
+      const parsed = z.object({
+        reason: z.string().trim().min(1, "Give the client a reason.").max(1000),
+      }).parse(req.body || {});
+
+      const shipment = await storage.getShipment(id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (!shipment.hasDangerousGoods) {
+        return res.status(400).json({ error: "This shipment carries no dangerous goods." });
+      }
+      if (shipment.dangerousGoodsStatus !== DangerousGoodsStatus.PENDING_REVIEW) {
+        return res.status(400).json({ error: "This declaration has already been reviewed." });
+      }
+
+      const rejected = await storage.updateShipment(id, {
+        dangerousGoodsStatus: DangerousGoodsStatus.REJECTED,
+        dangerousGoodsReviewedByUserId: user.id,
+        dangerousGoodsReviewedAt: new Date(),
+        dangerousGoodsRejectionReason: parsed.reason,
+        status: "cancelled",
+        carrierStatus: "cancelled",
+      }) || shipment;
+
+      // Nothing was ever tendered to the carrier, so there is no carrier cancellation to
+      // make — only the client's money to return.
+      const refundRequest = await ensureShipmentRefundRequestForCancellation({
+        shipment: rejected,
+        user,
+        autoRefund: true,
+      });
+
+      await resolveAttentionFlags({
+        shipmentId: id,
+        actorUserId: user.id,
+        resolutionNote: "Dangerous goods declaration reviewed",
+      });
+
+      await recordShipmentStatusChange({
+        shipment: rejected,
+        previousStatus: shipment.status,
+        nextStatus: "cancelled",
+        actorUserId: user.id,
+        source: "dangerous_goods_review",
+      });
+
+      await logAudit(user.id, "reject_dangerous_goods_shipment", "shipment", id,
+        `Rejected dangerous goods declaration for ${shipment.trackingNumber}: ${parsed.reason}`, req.ip);
+
+      res.json({ success: true, shipment: rejected, refundRequest });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error rejecting dangerous goods shipment", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ─── Dangerous goods, manual flow: review → handover → quotation ──────────────────
+  //
+  // These three endpoints are the operator's side of a shipment that no carrier API priced.
+  // The client submitted a declaration and nothing else; an operator checks it, emails it to
+  // DHL or FedEx, and types in whatever they come back with.
+
+  const dangerousGoodsOpsAddressPatchSchema = z.object({
+    name: z.string().min(1).optional(),
+    company: z.string().max(120).nullable().optional(),
+    phone: z.string().min(1).optional(),
+    email: z.string().email().or(z.literal("")).nullable().optional(),
+    addressLine1: z.string().min(1).optional(),
+    addressLine2: z.string().nullable().optional(),
+    city: z.string().min(1).optional(),
+    stateOrProvince: z.string().nullable().optional(),
+    postalCode: z.string().nullable().optional(),
+    countryCode: z.string().length(2).optional(),
+  });
+
+  const dangerousGoodsOpsPatchSchema = z.object({
+    shipper: dangerousGoodsOpsAddressPatchSchema.optional(),
+    recipient: dangerousGoodsOpsAddressPatchSchema.optional(),
+    packages: z.array(z.object({
+      weight: z.number().positive(),
+      length: z.number().positive(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+    })).min(1).optional(),
+    items: z.array(shipmentItemInputSchema).optional(),
+    // Draft, not strict: an operator fills this in over several passes, and refusing to save
+    // half of it would push them back to keeping the other half in a notebook.
+    declaration: dangerousGoodsDraftDeclarationSchema.optional(),
+    preferredPickupDate: z.string().max(32).nullable().optional(),
+  });
+
+  /**
+   * Fill in what the client left out.
+   *
+   * Genuinely new capability: no operations endpoint could write a shipment's addresses,
+   * weights or line items before this one, and the admin equivalent refuses any shipment that
+   * is not `payment_pending && unpaid && unbooked`. It is deliberately narrow — dangerous
+   * goods only, before handover only, and every call is audited, because it edits data the
+   * client declared and signed.
+   */
+  app.patch("/api/operations/shipments/:id/dangerous-goods", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({ error: "This is not a manually-quoted dangerous goods shipment." });
+      }
+      if (shipment.status !== DangerousGoodsShipmentStatus.REVIEW) {
+        return res.status(400).json({ error: "Details can only be edited before the declaration is sent to the carrier." });
+      }
+
+      const patch = dangerousGoodsOpsPatchSchema.parse(req.body || {});
+      const updates: Record<string, unknown> = {};
+      const changed: string[] = [];
+
+      if (patch.shipper) {
+        const a = patch.shipper;
+        if (a.name !== undefined) updates.senderName = a.name;
+        if (a.company !== undefined) updates.senderCompany = a.company;
+        if (a.phone !== undefined) updates.senderPhone = a.phone;
+        if (a.email !== undefined) updates.senderEmail = a.email || null;
+        if (a.addressLine1 !== undefined) updates.senderAddress = a.addressLine1;
+        if (a.addressLine2 !== undefined) updates.senderAddressLine2 = a.addressLine2;
+        if (a.city !== undefined) updates.senderCity = a.city;
+        if (a.stateOrProvince !== undefined) updates.senderStateOrProvince = a.stateOrProvince;
+        if (a.postalCode !== undefined) updates.senderPostalCode = a.postalCode;
+        if (a.countryCode !== undefined) updates.senderCountry = a.countryCode;
+        changed.push("shipper");
+      }
+
+      if (patch.recipient) {
+        const a = patch.recipient;
+        if (a.name !== undefined) updates.recipientName = a.name;
+        if (a.company !== undefined) updates.recipientCompany = a.company;
+        if (a.phone !== undefined) updates.recipientPhone = a.phone;
+        if (a.email !== undefined) updates.recipientEmail = a.email || null;
+        if (a.addressLine1 !== undefined) updates.recipientAddress = a.addressLine1;
+        if (a.addressLine2 !== undefined) updates.recipientAddressLine2 = a.addressLine2;
+        if (a.city !== undefined) updates.recipientCity = a.city;
+        if (a.stateOrProvince !== undefined) updates.recipientStateOrProvince = a.stateOrProvince;
+        if (a.postalCode !== undefined) updates.recipientPostalCode = a.postalCode;
+        if (a.countryCode !== undefined) updates.recipientCountry = a.countryCode;
+        changed.push("recipient");
+      }
+
+      if (patch.packages) {
+        updates.packagesData = JSON.stringify(patch.packages);
+        updates.numberOfPackages = patch.packages.length;
+        // Total weight is derived, never typed twice — the carrier prices on it and the two
+        // figures disagreeing is a rejection at acceptance.
+        updates.weight = patch.packages.reduce((sum, pkg) => sum + pkg.weight, 0).toString();
+        updates.length = patch.packages[0].length.toString();
+        updates.width = patch.packages[0].width.toString();
+        updates.height = patch.packages[0].height.toString();
+        changed.push("packages");
+      }
+
+      if (patch.items) {
+        updates.itemsData = patch.items.length ? JSON.stringify(patch.items) : null;
+        changed.push("items");
+      }
+
+      if (patch.declaration) {
+        updates.dangerousGoodsData = JSON.stringify(patch.declaration);
+        updates.dangerousGoodsRegulation = patch.declaration.regulation;
+        changed.push("declaration");
+      }
+
+      if (patch.preferredPickupDate !== undefined) {
+        updates.dgPreferredPickupDate = patch.preferredPickupDate;
+        changed.push("preferred pickup date");
+      }
+
+      if (changed.length === 0) {
+        return res.status(400).json({ error: "Nothing to update." });
+      }
+
+      const updated = await storage.updateShipment(shipment.id, updates) || shipment;
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "dangerous_goods_details_updated",
+        title: "Dangerous goods details updated",
+        description: `Operations updated: ${changed.join(", ")}.`,
+      });
+
+      await logAudit(user.id, "update_dangerous_goods_details", "shipment", shipment.id,
+        `Updated ${changed.join(", ")} on dangerous goods shipment ${shipment.trackingNumber}`, req.ip);
+
+      res.json({
+        success: true,
+        shipment: updated,
+        missingFields: dangerousGoodsMissingFields(updated, parseDangerousGoodsDeclaration(updated.dangerousGoodsData)),
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error updating dangerous goods details", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Mark the declaration as sent to the carrier.
+   *
+   * Gated on there being nothing left in `missingFields`, because the cost of sending an
+   * incomplete declaration is not a validation error — it is a rejection at acceptance, days
+   * later, after the goods have already been collected.
+   *
+   * This is also the moment the operator signs off the declaration, so it carries the DG
+   * review approval: Ezhalha is shipper of record on its own carrier account, and putting the
+   * declaration in front of DHL is the act of offering the goods for transport.
+   */
+  app.post("/api/operations/shipments/:id/dangerous-goods/handover", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const parsed = z.object({
+        carrierCode: z.string().trim().min(1).max(32).optional(),
+        note: z.string().trim().max(2000).optional(),
+      }).parse(req.body || {});
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({ error: "This is not a manually-quoted dangerous goods shipment." });
+      }
+      if (shipment.status !== DangerousGoodsShipmentStatus.REVIEW) {
+        return res.status(400).json({ error: "This shipment has already been sent to the carrier." });
+      }
+
+      const declaration = parseDangerousGoodsDeclaration(shipment.dangerousGoodsData);
+      const missingFields = dangerousGoodsMissingFields(shipment, declaration);
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          error: "Complete the outstanding details before sending this to the carrier.",
+          missingFields,
+        });
+      }
+
+      const updated = await storage.updateShipment(shipment.id, {
+        status: DangerousGoodsShipmentStatus.AWAITING_CARRIER,
+        carrierStatus: DangerousGoodsShipmentStatus.AWAITING_CARRIER,
+        dgHandoverAt: new Date(),
+        ...(parsed.carrierCode ? { carrierCode: parsed.carrierCode, carrierName: parsed.carrierCode } : {}),
+        dangerousGoodsStatus: DangerousGoodsStatus.APPROVED,
+        dangerousGoodsReviewedByUserId: user.id,
+        dangerousGoodsReviewedAt: new Date(),
+      }) || shipment;
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "dangerous_goods_handover",
+        title: "Sent to the carrier",
+        description: parsed.note || `Declaration sent to ${parsed.carrierCode || "the carrier"} for a price.`,
+      });
+
+      await recordShipmentStatusChange({
+        shipment: updated,
+        previousStatus: shipment.status,
+        nextStatus: updated.status,
+        actorUserId: user.id,
+        source: "dangerous_goods_handover",
+      });
+
+      await logAudit(user.id, "handover_dangerous_goods_shipment", "shipment", shipment.id,
+        `Sent dangerous goods declaration for ${shipment.trackingNumber} to ${parsed.carrierCode || "the carrier"}`, req.ip);
+
+      res.json({ success: true, shipment: updated });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error handing dangerous goods shipment to carrier", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Enter what the carrier quoted, and turn it into a price the client can pay.
+   *
+   * The operator types the carrier's cost; the client's own pricing profile supplies the
+   * margin and `calculateShipmentAccounting` the VAT, so a DG shipment is priced by exactly
+   * the same machinery as everything else on the platform. An operator may override the final
+   * total, and the margin is then solved backwards to hit it — the stored breakdown stays
+   * internally consistent either way, which is what Zoho and the VAT return depend on.
+   *
+   * No air waybill is recorded here. The carrier has agreed a price by email but nothing is
+   * booked yet, because Ezhalha does not commit a consignment it has not been paid for — an
+   * unpaid quote that expires should cost nobody anything. The waybill arrives at the separate
+   * booking step below, after the money does.
+   */
+  app.post("/api/operations/shipments/:id/dangerous-goods/quote", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const parsed = z.object({
+        carrierCode: z.string().trim().min(1).max(32),
+        carrierName: z.string().trim().max(80).optional(),
+        serviceType: z.string().trim().max(80).optional(),
+        carrierCostSar: z.number().positive("The carrier cost must be greater than zero."),
+        validUntil: z.string().optional(),
+        // The date the carrier said they can collect. Only knowable now — it is the answer to
+        // the email, not something the client could have picked at submission.
+        collectionDate: z.string().max(32).optional(),
+        note: z.string().trim().max(2000).optional(),
+        finalTotalOverrideSar: z.number().positive().optional(),
+      }).parse(req.body || {});
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({ error: "This is not a manually-quoted dangerous goods shipment." });
+      }
+      if (shipment.paymentStatus === "paid") {
+        return res.status(400).json({ error: "This shipment has already been paid for." });
+      }
+      // Re-quoting is allowed: a carrier revising its price before the client pays is normal.
+      if (
+        shipment.status !== DangerousGoodsShipmentStatus.AWAITING_CARRIER &&
+        shipment.status !== "payment_pending"
+      ) {
+        return res.status(400).json({ error: "Send the declaration to the carrier before entering their quote." });
+      }
+
+      const account = await storage.getClientAccount(shipment.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+
+      const expiresAt = parsed.validUntil ? new Date(parsed.validUntil) : defaultDangerousGoodsQuoteExpiry();
+      if (Number.isNaN(expiresAt.getTime())) {
+        return res.status(400).json({ error: "Invalid quote validity date." });
+      }
+      if (expiresAt.getTime() <= Date.now()) {
+        return res.status(400).json({ error: "The quote validity date is in the past." });
+      }
+
+      const pricing = await computeQuotationPricing({
+        type: "express",
+        clientProfile: account.profile || null,
+        clientAccountType: account.accountType || null,
+        originCountryCode: shipment.senderCountry,
+        destinationCountryCode: shipment.recipientCountry,
+        weightKg: Number(shipment.weight) || 0,
+        baseRateSar: parsed.carrierCostSar,
+        carrierCode: parsed.carrierCode,
+        priceOverrideSar: parsed.finalTotalOverrideSar,
+      });
+
+      const snapshot = calculateShipmentAccounting({
+        shipmentType: pricing.shipmentType,
+        isDdp: false,
+        recipientCountryCode: shipment.recipientCountry,
+        baseRate: pricing.baseRate,
+        marginAmount: pricing.marginAmount,
+      });
+
+      const updated = await storage.updateShipment(shipment.id, {
+        status: "payment_pending",
+        carrierStatus: "payment_pending",
+        // Stays "unpaid" rather than "pending": operations must keep seeing this shipment
+        // while the client decides, precisely because someone has to unwind the carrier
+        // booking by hand if they never pay.
+        paymentStatus: "unpaid",
+        isQuote: true,
+        quoteCreatedByUserId: user.id,
+        quoteNote: parsed.note || null,
+        carrierCode: parsed.carrierCode,
+        carrierName: parsed.carrierName || parsed.carrierCode,
+        carrierServiceType: parsed.serviceType || null,
+        serviceType: parsed.serviceType || null,
+        baseRate: pricing.baseRate.toFixed(2),
+        marginAmount: pricing.marginAmount.toFixed(2),
+        margin: pricing.marginAmount.toFixed(2),
+        finalPrice: pricing.clientTotalSar.toFixed(2),
+        ...getShipmentAccountingInsert(snapshot),
+        dgCarrierCostSar: parsed.carrierCostSar.toFixed(2),
+        dgQuotedAt: new Date(),
+        dgQuoteExpiresAt: expiresAt,
+        dgQuoteNote: parsed.note || null,
+        dgQuoteExpiryFlaggedAt: null,
+        dgDeclinedAt: null,
+        dgDeclineReason: null,
+        ...(parsed.collectionDate ? { dgPreferredPickupDate: parsed.collectionDate } : {}),
+      }) || shipment;
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "dangerous_goods_quoted",
+        title: "Carrier quotation entered",
+        description: `${parsed.carrierCode} quoted SAR ${parsed.carrierCostSar.toFixed(2)}. Client total SAR ${pricing.clientTotalSar.toFixed(2)}, valid until ${expiresAt.toISOString().slice(0, 10)}. The air waybill is booked once the client pays.`,
+        audience: OperationEventAudience.INTERNAL,
+      });
+
+      await recordShipmentStatusChange({
+        shipment: updated,
+        previousStatus: shipment.status,
+        nextStatus: updated.status,
+        actorUserId: user.id,
+        source: "dangerous_goods_quote",
+      });
+
+      await logAudit(user.id, "quote_dangerous_goods_shipment", "shipment", shipment.id,
+        `Quoted dangerous goods shipment ${shipment.trackingNumber}: carrier cost SAR ${parsed.carrierCostSar.toFixed(2)}, client total SAR ${pricing.clientTotalSar.toFixed(2)}`, req.ip);
+
+      // Notify exactly as an admin quotation does — same title, same action URL, same page.
+      const appBaseUrl = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+      const clientUsers = (await storage.getUsersByClientAccount(shipment.clientAccountId)).filter((u) => u.isActive);
+      const recipients = clientUsers.filter((u) => u.isPrimaryContact).length
+        ? clientUsers.filter((u) => u.isPrimaryContact)
+        : clientUsers;
+      if (recipients.length > 0) {
+        await notifyUsers(recipients.map((u) => u.id), {
+          title: "New quotation ready to pay",
+          body: `Your dangerous goods shipment to ${shipment.recipientCity}, ${shipment.recipientCountry} (${shipment.trackingNumber}) has been arranged with the carrier — total SAR ${pricing.clientTotalSar.toFixed(2)}. The price holds until ${expiresAt.toISOString().slice(0, 10)}.`,
+          type: "quotation_created",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: `${appBaseUrl}/client/quotations/${shipment.id}`,
+          sendEmail: true,
+        });
+      }
+
+      res.json({
+        success: true,
+        shipment: updated,
+        pricing: {
+          carrierCostSar: parsed.carrierCostSar,
+          baseRate: pricing.baseRate,
+          marginAmount: pricing.marginAmount,
+          vatAmountSar: pricing.vatAmountSar,
+          clientTotalSar: pricing.clientTotalSar,
+          validUntil: expiresAt,
+        },
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error quoting dangerous goods shipment", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Serve a document the client attached to a dangerous goods declaration.
+   *
+   * An operator signs the Shipper's Declaration on Ezhalha's behalf, which means reading the
+   * safety data sheet itself — the extracted UN number and packing group are a convenience,
+   * not evidence. Without this the sheet was listed by name in the ops hub and could not be
+   * opened, so the one check that matters could not actually be performed.
+   *
+   * Addressed by index into the stored array rather than by path: a caller must already be
+   * allowed to see the shipment to reach a document, so an operator cannot read arbitrary
+   * uploads by guessing object paths through this route.
+   */
+  app.get("/api/operations/shipments/:id/dangerous-goods/documents/:index", requireOperationsPermission("operations", "read"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      // Goes through the detail loader so the viewer's shipment visibility is enforced the
+      // same way it is everywhere else in operations, rather than re-implemented here.
+      const visible = await getOperationShipmentDetail(req.params.id, user);
+      if (!visible) return res.status(404).json({ error: "Shipment not found" });
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+
+      let documents: Array<{ fileName?: string; objectPath?: string; contentType?: string }> = [];
+      try {
+        const parsed = JSON.parse(shipment.dangerousGoodsDocumentsData || "[]");
+        documents = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        documents = [];
+      }
+
+      const index = Number(req.params.index);
+      const document = Number.isInteger(index) && index >= 0 ? documents[index] : undefined;
+      if (!document?.objectPath) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = await readStoredFileBuffer(document.objectPath);
+      } catch (readError: any) {
+        // The row exists but the bytes do not — a storage backend change, or a file removed
+        // out from under us. Say so plainly rather than 500ing: the operator needs to know to
+        // ask the client for the sheet again.
+        logError("Dangerous goods document could not be read", { error: readError?.message, shipmentId: shipment.id });
+        return res.status(404).json({ error: "This document is no longer available in storage. Ask the client to upload it again." });
+      }
+
+      // Quoted and stripped of path separators: the filename comes from a client upload, and
+      // it is echoed into a response header here.
+      const safeName = (document.fileName || "safety-data-sheet").replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+      res.setHeader("Content-Type", document.contentType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+      res.setHeader("Content-Length", String(buffer.length));
+      res.send(buffer);
+    } catch (error: any) {
+      logError("Error serving dangerous goods document", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  /**
+   * Record the air waybill the carrier issued, once the client has paid for it.
+   *
+   * This is the step that turns a paid quotation into a real consignment. Everything before it
+   * was an email conversation about a price; the waybill only exists because an operator went
+   * back to the carrier after the money arrived and asked them to book it. Nothing here tenders
+   * the shipment through a carrier API — for dangerous goods that would produce a second
+   * Shipper's Declaration against one physical consignment.
+   *
+   * Gated on payment for exactly that reason: a waybill recorded before payment is a booking
+   * Ezhalha owns and has not been paid for, which is the situation this split was made to end.
+   */
+  app.post("/api/operations/shipments/:id/dangerous-goods/booking", requireOperationsPermission("operations", "update"), async (req, res) => {
+    try {
+      const user = await ensureOperationsAccess(req, res);
+      if (!user) return;
+
+      const parsed = z.object({
+        carrierTrackingNumber: z.string().trim().min(4, "Enter the air waybill the carrier issued.").max(64),
+        carrierCode: z.string().trim().min(1).max(32).optional(),
+        carrierName: z.string().trim().max(80).optional(),
+        serviceType: z.string().trim().max(80).optional(),
+        collectionDate: z.string().max(32).optional(),
+        note: z.string().trim().max(2000).optional(),
+      }).parse(req.body || {});
+
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment) return res.status(404).json({ error: "Shipment not found" });
+      if (shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({ error: "This is not a manually-quoted dangerous goods shipment." });
+      }
+      if (shipment.paymentStatus !== "paid") {
+        return res.status(400).json({ error: "The client has not paid for this shipment yet. Do not book it with the carrier." });
+      }
+
+      // A waybill already on the shipment means someone has already booked this consignment.
+      // Silently overwriting it would leave a real booking with the carrier that nothing in
+      // our records points at — and for dangerous goods, two live Shipper's Declarations.
+      // Re-submitting the same waybill is treated as the retry it almost always is.
+      if (shipment.carrierTrackingNumber && shipment.carrierTrackingNumber !== parsed.carrierTrackingNumber) {
+        return res.status(409).json({
+          error: `This shipment is already booked on air waybill ${shipment.carrierTrackingNumber}. Cancel that booking with the carrier before recording a different one.`,
+          carrierTrackingNumber: shipment.carrierTrackingNumber,
+        });
+      }
+
+      const collectionDate = parsed.collectionDate || shipment.dgPreferredPickupDate || null;
+      const pickupDate = collectionDate && isBookablePickupDate(collectionDate)
+        ? collectionDate
+        : computeDefaultPickupDate().date;
+
+      const previousStatus = shipment.status;
+      const updated = await storage.updateShipment(shipment.id, {
+        status: "created",
+        carrierStatus: "processing",
+        carrierTrackingNumber: parsed.carrierTrackingNumber,
+        ...(parsed.carrierCode ? { carrierCode: parsed.carrierCode } : {}),
+        ...(parsed.carrierName ? { carrierName: parsed.carrierName } : {}),
+        ...(parsed.serviceType ? { carrierServiceType: parsed.serviceType, serviceType: parsed.serviceType } : {}),
+        ...(collectionDate ? { dgPreferredPickupDate: collectionDate } : {}),
+        pickupRequested: true,
+        pickupStatus: shipment.pickupConfirmationNumber ? shipment.pickupStatus : "requested",
+        pickupDate,
+        pickupReadyTime: shipment.pickupReadyTime || PICKUP_DEFAULT_READY_TIME,
+        pickupCloseTime: shipment.pickupCloseTime || PICKUP_DEFAULT_CLOSE_TIME,
+      }) || shipment;
+
+      await resolveAttentionFlagsOfType({
+        shipmentId: shipment.id,
+        issueType: "dangerous_goods_awaiting_booking",
+        actorUserId: user.id,
+      });
+
+      // Collection is booked through the carrier API even though the shipment itself was not:
+      // the waybill is on Ezhalha's own account, so the pickup endpoint accepts it normally. A
+      // failure here is non-fatal and lands as an attention flag, exactly as it does elsewhere.
+      try {
+        const dgAdapter = getAdapterForShipment(updated);
+        await bookCarrierPickupIfRequested(
+          updated,
+          dgAdapter,
+          getIntegrationAppKeyForCarrier(dgAdapter.carrierCode),
+          user.id,
+        );
+      } catch (pickupError: any) {
+        logError(`Dangerous goods pickup booking failed for ${updated.trackingNumber}`, pickupError);
+      }
+
+      await createOperationEvent({
+        shipmentId: shipment.id,
+        actorUserId: user.id,
+        eventType: "dangerous_goods_booked",
+        title: "Booked with the carrier",
+        description: `${updated.carrierName || updated.carrierCode || "Carrier"} issued air waybill ${parsed.carrierTrackingNumber}. Collection ${pickupDate}.${parsed.note ? ` ${parsed.note}` : ""}`,
+        audience: OperationEventAudience.INTERNAL,
+      });
+
+      await recordShipmentStatusChange({
+        shipment: updated,
+        previousStatus,
+        nextStatus: updated.status,
+        actorUserId: user.id,
+        source: "dangerous_goods_booking",
+      });
+
+      await logAudit(user.id, "book_dangerous_goods_shipment", "shipment", shipment.id,
+        `Booked dangerous goods shipment ${shipment.trackingNumber} with ${updated.carrierCode || "the carrier"} on air waybill ${parsed.carrierTrackingNumber}`, req.ip);
+
+      const appBaseUrl = process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3002";
+      const clientUsers = (await storage.getUsersByClientAccount(shipment.clientAccountId)).filter((u) => u.isActive);
+      const recipients = clientUsers.filter((u) => u.isPrimaryContact).length
+        ? clientUsers.filter((u) => u.isPrimaryContact)
+        : clientUsers;
+      if (recipients.length > 0) {
+        await notifyUsers(recipients.map((u) => u.id), {
+          title: "Your dangerous goods shipment is booked",
+          body: `${shipment.trackingNumber} is booked with ${updated.carrierName || updated.carrierCode || "the carrier"} on air waybill ${parsed.carrierTrackingNumber}. Collection is set for ${pickupDate}.`,
+          type: "shipment_milestone",
+          entityType: "shipment",
+          entityId: shipment.id,
+          actionUrl: `${appBaseUrl}/client/shipments?shipmentId=${shipment.id}`,
+          sendEmail: true,
+        });
+      }
+
+      res.json({ success: true, shipment: updated });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error booking dangerous goods shipment", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
 
   app.post("/api/operations/shipments/:id/charges/extra-weight", requireOperationsPermission("operations", "update"), async (req, res) => {
     try {
@@ -9135,6 +10450,25 @@ export async function registerRoutes(
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const abandonedOnly = req.query.abandoned === "true";
+      const asFilter = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return text && text !== SHIPMENT_FILTER_ALL ? text : undefined;
+      };
+      // Only accept a real calendar date; anything else is ignored rather than reaching SQL.
+      const asDate = (value: unknown) => {
+        const text = typeof value === "string" ? value.trim() : "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : undefined;
+      };
+      const listFilters = {
+        carrierCode: asFilter(req.query.carrierCode),
+        fulfillmentType: asFilter(req.query.fulfillmentType),
+        paymentStatus: asFilter(req.query.paymentStatus),
+        paymentMethod: asFilter(req.query.paymentMethod),
+        originCountry: asFilter(req.query.originCountry),
+        destinationCountry: asFilter(req.query.destinationCountry),
+        dateFrom: asDate(req.query.dateFrom),
+        dateTo: asDate(req.query.dateTo),
+      };
       const clientAccountIds = await getScopedClientAccountIds(adminUser);
 
       if (abandonedOnly) {
@@ -9227,8 +10561,15 @@ export async function registerRoutes(
         });
       }
 
-      const result = await storage.getShipmentsPaginated({ page, limit, search, status, clientAccountIds, abandonedOnly });
-      res.json(result);
+      const result = await storage.getShipmentsPaginated({
+        page, limit, search, status, clientAccountIds, abandonedOnly, ...listFilters,
+      });
+      // Facets are the values actually present in the rows this admin may see, so the dropdowns
+      // never offer a carrier or country that would return nothing. Scoped by the same
+      // clientAccountIds as the list, and deliberately NOT narrowed by the current filters —
+      // otherwise choosing one value would empty the other dropdowns.
+      const facets = await storage.getShipmentFilterFacets({ clientAccountIds });
+      res.json({ ...result, facets });
     } catch (error) {
       logError("Error fetching shipments", error);
       res.status(500).json({ error: "Internal server error" });
@@ -9661,6 +11002,15 @@ export async function registerRoutes(
 
       if (shipment.status !== "carrier_error") {
         return res.status(400).json({ error: "Shipment is not in carrier_error state" });
+      }
+
+      // Defence in depth. A shipment awaiting dangerous goods review is in `awaiting_review`,
+      // not `carrier_error`, so this is unreachable today — but retry is a booking call, and
+      // a booking call must never be the thing that tenders an unreviewed declaration.
+      if (shipment.hasDangerousGoods && shipment.dangerousGoodsStatus === DangerousGoodsStatus.PENDING_REVIEW) {
+        return res.status(400).json({
+          error: "This shipment's dangerous goods declaration has not been reviewed yet. Approve it from the operations hub.",
+        });
       }
 
       const retryAddrValidation = validateShippingAddresses(
@@ -10391,6 +11741,185 @@ export async function registerRoutes(
   });
 
   // Admin - Client credit ledger (limit, outstanding, available + transactions)
+  /**
+   * Everything worth knowing about one client's history with us: what they have shipped, what we
+   * billed, what we actually made, and where they stand financially.
+   *
+   * Money is computed through getEffectiveShipmentFinancials — the same helper the financial
+   * statements use — rather than summing raw columns. That matters most for two things it already
+   * handles: a cancelled shipment contributes zero to every figure, and a DDP shipment's real
+   * supplier cost replaces the lane sell base so margin is not overstated.
+   */
+  app.get("/api/admin/clients/:id/analytics", requireAdminPermission("clients", "read"), async (req, res) => {
+    try {
+      const adminUser = req.currentUser!;
+      const { id } = req.params;
+      const client = await storage.getClientAccount(id);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      if (!(await ensureAccountManagerClientAccess(adminUser, client.id, res))) return;
+
+      const [shipments, invoices, payments, creditSummary, users] = await Promise.all([
+        storage.getShipmentsByClientAccount(id),
+        storage.getInvoicesByClientAccount(id),
+        storage.getPaymentsByClientAccount(id),
+        storage.getClientCreditSummary(id),
+        storage.getUsersByClientAccount(id),
+      ]);
+
+      const isCancelled = (shipment: Shipment) => shipment.status === "cancelled";
+      const active = shipments.filter((shipment) => !isCancelled(shipment));
+      const cancelled = shipments.filter(isCancelled);
+
+      let grossBilledSar = 0;
+      let revenueExTaxSar = 0;
+      let costSar = 0;
+      let netProfitSar = 0;
+      let collectedSar = 0;
+      let outstandingSar = 0;
+      let totalWeight = 0;
+
+      const byStatus: Record<string, number> = {};
+      const byFulfillment: Record<string, number> = {};
+      const byCarrier: Record<string, { shipments: number; revenueSar: number }> = {};
+      const byDestination: Record<string, number> = {};
+      const byOrigin: Record<string, number> = {};
+      const monthly: Record<string, { month: string; shipments: number; revenueSar: number; profitSar: number }> = {};
+
+      for (const shipment of shipments) {
+        byStatus[shipment.status] = (byStatus[shipment.status] || 0) + 1;
+
+        // Cancelled shipments are counted for volume context but contribute no money, so the
+        // financial roll-up below deliberately skips them.
+        if (isCancelled(shipment)) continue;
+
+        const money = getEffectiveShipmentFinancials(shipment as unknown as Record<string, any>);
+        grossBilledSar += money.clientTotalAmountSar;
+        revenueExTaxSar += money.revenueExcludingTaxAmountSar;
+        costSar += money.realCostAmountSar;
+        netProfitSar += money.realNetProfitAmountSar;
+        totalWeight += money.weightValue;
+
+        if (shipment.paymentStatus === "paid") collectedSar += money.clientTotalAmountSar;
+        else outstandingSar += money.clientTotalAmountSar;
+
+        const fulfillment = shipment.fulfillmentType || "carrier";
+        byFulfillment[fulfillment] = (byFulfillment[fulfillment] || 0) + 1;
+
+        // Shipments still awaiting a carrier are grouped under a null code, which the UI labels
+        // "Not assigned" — "UNKNOWN" reads like a data fault rather than a normal early state.
+        const carrier = shipment.carrierCode || "";
+        byCarrier[carrier] = byCarrier[carrier] || { shipments: 0, revenueSar: 0 };
+        byCarrier[carrier].shipments += 1;
+        byCarrier[carrier].revenueSar = roundMoney(byCarrier[carrier].revenueSar + money.clientTotalAmountSar);
+
+        if (shipment.recipientCountry) byDestination[shipment.recipientCountry] = (byDestination[shipment.recipientCountry] || 0) + 1;
+        if (shipment.senderCountry) byOrigin[shipment.senderCountry] = (byOrigin[shipment.senderCountry] || 0) + 1;
+
+        const created = shipment.createdAt ? new Date(shipment.createdAt) : null;
+        if (created && !Number.isNaN(created.getTime())) {
+          const key = `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, "0")}`;
+          monthly[key] = monthly[key] || { month: key, shipments: 0, revenueSar: 0, profitSar: 0 };
+          monthly[key].shipments += 1;
+          monthly[key].revenueSar = roundMoney(monthly[key].revenueSar + money.clientTotalAmountSar);
+          monthly[key].profitSar = roundMoney(monthly[key].profitSar + money.realNetProfitAmountSar);
+        }
+      }
+
+      const cancelledValueSar = roundMoney(
+        cancelled.reduce((sum, shipment) => sum + parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice), 0),
+      );
+
+      const dates = shipments
+        .map((shipment) => (shipment.createdAt ? new Date(shipment.createdAt).getTime() : NaN))
+        .filter((time) => !Number.isNaN(time));
+      const firstShipmentAt = dates.length ? new Date(Math.min(...dates)).toISOString() : null;
+      const lastShipmentAt = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
+
+      const invoiceTotals = invoices.reduce(
+        (acc, invoice) => {
+          const amount = parseMoneyValue(invoice.amount);
+          acc.count += 1;
+          if (invoice.status === "paid") {
+            acc.paidCount += 1;
+            acc.paidSar = roundMoney(acc.paidSar + amount);
+          } else {
+            acc.openCount += 1;
+            acc.openSar = roundMoney(acc.openSar + amount);
+            // Anything unpaid past its due date is the number that actually needs chasing.
+            if (invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now()) {
+              acc.overdueCount += 1;
+              acc.overdueSar = roundMoney(acc.overdueSar + amount);
+            }
+          }
+          return acc;
+        },
+        { count: 0, paidCount: 0, paidSar: 0, openCount: 0, openSar: 0, overdueCount: 0, overdueSar: 0 },
+      );
+
+      const topN = (record: Record<string, number>, limit = 5) =>
+        Object.entries(record)
+          .map(([key, count]) => ({ key, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit);
+
+      res.json({
+        client: {
+          id: client.id,
+          name: client.name,
+          accountNumber: client.accountNumber,
+          email: client.email,
+          phone: client.phone,
+          country: client.country,
+          city: client.nationalAddressCity,
+          profile: client.profile,
+          isActive: client.isActive,
+          createdAt: client.createdAt,
+        },
+        totals: {
+          shipments: shipments.length,
+          activeShipments: active.length,
+          cancelledShipments: cancelled.length,
+          cancelledValueSar,
+          grossBilledSar: roundMoney(grossBilledSar),
+          revenueExTaxSar: roundMoney(revenueExTaxSar),
+          costSar: roundMoney(costSar),
+          netProfitSar: roundMoney(netProfitSar),
+          marginPct: revenueExTaxSar > 0 ? Math.round((netProfitSar / revenueExTaxSar) * 1000) / 10 : 0,
+          collectedSar: roundMoney(collectedSar),
+          outstandingSar: roundMoney(outstandingSar),
+          avgShipmentValueSar: active.length ? roundMoney(grossBilledSar / active.length) : 0,
+          avgProfitPerShipmentSar: active.length ? roundMoney(netProfitSar / active.length) : 0,
+          totalWeightKg: Math.round(totalWeight * 100) / 100,
+        },
+        history: {
+          firstShipmentAt,
+          lastShipmentAt,
+          userCount: users.length,
+          activeUserCount: users.filter((user) => user.isActive).length,
+        },
+        breakdown: {
+          byStatus,
+          byFulfillment,
+          byCarrier: Object.entries(byCarrier)
+            .map(([carrierCode, value]) => ({ carrierCode, ...value }))
+            .sort((a, b) => b.shipments - a.shipments),
+          topDestinations: topN(byDestination),
+          topOrigins: topN(byOrigin),
+        },
+        monthly: Object.values(monthly).sort((a, b) => a.month.localeCompare(b.month)).slice(-12),
+        credit: {
+          enabled: Boolean(client.creditEnabled),
+          ...creditSummary,
+        },
+        invoices: invoiceTotals,
+        paymentCount: payments.length,
+      });
+    } catch (error) {
+      logError("Error building client analytics", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/admin/clients/:id/credit", requireAdminPermission("clients", "read"), async (req, res) => {
     try {
       const adminUser = req.currentUser!;
@@ -11638,6 +13167,135 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================
+  // ADMIN - DANGEROUS GOODS ACCESS REQUESTS
+  // ============================================
+  // Mirrors the sales-feature flow. The stakes are higher: approving this lets a client put
+  // regulated goods on Ezhalha's own carrier accounts, which makes Ezhalha the shipper of
+  // record on the Shipper's Declaration. Approve only against the uploaded DG training
+  // certificate and safety data sheets.
+  app.get("/api/admin/dangerous-goods-requests", requireAdminPermission("dangerous-goods-requests", "read"), async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 25, 100);
+      const result = await storage.getDangerousGoodsAccessRequests({ status, page, limit });
+
+      const enrichedRequests = await Promise.all(
+        result.requests.map(async (request) => {
+          const clientAccount = await storage.getClientAccount(request.clientAccountId);
+          const requestedBy = await storage.getUser(request.requestedByUserId);
+          const reviewedBy = request.reviewedByUserId ? await storage.getUser(request.reviewedByUserId) : null;
+          return {
+            ...request,
+            clientName: clientAccount?.name || "Unknown",
+            clientEmail: clientAccount?.email || "",
+            accountNumber: clientAccount?.accountNumber || "",
+            companyName: clientAccount?.companyName || "",
+            requestedByName: requestedBy?.username || "Unknown",
+            reviewedByName: reviewedBy?.username || null,
+          };
+        }),
+      );
+
+      res.json({ ...result, requests: enrichedRequests });
+    } catch (error: any) {
+      logError("Error fetching dangerous goods requests", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/dangerous-goods-requests/:id/approve", requireAdminPermission("dangerous-goods-requests", "approve"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateDangerousGoodsAccessRequest(id, {
+        status: "approved",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await storage.updateClientAccount(request.clientAccountId, { dangerousGoodsEnabled: true } as any);
+      await logAudit(req.session.userId, "approve_dangerous_goods", "dangerous_goods_access_request", id,
+        `Approved dangerous goods access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error approving dangerous goods request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/dangerous-goods-requests/:id/reject", requireAdminPermission("dangerous-goods-requests", "reject"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateDangerousGoodsAccessRequest(id, {
+        status: "rejected",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await logAudit(req.session.userId, "reject_dangerous_goods", "dangerous_goods_access_request", id,
+        `Rejected dangerous goods access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error rejecting dangerous goods request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/dangerous-goods-requests/:id/revoke", requireAdminPermission("dangerous-goods-requests", "revoke"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adminNotes } = req.body;
+      const request = await storage.updateDangerousGoodsAccessRequest(id, {
+        status: "revoked",
+        adminNotes: adminNotes || null,
+        reviewedByUserId: req.session.userId!,
+        reviewedAt: new Date(),
+      });
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      await storage.updateClientAccount(request.clientAccountId, { dangerousGoodsEnabled: false } as any);
+      await logAudit(req.session.userId, "revoke_dangerous_goods", "dangerous_goods_access_request", id,
+        `Revoked dangerous goods access for client ${request.clientAccountId}`, req.ip);
+      res.json({ success: true, request });
+    } catch (error: any) {
+      logError("Error revoking dangerous goods request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Direct admin toggle — enable/disable dangerous goods on a client.
+  app.patch("/api/admin/clients/:id/dangerous-goods", requireAdminPermission("clients", "update"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const parsed = z.object({ enabled: z.boolean() }).parse(req.body || {});
+      const client = await storage.getClientAccount(id);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      await storage.updateClientAccount(id, { dangerousGoodsEnabled: parsed.enabled } as any);
+
+      const existing = await storage.getDangerousGoodsAccessRequestByClient(id);
+      if (existing && existing.status === "pending") {
+        await storage.updateDangerousGoodsAccessRequest(existing.id, {
+          status: parsed.enabled ? "approved" : "rejected",
+          adminNotes: "Set directly by admin",
+          reviewedByUserId: req.session.userId!,
+          reviewedAt: new Date(),
+        });
+      }
+
+      await logAudit(req.session.userId, parsed.enabled ? "enable_dangerous_goods" : "disable_dangerous_goods",
+        "client", id, `${parsed.enabled ? "Enabled" : "Disabled"} dangerous goods for client ${id}`, req.ip);
+      res.json({ success: true, dangerousGoodsEnabled: parsed.enabled });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error toggling dangerous goods", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Direct admin toggle (no client request required) — enable/disable the bundle on a client.
   app.patch("/api/admin/clients/:id/sales-features", requireAdminPermission("clients", "update"), async (req, res) => {
     try {
@@ -11841,6 +13499,7 @@ export async function registerRoutes(
             shipmentType: shipment.shipmentType,
             serviceType: shipment.serviceType,
             carrierCode: shipment.carrierCode,
+            carrierName: shipment.carrierName,
             senderName: shipment.senderName,
             senderCity: shipment.senderCity,
             senderCountry: shipment.senderCountry,
@@ -12260,7 +13919,7 @@ export async function registerRoutes(
     ...quotationPricingControls,
   });
 
-  const pricingInputFromQuotation = (data: z.infer<typeof quotationCreateSchema>, clientProfile: string | null) => {
+  const pricingInputFromQuotation = (data: z.infer<typeof quotationCreateSchema>, clientProfile: string | null, clientAccountType: string | null) => {
     const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
     const first = data.packages[0];
     return {
@@ -12292,7 +13951,7 @@ export async function registerRoutes(
       const data = quotationCreateSchema.parse(req.body);
       const account = await storage.getClientAccount(data.clientAccountId);
       if (!account) return res.status(404).json({ error: "Client account not found" });
-      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null, account.accountType || null));
       res.json(pricing);
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
@@ -12342,7 +14001,7 @@ export async function registerRoutes(
           const liveFallbackMarginPercent =
             liveBaseRateSar != null && liveBaseRateSar > 0
               ? localPricingRule
-                ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+                ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
                 : 20
               : null;
           const local = await resolveLocalRate({ carrierCode: carrier.code, weightKg: totalWeightKg, clientProfile: profile, liveBaseRateSar, liveFallbackMarginPercent });
@@ -12360,7 +14019,7 @@ export async function registerRoutes(
           for (const transportMethod of methods) {
             try {
               const pricing = await computeQuotationPricing({
-                type: "ddp", clientProfile: profile, originCountryCode: origin, destinationCountryCode: destination,
+                type: "ddp", clientProfile: profile, clientAccountType: account.accountType || null, originCountryCode: origin, destinationCountryCode: destination,
                 destinationCity: data.recipient.city, weightKg: totalWeightKg, pieces: data.packages.length,
                 length: first.length, width: first.width, height: first.height, ddpTransportMethod: transportMethod,
               });
@@ -12394,7 +14053,7 @@ export async function registerRoutes(
             const rates = selectCheapestCarrierAccountPortfolio(results)?.carrierRates || [];
             for (const rate of rates) {
               if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
-              const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate) : 20;
+              const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType)) : 20;
               const snap = calculateShipmentAccounting({ shipmentType: expressShipmentType, isDdp: false, recipientCountryCode: destination, baseRate: rate.baseRate, marginAmount: rate.baseRate * (marginPct / 100) });
               options.push({ carrierCode: adapter.carrierCode, carrierName: adapter.name, serviceType: rate.serviceType, serviceName: rate.serviceName, baseRate: rate.baseRate, clientTotal: snap.clientTotalAmountSar, transitDays: rate.transitDays ?? null });
             }
@@ -12463,7 +14122,7 @@ export async function registerRoutes(
       if (!lane) return res.status(404).json({ error: "Door To Door Freight pricing is not configured for this origin and destination yet." });
       const pricingRule = account.profile ? await storage.getPricingRuleByProfile(account.profile) : undefined;
       const base = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage: 0 });
-      const markupPercentage = pricingRule ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity) : 0;
+      const markupPercentage = pricingRule ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity, normalizePricingAccountType(account?.accountType)) : 0;
       const pricing = calculateDdpPrice({ lane, transportMethod: data.transportMethod, packages: data.packages, totalCbm: data.totalCbm, markupPercentage });
       // With-VAT total (margin VAT) — matches what the created quote charges the client.
       const snapshot = calculateShipmentAccounting({ shipmentType: "inbound", isDdp: true, recipientCountryCode: lane.destinationCountryCode || "SA", baseRate: pricing.baseRateSar, marginAmount: pricing.markupAmountSar });
@@ -12525,7 +14184,7 @@ export async function registerRoutes(
       const account = await storage.getClientAccount(data.clientAccountId);
       if (!account) return res.status(404).json({ error: "Client account not found" });
 
-      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null));
+      const pricing = await computeQuotationPricing(pricingInputFromQuotation(data, account.profile || null, account.accountType || null));
       const snapshot = calculateShipmentAccounting({
         shipmentType: pricing.shipmentType,
         isDdp: pricing.isDdp,
@@ -12719,7 +14378,7 @@ export async function registerRoutes(
         const recipientCountryCode = String(body.recipientCountryCode || "SA").trim().toUpperCase() || "SA";
         const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
         const marginPercentage = rule
-          ? await storage.getMarginForAmount(rule.id, baseRate)
+          ? await storage.getMarginForAmount(rule.id, baseRate, normalizePricingAccountType(typeof body.accountType === "string" ? body.accountType : null))
           : 15;
         const markup = round2(baseRate * (marginPercentage / 100));
         const snapshot = calculateShipmentAccounting({
@@ -12762,7 +14421,7 @@ export async function registerRoutes(
         const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
         const rule = body.profile ? await storage.getPricingRuleByProfile(String(body.profile)) : undefined;
         const markupPercentage = rule
-          ? await storage.getDdpMarginForQuantity(rule.id, basePricing.billingUnit, basePricing.billableQuantity)
+          ? await storage.getDdpMarginForQuantity(rule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(typeof body.accountType === "string" ? body.accountType : null))
           : 0;
         // Pass 2: final quote with the resolved markup.
         const quote = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
@@ -12867,11 +14526,33 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid badge gradient colors" });
       }
 
+      // A new profile starts with both account types set to the headline margins the admin
+      // entered, so Company and Individual are explicitly populated and equal rather than
+      // leaning on the fallback. The admin then edits whichever side should differ.
+      const accountTypeMargins: Record<string, string | null> = {};
+      for (const [field, label] of [
+        ["companyMarginPercentage", "company margin percentage"],
+        ["companyDdpMarginPercentage", "company Door To Door Freight markup"],
+        ["individualMarginPercentage", "individual margin percentage"],
+        ["individualDdpMarginPercentage", "individual Door To Door Freight markup"],
+      ] as const) {
+        const isDdp = field.includes("Ddp");
+        const provided = (req.body as Record<string, unknown>)[field];
+        const parsed = provided === undefined
+          ? (isDdp ? ddpMargin.toFixed(2) : margin.toFixed(2))
+          : parseAccountTypeMargin(provided, label);
+        if (parsed instanceof Error) {
+          return res.status(400).json({ error: parsed.message });
+        }
+        accountTypeMargins[field] = parsed;
+      }
+
       const newRule = await storage.createPricingRule({
         profile: profileKey,
         displayName: displayName.trim(),
         marginPercentage: margin.toFixed(2),
         ddpMarginPercentage: ddpMargin.toFixed(2),
+        ...accountTypeMargins,
         badgeColor: normalizedBadgeColor || "#6B7280",
         badgeStyle: normalizedBadgeStyle,
         badgeGradientFrom: normalizedGradientFrom,
@@ -12891,6 +14572,20 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * Validate one per-account-type margin field. Returns the stored string, `null` to clear it,
+   * or an Error to reject with. Kept separate from the profile-wide fields because these are
+   * nullable: clearing one drops that account type back onto the profile-wide fallback.
+   */
+  const parseAccountTypeMargin = (value: unknown, label: string): string | null | Error => {
+    if (value === null || value === "") return null;
+    const parsed = parseFloat(String(value));
+    if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+      return new Error(`Invalid ${label}`);
+    }
+    return parsed.toFixed(2);
+  };
+
   // Admin - Update Pricing Rule
   app.patch("/api/admin/pricing/:id", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
@@ -12898,6 +14593,10 @@ export async function registerRoutes(
       const {
         marginPercentage,
         ddpMarginPercentage,
+        companyMarginPercentage,
+        companyDdpMarginPercentage,
+        individualMarginPercentage,
+        individualDdpMarginPercentage,
         displayName,
         isActive,
         badgeColor,
@@ -12911,6 +14610,10 @@ export async function registerRoutes(
       const updates: {
         marginPercentage?: string;
         ddpMarginPercentage?: string;
+        companyMarginPercentage?: string | null;
+        companyDdpMarginPercentage?: string | null;
+        individualMarginPercentage?: string | null;
+        individualDdpMarginPercentage?: string | null;
         displayName?: string;
         isActive?: boolean;
         badgeColor?: string | null;
@@ -12934,6 +14637,20 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Invalid Door To Door Freight markup percentage" });
         }
         updates.ddpMarginPercentage = ddpMargin.toFixed(2);
+      }
+
+      for (const [field, value, label] of [
+        ["companyMarginPercentage", companyMarginPercentage, "company margin percentage"],
+        ["companyDdpMarginPercentage", companyDdpMarginPercentage, "company Door To Door Freight markup"],
+        ["individualMarginPercentage", individualMarginPercentage, "individual margin percentage"],
+        ["individualDdpMarginPercentage", individualDdpMarginPercentage, "individual Door To Door Freight markup"],
+      ] as const) {
+        if (value === undefined) continue;
+        const parsed = parseAccountTypeMargin(value, label);
+        if (parsed instanceof Error) {
+          return res.status(400).json({ error: parsed.message });
+        }
+        (updates as Record<string, string | null>)[field] = parsed;
       }
 
       if (displayName !== undefined) {
@@ -12995,6 +14712,12 @@ export async function registerRoutes(
       const changeDetails = [];
       if (updates.marginPercentage) changeDetails.push(`margin to ${updates.marginPercentage}%`);
       if (updates.ddpMarginPercentage) changeDetails.push(`DDP markup to ${updates.ddpMarginPercentage}%`);
+      // Pricing changes are audited per account type — "margin to 18%" alone would not say
+      // whether companies, individuals, or both were re-rated.
+      if (updates.companyMarginPercentage !== undefined) changeDetails.push(`company margin to ${updates.companyMarginPercentage ?? "profile default"}%`);
+      if (updates.companyDdpMarginPercentage !== undefined) changeDetails.push(`company DDP markup to ${updates.companyDdpMarginPercentage ?? "profile default"}%`);
+      if (updates.individualMarginPercentage !== undefined) changeDetails.push(`individual margin to ${updates.individualMarginPercentage ?? "profile default"}%`);
+      if (updates.individualDdpMarginPercentage !== undefined) changeDetails.push(`individual DDP markup to ${updates.individualDdpMarginPercentage ?? "profile default"}%`);
       if (updates.displayName) changeDetails.push(`name to "${updates.displayName}"`);
       if (updates.isActive !== undefined) changeDetails.push(`active to ${updates.isActive}`);
       if (updates.badgeColor) changeDetails.push(`badge color to ${updates.badgeColor}`);
@@ -13048,7 +14771,12 @@ export async function registerRoutes(
   app.get("/api/admin/pricing/:id/tiers", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
     try {
       const { id } = req.params;
-      const tiers = await storage.getPricingTiersByProfileId(id);
+      // No accountType filters to a single set; omitting it returns both, which is what the
+      // admin screen wants so it can render Company and Individual side by side.
+      const accountType = typeof req.query.accountType === "string"
+        ? normalizePricingAccountType(req.query.accountType)
+        : undefined;
+      const tiers = await storage.getPricingTiersByProfileId(id, accountType);
       res.json(tiers);
     } catch (error) {
       logError("Error fetching pricing tiers", error);
@@ -13058,6 +14786,9 @@ export async function registerRoutes(
 
   // Admin - Create Pricing Tier
   const pricingTierSchema = z.object({
+    // Required, not defaulted: a tier saved without an account type would land in "company" and
+    // silently price the wrong set.
+    accountType: z.enum(PRICING_ACCOUNT_TYPES as [PricingAccountTypeValue, ...PricingAccountTypeValue[]]),
     minAmount: z.number().min(0, "Minimum amount must be 0 or greater"),
     marginPercentage: z.number().min(0, "Margin must be 0 or greater").max(1000, "Margin cannot exceed 1000%"),
   });
@@ -13066,7 +14797,7 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       
-      const { minAmount, marginPercentage } = pricingTierSchema.parse(req.body);
+      const { accountType, minAmount, marginPercentage } = pricingTierSchema.parse(req.body);
 
       // Verify profile exists
       const profile = await storage.getPricingRuleById(id);
@@ -13076,12 +14807,13 @@ export async function registerRoutes(
 
       const tier = await storage.createPricingTier({
         profileId: id,
+        accountType,
         minAmount: String(minAmount),
         marginPercentage: String(marginPercentage),
       });
 
       await logAudit(req.session.userId, "create_pricing_tier", "pricing_tier", tier.id,
-        `Created pricing tier for ${profile.displayName}: SAR ${minAmount}+ at ${marginPercentage}%`, req.ip);
+        `Created ${accountType} pricing tier for ${profile.displayName}: SAR ${minAmount}+ at ${marginPercentage}%`, req.ip);
 
       res.status(201).json(tier);
     } catch (error) {
@@ -13152,7 +14884,12 @@ export async function registerRoutes(
   // Admin - DDP Pricing Tiers
   app.get("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "read"), async (req, res) => {
     try {
-      res.json(await storage.getDdpPricingTiersByProfileId(req.params.id));
+      // No accountType filters to a single set; omitting it returns both, which is what the
+      // admin screen wants so it can render Company and Individual side by side.
+      const accountType = typeof req.query.accountType === "string"
+        ? normalizePricingAccountType(req.query.accountType)
+        : undefined;
+      res.json(await storage.getDdpPricingTiersByProfileId(req.params.id, accountType));
     } catch (error) {
       logError("Error fetching DDP pricing tiers", error);
       res.status(500).json({ error: "Internal server error" });
@@ -13161,7 +14898,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/pricing/:id/ddp-tiers", requireAdminPermission("pricing-rules", "update"), async (req, res) => {
     try {
-      const { billingUnit, minAmount, marginPercentage } = ddpPricingTierSchema.parse(req.body);
+      const { accountType, billingUnit, minAmount, marginPercentage } = ddpPricingTierSchema.parse(req.body);
       const profile = await storage.getPricingRuleById(req.params.id);
       if (!profile) {
         return res.status(404).json({ error: "Pricing profile not found" });
@@ -13169,12 +14906,13 @@ export async function registerRoutes(
 
       const tier = await storage.createDdpPricingTier({
         profileId: profile.id,
+        accountType,
         billingUnit,
         minAmount: String(minAmount),
         marginPercentage: String(marginPercentage),
       });
       await logAudit(req.session.userId, "create_ddp_pricing_tier", "ddp_pricing_tier", tier.id,
-        `Created DDP pricing tier for ${profile.displayName}: ${minAmount}+ ${billingUnit} at ${marginPercentage}%`, req.ip);
+        `Created ${accountType} DDP pricing tier for ${profile.displayName}: ${minAmount}+ ${billingUnit} at ${marginPercentage}%`, req.ip);
       res.status(201).json(tier);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -13601,6 +15339,10 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
+      // A field the admin can correct in the form — answer with the message, not a generic 500.
+      if (error instanceof IntegrationFieldValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
       if (error instanceof Error && (
         error.message.startsWith("Missing required credentials") ||
         error.message.startsWith("Unsupported integration field") ||
@@ -13685,6 +15427,10 @@ export async function registerRoutes(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
+      }
+      // A field the admin can correct in the form — answer with the message, not a generic 500.
+      if (error instanceof IntegrationFieldValidationError) {
+        return res.status(400).json({ error: error.message });
       }
       if (error instanceof Error && (
         error.message.startsWith("Missing required credentials") ||
@@ -16274,25 +18020,6 @@ export async function registerRoutes(
     currency: z.string().default("SAR"),
   });
 
-  const shipmentItemInputSchema = z.object({
-    itemName: z.string().min(1),
-    itemDescription: z.string().optional(),
-    category: z.string().min(1),
-    material: z.string().optional(),
-    countryOfOrigin: z.string().length(2),
-    hsCode: z.string().optional(),
-    hsCodeSource: z.enum(["USER", "FEDEX", "HISTORY", "UNKNOWN"]).optional(),
-    hsCodeConfidence: z.enum(["HIGH", "MEDIUM", "LOW", "MISSING"]).optional(),
-    hsCodeCandidates: z.array(z.object({
-      code: z.string(),
-      description: z.string(),
-      confidence: z.number(),
-    })).optional(),
-    price: z.number().nonnegative(),
-    quantity: z.number().int().positive(),
-    currency: z.string().optional(),
-  });
-
   const shipmentInputSchema = z.object({
     shipmentType: z.enum(["domestic", "inbound", "outbound"]),
     isDdp: z.boolean().default(false),
@@ -16313,6 +18040,8 @@ export async function registerRoutes(
     shipDate: z.string().optional(),
     items: z.array(shipmentItemInputSchema).optional().default([]),
     tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional().default([]),
+    dangerousGoods: dangerousGoodsDeclarationSchema.optional(),
+    dangerousGoodsDocuments: z.array(dangerousGoodsDocumentSchema).max(DANGEROUS_GOODS_DOCUMENT_MAX_FILES).optional(),
   });
 
   const invoiceExtractionSchema = z.object({
@@ -16438,6 +18167,63 @@ export async function registerRoutes(
     },
   );
 
+  // Integration health — failures by carrier and call, with the reason decoded.
+  app.get("/api/admin/integration-health", requireAdminPermission("integrations", "read"), async (req, res) => {
+    try {
+      const windowHours = Number(req.query.windowHours);
+      const report = await getIntegrationHealth({
+        windowHours: Number.isFinite(windowHours) ? windowHours : undefined,
+      });
+      res.json(report);
+    } catch (error: any) {
+      logError("Failed to build integration health report", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post(
+    "/api/client/shipments/extract-dangerous-goods",
+    requireClient,
+    requireClientPermission(ClientPermission.CREATE_SHIPMENTS),
+    async (req, res) => {
+      try {
+        const user = await storage.getUser(req.session.userId!);
+        if (!user?.clientAccountId) {
+          return res.status(404).json({ error: "Client account not found" });
+        }
+
+        // Same gate as the quote. Reading a safety data sheet is cheap, but it is part of a
+        // flow only approved accounts are allowed into.
+        const account = await storage.getClientAccount(user.clientAccountId);
+        if (!account?.dangerousGoodsEnabled) {
+          return res.status(403).json({
+            error: "Your account is not approved for dangerous goods.",
+          });
+        }
+
+        const data = packageExtractionSchema.parse(req.body);
+        const extraction = await withShipmentIntegrationAccount(
+          "gemini",
+          {},
+          () => extractDangerousGoodsFromDocument({
+            fileName: data.fileName,
+            objectPath: data.objectPath,
+            contentType: data.contentType,
+          }),
+        );
+
+        res.json(extraction);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors[0].message });
+        }
+
+        const message = error instanceof Error ? error.message : "Failed to read the safety data sheet";
+        res.status(422).json({ error: message });
+      }
+    },
+  );
+
   const ddpPackageSchema = z.object({
     weight: z.number().nonnegative().default(0),
     length: z.number().nonnegative().default(0),
@@ -16499,7 +18285,7 @@ export async function registerRoutes(
         markupPercentage: 0,
       });
       const markupPercentage = pricingRule
-        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
         : 0;
       const pricing = calculateDdpPrice({
         lane,
@@ -16642,7 +18428,7 @@ export async function registerRoutes(
           try {
             const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
             const markupPercentage = pricingRule
-              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
               : 0;
             const pricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
             const snapshot = calculateShipmentAccounting({
@@ -16739,7 +18525,7 @@ export async function registerRoutes(
               // SELECT / FREIGHT WORLDWIDE come back at 0 on unsupported lanes).
               if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
               const marginPercentage = pricingRule
-                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType))
                 : defaultMarginPercentage;
               const marginAmount = rate.baseRate * (marginPercentage / 100);
               const snapshot = calculateShipmentAccounting({
@@ -16802,8 +18588,14 @@ export async function registerRoutes(
   });
 
   // ─── Client quotation review / modify (auto re-price) — a payment_pending isQuote shipment ───
-  const quotationTypeForShipment = (s: Shipment): "express" | "local" | "ddp" =>
-    s.fulfillmentType === "local" ? "local" : (s.fulfillmentType === "ddp_manual" || s.isDdp) ? "ddp" : "express";
+  const quotationTypeForShipment = (s: Shipment): "express" | "local" | "ddp" | "dangerous_goods" =>
+    s.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE
+      ? "dangerous_goods"
+      : s.fulfillmentType === "local"
+        ? "local"
+        : (s.fulfillmentType === "ddp_manual" || s.isDdp)
+          ? "ddp"
+          : "express";
 
   const parseQuotePackages = (s: Shipment): Array<{ weight: number; length: number; width: number; height: number }> => {
     try {
@@ -16849,9 +18641,33 @@ export async function registerRoutes(
     supplierName: s.ddpSupplierName || "",
     supplierPhone: s.ddpSupplierPhone || "",
     specialInstructions: s.ddpSpecialInstructions || "",
-    // DDP quotes need the client's customs/terms/broker consent before payment.
-    requiresConsent: Boolean(s.isDdp),
-    consentAccepted: Boolean(s.ddpTermsAcceptedAt && s.ddpBrokerAuthorizationAcceptedAt),
+    // DDP quotes need the client's customs/terms/broker consent before payment. A dangerous
+    // goods quote needs a different confirmation for a different reason: operations may have
+    // corrected the addresses, weights or commodity details while arranging carriage, so the
+    // client re-confirms the declaration as it now stands before paying for it.
+    requiresConsent: Boolean(s.isDdp) || s.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE,
+    consentAccepted: s.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE
+      ? Boolean(s.dgClientConfirmedAt)
+      : Boolean(s.ddpTermsAcceptedAt && s.ddpBrokerAuthorizationAcceptedAt),
+    // Present only for dangerous goods: what operations agreed with the carrier, and how long
+    // that price holds. A DG quote is not editable by the client — the carrier has already
+    // accepted this exact declaration, and re-pricing it here would silently replace a figure
+    // a person negotiated with one this system invented.
+    dangerousGoods: s.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE
+      ? {
+          declaration: parseDangerousGoodsDeclaration(s.dangerousGoodsData),
+          documents: (() => { try { return JSON.parse(s.dangerousGoodsDocumentsData || "[]"); } catch { return []; } })(),
+          carrierAwb: s.carrierTrackingNumber,
+          quotedAt: s.dgQuotedAt,
+          expiresAt: s.dgQuoteExpiresAt,
+          expired: Boolean(s.dgQuoteExpiresAt && s.dgQuoteExpiresAt.getTime() <= Date.now()),
+          note: s.dgQuoteNote,
+          declinedAt: s.dgDeclinedAt,
+          declineReason: s.dgDeclineReason,
+          preferredPickupDate: s.dgPreferredPickupDate,
+          editable: false,
+        }
+      : null,
     pricing: {
       baseRate: Number(s.baseRate || 0),
       marginAmount: Number(s.marginAmount || 0),
@@ -16915,6 +18731,15 @@ export async function registerRoutes(
     const packages = body.packages || parseQuotePackages(shipment);
     const totalWeightKg = packages.reduce((sum, p) => sum + p.weight, 0);
     const type = quotationTypeForShipment(shipment);
+    // Dangerous goods is never re-priced by a rate engine. Its price came out of an email
+    // thread with the carrier, against an air waybill that already exists — there is no rate
+    // card that would reproduce it, and inventing one here would quietly change what the
+    // client owes for goods the carrier has already accepted.
+    if (type === "dangerous_goods") {
+      const err: any = new Error("A dangerous goods shipment is priced by operations and cannot be re-priced automatically.");
+      err.httpStatus = 400;
+      throw err;
+    }
     const isIntl = type === "ddp" || (type === "express" && shipper.countryCode !== recipient.countryCode);
 
     let items: any[] | undefined = body.items;
@@ -16938,6 +18763,7 @@ export async function registerRoutes(
     const pricing = await computeQuotationPricing({
       type,
       clientProfile: account?.profile || null,
+      clientAccountType: account?.accountType || null,
       originCountryCode: shipper.countryCode,
       destinationCountryCode: recipient.countryCode,
       destinationCity: recipient.city,
@@ -17004,6 +18830,15 @@ export async function registerRoutes(
       if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
       if (shipment.paymentStatus === "paid" || shipment.status !== "payment_pending") {
         return res.status(400).json({ error: "This quotation can no longer be modified." });
+      }
+      // A dangerous goods quote is a price a person agreed with the carrier against this exact
+      // declaration, on an air waybill that already exists. Re-pricing it here would replace
+      // that figure with a carrier-API rate that was never offered, for a shipment the carrier
+      // has already accepted. Changes go back through operations.
+      if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({
+          error: "A dangerous goods quotation cannot be edited here — the carrier has already accepted this declaration. Contact operations to change it.",
+        });
       }
 
       const body = pendingShipmentPatchSchema.parse(req.body);
@@ -17083,6 +18918,99 @@ export async function registerRoutes(
     }
   });
 
+  // Client re-confirms the dangerous goods declaration as it now stands, before paying.
+  //
+  // Not the same act as the consent given at submission. Operations may have corrected the
+  // addresses, the weights or the commodity details while arranging carriage with the
+  // carrier, so this confirms what is actually going to fly — and it is the client, not
+  // Ezhalha, who is legally the offeror of those goods.
+  app.post("/api/client/quotations/:id/confirm-declaration", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment || shipment.clientAccountId !== user.clientAccountId || !shipment.isQuote) {
+        return res.status(404).json({ error: "Quotation not found" });
+      }
+      if (shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE) {
+        return res.status(400).json({ error: "This quotation carries no dangerous goods declaration." });
+      }
+      if (shipment.paymentStatus === "paid") {
+        return res.status(400).json({ error: "This shipment has already been paid for." });
+      }
+
+      z.object({ declarationConfirmed: z.literal(true) }).parse(req.body);
+
+      const updated = await storage.updateShipment(shipment.id, { dgClientConfirmedAt: new Date() });
+      await logAudit(req.session.userId, "confirm_dangerous_goods_declaration", "shipment", shipment.id,
+        `Client confirmed the dangerous goods declaration for ${shipment.trackingNumber}`, req.ip);
+      res.json(serializeQuotation(updated || shipment));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "The declaration must be confirmed before paying." });
+      logError("Failed to confirm dangerous goods declaration", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to confirm declaration" });
+    }
+  });
+
+  // Client declines a quotation outright.
+  //
+  // Declining cancels the shipment but does NOT unwind anything at the carrier — for
+  // dangerous goods the booking lives in an email thread, and only a person can undo it. So
+  // this raises an attention flag rather than pretending the cancellation is complete.
+  app.post("/api/client/quotations/:id/decline", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      const shipment = await storage.getShipment(req.params.id);
+      if (!shipment || shipment.clientAccountId !== user.clientAccountId || !shipment.isQuote) {
+        return res.status(404).json({ error: "Quotation not found" });
+      }
+      if (shipment.paymentStatus === "paid") {
+        return res.status(400).json({ error: "This shipment has already been paid for." });
+      }
+      if (shipment.status !== "payment_pending") {
+        return res.status(400).json({ error: "This quotation is no longer open." });
+      }
+
+      const parsed = z.object({ reason: z.string().trim().max(1000).optional() }).parse(req.body || {});
+
+      const declined = await storage.updateShipment(shipment.id, {
+        status: "cancelled",
+        carrierStatus: "cancelled",
+        dgDeclinedAt: new Date(),
+        dgDeclineReason: parsed.reason || null,
+      }) || shipment;
+
+      await recordShipmentStatusChange({
+        shipment: declined,
+        previousStatus: shipment.status,
+        nextStatus: "cancelled",
+        actorUserId: req.session.userId,
+        source: "client_declined_quotation",
+      });
+
+      // The carrier booking is real and still open. Nothing in this system can cancel it, so
+      // an operator has to — and the only way they will know is if we tell them.
+      if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE && shipment.carrierTrackingNumber) {
+        await createAttentionFlag({
+          shipmentId: shipment.id,
+          issueType: "dangerous_goods_booking_to_unwind",
+          severity: "high",
+          details: `Client declined the quotation. Cancel air waybill ${shipment.carrierTrackingNumber} with ${shipment.carrierCode || "the carrier"} by email — nothing in the system can do it.`,
+        });
+      }
+
+      await logAudit(req.session.userId, "decline_quotation", "shipment", shipment.id,
+        `Client declined quotation ${shipment.trackingNumber}${parsed.reason ? `: ${parsed.reason}` : ""}`, req.ip);
+
+      res.json(serializeQuotation(declined));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+      logError("Failed to decline quotation", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to decline quotation" });
+    }
+  });
+
   app.post("/api/client/ddp/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -17120,7 +19048,7 @@ export async function registerRoutes(
         markupPercentage: 0,
       });
       const markupPercentage = pricingRule
-        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity)
+        ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
         : 0;
       const pricing = calculateDdpPrice({
         lane,
@@ -17255,9 +19183,30 @@ export async function registerRoutes(
       const pricingRule = await storage.getPricingRuleByProfile(account.profile);
       const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
 
-      const carrierAdapters = data.carrier?.trim()
+      // Dangerous goods gating happens before any carrier is called. Two separate gates:
+      // the client must be approved by us, and the carrier account must be approved by the
+      // carrier. Quoting DG on an unapproved carrier account does not merely lose the
+      // surcharge — DHL and FedEx reject the call outright — so filtering here produces one
+      // clear message instead of a pile of carrier errors.
+      if (data.dangerousGoods && !account.dangerousGoodsEnabled) {
+        return res.status(403).json({
+          error: "Your account is not approved for dangerous goods. Request access from your account settings.",
+        });
+      }
+
+      const allCarrierAdapters = data.carrier?.trim()
         ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
         : carrierService.getSupportedCarriers();
+
+      const carrierAdapters = data.dangerousGoods
+        ? allCarrierAdapters.filter((adapter) => adapter.capabilities?.dangerousGoods?.supported)
+        : allCarrierAdapters;
+
+      if (data.dangerousGoods && carrierAdapters.length === 0) {
+        return res.status(422).json({
+          error: "No carrier on this lane can carry dangerous goods.",
+        });
+      }
 
       // Map to carrier adapter format
       const rateRequest = {
@@ -17300,7 +19249,14 @@ export async function registerRoutes(
         packagingType: data.packageType,
         currency: data.currency,
         shipDate: data.shipDate,
+        dangerousGoods: data.dangerousGoods,
       };
+
+      // Dangerous goods refusals are collected rather than swallowed. The fan-out treats every
+      // carrier error the same and ends with a generic "no rates available", which for a DG
+      // quote hides the one thing the client needs to know: that no account is approved to
+      // carry it. That is the exact failure mode this whole feature exists to remove.
+      const dangerousGoodsRefusals: string[] = [];
 
       const carrierRateResults = await Promise.all(
         carrierAdapters.map(async (carrierAdapter) => {
@@ -17322,6 +19278,9 @@ export async function registerRoutes(
                   ),
                 };
               } catch (error) {
+                if (error instanceof CarrierError && error.code.startsWith("DANGEROUS_GOODS")) {
+                  dangerousGoodsRefusals.push(error.carrierMessage);
+                }
                 logError("Carrier account rate lookup failed", {
                   carrierCode: carrierAdapter.carrierCode,
                   carrierName: carrierAdapter.name,
@@ -17344,6 +19303,9 @@ export async function registerRoutes(
                 carrierRates: await carrierAdapter.getRates(rateRequest),
               });
             } catch (error) {
+              if (error instanceof CarrierError && error.code.startsWith("DANGEROUS_GOODS")) {
+                dangerousGoodsRefusals.push(error.carrierMessage);
+              }
               logError("Carrier environment rate lookup failed", {
                 carrierCode: carrierAdapter.carrierCode,
                 carrierName: carrierAdapter.name,
@@ -17393,7 +19355,7 @@ export async function registerRoutes(
       for (const { carrierAdapter, carrierRates, integrationAccountId } of carrierRateResults) {
         for (const rate of carrierRates) {
           const marginPercentage = pricingRule
-            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate)
+            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType))
             : defaultMarginPercentage;
 
           const marginAmount = rate.baseRate * (marginPercentage / 100);
@@ -17465,6 +19427,12 @@ export async function registerRoutes(
       }
 
       if (quotes.length === 0) {
+        if (dangerousGoodsRefusals.length > 0) {
+          return res.status(422).json({
+            error: "No carrier account is approved to carry these dangerous goods.",
+            details: Array.from(new Set(dangerousGoodsRefusals)),
+          });
+        }
         return res.status(502).json({
           error: "No carrier rates were available for this shipment.",
         });
@@ -17523,7 +19491,7 @@ export async function registerRoutes(
         const liveFallbackMarginPercent =
           liveBaseRateSar != null && liveBaseRateSar > 0
             ? localPricingRule
-              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
               : 20
             : null;
         const local = await resolveLocalRate({
@@ -17855,6 +19823,120 @@ export async function registerRoutes(
     res.json(channels.map(serializeChannel));
   });
 
+  // ---------------------------------------------------------------------------
+  // Zid OAuth
+  // ---------------------------------------------------------------------------
+  // Unlike WooCommerce (per-store keys the client pastes in), Zid needs a merchant to
+  // authorise Ezhalha's app in a browser. `state` is a signed handle for the pending
+  // connection: it is how the callback knows which client account is connecting, and it is
+  // the CSRF defence for the authorization-code flow.
+
+  function signZidState(payload: Record<string, string>): string {
+    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const mac = createHmac("sha256", getZidStateSecret()).update(body).digest("base64url");
+    return `${body}.${mac}`;
+  }
+
+  function verifyZidState(state: string): Record<string, string> | null {
+    const [body, mac] = String(state || "").split(".");
+    if (!body || !mac) return null;
+    const expected = createHmac("sha256", getZidStateSecret()).update(body).digest("base64url");
+    // Constant-time: a state check that leaks timing is not a state check.
+    if (expected.length !== mac.length) return null;
+    if (!timingSafeEqual(Buffer.from(expected), Buffer.from(mac))) return null;
+    try {
+      const parsed = JSON.parse(Buffer.from(body, "base64url").toString());
+      if (!parsed?.clientAccountId || !parsed?.issuedAt) return null;
+      // Ten minutes is plenty for a consent screen and short enough that a leaked link is
+      // useless by the time anyone finds it.
+      if (Date.now() - Number(parsed.issuedAt) > 10 * 60 * 1000) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function getZidStateSecret(): string {
+    return process.env.SESSION_SECRET || process.env.INTEGRATION_CONFIG_SECRET || "zid-state-dev-secret";
+  }
+
+  app.get("/api/client/sales-channels/zid/connect", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.clientAccountId) return res.status(404).json({ error: "Client account not found" });
+      if (!isZidConfigured()) {
+        return res.status(503).json({ error: "Zid is not configured on this environment yet." });
+      }
+
+      const state = signZidState({
+        clientAccountId: user.clientAccountId,
+        userId: user.id,
+        issuedAt: String(Date.now()),
+      });
+
+      res.json({ authorizeUrl: buildZidAuthorizeUrl(state), redirectUri: getZidRedirectUri() });
+    } catch (error: any) {
+      logError("Failed to build Zid authorize URL", { error: error.message });
+      res.status(500).json({ error: "Could not start the Zid connection" });
+    }
+  });
+
+  // Zid redirects the merchant's browser here after consent, so failures render a redirect
+  // back into the app rather than JSON the merchant would never understand.
+  app.get("/api/sales-channels/zid/callback", async (req, res) => {
+    const settingsUrl = "/client/sales-channels";
+    const fail = (reason: string) =>
+      res.redirect(`${settingsUrl}?connected=zid&error=${encodeURIComponent(reason)}`);
+
+    try {
+      const code = typeof req.query.code === "string" ? req.query.code : "";
+      const state = typeof req.query.state === "string" ? req.query.state : "";
+      if (!code) return fail("Zid did not return an authorization code");
+
+      const parsedState = verifyZidState(state);
+      if (!parsedState) return fail("This connection link has expired. Start again from Sales Channels.");
+
+      const clientAccount = await storage.getClientAccount(parsedState.clientAccountId);
+      if (!clientAccount) return fail("Client account not found");
+
+      const credentials = await exchangeZidAuthorizationCode(code);
+
+      // Basic-auth credential for the inbound webhooks — Zid does not sign payloads.
+      const webhook = generateZidWebhookCredential();
+
+      const channel = await storage.createSalesChannel({
+        clientAccountId: clientAccount.id,
+        platform: "zid",
+        name: "Zid store",
+        storeUrl: null,
+        status: "connected",
+        credentialsEncrypted: encryptIntegrationPayload(credentials as unknown as Record<string, string>),
+        webhookSecret: webhook.secret,
+        syncSettings: JSON.stringify({ autoSync: true, importPaidOnly: "paid" }),
+        carrierMode: "manual",
+      } as any);
+
+      // Registered per store, because the target URL carries the channel id — that is how an
+      // inbound order is attributed to the right client. Failures are non-fatal: the
+      // five-minute poll still imports orders, so the store is slower, not broken.
+      const targetUrl = `${(process.env.APP_BASE_URL || "https://app.ezhalha.co").replace(/\/+$/, "")}/api/webhooks/sales-channel/zid?channel=${channel.id}`;
+      await registerZidWebhooks({
+        credentials,
+        targetUrl,
+        basicAuthUsername: webhook.username,
+        basicAuthPassword: webhook.password,
+      });
+
+      await logAudit(parsedState.userId, "connect_sales_channel", "sales_channel", channel.id,
+        `Connected Zid store for client ${clientAccount.id}`, req.ip);
+
+      res.redirect(`${settingsUrl}?connected=zid&channel=${channel.id}`);
+    } catch (error: any) {
+      logError("Zid OAuth callback failed", { error: error.message });
+      fail("We could not complete the Zid connection. Please try again.");
+    }
+  });
+
   app.post("/api/client/sales-channels", requireClient, requireSalesFeature, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -18061,7 +20143,7 @@ export async function registerRoutes(
         const liveFallbackMarginPercent =
           liveBaseRateSar != null && liveBaseRateSar > 0
             ? localPricingRule
-              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar)
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, normalizePricingAccountType(account?.accountType))
               : 20
             : null;
         const local = await resolveLocalRate({
@@ -18219,6 +20301,190 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Dangerous goods: submit unpriced, operations quotes it by hand ───────────────
+  //
+  // A dangerous goods shipment has no rate step and no checkout. Carriage is arranged with
+  // DHL or FedEx over email, so no price exists at submission time — the client hands over a
+  // complete declaration and an operator comes back with what the carrier charged.
+  //
+  // Two details here are load-bearing and easy to get wrong:
+  //
+  //   * `paymentStatus: "unpaid"`. Operations filters its queues on {paid, unpaid}, so a
+  //     shipment created "pending" — the value every other unpaid shipment carries — would be
+  //     invisible to the operators who are the entire point of this flow.
+  //   * Prices are stored as 0.00, not null. baseRate/margin/finalPrice are NOT NULL columns,
+  //     so "not yet priced" has to be carried by the status, never by an absent price.
+
+  // Postal code is required only where the country actually uses one. Insisting otherwise is
+  // exactly how "00000" reached FedEx on a Lebanese address and the collection failed for
+  // three days behind an error that named the wrong field.
+  const dangerousGoodsAddressSchema = z.object({
+    name: z.string().min(1, "Name is required"),
+    company: z.string().optional(),
+    phone: z.string().min(1, "Phone is required"),
+    email: z.string().email("Invalid email address").optional().or(z.literal("")),
+    countryCode: z.string().length(2, "Country code must be 2 characters"),
+    city: z.string().min(1, "City is required"),
+    postalCode: z.string().optional(),
+    addressLine1: z.string().min(1, "Address is required"),
+    addressLine2: z.string().optional(),
+    stateOrProvince: z.string().optional(),
+    shortAddress: z.string().optional(),
+  }).superRefine((data, ctx) => {
+    if (COUNTRIES_REQUIRING_STATE.includes(data.countryCode) && !data.stateOrProvince) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `State/Province is required for ${data.countryCode}`, path: ["stateOrProvince"] });
+    }
+    if (isPostalCodeRequired(data.countryCode) && !data.postalCode?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Postal code is required", path: ["postalCode"] });
+    }
+  });
+
+  const dangerousGoodsSubmitSchema = z.object({
+    shipmentType: z.enum(["domestic", "inbound", "outbound"]),
+    shipper: dangerousGoodsAddressSchema,
+    recipient: dangerousGoodsAddressSchema,
+    packages: z.array(z.object({
+      weight: z.number().positive("Weight must be positive"),
+      length: z.number().positive("Length must be positive"),
+      width: z.number().positive("Width must be positive"),
+      height: z.number().positive("Height must be positive"),
+    })).min(1, "At least one package is required"),
+    weightUnit: z.enum(["LB", "KG"]).default("KG"),
+    dimensionUnit: z.enum(["IN", "CM"]).default("CM"),
+    packageType: z.string().default("YOUR_PACKAGING"),
+    currency: z.string().default("SAR"),
+    items: z.array(shipmentItemInputSchema).optional().default([]),
+    tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional().default([]),
+    dangerousGoods: dangerousGoodsDraftDeclarationSchema,
+    dangerousGoodsDocuments: z.array(dangerousGoodsDocumentSchema).max(DANGEROUS_GOODS_DOCUMENT_MAX_FILES).optional().default([]),
+    // A preference, not a booking. Nothing is collected until the shipment is paid for.
+    preferredPickupDate: z.string().max(32).optional(),
+    specialInstructions: z.string().max(2000).optional(),
+  });
+
+  app.post("/api/client/shipments/dangerous-goods", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
+    try {
+      const idempotencyKey = req.headers["idempotency-key"] as string | undefined;
+      if (idempotencyKey) {
+        const cached = await getIdempotencyRecord(idempotencyKey);
+        if (cached) return res.status(cached.statusCode).json(cached.response);
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) return res.status(404).json({ error: "Client account not found" });
+      if (!account.dangerousGoodsEnabled) {
+        return res.status(403).json({ error: "Dangerous goods shipping is not enabled for this account." });
+      }
+
+      const data = dangerousGoodsSubmitSchema.parse(req.body);
+      const totalWeight = data.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+      const isInternational = data.shipper.countryCode !== data.recipient.countryCode;
+
+      if (isInternational && data.items.length === 0) {
+        return res.status(400).json({ error: "At least one customs line item is required for an international shipment." });
+      }
+
+      const enriched = await enrichItemsWithHsCodes(data.items, {
+        clientAccountId: user.clientAccountId,
+        destinationCountry: data.recipient.countryCode || data.shipper.countryCode || "SA",
+      });
+
+      // Zero, not null: the price columns are NOT NULL, and "unpriced" is carried by the
+      // dg_review status instead. Recording the tax scenario now keeps the accounting columns
+      // consistent from the first write, so the later quote only has to update amounts.
+      const accountingSnapshot = calculateShipmentAccounting({
+        shipmentType: data.shipmentType,
+        isDdp: false,
+        recipientCountryCode: data.recipient.countryCode,
+        baseRate: 0,
+        marginAmount: 0,
+      });
+
+      const shipment = await storage.createShipment({
+        clientAccountId: user.clientAccountId,
+        senderName: data.shipper.name,
+        senderCompany: data.shipper.company || null,
+        senderAddress: data.shipper.addressLine1,
+        senderAddressLine2: data.shipper.addressLine2 || null,
+        senderCity: data.shipper.city,
+        senderStateOrProvince: data.shipper.stateOrProvince || null,
+        senderPostalCode: data.shipper.postalCode || null,
+        senderCountry: data.shipper.countryCode,
+        senderPhone: data.shipper.phone,
+        senderEmail: data.shipper.email || null,
+        senderShortAddress: data.shipper.shortAddress || null,
+        recipientName: data.recipient.name,
+        recipientCompany: data.recipient.company || null,
+        recipientAddress: data.recipient.addressLine1,
+        recipientAddressLine2: data.recipient.addressLine2 || null,
+        recipientCity: data.recipient.city,
+        recipientStateOrProvince: data.recipient.stateOrProvince || null,
+        recipientPostalCode: data.recipient.postalCode || null,
+        recipientCountry: data.recipient.countryCode,
+        recipientPhone: data.recipient.phone,
+        recipientEmail: data.recipient.email || null,
+        recipientShortAddress: data.recipient.shortAddress || null,
+        weight: totalWeight.toString(),
+        weightUnit: data.weightUnit,
+        length: data.packages[0].length.toString(),
+        width: data.packages[0].width.toString(),
+        height: data.packages[0].height.toString(),
+        dimensionUnit: data.dimensionUnit,
+        packageType: data.packageType,
+        numberOfPackages: data.packages.length,
+        packagesData: JSON.stringify(data.packages),
+        itemsData: enriched.items.length ? JSON.stringify(enriched.items) : undefined,
+        tradeDocumentsData: data.tradeDocuments.length ? JSON.stringify(data.tradeDocuments) : undefined,
+        ...dangerousGoodsInsertFields(data.dangerousGoods, data.dangerousGoodsDocuments),
+        shipmentType: data.shipmentType,
+        fulfillmentType: DG_MANUAL_FULFILLMENT_TYPE,
+        currency: data.currency,
+        status: DangerousGoodsShipmentStatus.REVIEW,
+        carrierStatus: DangerousGoodsShipmentStatus.REVIEW,
+        baseRate: "0.00",
+        marginAmount: "0.00",
+        margin: "0.00",
+        finalPrice: "0.00",
+        ...getShipmentAccountingInsert(accountingSnapshot),
+        // "unpaid", not "pending" — operations filters its queues on {paid, unpaid}, and a
+        // shipment nobody can see is a shipment nobody will quote.
+        paymentStatus: "unpaid",
+        dgPreferredPickupDate: data.preferredPickupDate || null,
+        ddpSpecialInstructions: data.specialInstructions || null,
+      });
+
+      await logAudit(req.session.userId, "submit_dangerous_goods_shipment", "shipment", shipment.id,
+        `Submitted dangerous goods shipment ${shipment.trackingNumber} for operations review: ${summarizeDangerousGoods(data.dangerousGoods)}`, req.ip);
+
+      await ensureOperationAssignmentForShipment({
+        shipment,
+        actorUserId: req.session.userId,
+        reason: "dangerous_goods_submitted",
+      });
+
+      const response = {
+        shipmentId: shipment.id,
+        trackingNumber: shipment.trackingNumber,
+        status: shipment.status,
+      };
+      if (idempotencyKey) {
+        await setIdempotencyRecord(idempotencyKey, response, 201);
+      }
+      res.status(201).json(response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to submit dangerous goods shipment", error);
+      res.status(500).json({ error: "Failed to submit dangerous goods shipment" });
+    }
+  });
+
   // STEP 2: Checkout - Create shipment draft with selected rate
   app.post("/api/client/shipments/checkout", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
@@ -18240,10 +20506,11 @@ export async function registerRoutes(
         quoteId: z.string().uuid("Invalid quote ID"),
         items: z.array(shipmentItemInputSchema).optional(),
         tradeDocuments: z.array(shipmentTradeDocumentSchema).max(5).optional(),
+        dangerousGoodsDocuments: z.array(dangerousGoodsDocumentSchema).max(DANGEROUS_GOODS_DOCUMENT_MAX_FILES).optional(),
         pickup: pickupInputSchema.optional(),
       });
 
-      const { quoteId, items, tradeDocuments, pickup } = checkoutSchema.parse(req.body);
+      const { quoteId, items, tradeDocuments, dangerousGoodsDocuments, pickup } = checkoutSchema.parse(req.body);
 
       // Verify quote exists and is valid
       const quote = await storage.getShipmentRateQuote(quoteId);
@@ -18306,7 +20573,7 @@ export async function registerRoutes(
       // Re-derive the margin server-side (never trust the quoted amount) using the
       // profile margin tiers. (Local shipments use their own /local/checkout.)
       const marginPercentage = pricingRule
-        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate, normalizePricingAccountType(account?.accountType))
         : defaultMarginPercentage;
       const recalculatedMargin = baseRate * (marginPercentage / 100);
 
@@ -18422,6 +20689,7 @@ export async function registerRoutes(
         tradeDocumentsData: shipmentData.tradeDocuments?.length
           ? JSON.stringify(shipmentData.tradeDocuments)
           : undefined,
+        ...dangerousGoodsInsertFields(shipmentData.dangerousGoods, dangerousGoodsDocuments),
         shipmentType: shipmentData.shipmentType,
         serviceType: quote.serviceType,
         currency: quote.currency,
@@ -18566,6 +20834,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Please accept the customs, terms and broker-authorization declaration before paying." });
       }
 
+      // Dangerous goods: the client is the offeror of the goods, so they confirm the
+      // declaration as operations left it before any money moves.
+      if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE && !shipment.dgClientConfirmedAt) {
+        return res.status(400).json({ error: "Please confirm the dangerous goods declaration before paying." });
+      }
+
+      // An expired quote is not a price. The carrier held it for a period and that period is
+      // over — paying now would commit the client to a figure the carrier no longer offers.
+      if (
+        shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE &&
+        shipment.dgQuoteExpiresAt &&
+        shipment.dgQuoteExpiresAt.getTime() <= Date.now()
+      ) {
+        return res.status(400).json({ error: "This dangerous goods quotation has expired. Operations will re-confirm the price with the carrier." });
+      }
+
       const account = await storage.getClientAccount(user.clientAccountId);
       if (!account) {
         return res.status(404).json({ error: "Client account not found" });
@@ -18706,6 +20990,26 @@ export async function registerRoutes(
 
       const currentShipment = (await storage.getShipment(shipmentId)) || shipment;
 
+      // A paid dangerous goods shipment is already as confirmed as this endpoint can make it.
+      // Payment moved it to `dg_booking`; the only thing left is an operator booking it with
+      // the carrier by hand, which nothing here can do. Answer with the shipment rather than
+      // re-running finalization, which would raise a second "book this now" attention flag.
+      if (
+        currentShipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE &&
+        currentShipment.paymentStatus === "paid"
+      ) {
+        const settledResponse = {
+          shipment: currentShipment,
+          carrierTrackingNumber: currentShipment.carrierTrackingNumber || "",
+          labelUrl: currentShipment.labelUrl || undefined,
+          estimatedDelivery: currentShipment.estimatedDelivery || undefined,
+        };
+        if (idempotencyKey) {
+          await setIdempotencyRecord(idempotencyKey, settledResponse, 200);
+        }
+        return res.json(settledResponse);
+      }
+
       if (
         currentShipment.status !== "payment_pending" &&
         !(currentShipment.status === "created" && currentShipment.carrierTrackingNumber) &&
@@ -18722,6 +21026,7 @@ export async function registerRoutes(
           paymentMethod: "tap",
           userId: req.session.userId,
           ipAddress: req.ip,
+          awaitConcurrentBooking: true,
         });
       } catch (carrierError) {
         const isCarrierErr = carrierError instanceof CarrierError;
@@ -18792,7 +21097,7 @@ export async function registerRoutes(
       
       // Get tiered margin based on the base rate amount
       const marginPercentage = pricingRule 
-        ? await storage.getMarginForAmount(pricingRule.id, baseRate)
+        ? await storage.getMarginForAmount(pricingRule.id, baseRate, normalizePricingAccountType(account?.accountType))
         : defaultMarginPercentage;
       
       const margin = baseRate * (marginPercentage / 100);
@@ -19084,6 +21389,70 @@ export async function registerRoutes(
     }
   });
 
+  // Dangerous goods access
+  app.get("/api/client/dangerous-goods", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const clientAccount = await storage.getClientAccount(user.clientAccountId);
+      const request = await storage.getDangerousGoodsAccessRequestByClient(user.clientAccountId);
+      res.json({
+        enabled: clientAccount?.dangerousGoodsEnabled || false,
+        request: request || null,
+      });
+    } catch (error: any) {
+      logError("Error fetching dangerous goods status", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/client/dangerous-goods/request", requireClient, requirePrimaryContact, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (account?.dangerousGoodsEnabled) {
+        return res.status(400).json({ error: "Dangerous goods is already enabled for your account." });
+      }
+      const existing = await storage.getDangerousGoodsAccessRequestByClient(user.clientAccountId);
+      if (existing && existing.status === "pending") {
+        return res.status(400).json({ error: "You already have a pending request." });
+      }
+
+      const parsed = z.object({
+        reason: z.string().max(2000).optional(),
+        documentPaths: z.array(z.string().min(1)).max(10).optional(),
+      }).parse(req.body || {});
+
+      const request = await storage.createDangerousGoodsAccessRequest({
+        clientAccountId: user.clientAccountId,
+        requestedByUserId: user.id,
+        status: "pending",
+        reason: parsed.reason || null,
+        documentPaths: parsed.documentPaths || null,
+      });
+
+      logAuditToFile({
+        userId: user.id,
+        action: "request_dangerous_goods",
+        resource: "dangerous_goods_access_request",
+        resourceId: request.id,
+        details: `Client ${user.username} requested dangerous goods access`,
+        ipAddress: req.ip || "unknown",
+      });
+
+      res.json({ success: true, request });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0]?.message || "Invalid request" });
+      logError("Error creating dangerous goods request", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Sales Channels feature access (Orders / Sales Channels / Assignment Rules bundle)
   app.get("/api/client/sales-features", requireClient, async (req, res) => {
     try {
@@ -19175,6 +21544,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Please accept the customs, terms and broker-authorization declaration before paying." });
       }
 
+      // Dangerous goods: the client is the offeror of the goods, so they confirm the
+      // declaration as operations left it before any money moves.
+      if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE && !shipment.dgClientConfirmedAt) {
+        return res.status(400).json({ error: "Please confirm the dangerous goods declaration before paying." });
+      }
+
+      // An expired quote is not a price. The carrier held it for a period and that period is
+      // over — paying now would commit the client to a figure the carrier no longer offers.
+      if (
+        shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE &&
+        shipment.dgQuoteExpiresAt &&
+        shipment.dgQuoteExpiresAt.getTime() <= Date.now()
+      ) {
+        return res.status(400).json({ error: "This dangerous goods quotation has expired. Operations will re-confirm the price with the carrier." });
+      }
+
       const existingCredit = await storage.getCreditInvoiceByShipmentId(shipmentId);
       if (existingCredit) {
         return res.status(400).json({ error: "A credit invoice already exists for this shipment" });
@@ -19243,16 +21628,23 @@ export async function registerRoutes(
       });
 
       const isDdpCredit = shipment.fulfillmentType === "ddp_manual";
+      const isDgManualCredit = shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE;
       // Local shipments are operations-fulfilled (like DDP): credit covers them so ops
-      // can proceed immediately, and there is no carrier auto-booking.
-      const isManualFulfillment = isDdpCredit || shipment.fulfillmentType === "local";
+      // can proceed immediately, and there is no carrier auto-booking. Dangerous goods are
+      // the same in this respect — an operator books them by email — so credit settles them
+      // and hands them straight to the booking step.
+      const isManualFulfillment = isDdpCredit || isDgManualCredit || shipment.fulfillmentType === "local";
       await storage.updateShipment(shipmentId, {
         paymentMethod: "CREDIT",
-        // DDP/local credit is covered by the client's credit balance, so the shipment is
+        // DDP/local/DG credit is covered by the client's credit balance, so the shipment is
         // treated as paid for the operations workflow; the creditInvoice stays UNPAID
         // as the receivable the client settles later. Other flows keep the prior behavior.
         paymentStatus: isManualFulfillment ? "paid" : "unpaid",
-        status: isDdpCredit ? "awaiting_review" : shipment.fulfillmentType === "local" ? "created" : "credit_pending",
+        status: isDdpCredit
+          ? "awaiting_review"
+          : isDgManualCredit
+            ? DangerousGoodsShipmentStatus.AWAITING_BOOKING
+            : shipment.fulfillmentType === "local" ? "created" : "credit_pending",
       });
 
       let carrierTrackingNumber = "";
@@ -19260,7 +21652,44 @@ export async function registerRoutes(
       let estimatedDelivery: Date | undefined;
 
       try {
-        if (shipment.fulfillmentType === "ddp_manual") {
+        if (isDgManualCredit) {
+          // Manually-quoted dangerous goods: nothing here may talk to a carrier. The movement
+          // was agreed by email at a price the carrier already gave, and an operator raises
+          // the waybill now that the client has committed to paying. Falling through to the
+          // express branch below would tender regulated goods through the API and produce a
+          // second Shipper's Declaration for one physical consignment.
+          await storage.updateShipment(shipmentId, {
+            carrierStatus: DangerousGoodsShipmentStatus.AWAITING_BOOKING,
+            dgDeclinedAt: null,
+            dgDeclineReason: null,
+          });
+
+          await createAttentionFlag({
+            shipmentId,
+            issueType: "dangerous_goods_awaiting_booking",
+            severity: "high",
+            details: `${shipment.trackingNumber} has been settled on credit. Confirm the movement with ${shipment.carrierName || shipment.carrierCode || "the carrier"} and record the air waybill.`,
+          });
+        } else if (shipment.hasDangerousGoods && shipment.dangerousGoodsStatus === DangerousGoodsStatus.PENDING_REVIEW) {
+          // Pay-later books the carrier on its own path rather than through
+          // finalizePaidShipmentAfterPayment, so the dangerous goods hold has to be repeated
+          // here. Without it, paying on credit would tender regulated goods with nobody
+          // having read the declaration.
+          await storage.updateShipment(shipmentId, {
+            status: "awaiting_review",
+            carrierStatus: "awaiting_dangerous_goods_review",
+          });
+
+          const declaration = parseDangerousGoodsDeclaration(shipment.dangerousGoodsData);
+          await createAttentionFlag({
+            shipmentId,
+            issueType: "dangerous_goods_review_required",
+            severity: "high",
+            details: declaration
+              ? `Dangerous goods declaration awaiting review: ${summarizeDangerousGoods(declaration)}`
+              : "Dangerous goods declaration awaiting review.",
+          });
+        } else if (shipment.fulfillmentType === "ddp_manual") {
           await storage.updateShipment(shipmentId, {
             status: "awaiting_review",
             carrierStatus: "awaiting_review",

@@ -3,11 +3,21 @@ import crypto from "crypto";
 import { calculateChargeableWeight, convertWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { countryTimeZone } from "@shared/country-timezones";
 import {
+  isDryIceDeclaration,
+  resolveDhlDangerousGoodsCodes,
+  type DangerousGoodsDeclaration,
+  type DgContentKindValue,
+} from "@shared/dangerous-goods";
+import {
   CarrierError,
+  assertDangerousGoodsAccountApproved,
+  extractUtcOffset,
+  rejectSyntheticDangerousGoodsRate,
   parseMoney,
   type AddressValidationRequest,
   type AddressValidationResponse,
   type CarrierAdapter,
+  type CarrierCapabilityProfile,
   type CreateShipmentRequest,
   type CreateShipmentResponse,
   type PostalCodeValidationRequest,
@@ -23,9 +33,10 @@ import {
   type PickupRequest,
   type PickupResponse,
 } from "./fedex";
-import { logError, logInfo } from "../services/logger";
+import { logError, logInfo, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
+import { buildIntegrationLogResponse } from "../services/integration-log-payload";
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -237,17 +248,58 @@ function buildPartyDetails(address: ShippingAddress, compact: boolean = false) {
 // rate returns; the volumetric weight it implies is negligible against any real actual weight.
 const DHL_NOMINAL_DIMENSIONS = { length: 10, width: 10, height: 10 };
 
-function buildPackages(request: RateRequest | CreateShipmentRequest) {
-  return request.packages.map((pkg) => {
+function buildPackages(
+  request: RateRequest | CreateShipmentRequest,
+  dangerousGoods?: { contentId: string; declaration: DangerousGoodsDeclaration } | null,
+) {
+  return request.packages.map((pkg, index) => {
     const d = pkg.dimensions;
     const hasDims = d && Number(d.length) > 0 && Number(d.width) > 0 && Number(d.height) > 0;
+    const declaredPackage = dangerousGoods?.declaration.packages.find(
+      (entry) => entry.packageIndex === index,
+    );
     return {
       weight: pkg.weight,
       dimensions: hasDims
         ? { length: d!.length, width: d!.width, height: d!.height }
         : { ...DHL_NOMINAL_DIMENSIONS },
+      // DHL declares dangerous goods per package, keyed only by the content id its contract
+      // approved. The commodity detail rides the Shipper's Declaration, not the API call.
+      ...(declaredPackage && dangerousGoods
+        ? {
+            dangerousGoods: [{
+              contentId: dangerousGoods.contentId,
+              ...(isDryIceDeclaration(dangerousGoods.declaration) && dangerousGoods.declaration.dryIceWeightKg
+                ? { dryIceTotalNetWeight: dangerousGoods.declaration.dryIceWeightKg }
+                : {}),
+            }],
+          }
+        : {}),
     };
   });
+}
+
+/**
+ * Content ids DHL assigned to this specific account, stored as a JSON map of content kind to
+ * id on the integration account. DHL validates against the contract rather than the
+ * published table, and for fully regulated goods the published table has no id at all.
+ */
+function configuredDhlContentIds(): Partial<Record<DgContentKindValue, string>> | null {
+  const raw = getIntegrationEnv("DHL_DG_CONTENT_IDS");
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    logWarn("DHL_DG_CONTENT_IDS is not valid JSON; falling back to the published code table");
+    return null;
+  }
+}
+
+function resolveDhlDgForRequest(request: RateRequest | CreateShipmentRequest) {
+  if (!request.dangerousGoods) return null;
+  const codes = resolveDhlDangerousGoodsCodes(request.dangerousGoods, configuredDhlContentIds());
+  return { ...codes, declaration: request.dangerousGoods };
 }
 
 function buildRateChargeableWeightSummary(request: RateRequest | CreateShipmentRequest) {
@@ -641,7 +693,39 @@ function isMeaningfulDhlEvent(event: { status?: string; description?: string }):
   return true;
 }
 
-function extractTrackingResponse(trackingNumber: string, data: any): TrackingResponse {
+/** DHL sends "+09:00", but also tolerates "+0900" / "09:00". Normalise to "+HH:MM". */
+function normalizeDhlGmtOffset(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const match = /^([+-]?)(\d{2}):?(\d{2})$/.exec(value.trim());
+  if (!match) return undefined;
+  return `${match[1] === "-" ? "-" : "+"}${match[2]}:${match[3]}`;
+}
+
+/**
+ * Rebuild the exact local wall-clock DHL reported, as a full ISO 8601 string.
+ * With `requestGMTOffsetPerEvent=true` this carries the real offset and the instant is exact;
+ * without it we still return the bare local string, which is what DHL's own page displays.
+ */
+function buildDhlLocalTimestamp(event: any): string | undefined {
+  const date = typeof event?.date === "string" ? event.date.trim() : "";
+  if (!date) return undefined;
+  const time = typeof event?.time === "string" && event.time.trim() ? event.time.trim() : "00:00:00";
+  const offset = normalizeDhlGmtOffset(event?.GMTOffset);
+  return `${date}T${time}${offset || ""}`;
+}
+
+/** Flatten `remarks: [{ value, details }]` into one carrier-authored paragraph. */
+function formatDhlRemarks(remarks: unknown): string | undefined {
+  if (!Array.isArray(remarks) || remarks.length === 0) return undefined;
+  const text = remarks
+    .map((remark: any) => [remark?.value, remark?.details].filter((part) => typeof part === "string" && part.trim()).join(" "))
+    .filter((part) => part.trim().length > 0)
+    .join(" ")
+    .trim();
+  return text || undefined;
+}
+
+export function extractTrackingResponse(trackingNumber: string, data: any): TrackingResponse {
   const shipments = Array.isArray(data?.shipments) ? data.shipments : [];
   const shipment = shipments[0] || data;
   const checkpoints = Array.isArray(shipment?.events)
@@ -654,11 +738,15 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
 
   const events: TrackingEvent[] = checkpoints
     .map((event: any) => {
+      // MyDHL API splits a scan into `date` ("2020-06-10") and `time` ("13:06:00"), both in the
+      // LOCAL time of the service area, and only supplies `GMTOffset` ("+09:00") when the request
+      // asks for it. Joining date+time without the offset makes `new Date` read it as the
+      // SERVER's local time, which silently shifted every scan by the server's UTC offset.
+      const localIso = buildDhlLocalTimestamp(event);
       const timestamp =
+        parseTrackingTimestamp(localIso) ||
         parseTrackingTimestamp(event?.timestamp) ||
-        parseTrackingTimestamp(event?.dateTime) ||
-        // DHL Express splits the scan into separate date + time fields.
-        parseTrackingTimestamp(event?.date && event?.time ? `${event.date}T${event.time}` : event?.date);
+        parseTrackingTimestamp(event?.dateTime);
 
       if (!timestamp) {
         return null;
@@ -667,6 +755,9 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
       // DHL events carry a `typeCode` (PU/AF/OK/…) — NOT a `status` field. Use it as the event
       // status, and never fall back to the envelope's `shipment.status` ("Success").
       const typeCode = String(event?.typeCode || event?.statusCode || "").toUpperCase();
+      // `description` is DHL's own scan text ("Shipment picked up"). The typeCode table below it
+      // is a LAST resort for a scan that arrives with no text at all — it must never win over
+      // wording DHL actually sent, because the hub presents this as the carrier's own words.
       const description =
         event?.description ||
         event?.statusDescription ||
@@ -681,6 +772,13 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
           (Array.isArray(event?.serviceArea) ? event.serviceArea[0]?.description : event?.serviceArea?.description) ||
           event?.location?.address?.addressLocality ||
           event?.location?.address?.addressRegion,
+        localTime: localIso || (typeof event?.timestamp === "string" ? event.timestamp : undefined),
+        utcOffset: extractUtcOffset(localIso) || normalizeDhlGmtOffset(event?.GMTOffset),
+        // Present only under trackingView=all-checkpoints-with-remarks. This is the plain-language
+        // "what does this mean for me" text DHL shows on its own tracking page.
+        remarks: formatDhlRemarks(event?.remarks),
+        signedBy: typeof event?.signedBy === "string" && event.signedBy.trim() ? event.signedBy : undefined,
+        raw: event,
       } satisfies TrackingEvent;
     })
     .filter((event: TrackingEvent | null): event is TrackingEvent => Boolean(event))
@@ -713,6 +811,13 @@ function extractTrackingResponse(trackingNumber: string, data: any): TrackingRes
 }
 
 export class DhlAdapter implements CarrierAdapter {
+  // DHL expresses DG as a content id per package plus a value added service code. Only the
+  // IATA set is reachable through MyDHL API for our lanes.
+  readonly capabilities: CarrierCapabilityProfile = {
+    type: "international",
+    dangerousGoods: { supported: true, regulations: ["IATA"] },
+  };
+
   name = "DHL";
   carrierCode = "DHL";
 
@@ -757,7 +862,14 @@ export class DhlAdapter implements CarrierAdapter {
         serviceName: "dhl",
         operation: `${method} ${endpoint}`,
         requestPayload: JSON.stringify(requestBody ?? {}),
-        responsePayload: JSON.stringify(isProduction() && !success ? { error: responseBody?.error } : responseBody ?? {}),
+        // Failures keep the carrier's message. This previously read `responseBody?.error`,
+        // but DHL returns `{detail, title, additionalDetails}` — so it stored `{}` and the
+        // reason for every production failure was thrown away.
+        responsePayload: JSON.stringify(buildIntegrationLogResponse({
+          responseBody,
+          success,
+          mask: (data) => data,
+        })),
         statusCode,
         duration,
         success,
@@ -931,14 +1043,21 @@ export class DhlAdapter implements CarrierAdapter {
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
+    assertDangerousGoodsAccountApproved(request, "DHL");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "DHL is not configured and mock mode is disabled in production");
       }
 
+      rejectSyntheticDangerousGoodsRate(request, "DHL");
       logInfo("Using mock DHL rates (DHL not configured)");
       return this.getMockRates(request);
     }
+
+    // Resolved BEFORE the try: an unresolvable declaration must abort the quote, and the
+    // catch below falls back to mock rates whenever mocking is allowed. Resolving inside the
+    // try would turn "DHL cannot carry these goods" into a cheerful non-DG price.
+    const rateDangerousGoods = resolveDhlDgForRequest(request);
 
     try {
       const declaredValue =
@@ -964,6 +1083,13 @@ export class DhlAdapter implements CarrierAdapter {
         packages: buildPackages(request),
       };
 
+      // Declaring the DG service on the RATE call is what makes DHL include its dangerous
+      // goods surcharge in the quoted price. Without it the client is quoted, and charged,
+      // a price that does not cover the shipment.
+      if (rateDangerousGoods) {
+        payload.valueAddedServices = [{ serviceCode: rateDangerousGoods.serviceCode }];
+      }
+
       if (request.currency) {
         payload.monetaryAmount = [
           {
@@ -987,6 +1113,7 @@ export class DhlAdapter implements CarrierAdapter {
           ? error
           : new CarrierError("RATE_FAILED", (error as Error).message || "DHL rate request failed");
       }
+      rejectSyntheticDangerousGoodsRate(request, "DHL");
       return this.getMockRates(request);
     }
   }
@@ -1040,6 +1167,7 @@ export class DhlAdapter implements CarrierAdapter {
   }
 
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
+    assertDangerousGoodsAccountApproved(request, "DHL");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "DHL is not configured and mock mode is disabled in production");
@@ -1066,6 +1194,7 @@ export class DhlAdapter implements CarrierAdapter {
         (Number.isFinite(requestedDeclaredValue) && requestedDeclaredValue > 0
           ? Math.min(requestedDeclaredValue, MAX_DECLARED_VALUE)
           : 1);
+      const bookingDangerousGoods = resolveDhlDgForRequest(request);
       const payload: Record<string, any> = {
         productCode: request.serviceType || defaultProductCode(request),
         plannedShippingDateAndTime: formatDhlShipmentDateTime(
@@ -1091,7 +1220,7 @@ export class DhlAdapter implements CarrierAdapter {
           incoterm: request.incoterm || "DAP",
           isCustomsDeclarable: isInternational,
           description: buildCommodityDescription(request, sanitizedItems),
-          packages: buildPackages(request),
+          packages: buildPackages(request, bookingDangerousGoods),
           declaredValue: normalizeDeclaredValue(declaredValue),
           declaredValueCurrency: request.currency || "SAR",
         },
@@ -1102,6 +1231,10 @@ export class DhlAdapter implements CarrierAdapter {
         if (exportDeclaration) {
           payload.content.exportDeclaration = exportDeclaration;
         }
+      }
+
+      if (bookingDangerousGoods) {
+        payload.valueAddedServices = [{ serviceCode: bookingDangerousGoods.serviceCode }];
       }
 
       const { data } = await this.makeRequest<any>("/shipments", "POST", payload);
@@ -1140,19 +1273,60 @@ export class DhlAdapter implements CarrierAdapter {
     // transit scans, no delivery. Shipments that were moving normally looked frozen at
     // "Shipment information received" for weeks. Omitting the parameter returns the same full
     // set, so the bare path is the fallback.
-    const endpointCandidates = [
-      `/shipments/${encodeURIComponent(trackingNumber)}/tracking?trackingView=all-checkpoints`,
-      `/shipments/${encodeURIComponent(trackingNumber)}/tracking`,
+    //
+    // `all-checkpoints-with-remarks` (MyDHL API 3.3.1 enum) is the same checkpoint set plus
+    // `events[].remarks[]`, DHL's plain-language explanation of each scan. It leads the list,
+    // but see the event-count guard below: a 200 is NOT sufficient proof a variant is good.
+    //
+    // requestGMTOffsetPerEvent=true adds `GMTOffset` to every event. Without it DHL sends a bare
+    // local date/time with no zone at all, so the scan cannot be placed on the real timeline.
+    const suffix = "&requestGMTOffsetPerEvent=true";
+    const base = `/shipments/${encodeURIComponent(trackingNumber)}/tracking`;
+    // An empty response is retried against exactly ONE alternative, never the whole list. A
+    // pre-transit waybill legitimately has zero scans and is polled every 10 minutes, so walking
+    // every candidate on empty would multiply our DHL call volume for every shipment that has
+    // not moved yet. Two calls is enough to tell "this variant is broken" from "nothing yet",
+    // because the second is the variant already proven good in production.
+    const emptyRetryCandidates = [
+      `${base}?trackingView=all-checkpoints-with-remarks${suffix}`,
+      `${base}?trackingView=all-checkpoints${suffix}`,
+    ];
+    // Only reached when a request throws, so these cost nothing on the happy path.
+    const errorFallbackCandidates = [
+      `${base}?trackingView=all-checkpoints`,
+      base,
     ];
 
     let lastError: Error | null = null;
-    for (const endpoint of endpointCandidates) {
+    let firstParsed: TrackingResponse | null = null;
+
+    for (const endpoint of [...emptyRetryCandidates, ...errorFallbackCandidates]) {
+      const isEmptyRetryCandidate = emptyRetryCandidates.includes(endpoint);
+      // Once one variant has parsed cleanly, a later candidate is only worth trying if it might
+      // do better — and outside the empty-retry pair, none of them will.
+      if (firstParsed && !isEmptyRetryCandidate) {
+        break;
+      }
+
       try {
         const { data } = await this.makeRequest<any>(endpoint, "GET", undefined, 1);
-        return extractTrackingResponse(trackingNumber, data);
+        const parsed = extractTrackingResponse(trackingNumber, data);
+        // Accept on EVENTS, not on HTTP status. The bug this candidate list exists for was a
+        // variant that answered 200 with a near-empty checkpoint set, and the old "first response
+        // wins" loop took it happily, freezing live shipments for weeks.
+        if (parsed.events.length > 0) {
+          return parsed;
+        }
+        firstParsed ??= parsed;
       } catch (error) {
         lastError = error as Error;
       }
+    }
+
+    // Every variant we tried came back empty: a genuinely brand-new waybill looks exactly like
+    // this, so return the parse rather than inventing a failure.
+    if (firstParsed) {
+      return firstParsed;
     }
 
     throw lastError instanceof CarrierError

@@ -78,6 +78,8 @@ import {
   type InsertCreditAccessRequest,
   type SalesFeatureAccessRequest,
   type InsertSalesFeatureAccessRequest,
+  type DangerousGoodsAccessRequest,
+  type InsertDangerousGoodsAccessRequest,
   type EmailLoginOtp,
   type InsertEmailLoginOtp,
   type PasswordResetToken,
@@ -141,6 +143,7 @@ import {
   emailTemplates,
   creditAccessRequests,
   salesFeatureAccessRequests,
+  dangerousGoodsAccessRequests,
   emailLoginOtps,
   passwordResetTokens,
   mobileRefreshTokens,
@@ -153,7 +156,13 @@ import {
   systemLogs,
   InvoiceType,
 } from "@shared/schema";
+import { SHIPMENT_FILTER_ALL, expandStatusFilter } from "@shared/shipment-filters";
 import { db } from "./db";
+import {
+  resolveProfileDefaultDdpMargin,
+  resolveProfileDefaultMargin,
+  type PricingAccountTypeValue,
+} from "@shared/pricing-account-types";
 import { eq, desc, isNull, and, gt, lt, gte, lte, or, ilike, sql, count, countDistinct, inArray } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
@@ -237,15 +246,31 @@ export interface IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }>;
+  getShipmentFilterFacets(params?: { clientAccountIds?: string[] }): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }>;
   getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]>;
   getShipment(id: string): Promise<Shipment | undefined>;
   getShipmentByPaymentId(paymentId: string): Promise<Shipment | undefined>;
   createShipment(shipment: InsertShipment): Promise<Shipment>;
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
   recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
+  getShipmentByCarrierTrackingNumber(carrierTrackingNumber: string): Promise<Shipment | undefined>;
+  claimCarrierBooking(id: string): Promise<boolean>;
+  releaseCarrierBookingClaim(id: string): Promise<void>;
 
   // Invoices
   getInvoices(): Promise<Invoice[]>;
@@ -330,11 +355,11 @@ export interface IStorage {
   deletePricingRule(id: string): Promise<void>;
 
   // Pricing Tiers
-  getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]>;
+  getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]>;
   createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
   updatePricingTier(id: string, updates: Partial<PricingTier>): Promise<PricingTier | undefined>;
   deletePricingTier(id: string): Promise<void>;
-  getMarginForAmount(profileId: string, amount: number): Promise<number>;
+  getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   listLocalCarrierPricingTiers(carrierCode?: string): Promise<LocalCarrierPricingTier[]>;
   createLocalCarrierPricingTier(tier: InsertLocalCarrierPricingTier): Promise<LocalCarrierPricingTier>;
@@ -377,11 +402,11 @@ export interface IStorage {
   deleteCarrierAssignmentRule(id: string): Promise<void>;
 
   // DDP Pricing Tiers
-  getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]>;
+  getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]>;
   createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier>;
   updateDdpPricingTier(id: string, updates: Partial<DdpPricingTier>): Promise<DdpPricingTier | undefined>;
   deleteDdpPricingTier(id: string): Promise<void>;
-  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number>;
+  getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number, accountType: PricingAccountTypeValue): Promise<number>;
 
   // DDP Pricing Lanes
   getDdpPricingLanes(): Promise<DdpPricingLane[]>;
@@ -552,6 +577,10 @@ export interface IStorage {
   getSalesFeatureAccessRequestByClient(clientAccountId: string): Promise<SalesFeatureAccessRequest | undefined>;
   createSalesFeatureAccessRequest(request: InsertSalesFeatureAccessRequest): Promise<SalesFeatureAccessRequest>;
   updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined>;
+  getDangerousGoodsAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: DangerousGoodsAccessRequest[]; total: number; page: number; totalPages: number }>;
+  getDangerousGoodsAccessRequestByClient(clientAccountId: string): Promise<DangerousGoodsAccessRequest | undefined>;
+  createDangerousGoodsAccessRequest(request: InsertDangerousGoodsAccessRequest): Promise<DangerousGoodsAccessRequest>;
+  updateDangerousGoodsAccessRequest(id: string, updates: Partial<DangerousGoodsAccessRequest>): Promise<DangerousGoodsAccessRequest | undefined>;
 
   // Credit Invoices
   getCreditInvoices(params?: {
@@ -881,20 +910,25 @@ export class DatabaseStorage implements IStorage {
   async createClientAccount(account: InsertClientAccount): Promise<ClientAccount> {
     for (let attempt = 0; attempt < 5; attempt++) {
       // Generate the next account number in format EZ0001, EZ0002, etc.
+      //
+      // Take the maximum NUMERICALLY, not by sorting the text column. `ORDER BY account_number
+      // DESC` compares strings, so once EZ10000 exists it still answers EZ9999 — '9' sorts
+      // above '1'. The generator then proposes EZ10000 forever, every insert conflicts, all
+      // five retries produce the same number, and no client account can be created again.
+      // Zero-padding hides this exactly until the 10,000th account, and it does not heal.
+      //
+      // The regexp filter keeps a hand-entered or legacy account number that is not EZ<digits>
+      // from breaking the cast for everyone else.
       const [maxResult] = await db
-        .select({ accountNumber: clientAccounts.accountNumber })
+        .select({
+          maxNumber: sql<number | null>`max(substring(${clientAccounts.accountNumber} from 3)::bigint)`,
+        })
         .from(clientAccounts)
-        .orderBy(desc(clientAccounts.accountNumber))
-        .limit(1);
+        .where(sql`${clientAccounts.accountNumber} ~ '^EZ[0-9]+$'`);
 
-      let nextNumber = 1;
-      if (maxResult?.accountNumber) {
-        const match = maxResult.accountNumber.match(/EZ(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
-      }
+      const nextNumber = Number(maxResult?.maxNumber ?? 0) + 1;
 
+      // Still padded to four, so existing numbers keep their shape; wider numbers simply grow.
       const accountNumber = `EZ${String(nextNumber).padStart(4, "0")}`;
 
       try {
@@ -1000,10 +1034,21 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     search?: string;
     status?: string;
+    carrierCode?: string;
+    fulfillmentType?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    originCountry?: string;
+    destinationCountry?: string;
+    dateFrom?: string;
+    dateTo?: string;
     clientAccountIds?: string[];
     abandonedOnly?: boolean;
   }): Promise<{ shipments: Shipment[]; total: number; page: number; totalPages: number }> {
-    const { page, limit, search, status, clientAccountIds, abandonedOnly } = params;
+    const {
+      page, limit, search, status, carrierCode, fulfillmentType, paymentStatus, paymentMethod,
+      originCountry, destinationCountry, dateFrom, dateTo, clientAccountIds, abandonedOnly,
+    } = params;
     const offset = (page - 1) * limit;
     const conditions = [isNull(shipments.deletedAt)];
 
@@ -1024,8 +1069,47 @@ export class DatabaseStorage implements IStorage {
         )!
       );
     }
-    if (status && status !== "all") {
-      conditions.push(eq(shipments.status, status as any));
+    // Each clause below mirrors matchesShipmentFilters in shared/shipment-filters.ts, which is the
+    // reference the client portal filters by. Keep the two in step.
+    if (status && status !== SHIPMENT_FILTER_ALL) {
+      // A status filter may name a lifecycle group ("in_transit" covers picked_up, customs
+      // clearance, out for delivery) rather than a single raw status.
+      const statuses = expandStatusFilter(status);
+      conditions.push(
+        statuses.length === 1
+          ? eq(shipments.status, statuses[0] as any)
+          : inArray(shipments.status, statuses as any),
+      );
+    }
+    if (carrierCode && carrierCode !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.carrierCode, carrierCode));
+    }
+    if (fulfillmentType && fulfillmentType !== SHIPMENT_FILTER_ALL) {
+      // fulfillmentType defaults to "carrier" in the schema, but older rows can be null.
+      conditions.push(
+        fulfillmentType === "carrier"
+          ? sql`coalesce(${shipments.fulfillmentType}, 'carrier') = 'carrier'`
+          : eq(shipments.fulfillmentType, fulfillmentType),
+      );
+    }
+    if (paymentStatus && paymentStatus !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentStatus, paymentStatus));
+    }
+    if (paymentMethod && paymentMethod !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.paymentMethod, paymentMethod));
+    }
+    if (originCountry && originCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.senderCountry, originCountry));
+    }
+    if (destinationCountry && destinationCountry !== SHIPMENT_FILTER_ALL) {
+      conditions.push(eq(shipments.recipientCountry, destinationCountry));
+    }
+    // Inclusive whole days in the server's local zone, matching what the date pickers imply.
+    if (dateFrom) {
+      conditions.push(sql`${shipments.createdAt} >= ${dateFrom}::date`);
+    }
+    if (dateTo) {
+      conditions.push(sql`${shipments.createdAt} < (${dateTo}::date + interval '1 day')`);
     }
     if (abandonedOnly) {
       conditions.push(sql`coalesce(${shipments.paymentStatus}, 'pending') <> 'paid'`);
@@ -1048,6 +1132,42 @@ export class DatabaseStorage implements IStorage {
     const total = totalResult?.count || 0;
     const totalPages = Math.ceil(total / limit);
     return { shipments: results, total, page, totalPages };
+  }
+
+  /**
+   * The distinct carrier / country values that actually occur in the visible shipments, so the
+   * filter dropdowns can offer only those. A full ISO country list would be seventy-odd entries
+   * for the seven origins this business ships from.
+   */
+  async getShipmentFilterFacets(params: { clientAccountIds?: string[] } = {}): Promise<{
+    carrierCodes: string[];
+    originCountries: string[];
+    destinationCountries: string[];
+  }> {
+    const { clientAccountIds } = params;
+    if (clientAccountIds && clientAccountIds.length === 0) {
+      return { carrierCodes: [], originCountries: [], destinationCountries: [] };
+    }
+    const scope = clientAccountIds
+      ? and(isNull(shipments.deletedAt), inArray(shipments.clientAccountId, clientAccountIds))
+      : isNull(shipments.deletedAt);
+
+    const distinct = async (column: any): Promise<string[]> => {
+      const rows = await db
+        .selectDistinct({ value: column })
+        .from(shipments)
+        .where(and(scope, sql`${column} is not null`, sql`${column} <> ''`));
+      return rows
+        .map((row) => String(row.value))
+        .sort((a, b) => a.localeCompare(b));
+    };
+
+    const [carrierCodes, originCountries, destinationCountries] = await Promise.all([
+      distinct(shipments.carrierCode),
+      distinct(shipments.senderCountry),
+      distinct(shipments.recipientCountry),
+    ]);
+    return { carrierCodes, originCountries, destinationCountries };
   }
 
   async getShipmentsByClientAccount(clientAccountId: string): Promise<Shipment[]> {
@@ -1094,6 +1214,62 @@ export class DatabaseStorage implements IStorage {
     await db.update(shipments)
       .set({ carrierStatusRepeatCount: repeatCount, carrierLastAttemptAt: new Date() })
       .where(and(eq(shipments.id, id), isNull(shipments.deletedAt)));
+  }
+
+  /**
+   * Win the exclusive right to book this shipment with the carrier.
+   *
+   * Returns true only for the caller that actually took the claim. Everything that decides the
+   * outcome lives in the WHERE clause, so Postgres resolves it atomically — two requests
+   * arriving in the same millisecond cannot both be told yes. A read followed by a check, which
+   * is what this replaces, gave both of them yes and produced two waybills for one shipment.
+   *
+   * The stale window lets a crashed attempt be retried rather than wedging the shipment
+   * forever, and `carrierTrackingNumber IS NULL` means an already-booked shipment can never be
+   * claimed at all, however long ago it was booked.
+   */
+  /**
+   * Find a shipment by the carrier's waybill, so one waybill never ends up on two shipments.
+   *
+   * There is no unique index on the column — historical rows carry blanks and duplicates from
+   * before the double-booking fix — so this is a best-effort guard at the point of entry rather
+   * than a database constraint. Soft-deleted shipments are ignored: a waybill freed by a
+   * deletion is legitimately reusable.
+   */
+  async getShipmentByCarrierTrackingNumber(carrierTrackingNumber: string): Promise<Shipment | undefined> {
+    const trimmed = carrierTrackingNumber.trim();
+    if (!trimmed) return undefined;
+    const [shipment] = await db
+      .select()
+      .from(shipments)
+      .where(and(eq(shipments.carrierTrackingNumber, trimmed), isNull(shipments.deletedAt)))
+      .limit(1);
+    return shipment || undefined;
+  }
+
+  async claimCarrierBooking(id: string): Promise<boolean> {
+    const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+    const claimed = await db.update(shipments)
+      .set({ carrierBookingClaimedAt: new Date() })
+      .where(and(
+        eq(shipments.id, id),
+        isNull(shipments.deletedAt),
+        isNull(shipments.carrierTrackingNumber),
+        or(
+          isNull(shipments.carrierBookingClaimedAt),
+          lt(shipments.carrierBookingClaimedAt, staleBefore),
+        ),
+      ))
+      .returning({ id: shipments.id });
+
+    return claimed.length > 0;
+  }
+
+  /** Hand the claim back after a failed booking so a retry is not blocked for five minutes. */
+  async releaseCarrierBookingClaim(id: string): Promise<void> {
+    await db.update(shipments)
+      .set({ carrierBookingClaimedAt: null })
+      .where(and(eq(shipments.id, id), isNull(shipments.carrierTrackingNumber)));
   }
 
   // Invoices
@@ -1542,10 +1718,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pricing Tiers
-  async getPricingTiersByProfileId(profileId: string): Promise<PricingTier[]> {
+  /** Omit `accountType` to list both sets — the admin pricing screen renders them side by side. */
+  async getPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<PricingTier[]> {
     return db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
-      .orderBy(pricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(pricingTiers.profileId, profileId), eq(pricingTiers.accountType, accountType))
+        : eq(pricingTiers.profileId, profileId))
+      .orderBy(pricingTiers.accountType, pricingTiers.minAmount);
   }
 
   async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {
@@ -1562,22 +1741,32 @@ export class DatabaseStorage implements IStorage {
     await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
   }
 
-  async getMarginForAmount(profileId: string, amount: number): Promise<number> {
-    // Get all tiers for this profile, ordered by minAmount descending
+  /**
+   * Express margin for one profile + account type at a given base rate.
+   *
+   * `accountType` is required rather than defaulted: a profile prices companies and individuals
+   * separately, and a parameter with a default would let a new call site silently bill an
+   * individual at the company rate.
+   */
+  async getMarginForAmount(profileId: string, amount: number, accountType: PricingAccountTypeValue): Promise<number> {
+    // Tiers belong to exactly one account type, so this filter is what keeps the two sets apart.
     const tiers = await db.select().from(pricingTiers)
-      .where(eq(pricingTiers.profileId, profileId))
+      .where(and(
+        eq(pricingTiers.profileId, profileId),
+        eq(pricingTiers.accountType, accountType),
+      ))
       .orderBy(desc(pricingTiers.minAmount));
-    
+
     // Find the applicable tier (highest minAmount that is <= the amount)
     for (const tier of tiers) {
       if (amount >= Number(tier.minAmount)) {
         return Number(tier.marginPercentage);
       }
     }
-    
-    // If no tiers found, fall back to the profile's default marginPercentage
+
+    // No tier matched: fall back to this account type's default margin on the profile.
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.marginPercentage) : 15; // Default to 15% if nothing found
+    return profile ? resolveProfileDefaultMargin(profile, accountType) : 15; // 15% if nothing found
   }
 
   // Local carrier pricing tiers
@@ -1795,10 +1984,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // DDP Pricing Tiers
-  async getDdpPricingTiersByProfileId(profileId: string): Promise<DdpPricingTier[]> {
+  /** Omit `accountType` to list both sets. */
+  async getDdpPricingTiersByProfileId(profileId: string, accountType?: PricingAccountTypeValue): Promise<DdpPricingTier[]> {
     return db.select().from(ddpPricingTiers)
-      .where(eq(ddpPricingTiers.profileId, profileId))
-      .orderBy(ddpPricingTiers.minAmount);
+      .where(accountType
+        ? and(eq(ddpPricingTiers.profileId, profileId), eq(ddpPricingTiers.accountType, accountType))
+        : eq(ddpPricingTiers.profileId, profileId))
+      .orderBy(ddpPricingTiers.accountType, ddpPricingTiers.minAmount);
   }
 
   async createDdpPricingTier(tier: InsertDdpPricingTier): Promise<DdpPricingTier> {
@@ -1815,11 +2007,18 @@ export class DatabaseStorage implements IStorage {
     await db.delete(ddpPricingTiers).where(eq(ddpPricingTiers.id, id));
   }
 
-  async getDdpMarginForQuantity(profileId: string, billingUnit: "KG" | "CBM", quantity: number): Promise<number> {
+  /** DDP markup for one profile + account type at a given billable quantity. */
+  async getDdpMarginForQuantity(
+    profileId: string,
+    billingUnit: "KG" | "CBM",
+    quantity: number,
+    accountType: PricingAccountTypeValue,
+  ): Promise<number> {
     const tiers = await db.select().from(ddpPricingTiers)
       .where(and(
         eq(ddpPricingTiers.profileId, profileId),
         eq(ddpPricingTiers.billingUnit, billingUnit),
+        eq(ddpPricingTiers.accountType, accountType),
       ))
       .orderBy(desc(ddpPricingTiers.minAmount));
 
@@ -1830,7 +2029,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const profile = await this.getPricingRuleById(profileId);
-    return profile ? Number(profile.ddpMarginPercentage) : 15;
+    return profile ? resolveProfileDefaultDdpMargin(profile, accountType) : 15;
   }
 
   // DDP Pricing Lanes
@@ -2995,11 +3194,20 @@ export class DatabaseStorage implements IStorage {
 <h3>8. Prohibited Items</h3>
 <p>The following items are prohibited from shipping through our platform:</p>
 <ul>
-<li>Hazardous materials and dangerous goods (unless specifically authorized)</li>
+<li>Undeclared hazardous materials and dangerous goods</li>
 <li>Illegal substances and contraband</li>
 <li>Perishable goods without proper packaging and authorization</li>
 <li>Items prohibited by the laws of the origin or destination country</li>
 <li>Items restricted by carrier policies</li>
+</ul>
+
+<h4>Dangerous Goods</h4>
+<p>Dangerous goods may be shipped only by accounts we have approved for dangerous goods in advance, and only when fully declared at the time of booking. To be approved you must provide evidence of current dangerous goods training and the safety data sheets for the substances you intend to ship.</p>
+<ul>
+<li><strong>Your responsibility:</strong> You are responsible for the accuracy and completeness of every declaration, and for classifying, packing, marking and labelling the goods in accordance with the current IATA Dangerous Goods Regulations and the rules of the origin and destination countries.</li>
+<li><strong>Our review:</strong> Every dangerous goods shipment is reviewed by our operations team before it is offered to the carrier. We may reject a declaration for any reason. A rejected shipment is cancelled and refunded, and is never handed to the carrier.</li>
+<li><strong>Undeclared goods:</strong> Shipping dangerous goods without declaring them is a serious safety and legal matter. Undeclared shipments may be stopped, seized or destroyed by the carrier or the authorities, at your cost, and may result in your account being closed.</li>
+<li><strong>Carrier acceptance:</strong> Acceptance is at all times subject to the carrier's own dangerous goods approvals and to the route being available for the class of goods declared.</li>
 </ul>
 
 <h3>9. Insurance and Liability</h3>
@@ -3146,6 +3354,36 @@ export class DatabaseStorage implements IStorage {
 
   async updateSalesFeatureAccessRequest(id: string, updates: Partial<SalesFeatureAccessRequest>): Promise<SalesFeatureAccessRequest | undefined> {
     const [updated] = await db.update(salesFeatureAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(salesFeatureAccessRequests.id, id)).returning();
+    return updated;
+  }
+
+  async getDangerousGoodsAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: DangerousGoodsAccessRequest[]; total: number; page: number; totalPages: number }> {
+    const page = params?.page || 1;
+    const limit = params?.limit || 25;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    if (params?.status) {
+      conditions.push(eq(dangerousGoodsAccessRequests.status, params.status));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [totalResult] = await db.select({ count: count() }).from(dangerousGoodsAccessRequests).where(whereClause);
+    const total = totalResult?.count || 0;
+    const requests = await db.select().from(dangerousGoodsAccessRequests).where(whereClause).orderBy(desc(dangerousGoodsAccessRequests.createdAt)).limit(limit).offset(offset);
+    return { requests, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  async getDangerousGoodsAccessRequestByClient(clientAccountId: string): Promise<DangerousGoodsAccessRequest | undefined> {
+    const [request] = await db.select().from(dangerousGoodsAccessRequests).where(eq(dangerousGoodsAccessRequests.clientAccountId, clientAccountId)).orderBy(desc(dangerousGoodsAccessRequests.createdAt)).limit(1);
+    return request;
+  }
+
+  async createDangerousGoodsAccessRequest(request: InsertDangerousGoodsAccessRequest): Promise<DangerousGoodsAccessRequest> {
+    const [created] = await db.insert(dangerousGoodsAccessRequests).values(request).returning();
+    return created;
+  }
+
+  async updateDangerousGoodsAccessRequest(id: string, updates: Partial<DangerousGoodsAccessRequest>): Promise<DangerousGoodsAccessRequest | undefined> {
+    const [updated] = await db.update(dangerousGoodsAccessRequests).set({ ...updates, updatedAt: new Date() }).where(eq(dangerousGoodsAccessRequests.id, id)).returning();
     return updated;
   }
 

@@ -25,6 +25,8 @@ import { PaginationControls } from "@/components/pagination-controls";
 import { SarAmount, SarSymbol } from "@/components/sar-symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CancelShipmentDialog } from "@/components/cancel-shipment-dialog";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -151,6 +153,10 @@ type FinancialShipment = Omit<
   isExtraWeightPaid: boolean;
   weightValue: number;
   carrierTrackingId: string | null;
+  carrierStatus: string | null;
+  pickupConfirmationNumber: string | null;
+  carrierCode: string | null;
+  carrierName: string | null;
   carrierPaymentAmountSar: number;
   carrierPaymentReference: string | null;
   carrierPaymentNote: string | null;
@@ -1127,7 +1133,14 @@ export default function AdminPayments() {
                           {shipment.weightValue > 0 ? `${shipment.weightValue.toFixed(2)} ${shipment.weightUnit || "KG"}` : "-"}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {shipment.carrierTrackingId || "-"}
+                          {shipment.carrierTrackingId ? (
+                            <CarrierTrackingLink
+                              trackingNumber={shipment.carrierTrackingId}
+                              carrierCode={shipment.carrierCode}
+                              carrierName={shipment.carrierName}
+                              className="text-sm"
+                            />
+                          ) : "-"}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col items-start gap-2">
@@ -1164,20 +1177,24 @@ export default function AdminPayments() {
                               </Button>
                             )}
                             {canCancelShipments && shipment.canCancel && (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => {
-                                  if (window.confirm(`Cancel shipment ${shipment.trackingNumber}?`)) {
-                                    cancelShipmentMutation.mutate(shipment.id);
-                                  }
-                                }}
-                                disabled={cancelShipmentMutation.isPending}
-                                data-testid={`button-cancel-financial-shipment-${shipment.id}`}
+                              <CancelShipmentDialog
+                                trackingNumber={shipment.trackingNumber}
+                                carrierStatus={shipment.carrierStatus}
+                                carrierName={shipment.carrierName}
+                                hasPickupBooked={Boolean(shipment.pickupConfirmationNumber)}
+                                isPending={cancelShipmentMutation.isPending}
+                                onConfirm={() => cancelShipmentMutation.mutate(shipment.id)}
                               >
-                                <Ban className="mr-1 h-3 w-3" />
-                                Cancel
-                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={cancelShipmentMutation.isPending}
+                                  data-testid={`button-cancel-financial-shipment-${shipment.id}`}
+                                >
+                                  <Ban className="mr-1 h-3 w-3" />
+                                  Cancel
+                                </Button>
+                              </CancelShipmentDialog>
                             )}
                             {!shipment.canMarkPaid && !shipment.canMarkCarrierPaid && !shipment.canViewCarrierPayment && !shipment.canCancel && (
                               <span className="text-xs text-muted-foreground">No actions</span>
@@ -1463,7 +1480,14 @@ export default function AdminPayments() {
                             {transaction.carrierPaymentReference || "-"}
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            {transaction.carrierTrackingId || "-"}
+                            {transaction.carrierTrackingId ? (
+                              <CarrierTrackingLink
+                                trackingNumber={transaction.carrierTrackingId}
+                                carrierCode={transaction.carrierCode}
+                                carrierName={transaction.carrierName}
+                                className="text-sm"
+                              />
+                            ) : "-"}
                           </TableCell>
                           <TableCell className="max-w-[280px] text-sm text-muted-foreground">
                             <div className="line-clamp-2">
@@ -1575,7 +1599,14 @@ export default function AdminPayments() {
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div>
                       <Label>Carrier Tracking</Label>
-                      <p className="font-mono text-sm">{carrierPaymentDialogShipment.carrierTrackingId || "-"}</p>
+                      {carrierPaymentDialogShipment.carrierTrackingId ? (
+                        <CarrierTrackingLink
+                          trackingNumber={carrierPaymentDialogShipment.carrierTrackingId}
+                          carrierCode={carrierPaymentDialogShipment.carrierCode}
+                          carrierName={carrierPaymentDialogShipment.carrierName}
+                          className="text-sm"
+                        />
+                      ) : <p className="font-mono text-sm">-</p>}
                     </div>
                     <div>
                       <Label>Paid At</Label>

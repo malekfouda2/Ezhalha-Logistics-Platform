@@ -10,6 +10,30 @@ common to both.
 
 ---
 
+## Which branch to work on
+
+All mobile work happens on the long-lived **`mobile`** branch, never directly on `main`.
+
+```bash
+git checkout mobile && git pull
+git checkout -b feat/mobile-login     # one branch per piece of work
+# … commit …
+git push -u origin feat/mobile-login  # then open a PR into `mobile`
+```
+
+`mobile` merges into `main` at the end of each M1 phase, as a single reviewable PR.
+
+**Once a week, pull `main` into `mobile`** — `git checkout mobile && git merge origin/main`.
+Skipping it is the one thing that makes this branch painful: the server, the web client and
+`shared/` all keep moving, and a month of unmerged drift turns into a very bad afternoon.
+
+If you need a change in `shared/` (a new field, a changed type), raise it as its own small PR
+into `main` and let it reach you via the weekly merge. Do not edit `shared/` on `mobile`.
+
+Full workflow: [`docs/branching-and-deployment.md`](../docs/branching-and-deployment.md).
+
+---
+
 ## First-time setup
 
 ```bash
@@ -21,6 +45,25 @@ npx expo install expo-secure-store expo-constants expo-localization expo-router 
 
 `create-expo-app` will not overwrite the files already committed here (`metro.config.js`,
 `tsconfig.json`, `src/api/*`). If it asks, keep the existing ones.
+
+### API base URL
+
+```
+https://staging.147-93-122-137.sslip.io
+```
+
+Real HTTPS with a Let's Encrypt certificate, so no iOS ATS or Android cleartext exception is
+needed. sslip.io resolves the IP embedded in the hostname straight back to the server, which is
+how this works without owning a domain — nothing to configure, and no DNS record to wait for.
+
+Staging runs the tip of `main` against its own database with sandbox carrier credentials, so
+nothing here charges a real card or books a real courier. Sign in with `staging.client`.
+
+`https://staging.ezhalha.co` will point at the same server once that A record is added; both will
+work, so switching later is a one-line change.
+
+Never point the app at `https://app.ezhalha.co` while developing — that is production, with live
+payments and real carriers.
 
 Then point the app at an API:
 

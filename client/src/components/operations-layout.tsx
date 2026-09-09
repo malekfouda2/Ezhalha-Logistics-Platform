@@ -32,6 +32,8 @@ const navItems = [
       { href: "/operations?view=attention", label: "Needs Attention" },
       { href: "/operations?view=special", label: "Special Handling" },
       { href: "/operations?view=delivered", label: "Delivered" },
+      { href: "/operations?view=returned", label: "Returned" },
+      { href: "/operations?view=dangerous_goods", label: "Dangerous Goods" },
     ],
   },
   {
@@ -54,6 +56,8 @@ interface OperationsNavSummary {
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
+  returnedCount: number;
+  dangerousGoodsCount: number;
 }
 
 export function OperationsLayout({ children }: OperationsLayoutProps) {
@@ -79,6 +83,8 @@ export function OperationsLayout({ children }: OperationsLayoutProps) {
       "/operations?view=attention": operationsSummary?.attentionCount ?? 0,
       "/operations?view=special": operationsSummary?.specialHandlingCount ?? 0,
       "/operations?view=delivered": operationsSummary?.deliveredCount ?? 0,
+      "/operations?view=returned": operationsSummary?.returnedCount ?? 0,
+      "/operations?view=dangerous_goods": operationsSummary?.dangerousGoodsCount ?? 0,
     }),
     [operationsSummary],
   );

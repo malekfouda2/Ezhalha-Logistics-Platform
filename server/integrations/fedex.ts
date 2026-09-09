@@ -7,9 +7,52 @@ import {
   type ChargeableWeightSummary,
 } from "@shared/chargeable-weight";
 import { countryTimeZone } from "@shared/country-timezones";
+import { carrierPostalCode } from "@shared/postal-codes";
+import {
+  isDryIceDeclaration,
+  resolveFedexDangerousGoodsDetail,
+  type DangerousGoodsDeclaration,
+  type DgRegulationValue,
+} from "@shared/dangerous-goods";
 import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
+import { buildIntegrationLogResponse } from "../services/integration-log-payload";
+
+/**
+ * FedEx carries dangerous goods per package, not per shipment: `packageSpecialServices` sits
+ * on each `requestedPackageLineItem`. Returns an empty object for packages with nothing
+ * declared, so it can be spread unconditionally into every line item.
+ *
+ * Dry ice takes the dedicated `dryIceWeight` field rather than the full commodity model —
+ * FedEx rejects a dangerousGoodsDetail for UN1845.
+ */
+function buildDangerousGoodsPackageSpecialServices(
+  declaration: DangerousGoodsDeclaration | undefined,
+  packageIndex: number,
+): Record<string, any> {
+  if (!declaration) return {};
+
+  if (isDryIceDeclaration(declaration)) {
+    if (!declaration.dryIceWeightKg) return {};
+    return {
+      packageSpecialServices: {
+        specialServiceTypes: ["DRY_ICE"],
+        dryIceWeight: { units: "KG", value: declaration.dryIceWeightKg },
+      },
+    };
+  }
+
+  const dangerousGoodsDetail = resolveFedexDangerousGoodsDetail(declaration, packageIndex);
+  if (!dangerousGoodsDetail) return {};
+
+  return {
+    packageSpecialServices: {
+      specialServiceTypes: ["DANGEROUS_GOODS"],
+      dangerousGoodsDetail,
+    },
+  };
+}
 
 const COUNTRIES_REQUIRING_STATE = new Set(["US", "CA", "AU", "IN", "BR", "MX", "CN", "JP"]);
 
@@ -94,6 +137,64 @@ const STATE_CODE_ALIASES: Record<string, Record<string, string>> = {
   },
 };
 
+/**
+ * FedEx caps each street line at 35 characters and ignores anything past the third line.
+ *
+ * Clients paste whole address blobs into line 1 — label prefixes, the city, the country, even
+ * the phone number. FedEx's /ship endpoint quietly tolerates an over-length line, but the
+ * pickup endpoint rejects it as `PICKUP.STREETLINE.MISSING`, which reads as "you sent nothing"
+ * when the truth is "you sent too much". That mismatch cost a real shipment its collection.
+ *
+ * So: strip the label noise, drop an embedded phone number (it has its own field), then wrap
+ * on word boundaries into at most three lines.
+ */
+export function buildFedexStreetLines(...lines: Array<string | undefined | null>): string[] {
+  const MAX_LINE = 35;
+  const MAX_LINES = 3;
+
+  const cleaned = lines
+    .map((line) => (line || "").trim())
+    .filter(Boolean)
+    .map((line) =>
+      line
+        // "Address: Main Road" → "Main Road"
+        .replace(/^\s*(address|addr|street)\s*[:\-]\s*/i, "")
+        // "… Lebanon Phone: +961 1 690 096" → "… Lebanon"; the phone has its own field.
+        .replace(/\b(phone|tel|mobile|mob)\s*[:\-]?\s*\+?[\d\s()\-]{6,}/gi, "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/[,\s]+$/, "")
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const out: string[] = [];
+  for (const line of cleaned) {
+    if (out.length >= MAX_LINES) break;
+    if (line.length <= MAX_LINE) {
+      out.push(line);
+      continue;
+    }
+
+    // Wrap on whitespace so a street name is never cut mid-word. A single token longer than
+    // the limit is hard-cut, because there is nothing better to do with it.
+    let remaining = line;
+    while (remaining && out.length < MAX_LINES) {
+      if (remaining.length <= MAX_LINE) {
+        out.push(remaining);
+        break;
+      }
+      let cut = remaining.lastIndexOf(" ", MAX_LINE);
+      if (cut <= 0) cut = MAX_LINE;
+      out.push(remaining.slice(0, cut).replace(/[,\s]+$/, "").trim());
+      remaining = remaining.slice(cut).trim();
+    }
+  }
+
+  // FedEx requires at least one street line; an empty array is a guaranteed rejection, so a
+  // placeholder that fails address validation beats a request that cannot even be parsed.
+  return out.length > 0 ? out : ["N/A"];
+}
+
 function sanitizeStateCode(countryCode: string, stateOrProvince?: string): string | undefined {
   if (!stateOrProvince || stateOrProvince.trim() === "") return undefined;
   const trimmed = stateOrProvince.trim();
@@ -125,6 +226,51 @@ export class CarrierError extends Error {
     this.code = code;
     this.carrierMessage = message;
   }
+}
+
+/**
+ * Refuse to answer a dangerous goods quote with a synthetic rate.
+ *
+ * Every adapter falls back to mock or locally-calculated rates when the carrier API is
+ * unavailable. Those fallbacks are fine for general cargo, but a dangerous goods price is
+ * the carrier's rate PLUS its dangerous goods surcharge — a number we cannot compute
+ * ourselves. Returning a synthetic figure would quote and charge the client less than the
+ * shipment costs, so a DG quote either comes from the carrier or it does not happen.
+ */
+/**
+ * Refuse dangerous goods on a carrier account the carrier has not approved for them.
+ *
+ * The adapter-level capability says "this carrier's API can express a declaration". This says
+ * "this particular account is contracted to send one", which is a different question and the
+ * one that actually decides whether the shipment moves. DHL does not reject an unapproved
+ * shipment at the API — it accepts it and stops the parcel at the facility, after the client
+ * has paid — so the check has to be ours.
+ *
+ * Runs inside the bound integration account, so it reads the setting for whichever account the
+ * fan-out selected rather than a global.
+ */
+export function assertDangerousGoodsAccountApproved(
+  request: { dangerousGoods?: unknown },
+  carrierCode: string,
+): void {
+  if (!request?.dangerousGoods) return;
+  if (getIntegrationEnvBoolean(`${carrierCode.toUpperCase()}_DG_ENABLED`)) return;
+
+  throw new CarrierError(
+    "DANGEROUS_GOODS_NOT_APPROVED",
+    `This ${carrierCode} account is not approved for dangerous goods. Enable it on the integration account once the carrier has added dangerous goods to the contract.`,
+  );
+}
+
+export function rejectSyntheticDangerousGoodsRate(
+  request: { dangerousGoods?: unknown },
+  carrierName: string,
+): void {
+  if (!request?.dangerousGoods) return;
+  throw new CarrierError(
+    "DANGEROUS_GOODS_RATE_UNAVAILABLE",
+    `${carrierName} could not price this dangerous goods shipment. A dangerous goods quote must come from the carrier, so no estimate is offered.`,
+  );
 }
 
 export interface ShippingAddress {
@@ -264,6 +410,12 @@ export interface RateRequest {
   packagingType?: string;
   currency?: string;
   shipDate?: string;
+  /**
+   * Present when the shipment carries regulated goods. It has to reach the RATE call, not
+   * just the booking: the carrier's dangerous-goods surcharge is only included in a quote
+   * that declares the goods, and that surcharge is what the client is charged.
+   */
+  dangerousGoods?: DangerousGoodsDeclaration;
 }
 
 export interface RateResponse {
@@ -298,6 +450,8 @@ export interface CreateShipmentRequest {
   commercialInvoiceDate?: string;
   items?: ShipmentItem[];
   tradeDocuments?: TradeDocumentReference[];
+  /** Regulated goods declaration. Carriers that cannot carry it must reject the request. */
+  dangerousGoods?: DangerousGoodsDeclaration;
   // Free-text note forwarded to the carrier's order (e.g. Fizzpa OrderNote / Shipox note).
   // Used by virtual-carrier routing to tell an aggregator's ops which courier to assign.
   // Carriers that expose no note field ignore it.
@@ -314,10 +468,30 @@ export interface CreateShipmentResponse {
 }
 
 export interface TrackingEvent {
+  /** The event instant. Correct even when the carrier reports a bare local wall-clock. */
   timestamp: Date;
+  /** Carrier's own event code (FedEx `eventType`, DHL `typeCode`, Aramex `UpdateCode`). */
   status: string;
+  /** The carrier's exact wording. Adapters must not reword, title-case, or substitute here. */
   description: string;
   location?: string;
+  /**
+   * The wall-clock string the carrier actually reported, offset included when it supplies one:
+   * "2026-08-15T10:23:00-07:00". Kept verbatim because rendering `timestamp` in the viewer's
+   * timezone shows a different clock time than the carrier's own tracking page does.
+   */
+  localTime?: string;
+  /** Just the offset portion, e.g. "-07:00". Absent when the carrier reports none. */
+  utcOffset?: string;
+  /** Exception detail (FedEx `exceptionCode`/`exceptionDescription`) — why it stopped moving. */
+  exceptionCode?: string;
+  exceptionDescription?: string;
+  /** DHL delivery scans. Legitimately empty under GDPR. */
+  signedBy?: string;
+  /** Carrier's own longer explanation: DHL `remarks[]`, FedEx status `ancillaryDetails[]`. */
+  remarks?: string;
+  /** The untouched carrier event object. */
+  raw?: unknown;
 }
 
 // Carrier pickup request. Fired after a shipment is booked with the carrier (so the pickup
@@ -373,6 +547,13 @@ export interface CarrierCapabilityProfile {
   // reached through client-facing virtual carriers. Hidden from the client rate list but
   // still resolvable by code for booking/tracking. See virtualCarriers.
   providerOnly?: boolean;
+  /**
+   * Whether the adapter can express a dangerous goods declaration in its carrier payload at
+   * all. This is about the API surface, not about approval: an adapter may be capable while
+   * a given integration account is still unapproved by the carrier. Approval is a per-account
+   * setting checked when the rate fan-out picks accounts.
+   */
+  dangerousGoods?: { supported: boolean; regulations: DgRegulationValue[] };
 }
 
 export interface CarrierAdapter {
@@ -395,6 +576,64 @@ export interface CarrierAdapter {
   supportsPickup?: boolean;
   requestPickup?(request: PickupRequest): Promise<PickupResponse>;
   cancelPickup?(confirmationNumber: string, request?: Partial<PickupRequest>): Promise<boolean>;
+}
+
+/**
+ * Build a display location from a FedEx `scanLocation` (Track API `AddressVO1`).
+ *
+ * The previous version emitted `` `${city}, ${stateOrProvinceCode}` `` unconditionally, so every
+ * scan outside the US/CA — where FedEx sends no state code — rendered as "DUBAI, undefined".
+ * FedEx also fills only `countryCode`/`countryName` for some international facilities, so fall
+ * back through the fields it actually populates.
+ */
+export function formatFedexScanLocation(location: any): string | undefined {
+  if (!location) return undefined;
+  const parts = [
+    location.city,
+    location.stateOrProvinceCode,
+    // Only add a country when there is no state — "SEATTLE, WA, US" is noise, "DUBAI, AE" is not.
+    location.stateOrProvinceCode ? undefined : (location.countryName || location.countryCode),
+  ].filter((part: unknown): part is string => typeof part === "string" && part.trim().length > 0);
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+/**
+ * FedEx Track API v1 `ScanEvent` -> TrackingEvent.
+ *
+ * `date` is ISO 8601 carrying the offset of the scan LOCATION, e.g. "2018-02-02T12:01:00-07:00"
+ * (per the published schema example). `new Date()` keeps the instant but discards the offset, and
+ * the hub then renders the scan in the viewer's timezone — a different clock time than the one on
+ * fedex.com. Keep the raw string so the carrier's own local time can be shown verbatim.
+ */
+export function parseFedexScanEvent(event: any): TrackingEvent {
+  const rawDate = typeof event?.date === "string" ? event.date : undefined;
+  const timestamp = rawDate ? new Date(rawDate) : new Date();
+  return {
+    timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
+    status: event?.eventType || event?.derivedStatusCode || "",
+    // eventDescription is FedEx's own wording ("Picked up", "At local FedEx facility").
+    // derivedStatus is the rolled-up milestone; use it only when the scan text is missing.
+    description: event?.eventDescription || event?.derivedStatus || "",
+    location: formatFedexScanLocation(event?.scanLocation),
+    localTime: rawDate,
+    utcOffset: extractUtcOffset(rawDate),
+    exceptionCode: event?.exceptionCode || undefined,
+    exceptionDescription: event?.exceptionDescription || undefined,
+    raw: event,
+  };
+}
+
+/**
+ * Pull the trailing offset out of an ISO 8601 string: "-07:00", "+03:00", or "Z" -> "+00:00".
+ * Returns undefined for a bare local timestamp ("2020-06-10T13:06:00"), which is exactly what
+ * DHL sends unless GMT offsets are requested.
+ */
+export function extractUtcOffset(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const match = /(?:Z|([+-])(\d{2}):?(\d{2}))$/.exec(value.trim());
+  if (!match) return undefined;
+  if (!match[1]) return "+00:00";
+  return `${match[1]}${match[2]}:${match[3]}`;
 }
 
 const MAX_RETRIES = 3;
@@ -687,6 +926,13 @@ export function validateFedExEnvOnStartup(): void {
 }
 
 export class FedExAdapter implements CarrierAdapter {
+  // FedEx expresses DG per package via packageSpecialServices.dangerousGoodsDetail, under
+  // either IATA (air) or ADR (European road) rules.
+  readonly capabilities: CarrierCapabilityProfile = {
+    type: "international",
+    dangerousGoods: { supported: true, regulations: ["IATA", "ADR"] },
+  };
+
   name = "FedEx";
   carrierCode = "FEDEX";
   
@@ -756,14 +1002,14 @@ export class FedExAdapter implements CarrierAdapter {
   ): Promise<void> {
     try {
       const maskedRequest = maskSensitiveData(requestBody);
-      let maskedResponse: any;
-      if (isProduction()) {
-        maskedResponse = responseBody?.error
-          ? { error: responseBody.error }
-          : { logged: false, reason: "production" };
-      } else {
-        maskedResponse = maskSensitiveData(responseBody);
-      }
+      // A failure keeps the carrier's own message even in production. This used to look for
+      // `responseBody.error`, but FedEx returns `{errors: [...]}` — plural — so nothing ever
+      // matched and every production failure was logged as "not logged".
+      const maskedResponse = buildIntegrationLogResponse({
+        responseBody,
+        success,
+        mask: maskSensitiveData,
+      });
 
       await storage.createIntegrationLog({
         serviceName: "fedex",
@@ -930,7 +1176,7 @@ export class FedExAdapter implements CarrierAdapter {
       const fedexRequest = {
         addressesToValidate: [{
           address: {
-            streetLines: [request.address.streetLine1, request.address.streetLine2].filter(Boolean),
+            streetLines: buildFedexStreetLines(request.address.streetLine1, request.address.streetLine2),
             city: request.address.city,
             stateOrProvinceCode: request.address.stateOrProvince,
             postalCode: request.address.postalCode,
@@ -968,7 +1214,7 @@ export class FedExAdapter implements CarrierAdapter {
     return {
       valid: true,
       resolvedAddresses: [{
-        streetLines: [request.address.streetLine1, request.address.streetLine2].filter(Boolean) as string[],
+        streetLines: buildFedexStreetLines(request.address.streetLine1, request.address.streetLine2),
         city: request.address.city || "Unknown City",
         stateOrProvince: request.address.stateOrProvince || "XX",
         postalCode: request.address.postalCode || "",
@@ -1162,10 +1408,12 @@ export class FedExAdapter implements CarrierAdapter {
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
+    assertDangerousGoodsAccountApproved(request, "FEDEX");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
       }
+      rejectSyntheticDangerousGoodsRate(request, "FedEx");
       logInfo("FedEx not configured, using mock rates");
       return this.getMockRates(request);
     }
@@ -1178,24 +1426,24 @@ export class FedExAdapter implements CarrierAdapter {
     const shipDateStamp = formatFedExShipDateStamp(request.shipDate);
 
     try {
-      const shipperStreetLines = [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean) as string[];
+      const shipperStreetLines = buildFedexStreetLines(request.shipper.streetLine1, request.shipper.streetLine2);
       const sanitizedShipperState = sanitizeStateCode(request.shipper.countryCode, request.shipper.stateOrProvince);
       const shipperAddress: any = {
         streetLines: shipperStreetLines,
         city: request.shipper.city,
-        postalCode: request.shipper.postalCode,
+        postalCode: carrierPostalCode(request.shipper.countryCode, request.shipper.postalCode),
         countryCode: request.shipper.countryCode,
       };
       if (sanitizedShipperState) {
         shipperAddress.stateOrProvinceCode = sanitizedShipperState;
       }
 
-      const recipientStreetLines = [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean) as string[];
+      const recipientStreetLines = buildFedexStreetLines(request.recipient.streetLine1, request.recipient.streetLine2);
       const sanitizedRecipientState = sanitizeStateCode(request.recipient.countryCode, request.recipient.stateOrProvince);
       const recipientAddress: any = {
         streetLines: recipientStreetLines,
         city: request.recipient.city,
-        postalCode: request.recipient.postalCode,
+        postalCode: carrierPostalCode(request.recipient.countryCode, request.recipient.postalCode),
         countryCode: request.recipient.countryCode,
       };
       if (sanitizedRecipientState) {
@@ -1229,8 +1477,8 @@ export class FedExAdapter implements CarrierAdapter {
 
       try {
         const saResult = await this.checkServiceAvailability({
-          origin: { postalCode: request.shipper.postalCode || "", countryCode: request.shipper.countryCode },
-          destination: { postalCode: request.recipient.postalCode || "", countryCode: request.recipient.countryCode },
+          origin: { postalCode: carrierPostalCode(request.shipper.countryCode, request.shipper.postalCode), countryCode: request.shipper.countryCode },
+          destination: { postalCode: carrierPostalCode(request.recipient.countryCode, request.recipient.postalCode), countryCode: request.recipient.countryCode },
         });
         if (saResult.services.length > 0) {
           const uniqueTypes = [...new Set(saResult.services.map(s => s.serviceType))];
@@ -1293,7 +1541,7 @@ export class FedExAdapter implements CarrierAdapter {
             rateRequestType: ["LIST", "ACCOUNT"],
             shipper: { address: shipperAddress },
             recipient: { address: recipientAddress },
-            requestedPackageLineItems: request.packages.map(pkg => ({
+            requestedPackageLineItems: request.packages.map((pkg, index) => ({
               weight: {
                 value: pkg.weight,
                 units: pkg.weightUnit,
@@ -1305,6 +1553,7 @@ export class FedExAdapter implements CarrierAdapter {
                 units: pkg.dimensions.unit,
               } : undefined,
               groupPackageCount: 1,
+              ...buildDangerousGoodsPackageSpecialServices(request.dangerousGoods, index),
             })),
             packagingType: tryPkg,
             packageCount: request.packages.length,
@@ -1315,6 +1564,9 @@ export class FedExAdapter implements CarrierAdapter {
           }
           if (rateCustomsDetail) {
             requestedShipment.customsClearanceDetail = rateCustomsDetail;
+          }
+          if (request.dangerousGoods) {
+            requestedShipment.shipmentSpecialServices = { specialServiceTypes: ["DANGEROUS_GOODS"] };
           }
 
           const rateRequest = {
@@ -1380,6 +1632,7 @@ export class FedExAdapter implements CarrierAdapter {
       });
 
       if (this.isConfigured() && this.baseUrl?.includes("sandbox")) {
+        rejectSyntheticDangerousGoodsRate(request, "FedEx");
         logInfo("FedEx sandbox rate API failed for all combos, generating calculated rates from service availability data");
         return this.getSandboxCalculatedRates(request, serviceTypesToTry, packagingTypesToTry);
       }
@@ -1390,6 +1643,7 @@ export class FedExAdapter implements CarrierAdapter {
       if (!isMockAllowed()) {
         throw new CarrierError("RATE_FAILED", error.message);
       }
+      rejectSyntheticDangerousGoodsRate(request, "FedEx");
       return this.getMockRates(request);
     }
   }
@@ -1680,6 +1934,7 @@ export class FedExAdapter implements CarrierAdapter {
   }
 
   async createShipment(request: CreateShipmentRequest): Promise<CreateShipmentResponse> {
+    assertDangerousGoodsAccountApproved(request, "FEDEX");
     if (!this.isConfigured()) {
       if (!isMockAllowed()) {
         throw new CarrierError("NOT_CONFIGURED", "FedEx is not configured and mock mode is disabled in production");
@@ -1719,17 +1974,17 @@ export class FedExAdapter implements CarrierAdapter {
       const recipientStateCode = sanitizeStateCode(request.recipient.countryCode, request.recipient.stateOrProvince);
 
       const shipperAddr: any = {
-        streetLines: [request.shipper.streetLine1, request.shipper.streetLine2].filter(Boolean),
+        streetLines: buildFedexStreetLines(request.shipper.streetLine1, request.shipper.streetLine2),
         city: request.shipper.city,
-        postalCode: request.shipper.postalCode,
+        postalCode: carrierPostalCode(request.shipper.countryCode, request.shipper.postalCode),
         countryCode: request.shipper.countryCode,
       };
       if (shipperStateCode) shipperAddr.stateOrProvinceCode = shipperStateCode;
 
       const recipientAddr: any = {
-        streetLines: [request.recipient.streetLine1, request.recipient.streetLine2].filter(Boolean),
+        streetLines: buildFedexStreetLines(request.recipient.streetLine1, request.recipient.streetLine2),
         city: request.recipient.city,
-        postalCode: request.recipient.postalCode,
+        postalCode: carrierPostalCode(request.recipient.countryCode, request.recipient.postalCode),
         countryCode: request.recipient.countryCode,
       };
       if (recipientStateCode) recipientAddr.stateOrProvinceCode = recipientStateCode;
@@ -1764,15 +2019,30 @@ export class FedExAdapter implements CarrierAdapter {
         },
       };
 
+      // Shipment-level special services accumulate. This used to assign the whole
+      // `shipmentSpecialServices` object for ETD alone, so anything added afterwards either
+      // clobbered ETD or was silently dropped when no trade documents were present.
+      const shipmentSpecialServiceTypes: string[] = [];
+      const shipmentSpecialServices: any = {};
+
       if (request.tradeDocuments && request.tradeDocuments.length > 0) {
+        shipmentSpecialServiceTypes.push("ELECTRONIC_TRADE_DOCUMENTS");
+        shipmentSpecialServices.etdDetail = {
+          attachedDocuments: request.tradeDocuments.map((document) => ({
+            documentType: document.documentType,
+            documentId: document.uploadedDocumentId,
+          })),
+        };
+      }
+
+      if (request.dangerousGoods) {
+        shipmentSpecialServiceTypes.push("DANGEROUS_GOODS");
+      }
+
+      if (shipmentSpecialServiceTypes.length > 0) {
         requestedShipment.shipmentSpecialServices = {
-          specialServiceTypes: ["ELECTRONIC_TRADE_DOCUMENTS"],
-          etdDetail: {
-            attachedDocuments: request.tradeDocuments.map((document) => ({
-              documentType: document.documentType,
-              documentId: document.uploadedDocumentId,
-            })),
-          },
+          ...shipmentSpecialServices,
+          specialServiceTypes: shipmentSpecialServiceTypes,
         };
       }
 
@@ -1860,6 +2130,7 @@ export class FedExAdapter implements CarrierAdapter {
               height: pkg.dimensions.height,
               units: pkg.dimensions.unit,
             } : undefined,
+            ...buildDangerousGoodsPackageSpecialServices(request.dangerousGoods, index),
           })),
         },
       };
@@ -1898,8 +2169,8 @@ export class FedExAdapter implements CarrierAdapter {
             logInfo(`Ship failed with service=${attemptServiceType}, looking up correct service via availability API`);
             try {
               const saResult = await this.checkServiceAvailability({
-                origin: { postalCode: request.shipper.postalCode || "", countryCode: request.shipper.countryCode },
-                destination: { postalCode: request.recipient.postalCode || "", countryCode: request.recipient.countryCode },
+                origin: { postalCode: carrierPostalCode(request.shipper.countryCode, request.shipper.postalCode), countryCode: request.shipper.countryCode },
+                destination: { postalCode: carrierPostalCode(request.recipient.countryCode, request.recipient.postalCode), countryCode: request.recipient.countryCode },
               });
               for (const svc of saResult.services) {
                 if (svc.serviceType !== attemptServiceType) {
@@ -2044,21 +2315,16 @@ export class FedExAdapter implements CarrierAdapter {
 
       return {
         trackingNumber,
-        status: trackResult.latestStatusDetail.statusByLocale,
+        status: trackResult.latestStatusDetail?.statusByLocale
+          || trackResult.latestStatusDetail?.description
+          || "",
         estimatedDelivery: trackResult.estimatedDeliveryTimeWindow?.window?.begins
           ? new Date(trackResult.estimatedDeliveryTimeWindow.window.begins)
           : undefined,
         actualDelivery: trackResult.actualDeliveryDetail?.actualDeliveryDate
           ? new Date(trackResult.actualDeliveryDetail.actualDeliveryDate)
           : undefined,
-        events: (trackResult.scanEvents || []).map((event: any) => ({
-          timestamp: new Date(event.date),
-          status: event.eventType,
-          description: event.eventDescription,
-          location: event.scanLocation?.city 
-            ? `${event.scanLocation.city}, ${event.scanLocation.stateOrProvinceCode}`
-            : undefined,
-        })),
+        events: (trackResult.scanEvents || []).map((event: any) => parseFedexScanEvent(event)),
       };
     } catch (error) {
       logError("FedEx tracking error", error);
@@ -2153,10 +2419,13 @@ export class FedExAdapter implements CarrierAdapter {
     const s = request.shipper;
     const body = {
       pickupAddress: {
-        streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
+        streetLines: buildFedexStreetLines(s.streetLine1, s.streetLine2),
         city: s.city,
         ...(s.stateOrProvince ? { stateOrProvinceCode: s.stateOrProvince } : {}),
-        postalCode: s.postalCode || "",
+        // Omitted for countries that have no postal codes, and for placeholder values like
+        // "00000". FedEx rejects both, and the error it returns names the postal code while
+        // the real fault is that we asked for one at all.
+        postalCode: carrierPostalCode(s.countryCode, s.postalCode),
         countryCode: s.countryCode,
         residential: false,
       },
@@ -2241,13 +2510,13 @@ export class FedExAdapter implements CarrierAdapter {
           // accepts is rejected here.
           contact: { personName: s.name, phoneNumber: sanitizePickupPhone(s.phone), companyName: s.companyName || s.name },
           address: {
-            streetLines: [s.streetLine1, s.streetLine2].filter(Boolean),
+            streetLines: buildFedexStreetLines(s.streetLine1, s.streetLine2),
             city: s.city,
             // The spec marks stateOrProvinceCode required, but a live booking succeeds without it
             // (confirmation 3069, CN origin), so keep omitting it rather than inventing a value
             // for the many countries that have none.
             stateOrProvinceCode: s.stateOrProvince || undefined,
-            postalCode: s.postalCode || "",
+            postalCode: carrierPostalCode(s.countryCode, s.postalCode),
             countryCode: s.countryCode,
           },
         },

@@ -1,12 +1,17 @@
 name: CI
 
-# Runs on every pull request into main, and on main itself so the branch's own
-# status is always known. Branch protection should require the `verify` job.
+# Runs on every pull request into main or mobile, and on those branches themselves so each
+# branch's own status is always known. Branch protection should require the `verify` job.
+#
+# `mobile` is the long-lived integration branch for the React Native app (see
+# docs/branching-and-deployment.md). It is covered here so that work merging into it gets the
+# same server-side guarantees as main — and so the weekly main → mobile merge is verified
+# rather than assumed.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, mobile]
   push:
-    branches: [main]
+    branches: [main, mobile]
 
 concurrency:
   # A new push to the same branch supersedes the previous run.

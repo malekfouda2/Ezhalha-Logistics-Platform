@@ -1,4 +1,5 @@
 import { storage } from "../storage";
+import { normalizePricingAccountType } from "@shared/pricing-account-types";
 import { resolveLocalRate } from "./local-pricing";
 import { calculateDdpPrice } from "./ddp-pricing";
 import { calculateShipmentAccounting } from "./shipment-accounting";
@@ -9,6 +10,11 @@ export type QuotationType = "express" | "local" | "ddp";
 export interface QuotationPricingInput {
   type: QuotationType;
   clientProfile: string | null;
+  /**
+   * The client's account type. A pricing profile charges companies and individuals different
+   * rates, so a quotation priced without this would quote the company rate to an individual.
+   */
+  clientAccountType?: string | null;
   // Route + weight (all types)
   originCountryCode: string;
   destinationCountryCode: string;
@@ -83,6 +89,7 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
   const destination = input.destinationCountryCode.toUpperCase();
   const pieces = input.pieces && input.pieces > 0 ? input.pieces : 1;
   const pricingRule = input.clientProfile ? await storage.getPricingRuleByProfile(input.clientProfile) : undefined;
+  const accountType = normalizePricingAccountType(input.clientAccountType);
 
   let baseRate = 0;
   let autoMargin = 0;
@@ -101,7 +108,7 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
     const liveFallbackMarginPercent =
       input.baseRateSar != null && input.baseRateSar > 0
         ? pricingRule
-          ? await storage.getMarginForAmount(pricingRule.id, input.baseRateSar)
+          ? await storage.getMarginForAmount(pricingRule.id, input.baseRateSar, accountType)
           : 20
         : null;
     const local = await resolveLocalRate({
@@ -136,7 +143,7 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
     const totalCbm = input.totalCbm ?? ((input.length || 0) * (input.width || 0) * (input.height || 0)) / 1_000_000 * pieces;
     const base = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
     const markupPercentage = pricingRule
-      ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity)
+      ? await storage.getDdpMarginForQuantity(pricingRule.id, base.billingUnit, base.billableQuantity, accountType)
       : 0;
     const quote = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
     baseRate = quote.baseRateSar;
@@ -152,7 +159,7 @@ export async function computeQuotationPricing(input: QuotationPricingInput): Pro
       throw new Error("A carrier base rate is required for an express quotation.");
     }
     baseRate = round2(input.baseRateSar!);
-    const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, baseRate) : 20;
+    const marginPct = pricingRule ? await storage.getMarginForAmount(pricingRule.id, baseRate, accountType) : 20;
     autoMargin = round2(baseRate * (marginPct / 100));
   }
 

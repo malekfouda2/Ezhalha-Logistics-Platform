@@ -2,8 +2,27 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { storage } from "../storage";
 import type { IntegrationAccount } from "@shared/schema";
+import {
+  carrierContactsSettingKey,
+  legacyCarrierContactKeys,
+  parseCarrierContactChannels,
+  serializeCarrierContactChannels,
+  validateCarrierContactChannels,
+} from "@shared/carrier-contact-channels";
 
 export type IntegrationCategory = "shipping" | "payment" | "ai" | "accounting" | "notifications" | "storage";
+
+/**
+ * A settings/credential value the admin can fix by editing the form. Thrown instead of a bare
+ * Error so the route can answer 400 with the message, rather than letting it fall through to the
+ * generic 500 — which told the admin only "Failed to update integration account".
+ */
+export class IntegrationFieldValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IntegrationFieldValidationError";
+  }
+}
 
 export interface IntegrationCredentialField {
   key: string;
@@ -12,6 +31,12 @@ export interface IntegrationCredentialField {
   secret?: boolean;
   placeholder?: string;
   helpText?: string;
+  /**
+   * How the admin UI renders this field. Absent means a plain text input (and a boolean toggle
+   * when `placeholder` is "true"/"false", which predates this flag). "carrier-contacts" renders
+   * the labelled phone/WhatsApp/email repeater and stores a JSON array.
+   */
+  kind?: "carrier-contacts";
 }
 
 export interface IntegrationAppDefinition {
@@ -21,6 +46,13 @@ export interface IntegrationAppDefinition {
   description: string;
   credentialFields: IntegrationCredentialField[];
   settingsFields?: IntegrationCredentialField[];
+  /**
+   * Setting keys that are accepted and preserved on save but never offered for editing —
+   * fields a newer field replaced. The admin form posts back every setting it loaded, so a
+   * retired key that is not allow-listed here makes saving an existing account fail outright
+   * with "Unsupported integration field".
+   */
+  legacySettingsKeys?: string[];
   capabilities: string[];
   docsSummary: string;
 }
@@ -66,11 +98,26 @@ const ALLOWED_PROVIDER_HOSTS: Record<string, Set<string>> = {
 
 // Contact-channel settings for a carrier, keyed by the carrier's env prefix (FEDEX / DHL / ARAMEX
 // …). Surfaced in the operations hub so ops can call / email / WhatsApp the carrier directly.
+//
+// One field holds a JSON list of labelled channels, because a carrier is rarely one number: a
+// general service line, a branch account manager, a claims mailbox. The three single-value keys
+// this replaced are still read (see withLegacyCarrierContacts) so accounts configured before the
+// change keep working; they are no longer offered for editing.
+/** The single-value keys `carrierContactFields` replaced. Accepted on save, never rendered. */
+function legacyCarrierContactSettingKeys(prefix: string): string[] {
+  return Object.values(legacyCarrierContactKeys(prefix));
+}
+
 function carrierContactFields(prefix: string): IntegrationCredentialField[] {
   return [
-    { key: `${prefix}_SUPPORT_PHONE`, label: "Support Phone", placeholder: "+9668001000530", helpText: "Carrier customer-service number. Shown as a 'Call carrier' action in the Operations Hub." },
-    { key: `${prefix}_SUPPORT_EMAIL`, label: "Support Email", placeholder: "support@carrier.com", helpText: "Carrier support email for the Operations Hub contact actions." },
-    { key: `${prefix}_SUPPORT_WHATSAPP`, label: "Support WhatsApp", placeholder: "+9665XXXXXXXX", helpText: "Carrier WhatsApp number (international format). Optional." },
+    {
+      key: carrierContactsSettingKey(prefix),
+      label: "Support Contacts",
+      kind: "carrier-contacts",
+      helpText:
+        "Phone, WhatsApp and email channels for this carrier. Each one is labelled so operators "
+        + "know who they are reaching from the Operations Hub.",
+    },
   ];
 }
 
@@ -97,8 +144,10 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "FEDEX_REQUIRE_HS", label: "Require HS Codes For International Shipments", placeholder: "false" },
       { key: "FEDEX_STRICT_ADDRESS", label: "Strict Address Validation", placeholder: "false" },
       { key: "FEDEX_TRACK_BASE_URL", label: "Track API Base URL", placeholder: "https://apis.fedex.com", helpText: "Base URL for the Basic Integrated Visibility (Track) project. Production: https://apis.fedex.com" },
+      { key: "FEDEX_DG_ENABLED", label: "Dangerous Goods Approved", placeholder: "false", helpText: "Turn on only once FedEx has approved this account for dangerous goods. FedEx rejects DG rate and shipment calls on an unapproved account, so leaving this off keeps DG quotes away from it entirely." },
       ...carrierContactFields("FEDEX"),
     ],
+    legacySettingsKeys: legacyCarrierContactSettingKeys("FEDEX"),
   },
   {
     key: "dhl",
@@ -115,8 +164,11 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "DHL_BASE_URL", label: "Base URL", placeholder: "https://express.api.dhl.com/mydhlapi/test" },
     ],
     settingsFields: [
+      { key: "DHL_DG_ENABLED", label: "Dangerous Goods Approved", placeholder: "false", helpText: "Turn on only once DHL has approved this account for dangerous goods. An unapproved DG shipment is not rejected by the API — it is stopped later at the DHL facility, after the client has paid." },
+      { key: "DHL_DG_CONTENT_IDS", label: "Dangerous Goods Content IDs", placeholder: "{\"FULLY_REGULATED\":\"HE1\"}", helpText: "JSON map of content kind to the content id DHL approved for THIS account, e.g. {\"FULLY_REGULATED\":\"HE1\"}. DHL validates against the contract rather than the published table, and fully regulated goods have no published id at all." },
       ...carrierContactFields("DHL"),
     ],
+    legacySettingsKeys: legacyCarrierContactSettingKeys("DHL"),
   },
   {
     key: "aramex",
@@ -139,6 +191,7 @@ export const INTEGRATION_APP_DEFINITIONS: IntegrationAppDefinition[] = [
       { key: "ARAMEX_MOCK_MODE", label: "Allow Mock Responses", placeholder: "false" },
       ...carrierContactFields("ARAMEX"),
     ],
+    legacySettingsKeys: legacyCarrierContactSettingKeys("ARAMEX"),
   },
   {
     key: "smsa",
@@ -403,7 +456,10 @@ function getCredentialFieldKeys(definition: IntegrationAppDefinition) {
 }
 
 function getSettingsFieldKeys(definition: IntegrationAppDefinition) {
-  return new Set((definition.settingsFields || []).map((field) => field.key));
+  return new Set([
+    ...(definition.settingsFields || []).map((field) => field.key),
+    ...(definition.legacySettingsKeys || []),
+  ]);
 }
 
 function getAllowedFieldKeys(definition: IntegrationAppDefinition) {
@@ -455,7 +511,29 @@ export function sanitizeIntegrationSettings(
   definition: IntegrationAppDefinition,
   values: Record<string, string>,
 ) {
-  return sanitizeIntegrationValues(definition, values, getSettingsFieldKeys(definition));
+  const sanitized = sanitizeIntegrationValues(definition, values, getSettingsFieldKeys(definition));
+
+  // Re-serialize every carrier-contacts field from its parsed form. That normalises whitespace,
+  // drops junk entries, and — the point — guarantees the stored blob is something the Operations
+  // Hub can read. A malformed array saved here would surface as a carrier with no contacts at
+  // all, with nothing to explain why.
+  for (const field of definition.settingsFields || []) {
+    if (field.kind !== "carrier-contacts") continue;
+    const raw = sanitized[field.key];
+    if (raw === undefined) continue;
+    if (!raw.trim()) {
+      sanitized[field.key] = "";
+      continue;
+    }
+    const channels = parseCarrierContactChannels(raw);
+    const errors = validateCarrierContactChannels(channels);
+    if (errors.length > 0) {
+      throw new IntegrationFieldValidationError(`${field.label}: ${errors[0].message}`);
+    }
+    sanitized[field.key] = channels.length > 0 ? serializeCarrierContactChannels(channels) : "";
+  }
+
+  return sanitized;
 }
 
 export function encryptIntegrationPayload(payload: Record<string, string>) {

@@ -26,6 +26,10 @@ export const OperationShipmentKind = {
   DDP: "DDP",
   EXPRESS: "EXPRESS",
   LOCAL: "LOCAL",
+  // Dangerous goods arranged by hand: operations quotes it with the carrier by email before
+  // the client ever sees a price. Its own kind because nothing about its queue, its task
+  // list, or its payment behaviour matches an express shipment.
+  DANGEROUS_GOODS: "DANGEROUS_GOODS",
 } as const;
 
 export type OperationShipmentKindValue =
@@ -170,6 +174,29 @@ export type CarrierPayoutBatchStatusValue =
   typeof CarrierPayoutBatchStatus[keyof typeof CarrierPayoutBatchStatus];
 
 // Shipment status
+// Carrier statuses that mean the goods have physically left the shipper. Cancelling before this
+// point is a clean reversal; after it, the money question needs a human.
+//
+// Lives here rather than in the server so the web and mobile clients can warn with the same rule
+// the server will actually apply — a confirmation dialog that promises an automatic refund the
+// server then routes to manual approval is worse than no dialog at all.
+export const COLLECTED_OR_MOVING_CARRIER_STATUSES: ReadonlySet<string> = new Set([
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+]);
+
+/**
+ * Whether a shipment is still merely booked — the carrier has a waybill but has not collected.
+ * Cancelling in this state refunds the client automatically; after collection the cancellation
+ * raises a refund request for approval instead.
+ */
+export function isCarrierStatusStillBooked(carrierStatus?: string | null): boolean {
+  const normalized = (carrierStatus || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return !COLLECTED_OR_MOVING_CARRIER_STATUSES.has(normalized);
+}
+
 export const ShipmentStatus = {
   PROCESSING: "processing",
   IN_TRANSIT: "in_transit",

@@ -32,10 +32,13 @@ import AdminIntegrationLogs from "@/pages/admin/integration-logs";
 import AdminApps from "@/pages/admin/apps";
 import AdminWebhookEvents from "@/pages/admin/webhook-events";
 import AdminEditClient from "@/pages/admin/edit-client";
+import AdminClientProfile from "@/pages/admin/client-profile";
 import AdminPolicies from "@/pages/admin/policies";
 import AdminCreditInvoices from "@/pages/admin/credit-invoices";
 import AdminCreditRequests from "@/pages/admin/credit-requests";
 import AdminSalesFeatureRequests from "@/pages/admin/sales-feature-requests";
+import AdminDangerousGoodsRequests from "@/pages/admin/dangerous-goods-requests";
+import AdminIntegrationHealth from "@/pages/admin/integration-health";
 import AdminEmailTemplates from "@/pages/admin/email-templates";
 import AdminSystemLogs from "@/pages/admin/system-logs";
 import AdminSettings from "@/pages/admin/settings";
@@ -196,6 +199,14 @@ function Router() {
           requiredAdminPermissionsAllOf={ADMIN_ROUTE_PERMISSIONS.editClient.allOf}
         />
       </Route>
+      {/* Declared after :id/edit so the more specific path wins. */}
+      <Route path="/admin/clients/:id">
+        <ProtectedRoute
+          component={AdminClientProfile}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.clientProfile.anyOf}
+        />
+      </Route>
       <Route path="/admin/applications">
         <ProtectedRoute
           component={AdminApplications}
@@ -333,6 +344,20 @@ function Router() {
           component={AdminSalesFeatureRequests}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.salesFeatureRequests.anyOf}
+        />
+      </Route>
+      <Route path="/admin/integration-health">
+        <ProtectedRoute
+          component={AdminIntegrationHealth}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.integrationHealth.anyOf}
+        />
+      </Route>
+      <Route path="/admin/dangerous-goods-requests">
+        <ProtectedRoute
+          component={AdminDangerousGoodsRequests}
+          requiredUserType="admin"
+          requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.dangerousGoodsRequests.anyOf}
         />
       </Route>
       <Route path="/admin/email-templates">

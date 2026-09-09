@@ -16,7 +16,17 @@ import {
 // server's rotation-reuse detection would see nine replays of an already-rotated token
 // and revoke the whole family, logging the user out.
 
+/**
+ * Where the API lives. Resolved in order:
+ *
+ *  1. `EXPO_PUBLIC_API_BASE_URL` from `.env` — per-developer override, inlined at build time.
+ *  2. `expo.extra.apiBaseUrl` in app.json — the shared default committed to the repo.
+ *  3. localhost, for running the API on your own machine.
+ *
+ * The env var comes first so pointing at a local server never means editing a tracked file.
+ */
 export const API_BASE_URL: string =
+  process.env.EXPO_PUBLIC_API_BASE_URL ??
   (Constants.expoConfig?.extra as { apiBaseUrl?: string } | undefined)?.apiBaseUrl ??
   "http://localhost:5000";
 

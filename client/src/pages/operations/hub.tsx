@@ -15,6 +15,7 @@ import {
   Package,
   RefreshCw,
   Search,
+  Undo2,
   Send,
   ShieldCheck,
   Sparkles,
@@ -31,8 +32,10 @@ import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient, readJsonResponse } from "@/lib/queryClient";
 import { PhoneInput } from "@/components/phone-input";
 import { getCarrierContact } from "@/lib/carrier-contacts";
+import { carrierBrandName } from "@shared/carriers";
+import type { CarrierContactChannel, CarrierContactType } from "@shared/carrier-contact-channels";
 
-type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered";
+type ViewKey = "d2d" | "express" | "local" | "attention" | "special" | "delivered" | "returned" | "dangerous_goods";
 type NoteVisibility = "INTERNAL" | "CLIENT";
 type CommunicationChannel = "whatsapp" | "sms" | "email";
 type OpsSelectOption = {
@@ -47,6 +50,8 @@ interface OperationSummary {
   attentionCount: number;
   specialHandlingCount: number;
   deliveredCount: number;
+  returnedCount: number;
+  dangerousGoodsCount: number;
   operationsUserCount: number;
 }
 
@@ -90,7 +95,23 @@ interface AttentionFlag {
   issueType: string;
   severity: string;
   details?: string | null;
+  /** JSON written by reportCarrierFailure — the decoded carrier error. */
+  metadata?: string | null;
   detectedAt: string;
+}
+
+interface CarrierFailureMetadata {
+  operation?: string;
+  code?: string | null;
+  category?: string;
+  retry?: string;
+  retryLabel?: string;
+  recognised?: boolean;
+  cause?: string;
+  action?: string;
+  carrierMessage?: string;
+  pickupDate?: string;
+  [key: string]: unknown;
 }
 
 interface SpecialHandling {
@@ -117,7 +138,7 @@ interface OperationShipmentSummary {
   id: string;
   trackingNumber: string;
   clientName: string;
-  shipmentKind: "DDP" | "EXPRESS" | "LOCAL";
+  shipmentKind: "DDP" | "EXPRESS" | "LOCAL" | "DANGEROUS_GOODS";
   ddpCurrentStage?: number | null;
   status: string;
   carrierStatus?: string | null;
@@ -135,6 +156,8 @@ interface OperationShipmentSummary {
   attentionFlags?: AttentionFlag[];
   attentionCount: number;
   carrierStatusRepeatCount?: number;
+  hasDangerousGoods?: boolean;
+  dangerousGoodsStatus?: string | null;
   duplicateStatus?: boolean;
   statusChangedAt?: string | null;
   sender: OperationParty;
@@ -144,6 +167,63 @@ interface OperationShipmentSummary {
   actualDelivery?: string | null;
   updatedAt: string;
   createdAt: string;
+}
+
+interface DangerousGoodsMissingField {
+  field: string;
+  label: string;
+  reason: string;
+}
+
+// A declaration as it actually arrives: a content kind and whatever the safety data sheet
+// gave up. Operations completes the rest here, so every field the client no longer fills in
+// is optional on the way in and required before the carrier handover.
+interface DangerousGoodsCommodity {
+  unNumber?: string;
+  properShippingName?: string;
+  technicalName?: string;
+  hazardClass?: string;
+  subsidiaryRisks?: string[];
+  packingGroup?: string;
+  packingInstruction?: string;
+  quantity?: { amount?: number; units?: string; quantityType?: string };
+  cargoAircraftOnly?: boolean;
+}
+
+interface DangerousGoodsDeclarationData {
+  regulation: string;
+  contentKind: string;
+  accessibility?: string;
+  offeror?: string;
+  emergencyContact?: { name?: string; phone?: string; contractNumber?: string };
+  signatory?: { name?: string; title?: string; place?: string };
+  packages: Array<{
+    packageIndex: number;
+    containerType?: string;
+    numberOfContainers?: number;
+    packingOption?: string;
+    commodities: DangerousGoodsCommodity[];
+  }>;
+  dryIceWeightKg?: number;
+  termsAcceptedAt?: string;
+}
+
+interface DangerousGoodsDetailData {
+  declaration: DangerousGoodsDeclarationData | null;
+  declarationSummary: string;
+  documents: Array<{ fileName: string; objectPath: string; documentType: string }>;
+  regulation: string | null;
+  missingFields: DangerousGoodsMissingField[];
+  carrierHandoverText: string;
+  preferredPickupDate: string | null;
+  handoverAt: string | null;
+  quotedAt: string | null;
+  quoteExpiresAt: string | null;
+  quoteNote: string | null;
+  carrierCostSar: string | null;
+  declinedAt: string | null;
+  declineReason: string | null;
+  awaitingBooking: boolean;
 }
 
 interface ShipmentTrackingNumber {
@@ -199,7 +279,24 @@ interface ShipmentDetails {
   shipDate?: string | null;
 }
 
+interface CarrierTrackingEvent {
+  id: string;
+  carrierCode: string;
+  eventCode: string | null;
+  description: string;
+  occurredAt: string;
+  carrierLocalTime: string | null;
+  carrierUtcOffset: string | null;
+  location: string | null;
+  exceptionCode: string | null;
+  exceptionDescription: string | null;
+  signedBy: string | null;
+  remarks: string | null;
+}
+
 interface OperationShipmentDetail extends OperationShipmentSummary {
+  dangerousGoods?: DangerousGoodsDetailData | null;
+  carrierTrackingEvents: CarrierTrackingEvent[];
   operationTasks: OperationTask[];
   operationEvents: OperationEvent[];
   operationNotes: OperationNote[];
@@ -223,7 +320,12 @@ interface OperationShipmentDetail extends OperationShipmentSummary {
     totalAdjustmentsAmountSar: string;
   };
   financialBreakdown?: Record<string, string | null>;
-  carrierContact?: { phone: string | null; email: string | null; whatsapp: string | null } | null;
+  carrierContact?: {
+    channels: CarrierContactChannel[];
+    phone: string | null;
+    email: string | null;
+    whatsapp: string | null;
+  } | null;
   pickup?: {
     requested: boolean;
     status: string | null;
@@ -327,6 +429,22 @@ const views: Record<ViewKey, {
     countKey: "deliveredCount",
     icon: CheckCircle2,
   },
+  returned: {
+    title: "Operations - Returned Shipments",
+    sub: "Shipments the carrier is sending back to the shipper - close the loop with the client and settle the charges",
+    short: "Returned",
+    queue: "returned",
+    countKey: "returnedCount",
+    icon: Undo2,
+  },
+  dangerous_goods: {
+    title: "Operations - Dangerous Goods",
+    sub: "Declarations submitted with no price - review them, agree carriage by email, quote the client, then book once they have paid",
+    short: "Dangerous goods",
+    queue: "dangerous_goods",
+    countKey: "dangerousGoodsCount",
+    icon: AlertTriangle,
+  },
 };
 
 const d2dStages = ["Planning", "Warehouse", "Billing", "Shipping", "Delivery"] as const;
@@ -346,6 +464,55 @@ const expressTabs = [
   { key: "customs", label: "Customs" },
   { key: "lastmile", label: "Last Mile" },
 ] as const;
+
+// The dangerous goods queue is worked stage by stage, like D2D — an operator filters to
+// "Awaiting booking" because those are the ones a client has already paid for and is waiting
+// on. Keys match the stage numbers in DG_STAGES so the list and the panel agree.
+const dangerousGoodsTabs = [
+  { key: "all", label: "All" },
+  { key: "review", label: "In Review" },
+  { key: "carrier", label: "With Carrier" },
+  { key: "quoted", label: "Awaiting Payment" },
+  { key: "booking", label: "To Book" },
+  { key: "live", label: "Booked & Moving" },
+  { key: "hold", label: "Declaration Hold" },
+] as const;
+
+type DangerousGoodsTabKey = (typeof dangerousGoodsTabs)[number]["key"];
+
+/** Amber while it is on us, purple while it is on the client, green once it is moving. */
+const dangerousGoodsTabBadgeClass: Record<Exclude<DangerousGoodsTabKey, "all">, string> = {
+  review: "b-amber",
+  carrier: "b-amber",
+  quoted: "b-purple",
+  booking: "b-red",
+  live: "b-green",
+  hold: "b-gray",
+};
+
+type OperationSortKey = "queue" | "newest" | "updated" | "stale" | "amount_desc" | "amount_asc";
+
+/**
+ * Every queue can be sorted, and by the same things — the ordering is applied server-side
+ * before the 200-row cap, so "Longest untouched" means the stalest shipments on the platform
+ * and not merely the stalest of the most recent page.
+ *
+ * `queue` is the default and preserves the behaviour operators already have: the most recent
+ * work, presented oldest-first so it is worked FIFO.
+ */
+const sortOptions: Array<{ key: OperationSortKey; label: string }> = [
+  { key: "queue", label: "Queue order (oldest first)" },
+  { key: "newest", label: "Newest first" },
+  { key: "updated", label: "Recently updated" },
+  { key: "stale", label: "Longest untouched" },
+  { key: "amount_desc", label: "Highest amount" },
+  { key: "amount_asc", label: "Lowest amount" },
+];
+
+const sortLabels: Record<OperationSortKey, string> = sortOptions.reduce(
+  (map, option) => ({ ...map, [option.key]: option.label }),
+  {} as Record<OperationSortKey, string>,
+);
 
 const statusOptions = [
   "awaiting_review",
@@ -371,6 +538,14 @@ const issueLabels: Record<string, string> = {
   qc_exception: "QC issue",
   stage_delay: "Stage delay",
   repeat_update: "Repeated status",
+  tracking_refresh_failed: "Tracking failed",
+  carrier_pickup_failed: "Pickup failed",
+  carrier_booking_failed: "Booking failed",
+  carrier_tracking_failed: "Tracking failed",
+  carrier_label_failed: "Label failed",
+  carrier_cancellation_failed: "Cancellation failed",
+  carrier_rating_failed: "Rate lookup failed",
+  dangerous_goods_review_required: "Dangerous goods review",
 };
 
 const specialHandlingReasons = [
@@ -457,7 +632,14 @@ const operationsCss = `
 .lp-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--g400)}
 .lp-search input{width:100%;height:36px;border:1px solid var(--g200);border-radius:var(--r);padding:0 12px 0 34px;background:var(--g50);font-size:12px;color:var(--g900);outline:none}
 .lp-search input:focus,.field-input:focus,.field-select:focus,.field-textarea:focus,.note-input:focus,.filter-select:focus{border-color:var(--pr);box-shadow:0 0 0 2px var(--pr-lt)}
-.chip-row{display:flex;gap:6px;padding:7px 11px;border-bottom:1px solid var(--g200);overflow-x:auto}
+/* Sorting sits with the search box rather than in the filter bar: it applies to every queue,
+   while the filters below it differ from one queue to the next. */
+.lp-sort{display:flex;align-items:center;gap:6px;margin-top:8px}
+.lp-sort-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--g400);flex-shrink:0}
+.lp-sort > *:last-child{flex:1;min-width:0}
+/* Wraps rather than scrolling: the dangerous goods queue has six stage chips, and a
+   horizontally-scrolled row hides the later stages — which are the ones a client is waiting on. */
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;padding:7px 11px;border-bottom:1px solid var(--g200)}
 .chip-row::-webkit-scrollbar,.tab-bar::-webkit-scrollbar{height:0}
 .chip{padding:3px 8px;border-radius:9999px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid var(--g200);color:var(--g500);background:var(--wh);transition:.15s;line-height:1.2}
 .chip.active,.chip:hover{background:var(--pr-lt);color:var(--pr);border-color:var(--pr)}
@@ -542,6 +724,21 @@ const operationsCss = `
 .checkpoint-copy{flex:1;min-width:0}
 .checkpoint-summary{margin-top:8px;padding:8px 10px;border-radius:var(--r);background:var(--blue-lt);border:1px solid var(--blue-bd);font-size:11px;color:var(--blue);line-height:1.5}
 .checkpoint-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.dg-needs{list-style:none;margin:0;padding:0}
+.dg-needs li{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;padding:8px 0;border-bottom:1px solid var(--g100);font-size:11px;line-height:1.5}
+.dg-needs li:last-child{border-bottom:none}
+.dg-needs b{color:var(--g900)}
+.dg-handover{background:var(--g900);color:#e8eaed;border-radius:var(--r);padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.65;white-space:pre-wrap;overflow-x:auto;max-height:420px;overflow-y:auto}
+.dg-money{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--g100);font-size:12px}
+.dg-money:last-child{border-bottom:none}
+.dg-money .lbl{color:var(--g500);line-height:1.45;min-width:0}
+.dg-money .val{font-weight:700;color:var(--g900);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dg-money.total{border-top:1px solid var(--g200);border-bottom:none;margin-top:4px;padding-top:10px}
+.dg-money.total .val{color:var(--pr);font-size:14px}
+.field-input.missing,.field-select.missing{border-color:var(--amber);background:var(--amber-lt)}
+.dg-doc-link{display:inline-flex;align-items:center;gap:5px;color:var(--pr);font-weight:600;text-decoration:none}
+.dg-doc-link:hover{text-decoration:underline}
+.dg-doc-link svg{width:13px;height:13px;flex-shrink:0}
 .field-hint{font-size:11px;color:var(--g400);line-height:1.45}
 .upload-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .upload-chip{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--g200);border-radius:var(--r);background:var(--wh)}
@@ -712,21 +909,37 @@ const operationsCss = `
 .ops-ref .progress-step-dot svg{width:18px;height:18px}
 `;
 
+const CONTACT_TYPE_FALLBACK_LABELS: Record<CarrierContactType, string> = {
+  phone: "Call carrier",
+  whatsapp: "WhatsApp carrier",
+  email: "Email carrier",
+};
+
 function isViewKey(value: string | null): value is ViewKey {
-  return value === "d2d" || value === "express" || value === "local" || value === "attention" || value === "special" || value === "delivered";
+  return value === "d2d" || value === "express" || value === "local" || value === "attention" || value === "special" || value === "delivered" || value === "returned" || value === "dangerous_goods";
 }
 
-function listPath(queue: string) {
-  return `/api/operations/shipments?queue=${queue}&limit=200`;
+function listPath(queue: string, sort: OperationSortKey) {
+  return `/api/operations/shipments?queue=${queue}&limit=200&sort=${sort}`;
 }
 
 function getShipmentView(shipment: OperationShipmentSummary | OperationShipmentDetail): ViewKey {
   if (shipment.status?.toLowerCase() === "delivered") {
     return "delivered";
   }
+  // A return outranks special handling / attention for deep links: the returned queue is the
+  // one page that explains why the shipment stopped moving forward.
+  if (shipment.status?.toLowerCase() === "returned") {
+    return "returned";
+  }
   if (shipment.specialHandling && shipment.specialHandling.status?.toLowerCase() === "open") {
     return "special";
   }
+  // Dangerous goods outranks attention. Every DG shipment that is waiting on an operator
+  // carries an attention flag by design — that is how "the client paid, book it" reaches
+  // anyone — and the attention panel has no booking form on it, so routing there would put
+  // the flag and the only cure for it on two different pages.
+  if (shipment.shipmentKind === "DANGEROUS_GOODS") return "dangerous_goods";
   if (shipment.status === "carrier_error" || (shipment.attentionCount || 0) > 0) {
     return "attention";
   }
@@ -767,6 +980,7 @@ function quantity(value?: string | null) {
 
 function getMethod(shipment: OperationShipmentSummary) {
   if (shipment.shipmentKind === "DDP") return shipment.serviceType || "Door to Door";
+  if (shipment.shipmentKind === "DANGEROUS_GOODS") return shipment.serviceType || "Dangerous goods";
   const direction = shipment.sender.country === "SA" || shipment.sender.country?.toLowerCase().includes("saudi") ? "Express Export" : "Express Import";
   return shipment.serviceType || direction;
 }
@@ -788,6 +1002,28 @@ function getD2DStage(shipment: OperationShipmentSummary) {
   return 1;
 }
 
+/**
+ * Which dangerous goods tab a shipment belongs in, from the list summary alone.
+ *
+ * Mirrors `getDangerousGoodsStage`, which works off the full detail record. Both read the
+ * same three fields in the same order, so a shipment cannot sit under one tab and open on a
+ * different stage.
+ */
+function getDangerousGoodsTab(shipment: OperationShipmentSummary): Exclude<DangerousGoodsTabKey, "all"> {
+  // This queue carries two different things. The stage tabs describe the manual ops-quoted
+  // flow; the older carrier-quoted shipments held for a declaration review are EXPRESS by
+  // kind and never pass through any of those stages. They were landing under "To Book" — paid,
+  // no waybill — which reads as work that does not exist.
+  if (shipment.shipmentKind !== "DANGEROUS_GOODS") return "hold";
+  if (shipment.paymentStatus === "paid") {
+    return shipment.carrierTrackingNumber && shipment.status !== "dg_booking" ? "live" : "booking";
+  }
+  const status = shipment.status?.toLowerCase();
+  if (status === "payment_pending") return "quoted";
+  if (status === "dg_awaiting_carrier") return "carrier";
+  return "review";
+}
+
 function getExpressTab(shipment: OperationShipmentSummary): "received" | "transit" | "customs" | "lastmile" {
   const status = shipment.status?.toLowerCase();
   if (status === "customs_clearance" || status === "carrier_error") return "customs";
@@ -798,32 +1034,12 @@ function getExpressTab(shipment: OperationShipmentSummary): "received" | "transi
   return "received";
 }
 
-// Maps the real (carrier-synced) shipment status to the active step index (0-based) in the
-// 9-step express timeline. Pre-pickup statuses stay at step 0 so the timeline never marks
-// "Picked up" / "Received at facility" as done before the carrier actually moves the shipment.
-function getExpressStepIndex(status?: string | null): number {
-  switch ((status || "").toLowerCase()) {
-    case "delivered":
-      return 8;
-    case "out_for_delivery":
-      return 7;
-    case "customs_clearance":
-    case "carrier_error":
-      return 6;
-    case "in_transit":
-    case "on_hold":
-    case "returned":
-      return 4;
-    case "picked_up":
-      return 1;
-    default:
-      // created / booked / awaiting_review / processing / awaiting_payment — not yet picked up
-      return 0;
-  }
-}
-
 function isShipmentDelivered(shipment: Pick<OperationShipmentSummary, "status"> | Pick<OperationShipmentDetail, "status">) {
   return shipment.status?.toLowerCase() === "delivered";
+}
+
+function isShipmentReturned(shipment: Pick<OperationShipmentSummary, "status"> | Pick<OperationShipmentDetail, "status">) {
+  return shipment.status?.toLowerCase() === "returned";
 }
 
 function priorityClass(priority?: string | null) {
@@ -910,10 +1126,28 @@ function OperationsHubContent() {
     attention: requestedShipmentId || null,
     special: requestedShipmentId || null,
     delivered: requestedShipmentId || null,
+    returned: requestedShipmentId || null,
+    dangerous_goods: requestedShipmentId || null,
   });
   const [d2dTab, setD2dTab] = useState<number | "all">("all");
   const [expressTab, setExpressTab] = useState<(typeof expressTabs)[number]["key"]>("all");
   const [deliveredTab, setDeliveredTab] = useState<"all" | "d2d" | "express">("all");
+  const [returnedTab, setReturnedTab] = useState<"all" | "d2d" | "express" | "local">("all");
+  const [dangerousGoodsTab, setDangerousGoodsTab] = useState<DangerousGoodsTabKey>("all");
+  // Per view, not global: an operator who sorts Express by amount does not expect Needs
+  // Attention to be re-ordered underneath them when they switch tabs.
+  const [sortByView, setSortByView] = useState<Record<ViewKey, OperationSortKey>>({
+    d2d: "queue",
+    express: "queue",
+    local: "queue",
+    attention: "queue",
+    special: "queue",
+    delivered: "queue",
+    returned: "queue",
+    dangerous_goods: "queue",
+  });
+  const sort = sortByView[view];
+  const setSort = (value: OperationSortKey) => setSortByView((current) => ({ ...current, [view]: value }));
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [noteBody, setNoteBody] = useState("");
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>("INTERNAL");
@@ -960,7 +1194,7 @@ function OperationsHubContent() {
     }
   }, [initialView, view]);
 
-  const activeListPath = listPath(views[view].queue);
+  const activeListPath = listPath(views[view].queue, sort);
   const activeListPollMs = view === "express" || view === "attention" ? 60000 : 120000;
   const activeListQuery = useQuery<OperationShipmentSummary[]>({
     queryKey: [activeListPath],
@@ -976,6 +1210,8 @@ function OperationsHubContent() {
       attention: view === "attention" ? activeListQuery.data || [] : [],
       special: view === "special" ? activeListQuery.data || [] : [],
       delivered: view === "delivered" ? activeListQuery.data || [] : [],
+      returned: view === "returned" ? activeListQuery.data || [] : [],
+      dangerous_goods: view === "dangerous_goods" ? activeListQuery.data || [] : [],
     }),
     [activeListQuery.data, view],
   );
@@ -1042,9 +1278,22 @@ function OperationsHubContent() {
         if (deliveredTab === "d2d" && shipment.shipmentKind !== "DDP") return false;
         if (deliveredTab === "express" && shipment.shipmentKind !== "EXPRESS") return false;
       }
+      if (view === "dangerous_goods") {
+        if (dangerousGoodsTab !== "all" && getDangerousGoodsTab(shipment) !== dangerousGoodsTab) return false;
+        if (filters.carrier && (shipment.carrierName || "") !== filters.carrier) return false;
+        if (filters.payment && shipment.paymentStatus !== filters.payment) return false;
+        if (filters.origin && shipment.sender.country !== filters.origin) return false;
+      }
+      if (view === "returned") {
+        if (!isShipmentReturned(shipment)) return false;
+        if (returnedTab === "d2d" && shipment.shipmentKind !== "DDP") return false;
+        if (returnedTab === "express" && shipment.shipmentKind !== "EXPRESS") return false;
+        if (returnedTab === "local" && shipment.shipmentKind !== "LOCAL") return false;
+        if (filters.carrier && shipment.carrierName !== filters.carrier) return false;
+      }
       return true;
     });
-  }, [d2dTab, deliveredTab, expressTab, filters, lists, search, view]);
+  }, [d2dTab, dangerousGoodsTab, deliveredTab, expressTab, filters, lists, returnedTab, search, view]);
 
   useEffect(() => {
     const ids = new Set(viewShipments.map((shipment) => shipment.id));
@@ -1193,6 +1442,10 @@ function OperationsHubContent() {
       if (selectedId && nextStatus.toLowerCase() === "delivered") {
         setSelectedIds((current) => ({ ...current, delivered: selectedId }));
         navigateToView("delivered", selectedId);
+      }
+      if (selectedId && nextStatus.toLowerCase() === "returned") {
+        setSelectedIds((current) => ({ ...current, returned: selectedId }));
+        navigateToView("returned", selectedId);
       }
       notify("Shipment status updated", "Client notification was queued successfully.");
       invalidateOperations();
@@ -1602,6 +1855,12 @@ function OperationsHubContent() {
             setExpressTab={setExpressTab}
             deliveredTab={deliveredTab}
             setDeliveredTab={setDeliveredTab}
+            returnedTab={returnedTab}
+            setReturnedTab={setReturnedTab}
+            dangerousGoodsTab={dangerousGoodsTab}
+            setDangerousGoodsTab={setDangerousGoodsTab}
+            sort={sort}
+            setSort={setSort}
             filters={filters}
             setFilter={setFilter}
             shipments={lists[view]}
@@ -1633,7 +1892,7 @@ function OperationsHubContent() {
             <>
               <DetailHeader shipment={detail} onMessage={openMessageModal} onSpecial={() => setSpecialModal(true)} />
               <div className="dp-body">
-                {(view === "d2d" || (view === "delivered" && detail.shipmentKind === "DDP")) && (
+                {(view === "d2d" || ((view === "delivered" || view === "returned") && detail.shipmentKind === "DDP")) && (
                   <D2DDetail
                     shipment={detail}
                     actions={opsActions}
@@ -1667,7 +1926,14 @@ function OperationsHubContent() {
                     />}
                   />
                 )}
-                {(view === "express" || view === "local" || (view === "delivered" && (detail.shipmentKind === "EXPRESS" || detail.shipmentKind === "LOCAL"))) && (
+                {(view === "express"
+                  || view === "local"
+                  // The Dangerous Goods queue also carries the older carrier-quoted holds:
+                  // Express shipments paid for but not yet tendered, waiting for an operator
+                  // to sign the declaration. They keep their Express panel, which is where
+                  // DangerousGoodsReview is mounted.
+                  || (view === "dangerous_goods" && detail.shipmentKind !== "DANGEROUS_GOODS")
+                  || ((view === "delivered" || view === "returned") && (detail.shipmentKind === "EXPRESS" || detail.shipmentKind === "LOCAL"))) && (
                   <ExpressDetail
                     shipment={detail}
                     actions={opsActions}
@@ -1676,6 +1942,34 @@ function OperationsHubContent() {
                     onMessage={openMessageModal}
                     onSyncTracking={() => trackingSyncMutation.mutate()}
                     syncPending={trackingSyncMutation.isPending}
+                    teamCard={
+                      <TeamAssignedCard
+                        shipment={detail}
+                        users={activeAgents}
+                        selectedUserIds={assignedTeamIds}
+                        setSelectedUserIds={setAssignedTeamIds}
+                        onSave={() => reassignMutation.mutate()}
+                        pending={reassignMutation.isPending}
+                      />
+                    }
+                    noteCard={<NotesCard
+                      shipment={detail}
+                      users={mentionableTeam}
+                      body={noteBody}
+                      setBody={setNoteBody}
+                      visibility={noteVisibility}
+                      setVisibility={setNoteVisibility}
+                      mentionUserIds={mentionUserIds}
+                      setMentionUserIds={setMentionUserIds}
+                      onSubmit={() => noteMutation.mutate()}
+                      pending={noteMutation.isPending}
+                    />}
+                  />
+                )}
+                {(view === "dangerous_goods" || view === "delivered" || view === "returned") && detail.shipmentKind === "DANGEROUS_GOODS" && (
+                  <DangerousGoodsDetail
+                    shipment={detail}
+                    onMessage={openMessageModal}
                     teamCard={
                       <TeamAssignedCard
                         shipment={detail}
@@ -1854,6 +2148,12 @@ function ListHeader(props: {
   setExpressTab: (value: any) => void;
   deliveredTab: "all" | "d2d" | "express";
   setDeliveredTab: (value: "all" | "d2d" | "express") => void;
+  returnedTab: "all" | "d2d" | "express" | "local";
+  setReturnedTab: (value: "all" | "d2d" | "express" | "local") => void;
+  dangerousGoodsTab: DangerousGoodsTabKey;
+  setDangerousGoodsTab: (value: DangerousGoodsTabKey) => void;
+  sort: OperationSortKey;
+  setSort: (value: OperationSortKey) => void;
   filters: Record<string, string>;
   setFilter: (key: string, value: string) => void;
   shipments: OperationShipmentSummary[];
@@ -1863,16 +2163,40 @@ function ListHeader(props: {
   const origins = Array.from(new Set(props.shipments.map((shipment) => shipment.sender.country).filter(Boolean)));
   const carriers = Array.from(new Set(props.shipments.map((shipment) => shipment.carrierName).filter(Boolean))) as string[];
   const issues = Array.from(new Set(props.shipments.flatMap((shipment) => shipment.attentionFlags || []).map((flag) => flag.issueType)));
+  // Per-stage counts on the chips: which stage the backlog is sitting in is the first thing
+  // an operator wants from this queue, and it is invisible if you have to click each tab.
+  const dangerousGoodsTabCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (props.view !== "dangerous_goods") return counts;
+    for (const shipment of props.shipments) {
+      const key = getDangerousGoodsTab(shipment);
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [props.shipments, props.view]);
 
   return (
     <div className="lp-head">
       <div className="lp-title">
-        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "local" ? "Local Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : "Delivered Shipments"}{" "}
+        {props.view === "d2d" ? "D2D Shipments" : props.view === "express" ? "Express Shipments" : props.view === "local" ? "Local Shipments" : props.view === "attention" ? "Needs Attention" : props.view === "special" ? "Special Handling" : props.view === "returned" ? "Returned Shipments" : props.view === "dangerous_goods" ? "Dangerous Goods" : "Delivered Shipments"}{" "}
         <span className="view-count">({props.count})</span>
       </div>
       <div className="lp-search">
         <Search />
         <input value={props.search} onChange={(event) => props.setSearch(event.target.value)} placeholder="Search..." />
+      </div>
+
+      <div className="lp-sort">
+        <span className="lp-sort-label">Sort</span>
+        {/* `queue` is the empty option rather than a listed one: PillSelect always renders a
+            clear-to-placeholder entry, and listing the default as well would show it twice. */}
+        <PillSelect
+          value={props.sort === "queue" ? "" : props.sort}
+          onChange={(value) => props.setSort((value || "queue") as OperationSortKey)}
+          placeholder={sortLabels.queue}
+          options={sortOptions.filter((option) => option.key !== "queue").map((option) => option.key)}
+          labelFor={(value) => sortLabels[value as OperationSortKey] || value}
+        />
       </div>
 
       {props.view === "d2d" && (
@@ -1941,6 +2265,44 @@ function ListHeader(props: {
           <button className={`chip ${props.deliveredTab === "express" ? "active" : ""}`} onClick={() => props.setDeliveredTab("express")}>Express</button>
         </div>
       )}
+
+      {props.view === "dangerous_goods" && (
+        <>
+          <div className="chip-row">
+            {dangerousGoodsTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`chip ${props.dangerousGoodsTab === tab.key ? "active" : ""}`}
+                onClick={() => props.setDangerousGoodsTab(tab.key)}
+              >
+                {tab.label}
+                {tab.key !== "all" && dangerousGoodsTabCounts[tab.key] > 0 ? ` (${dangerousGoodsTabCounts[tab.key]})` : ""}
+              </button>
+            ))}
+          </div>
+          <div className="filter-bar">
+            <PillSelect value={props.filters.carrier || ""} onChange={(value) => props.setFilter("carrier", value)} placeholder="Carrier" options={carriers} />
+            <PillSelect value={props.filters.payment || ""} onChange={(value) => props.setFilter("payment", value)} placeholder="Payment" options={["paid", "unpaid"]} />
+            <PillSelect value={props.filters.origin || ""} onChange={(value) => props.setFilter("origin", value)} placeholder="Origin" options={origins} />
+            <button className="chip" onClick={() => ["carrier", "payment", "origin"].forEach((key) => props.setFilter(key, ""))}>Clear</button>
+          </div>
+        </>
+      )}
+
+      {props.view === "returned" && (
+        <>
+          <div className="chip-row">
+            <button className={`chip ${props.returnedTab === "all" ? "active" : ""}`} onClick={() => props.setReturnedTab("all")}>All</button>
+            <button className={`chip ${props.returnedTab === "d2d" ? "active" : ""}`} onClick={() => props.setReturnedTab("d2d")}>Door to Door</button>
+            <button className={`chip ${props.returnedTab === "express" ? "active" : ""}`} onClick={() => props.setReturnedTab("express")}>Express</button>
+            <button className={`chip ${props.returnedTab === "local" ? "active" : ""}`} onClick={() => props.setReturnedTab("local")}>Local</button>
+          </div>
+          <div className="filter-bar">
+            <PillSelect value={props.filters.carrier || ""} onChange={(value) => props.setFilter("carrier", value)} placeholder="Carrier" options={carriers} />
+            <button className="chip" onClick={() => props.setFilter("carrier", "")}>Clear</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1976,6 +2338,8 @@ function ShipmentListItem({ shipment, view, active, onClick }: {
   const flag = shipment.attentionFlags?.[0];
   const stageBadge = view === "delivered"
     ? <span className="badge b-green">Delivered</span>
+    : view === "returned"
+    ? <span className="badge b-amber">Returned to shipper</span>
     : view === "d2d"
     ? <span className="badge b-pr">Stage {stage}: {d2dStages[stage - 1]}</span>
     : view === "express"
@@ -1984,6 +2348,13 @@ function ShipmentListItem({ shipment, view, active, onClick }: {
       ? <span className="badge b-blue">{formatStatus(shipment.status || "created")}</span>
       : view === "attention"
         ? <span className={`badge ${issueClass(flag?.issueType)}`}>{issueLabels[flag?.issueType || ""] || "Needs attention"}</span>
+        : view === "dangerous_goods"
+        // Without this the DG rows fell through to the special-handling branch and every one
+        // of them read "Normal" — a priority nobody set, on a queue where the stage is the
+        // only thing worth showing.
+        ? <span className={`badge ${dangerousGoodsTabBadgeClass[getDangerousGoodsTab(shipment)]}`}>
+            {dangerousGoodsTabs.find((tab) => tab.key === getDangerousGoodsTab(shipment))?.label}
+          </span>
         : <span className={`badge ${priorityClass(shipment.specialHandlingPriority)}`}>{formatStatus(shipment.specialHandlingPriority || "normal")}</span>;
 
   return (
@@ -2006,7 +2377,11 @@ function DetailHeader({ shipment, onMessage, onSpecial }: {
   onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
   onSpecial: () => void;
 }) {
-  const badge = shipment.shipmentKind === "DDP"
+  const badge = isShipmentReturned(shipment)
+    ? <span className="badge b-amber">Returned to shipper</span>
+    : shipment.shipmentKind === "DANGEROUS_GOODS" && !isShipmentDelivered(shipment)
+    ? <span className="badge b-amber">Stage {getDangerousGoodsStage(shipment)} · {DG_STAGES[getDangerousGoodsStage(shipment) - 1].title}</span>
+    : shipment.shipmentKind === "DDP"
     ? isShipmentDelivered(shipment)
       ? <span className="badge b-green">Delivered</span>
       : <span className="badge b-pr">Stage {getD2DStage(shipment)} · {d2dStages[getD2DStage(shipment) - 1]}</span>
@@ -2161,6 +2536,157 @@ function PlanNotesEditor({ shipment, actions }: { shipment: OperationShipmentDet
           {actions.planPending ? "Saving..." : "Save plan"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Replace the carrier waybill an express shipment travels on.
+ *
+ * Distinct from `TrackingNumbersEditor` below, and the two are easy to confuse. That one edits
+ * a free-text list operators keep for their own reference; this one rewrites
+ * `carrierTrackingNumber` — the number the tracking poller actually calls the carrier with.
+ * Only this one changes what the shipment is.
+ */
+function CarrierWaybillEditor({ shipment }: { shipment: OperationShipmentDetail }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [awb, setAwb] = useState("");
+  const [carrierCode, setCarrierCode] = useState(shipment.carrierCode || "FEDEX");
+  const [reason, setReason] = useState("");
+  const [previousCancelled, setPreviousCancelled] = useState(false);
+
+  useEffect(() => {
+    setOpen(false);
+    setAwb("");
+    setReason("");
+    setPreviousCancelled(false);
+    setCarrierCode(shipment.carrierCode || "FEDEX");
+  }, [shipment.id]);
+
+  const replaceMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/carrier-tracking-number`, {
+        carrierTrackingNumber: awb.trim(),
+        carrierCode,
+        carrierName: carrierCode === "DHL" ? "DHL Express" : carrierCode === "FEDEX" ? "FedEx" : carrierCode,
+        reason: reason.trim(),
+        previousWaybillCancelled: previousCancelled,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: (data: any) => {
+      // Say plainly whether the carrier answered. The operator replaced this number because
+      // they believe it is live, and "saved" alone does not tell them whether it is.
+      if (data?.trackingError) {
+        toast({
+          title: "Waybill replaced — the carrier has no scans yet",
+          description: `${data.trackingError} Tracking will retry automatically.`,
+        });
+      } else {
+        toast({ title: "Waybill replaced", description: "Tracking is now following the new number." });
+      }
+      setOpen(false);
+      setAwb("");
+      setReason("");
+      setPreviousCancelled(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not replace the waybill", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const canSubmit = awb.trim().length >= 4 && reason.trim().length >= 3 && !replaceMutation.isPending;
+
+  return (
+    <div className="card">
+      <div className="card-title"><Truck /> Carrier air waybill</div>
+
+      <div className="sc-row">
+        <span className="sc-key">Currently tracking</span>
+        <span className="sc-val">{shipment.carrierTrackingNumber || "No waybill recorded"}</span>
+      </div>
+
+      {!open ? (
+        <div style={{ marginTop: 10 }}>
+          <button className="btn btn-gh btn-sm" type="button" onClick={() => setOpen(true)}>
+            <RefreshCw /> {shipment.carrierTrackingNumber ? "Replace waybill" : "Record a waybill"}
+          </button>
+          <div className="field-hint" style={{ marginTop: 8 }}>
+            Use this when the carrier voided and reissued the waybill, when the booking was made
+            by hand outside the system, or when the number is simply wrong.
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: 10 }}>
+          <div className="alert alert-amber">
+            <AlertTriangle />
+            <div>
+              Replacing the waybill clears this shipment&rsquo;s scan history, delivery estimate
+              and stored label — they belong to the old consignment. Tracking restarts against
+              the new number.
+            </div>
+          </div>
+
+          <div className="checkpoint-grid">
+            <div>
+              <label className="field-label">Carrier</label>
+              <select className="field-select" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+                <option value="FEDEX">FedEx</option>
+                <option value="DHL">DHL Express</option>
+                <option value="ARAMEX">Aramex</option>
+              </select>
+              <div className="field-hint">Change it if the shipment moved to a different carrier.</div>
+            </div>
+            <DgField
+              label="New air waybill number"
+              value={awb}
+              onChange={setAwb}
+              placeholder="e.g. 881234567890"
+              hint="The number the carrier issued for the consignment as it stands now."
+            />
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <label className="field-label">Why is it being replaced?</label>
+            <textarea
+              className="field-textarea"
+              rows={2}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="e.g. FedEx voided 881122334455 after the address correction and reissued it."
+            />
+            <div className="field-hint">Recorded on the shipment and in the audit trail.</div>
+          </div>
+
+          {shipment.carrierTrackingNumber && (
+            <label
+              style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 10, cursor: "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={previousCancelled}
+                onChange={(event) => setPreviousCancelled(event.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span className="field-hint" style={{ margin: 0 }}>
+                {shipment.carrierTrackingNumber} has already been cancelled with the carrier.
+                Leave this unticked and the shipment is flagged so someone cancels it — an
+                abandoned waybill still gets collected.
+              </span>
+            </label>
+          )}
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            <button className="btn btn-pr" disabled={!canSubmit} onClick={() => replaceMutation.mutate()}>
+              {replaceMutation.isPending ? "Replacing…" : "Replace & track"}
+            </button>
+            <button className="btn btn-gh" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3101,13 +3627,19 @@ function ExpressDetail({ shipment, actions, subTab, setSubTab, onMessage, onSync
               <>
                 <div className="alert alert-blue alert-track">
                   <MapPin />
-                  <span>{shipment.carrierTrackingNumber || shipment.trackingNumber} via {shipment.carrierName || "carrier"}</span>
+                  <span>
+                    {shipment.trackingNumber}
+                    {shipment.carrierTrackingNumber ? ` · AWB ${shipment.carrierTrackingNumber}` : ""}
+                    {" "}via {shipment.carrierName || "carrier"}
+                  </span>
                   <button className="btn btn-blue btn-xs" style={{ marginLeft: "auto" }} type="button" onClick={onSyncTracking} disabled={syncPending}>
                     <RefreshCw className={syncPending ? "animate-spin" : ""} />
                     {syncPending ? "Syncing..." : "Sync now"}
                   </button>
                 </div>
+                <DangerousGoodsReview shipment={shipment} />
                 <TrackingSteps shipment={shipment} variant="express" />
+                <CarrierWaybillEditor shipment={shipment} />
                 <TrackingNumbersEditor shipment={shipment} actions={actions} />
                 <LastMileEditor shipment={shipment} actions={actions} />
               </>
@@ -3142,10 +3674,16 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
   // Carrier contact channels — configured per carrier in the Apps tab, with a built-in fallback.
   const fallback = getCarrierContact(shipment.carrierCode);
   const carrierName = shipment.carrierName || fallback?.name || shipment.carrierCode || "carrier";
-  const contactPhone = shipment.carrierContact?.phone || fallback?.phone || null;
-  const contactEmail = shipment.carrierContact?.email || null;
-  const contactWhatsapp = shipment.carrierContact?.whatsapp || null;
-  const hasContact = Boolean(contactPhone || contactEmail || contactWhatsapp);
+  // Every labelled channel the admin configured, in their order. The built-in customer-service
+  // number is appended only when nothing is configured, so it never shadows a real account
+  // manager the carrier gave us.
+  const configuredChannels = shipment.carrierContact?.channels || [];
+  const contactChannels: CarrierContactChannel[] = configuredChannels.length > 0
+    ? configuredChannels
+    : fallback?.phone
+      ? [{ label: `${fallback.name} customer service`, type: "phone", value: fallback.phone }]
+      : [];
+  const hasContact = contactChannels.length > 0;
   return (
     <>
     <div className="dp-grid">
@@ -3155,6 +3693,7 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
           <div className="sc-row"><span className="sc-key">Current stage</span><span className="sc-val">{formatStatus(shipment.status)}</span></div>
           <div className="sc-row"><span className="sc-key">Hours since update</span><span className="sc-val red">{hoursStale}h</span></div>
           <div className="sc-row"><span className="sc-key">Details</span><span className="sc-val red">{flag?.details || shipment.carrierStatus || "Operational follow-up required"}</span></div>
+          <CarrierFailureExplanation flag={flag} />
         </div>
         <TimelineCard shipment={shipment} />
         {noteCard}
@@ -3187,21 +3726,30 @@ function AttentionDetail({ shipment, onMessage, onSpecial, onResolve, teamCard, 
         <div className="modal-title">Contact {carrierName}</div>
         <div className="modal-sub">Choose a channel to reach the carrier</div>
         <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {contactPhone && (
-            <a className="btn btn-blue btn-sm" href={`tel:${contactPhone}`} style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Phone /> Call — {contactPhone}
-            </a>
-          )}
-          {contactWhatsapp && (
-            <a className="btn btn-green btn-sm" href={`https://wa.me/${contactWhatsapp.replace(/[^\d]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Smartphone /> WhatsApp — {contactWhatsapp}
-            </a>
-          )}
-          {contactEmail && (
-            <a className="btn btn-gh btn-sm" href={`mailto:${contactEmail}`} style={{ justifyContent: "flex-start", gap: 10 }}>
-              <Mail /> Email — {contactEmail}
-            </a>
-          )}
+          {contactChannels.map((channel, index) => {
+            const href = channel.type === "email"
+              ? `mailto:${channel.value}`
+              : channel.type === "whatsapp"
+                ? `https://wa.me/${channel.value.replace(/[^\d]/g, "")}`
+                : `tel:${channel.value}`;
+            const external = channel.type === "whatsapp";
+            return (
+              <a
+                key={`${channel.type}-${channel.value}-${index}`}
+                className={`btn btn-sm ${channel.type === "email" ? "btn-gh" : channel.type === "whatsapp" ? "btn-green" : "btn-blue"}`}
+                href={href}
+                {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                style={{ justifyContent: "flex-start", gap: 10, textAlign: "left" }}
+              >
+                {channel.type === "email" ? <Mail /> : channel.type === "whatsapp" ? <Smartphone /> : <Phone />}
+                <span style={{ minWidth: 0 }}>
+                  {/* Label first: an operator picks who to reach, not which digits to dial. */}
+                  <span style={{ display: "block", fontWeight: 600 }}>{channel.label || CONTACT_TYPE_FALLBACK_LABELS[channel.type]}</span>
+                  <span style={{ display: "block", fontSize: 11, opacity: 0.85 }}>{channel.value}</span>
+                </span>
+              </a>
+            );
+          })}
           {!hasContact && <div className="empty">No contact channels configured. Add them on the carrier's account in the Apps tab.</div>}
         </div>
         <div className="modal-foot">
@@ -3239,7 +3787,12 @@ function SpecialDetail({ shipment, users, subTab, setSubTab, onMessage, onResolv
             ))}
           </div>
           <div className="tab-content">
-            {subTab === "track" && <TrackingSteps shipment={shipment} variant={shipment.shipmentKind === "DDP" ? "d2d" : "express"} />}
+            {subTab === "track" && (
+              <>
+                <DangerousGoodsReview shipment={shipment} />
+                <TrackingSteps shipment={shipment} variant={shipment.shipmentKind === "DDP" ? "d2d" : "express"} />
+              </>
+            )}
             {subTab === "actions" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <button className="btn btn-amber btn-sm" type="button" onClick={() => onMessage({ template: "update" })}>Send priority update to client</button>
@@ -3293,7 +3846,12 @@ function ShipmentInfoRows({ shipment }: { shipment: OperationShipmentDetail }) {
       <div className="sc-row"><span className="sc-key">Origin</span><span className="sc-val">{shipment.sender.city || shipment.sender.country}</span></div>
       <div className="sc-row"><span className="sc-key">Destination</span><span className="sc-val">{shipment.recipient.city || shipment.recipient.country}</span></div>
       <div className="sc-row"><span className="sc-key">Carrier</span><span className="sc-val">{shipment.carrierName || "Manual"}</span></div>
-      <div className="sc-row"><span className="sc-key">Tracking no.</span><span className="sc-val">{shipment.carrierTrackingNumber || shipment.trackingNumber}</span></div>
+      {/* Two different numbers, always shown as two rows. Collapsing them — showing the carrier
+          waybill in place of the Ezhalha reference once one exists — makes it look as though a
+          shipment was issued a new internal number partway through its life, which is exactly
+          the reference an operator quotes to a client on the phone. */}
+      <div className="sc-row"><span className="sc-key">Tracking no.</span><span className="sc-val">{shipment.trackingNumber}</span></div>
+      <div className="sc-row"><span className="sc-key">Carrier AWB</span><span className="sc-val">{shipment.carrierTrackingNumber || "Not booked yet"}</span></div>
       {(shipment as any).pickupConfirmationNumber && (
         <div className="sc-row"><span className="sc-key">Pickup no.</span><span className="sc-val">{(shipment as any).pickupConfirmationNumber}</span></div>
       )}
@@ -3460,10 +4018,18 @@ function TimelineCard({ shipment, compact = false }: { shipment: OperationShipme
 }
 
 function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetail; variant: "d2d" | "express" }) {
-  const labels = variant === "d2d"
-    ? ["Received at origin warehouse", "Customs clearance - origin", "Departed origin", "In transit", "Arrived destination", "Customs clearance - destination", "Last-mile delivery"]
-    : ["Order created and booked", "Picked up from sender", "Received at carrier origin facility", "Departed origin", "In transit", "Arrived destination facility", "Customs clearance", "Out for delivery", "Delivered"];
-  const activeIndex = variant === "d2d" ? getD2DStage(shipment) : getExpressStepIndex(shipment.status);
+  // Express shipments are tracked BY the carrier, so the carrier's own scans are the timeline.
+  // The fixed nine-step ladder that used to live here was ours, not theirs: it inferred a step
+  // index from our mapped status and then printed our wording ("Received at carrier origin
+  // facility") next to it, so an operator reading the hub never saw what DHL or FedEx actually
+  // said, and every scan carried our render time instead of the carrier's.
+  if (variant === "express") {
+    return <CarrierScanFeed shipment={shipment} />;
+  }
+
+  // D2D is different: those stages are OUR warehouse workflow, which no carrier reports on.
+  const labels = ["Received at origin warehouse", "Customs clearance - origin", "Departed origin", "In transit", "Arrived destination", "Customs clearance - destination", "Last-mile delivery"];
+  const activeIndex = getD2DStage(shipment);
   return (
     <div className="track-wrap">
       {labels.map((label, index) => {
@@ -3476,6 +4042,1233 @@ function TrackingSteps({ shipment, variant }: { shipment: OperationShipmentDetai
             <div className="track-info">
               <div className="track-title">{label}</div>
               <div className="track-sub">{state === "done" ? "Completed" : state === "active-step" ? "In progress" : "Pending"}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Format a carrier scan time WITHOUT moving it into the viewer's timezone.
+ *
+ * `carrierLocalTime` is the wall-clock the carrier printed, offset included when it sent one
+ * ("2026-08-15T10:23:00-07:00"). Passing that through `new Date()` and toLocaleString would
+ * re-render it in the operator's zone — a Riyadh operator would see a Memphis scan at a time
+ * that appears nowhere on fedex.com. So the components are read out of the string as text.
+ *
+ * Falls back to `occurredAt` (a real instant) only for a carrier that reported no local time.
+ */
+function formatCarrierScanTime(event: CarrierTrackingEvent): string {
+  const local = event.carrierLocalTime?.trim();
+  const match = local ? /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(local) : null;
+  if (match) {
+    const [, year, month, day, hour, minute] = match;
+    const monthLabel = MONTH_LABELS[Number(month) - 1] || month;
+    const offset = event.carrierUtcOffset ? ` (UTC${event.carrierUtcOffset})` : "";
+    return `${monthLabel} ${Number(day)}, ${year} · ${hour}:${minute}${offset}`;
+  }
+  return formatDate(event.occurredAt);
+}
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// ─── Dangerous goods: the manual, ops-quoted flow ─────────────────────────────────
+//
+// Five stages, matching the actual sequence of work rather than a shipment lifecycle:
+// read what the client declared and fill the gaps, email it to the carrier, type in what
+// they charged, wait for the client to pay, then run it like any other shipment.
+//
+// The stage the shipment is really in comes from the server; stages 1 and 2 are both
+// "before handover", so the operator moves between them locally.
+
+const DG_STAGES = [
+  { title: "Review & complete the declaration", sub: "Check it against the safety data sheet and fill in what is missing" },
+  { title: "Hand over to the carrier", sub: "Everything the carrier needs, in one block to paste into an email" },
+  { title: "Enter the carrier's quotation", sub: "What the carrier charges us — the system prices it for the client" },
+  { title: "Awaiting the client's payment", sub: "Nothing is booked yet, so an unpaid quote costs us nothing" },
+  { title: "Book it and record the air waybill", sub: "Paid — confirm the movement with the carrier and enter the waybill" },
+  { title: "Booked and moving", sub: "Behaves like any other shipment from here" },
+] as const;
+
+function getDangerousGoodsStage(shipment: OperationShipmentDetail): number {
+  // Paid but no waybill yet is its own stage: the client is now waiting on us, and the only
+  // thing that moves the shipment on is a person talking to the carrier.
+  if (shipment.paymentStatus === "paid") {
+    return shipment.carrierTrackingNumber && shipment.status !== "dg_booking" ? 6 : 5;
+  }
+  if (shipment.status === "payment_pending") return 4;
+  if (shipment.status === "dg_awaiting_carrier") return 3;
+  return 1;
+}
+
+function dgDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function dgDaysLeft(value?: string | null): number | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
+/** An input that turns amber while the field it edits is still on the "still needed" list. */
+function DgField({ label, hint, value, onChange, missing, type, placeholder }: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (value: string) => void;
+  missing?: boolean;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="field-label">{label}</label>
+      <input
+        className={`field-input ${missing ? "missing" : ""}`}
+        type={type || "text"}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {hint && <div className="field-hint">{hint}</div>}
+    </div>
+  );
+}
+
+/**
+ * One downloadable document row.
+ *
+ * The link goes through the operations endpoint rather than straight at `/uploads/...`: that
+ * serves the file inline under its storage UUID, so an operator saving a safety data sheet for
+ * a carrier ended up with `f4d902e6-….pdf` instead of the name the client gave it.
+ */
+function DgDocumentRow({ shipmentId, index, document }: {
+  shipmentId: string;
+  index: number;
+  document: { fileName: string; documentType: string };
+}) {
+  return (
+    <div className="sc-row">
+      <span className="sc-key">{document.documentType.replace(/_/g, " ").toLowerCase()}</span>
+      <span className="sc-val">
+        <a
+          className="dg-doc-link"
+          href={`/api/operations/shipments/${shipmentId}/dangerous-goods/documents/${index}`}
+          target="_blank"
+          rel="noreferrer"
+          data-testid={`link-dg-document-${index}`}
+        >
+          <Download /> {document.fileName}
+        </a>
+      </span>
+    </div>
+  );
+}
+
+function DangerousGoodsDetail({ shipment, onMessage, teamCard, noteCard }: {
+  shipment: OperationShipmentDetail;
+  onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
+  teamCard: React.ReactNode;
+  noteCard: React.ReactNode;
+}) {
+  const { toast } = useToast();
+  const dg = shipment.dangerousGoods || null;
+  const serverStage = getDangerousGoodsStage(shipment);
+  const [reviewComplete, setReviewComplete] = useState(false);
+  const activeStage = serverStage === 1 && reviewComplete ? 2 : serverStage;
+  const [expandedStage, setExpandedStage] = useState(activeStage);
+
+  useEffect(() => {
+    setReviewComplete(false);
+  }, [shipment.id]);
+
+  useEffect(() => {
+    setExpandedStage(activeStage);
+  }, [activeStage, shipment.id]);
+
+  if (!dg) {
+    return (
+      <div className="dp-grid">
+        <div>
+          <div className="alert alert-red">
+            <AlertTriangle />
+            <div>This shipment is flagged as dangerous goods but carries no declaration data. It cannot be quoted or tendered in this state.</div>
+          </div>
+          <ShipmentDetailsPanel shipment={shipment} />
+          {noteCard}
+        </div>
+        <SidePanel shipment={shipment} teamCard={teamCard} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="dp-grid">
+      <div>
+        <div className="alert alert-amber">
+          <AlertTriangle />
+          <div>
+            <b>Ezhalha signs the Shipper's Declaration for these goods.</b> Everything below is what
+            the client declared. Check it against the safety data sheet before handing it to a
+            carrier — once tendered, it is our declaration, not theirs.
+          </div>
+        </div>
+
+        <ShipmentDetailsPanel shipment={shipment} />
+
+        <div>
+          {DG_STAGES.map((stageInfo, index) => {
+            const stage = index + 1;
+            const done = stage < activeStage;
+            const active = stage === activeStage;
+            const locked = stage > activeStage;
+            const expanded = expandedStage === stage;
+            return (
+              <div key={stageInfo.title} className={`stage-card ${done ? "done" : ""} ${active ? "active" : ""} ${locked ? "locked" : ""}`}>
+                <div
+                  className="stage-head"
+                  onClick={() => {
+                    if (locked) return;
+                    setExpandedStage((current) => (current === stage ? 0 : stage));
+                  }}
+                >
+                  <div className="stage-left">
+                    <div className="stage-num">{done ? "✓" : stage}</div>
+                    <div>
+                      <div className="stage-title">Stage {stage} — {stageInfo.title}</div>
+                      <div className="stage-sub">
+                        {stage === 1 && dg.missingFields.length > 0 && active
+                          ? `${dg.missingFields.length} thing${dg.missingFields.length === 1 ? "" : "s"} still needed before this can go to a carrier`
+                          : done ? "Completed" : active ? "In progress" : "Pending"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="stage-sub">{expanded ? "▾" : "▸"}</div>
+                </div>
+                {expanded && (
+                  <div className="stage-body">
+                    {stage === 1 && (
+                      <DangerousGoodsReviewStage
+                        shipment={shipment}
+                        dg={dg}
+                        onReviewComplete={() => { setReviewComplete(true); setExpandedStage(2); }}
+                      />
+                    )}
+                    {stage === 2 && <DangerousGoodsHandoverStage shipment={shipment} dg={dg} toast={toast} />}
+                    {stage === 3 && <DangerousGoodsQuoteStage shipment={shipment} dg={dg} />}
+                    {stage === 4 && <DangerousGoodsAwaitingPaymentStage shipment={shipment} dg={dg} onMessage={onMessage} />}
+                    {stage === 5 && <DangerousGoodsBookingStage shipment={shipment} dg={dg} />}
+                    {stage === 6 && <DangerousGoodsLiveStage shipment={shipment} dg={dg} />}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {noteCard}
+      </div>
+      <SidePanel shipment={shipment} teamCard={teamCard} />
+    </div>
+  );
+}
+
+// ── Stage 1 — review and complete ────────────────────────────────────────────────
+
+type DgAddressForm = {
+  name: string; company: string; phone: string; email: string;
+  addressLine1: string; addressLine2: string; city: string;
+  stateOrProvince: string; postalCode: string; countryCode: string;
+};
+
+type DgPackageForm = { weight: string; length: string; width: string; height: string };
+
+function addressFormFrom(party: OperationParty, address: string): DgAddressForm {
+  return {
+    name: party.name || "",
+    company: "",
+    phone: party.phone || "",
+    email: "",
+    addressLine1: address || "",
+    addressLine2: "",
+    city: party.city || "",
+    stateOrProvince: "",
+    postalCode: "",
+    countryCode: party.country || "",
+  };
+}
+
+function DangerousGoodsReviewStage({ shipment, dg, onReviewComplete }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+  onReviewComplete: () => void;
+}) {
+  const { toast } = useToast();
+  const details = shipment.details;
+
+  const [shipper, setShipper] = useState<DgAddressForm>(() => addressFormFrom(shipment.sender, shipment.sender.address));
+  const [recipient, setRecipient] = useState<DgAddressForm>(() => addressFormFrom(shipment.recipient, shipment.recipient.address));
+  const [packages, setPackages] = useState<DgPackageForm[]>(() => {
+    const stored = Array.isArray(details?.packages) ? (details.packages as any[]) : [];
+    if (stored.length > 0) {
+      return stored.map((pkg) => ({
+        weight: String(pkg?.weight ?? ""),
+        length: String(pkg?.length ?? ""),
+        width: String(pkg?.width ?? ""),
+        height: String(pkg?.height ?? ""),
+      }));
+    }
+    return [{ weight: details?.weight || "", length: details?.length || "", width: details?.width || "", height: details?.height || "" }];
+  });
+  const [declaration, setDeclaration] = useState<DangerousGoodsDeclarationData | null>(dg.declaration);
+
+  // Re-seed whenever the server sends a newer shipment: an operator editing one field must not
+  // silently revert another operator's save that landed in between.
+  useEffect(() => {
+    setShipper(addressFormFrom(shipment.sender, shipment.sender.address));
+    setRecipient(addressFormFrom(shipment.recipient, shipment.recipient.address));
+    setDeclaration(dg.declaration);
+  }, [shipment.id, shipment.updatedAt]);
+
+  const missingByField = useMemo(() => {
+    const map = new Set(dg.missingFields.map((entry) => entry.field));
+    return map;
+  }, [dg.missingFields]);
+
+  const editable = shipment.status === "dg_review";
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, unknown> = {
+        shipper: {
+          name: shipper.name,
+          phone: shipper.phone,
+          addressLine1: shipper.addressLine1,
+          city: shipper.city,
+          stateOrProvince: shipper.stateOrProvince || null,
+          postalCode: shipper.postalCode || null,
+          countryCode: shipper.countryCode.toUpperCase(),
+        },
+        recipient: {
+          name: recipient.name,
+          phone: recipient.phone,
+          addressLine1: recipient.addressLine1,
+          city: recipient.city,
+          stateOrProvince: recipient.stateOrProvince || null,
+          postalCode: recipient.postalCode || null,
+          countryCode: recipient.countryCode.toUpperCase(),
+        },
+        packages: packages.map((pkg) => ({
+          weight: Number(pkg.weight) || 0,
+          length: Number(pkg.length) || 0,
+          width: Number(pkg.width) || 0,
+          height: Number(pkg.height) || 0,
+        })),
+      };
+      if (declaration) body.declaration = declaration;
+      const res = await apiRequest("PATCH", `/api/operations/shipments/${shipment.id}/dangerous-goods`, body);
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      toast({ title: "Saved", description: "The declaration has been updated." });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not save", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const updateCommodity = (packageIndex: number, commodityIndex: number, patch: Partial<DangerousGoodsCommodity>) => {
+    setDeclaration((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        packages: current.packages.map((pkg, pIndex) =>
+          pIndex !== packageIndex
+            ? pkg
+            : {
+                ...pkg,
+                commodities: pkg.commodities.map((commodity, cIndex) =>
+                  cIndex !== commodityIndex ? commodity : { ...commodity, ...patch },
+                ),
+              },
+        ),
+      };
+    });
+  };
+
+  return (
+    <div>
+      {dg.missingFields.length > 0 ? (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <div className="card-title"><AlertTriangle /> Still needed — {dg.missingFields.length}</div>
+          <div className="field-hint" style={{ marginBottom: 6 }}>
+            This cannot go to the carrier until these are filled in. An incomplete declaration is
+            not rejected here — it is rejected at acceptance, after the goods have been collected.
+          </div>
+          <ul className="dg-needs">
+            {dg.missingFields.map((entry) => (
+              <li key={entry.field}>
+                <span>⚠️</span>
+                <div><b>{entry.label}</b><br /><span className="field-hint">{entry.reason}</span></div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="alert alert-green">
+          <CheckCircle2 />
+          <div>Everything a carrier will ask for is present. Continue to the handover.</div>
+        </div>
+      )}
+
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="card-title"><FileText /> Declared goods</div>
+        <div className="sc-row"><span className="sc-key">Content type</span><span className="sc-val">{declaration?.contentKind?.replace(/_/g, " ") || "Not set"}</span></div>
+        <div className="sc-row"><span className="sc-key">Regulation</span><span className="sc-val">{declaration?.regulation || dg.regulation || "Not set"}</span></div>
+        {declaration && (
+          <div className="checkpoint-grid" style={{ marginTop: 12 }}>
+            <div>
+              <label className="field-label">Accessibility</label>
+              <select
+                className={`field-select ${missingByField.has("declaration.accessibility") ? "missing" : ""}`}
+                value={declaration.accessibility || ""}
+                onChange={(event) => setDeclaration({ ...declaration, accessibility: event.target.value || undefined })}
+              >
+                <option value="">Not set</option>
+                <option value="ACCESSIBLE">Accessible</option>
+                <option value="INACCESSIBLE">Inaccessible</option>
+              </select>
+              <div className="field-hint">Decides how the carrier stows it. The client is not asked this.</div>
+            </div>
+            <DgField label="Offeror" value={declaration.offeror || ""} missing={missingByField.has("declaration.offeror")}
+              hint="The party offering the goods for transport, as named on the declaration."
+              onChange={(value) => setDeclaration({ ...declaration, offeror: value })} />
+            <DgField label="Emergency contact name" value={declaration.emergencyContact?.name || ""} missing={missingByField.has("declaration.emergencyContact")}
+              onChange={(value) => setDeclaration({ ...declaration, emergencyContact: { ...declaration.emergencyContact, name: value } })} />
+            <DgField label="Emergency contact phone" value={declaration.emergencyContact?.phone || ""} missing={missingByField.has("declaration.emergencyContact")}
+              hint="Must be answered around the clock, in English, for the whole journey."
+              onChange={(value) => setDeclaration({ ...declaration, emergencyContact: { ...declaration.emergencyContact, phone: value } })} />
+            <DgField label="Signatory" value={declaration.signatory?.name || ""} missing={missingByField.has("declaration.signatory")}
+              onChange={(value) => setDeclaration({ ...declaration, signatory: { ...declaration.signatory, name: value } })} />
+            <DgField label="Signed at (place)" value={declaration.signatory?.place || ""} missing={missingByField.has("declaration.signatory")}
+              onChange={(value) => setDeclaration({ ...declaration, signatory: { ...declaration.signatory, place: value } })} />
+          </div>
+        )}
+      </div>
+
+      {declaration?.packages.map((pkg, packageIndex) =>
+        pkg.commodities.map((commodity, commodityIndex) => {
+          const path = `declaration.packages.${packageIndex}.commodities.${commodityIndex}`;
+          return (
+            <div className="checkpoint-card" key={`${packageIndex}-${commodityIndex}`} style={{ marginBottom: 10 }}>
+              <div className="card-title"><AlertTriangle /> Package {pkg.packageIndex + 1}, entry {commodityIndex + 1}</div>
+              <div className="checkpoint-grid">
+                <DgField label="UN number" value={commodity.unNumber || ""} missing={missingByField.has(`${path}.unNumber`)}
+                  hint="As printed, e.g. UN1993 or ID8000."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { unNumber: value.toUpperCase() })} />
+                <DgField label="Proper shipping name" value={commodity.properShippingName || ""} missing={missingByField.has(`${path}.properShippingName`)}
+                  hint="Must match the IATA entry exactly, not a trade name."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { properShippingName: value })} />
+                <DgField label="Technical name" value={commodity.technicalName || ""} missing={missingByField.has(`${path}.technicalName`)}
+                  hint="Required whenever the shipping name is n.o.s. — name the actual substance."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { technicalName: value })} />
+                <DgField label="Class / division" value={commodity.hazardClass || ""} missing={missingByField.has(`${path}.hazardClass`)}
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { hazardClass: value })} />
+                <DgField label="Packing group" value={commodity.packingGroup || ""} missing={missingByField.has(`${path}.packingGroup`)}
+                  hint="I, II or III."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { packingGroup: value.toUpperCase() })} />
+                <DgField label="Packing instruction" value={commodity.packingInstruction || ""}
+                  hint="From the safety data sheet — passenger vs cargo-aircraft-only limits differ."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { packingInstruction: value })} />
+                <DgField label="Net quantity" value={String(commodity.quantity?.amount ?? "")} missing={missingByField.has(`${path}.quantity`)} type="number"
+                  hint="Per package. A safety data sheet never states this — it describes a substance, not a shipment."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { quantity: { ...commodity.quantity, amount: Number(value) || undefined } })} />
+                <DgField label="Units" value={commodity.quantity?.units || ""} missing={missingByField.has(`${path}.quantity`)}
+                  hint="L, KG, or the unit the packing instruction limits."
+                  onChange={(value) => updateCommodity(packageIndex, commodityIndex, { quantity: { ...commodity.quantity, units: value } })} />
+              </div>
+              {commodity.cargoAircraftOnly && (
+                <div className="checkpoint-summary">Declared cargo aircraft only — it cannot travel on a passenger flight, which narrows the routings the carrier can offer.</div>
+              )}
+            </div>
+          );
+        }),
+      )}
+
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="card-title"><MapPin /> Route</div>
+        <div className="checkpoint-grid">
+          <DgField label="Shipper name" value={shipper.name} missing={missingByField.has("sender.name")} onChange={(value) => setShipper({ ...shipper, name: value })} />
+          <DgField label="Shipper phone" value={shipper.phone} missing={missingByField.has("sender.phone")} onChange={(value) => setShipper({ ...shipper, phone: value })} />
+          <DgField label="Shipper address" value={shipper.addressLine1} missing={missingByField.has("sender.address")} onChange={(value) => setShipper({ ...shipper, addressLine1: value })} />
+          <DgField label="Shipper city" value={shipper.city} missing={missingByField.has("sender.city")} onChange={(value) => setShipper({ ...shipper, city: value })} />
+          <DgField label="Shipper postal code" value={shipper.postalCode} missing={missingByField.has("sender.postalCode")}
+            hint="Leave empty for a country that does not use postal codes — sending zeros is worse than sending nothing."
+            onChange={(value) => setShipper({ ...shipper, postalCode: value })} />
+          <DgField label="Shipper country" value={shipper.countryCode} missing={missingByField.has("sender.country")} onChange={(value) => setShipper({ ...shipper, countryCode: value })} />
+          <DgField label="Consignee name" value={recipient.name} missing={missingByField.has("recipient.name")} onChange={(value) => setRecipient({ ...recipient, name: value })} />
+          <DgField label="Consignee phone" value={recipient.phone} missing={missingByField.has("recipient.phone")} onChange={(value) => setRecipient({ ...recipient, phone: value })} />
+          <DgField label="Consignee address" value={recipient.addressLine1} missing={missingByField.has("recipient.address")} onChange={(value) => setRecipient({ ...recipient, addressLine1: value })} />
+          <DgField label="Consignee city" value={recipient.city} missing={missingByField.has("recipient.city")} onChange={(value) => setRecipient({ ...recipient, city: value })} />
+          <DgField label="Consignee postal code" value={recipient.postalCode} missing={missingByField.has("recipient.postalCode")}
+            hint="Leave empty for a country that does not use postal codes."
+            onChange={(value) => setRecipient({ ...recipient, postalCode: value })} />
+          <DgField label="Consignee country" value={recipient.countryCode} missing={missingByField.has("recipient.country")} onChange={(value) => setRecipient({ ...recipient, countryCode: value })} />
+        </div>
+      </div>
+
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="card-title"><Package /> Packages</div>
+        {packages.map((pkg, index) => (
+          <div className="checkpoint-grid" key={index} style={{ marginBottom: 10 }}>
+            <DgField label={`Package ${index + 1} weight (${details?.weightUnit || "KG"})`} type="number" value={pkg.weight}
+              missing={missingByField.has(`packages.${index}.weight`)}
+              onChange={(value) => setPackages(packages.map((p, i) => (i === index ? { ...p, weight: value } : p)))} />
+            <DgField label={`Length (${details?.dimensionUnit || "CM"})`} type="number" value={pkg.length}
+              missing={missingByField.has(`packages.${index}.dimensions`)}
+              onChange={(value) => setPackages(packages.map((p, i) => (i === index ? { ...p, length: value } : p)))} />
+            <DgField label={`Width (${details?.dimensionUnit || "CM"})`} type="number" value={pkg.width}
+              missing={missingByField.has(`packages.${index}.dimensions`)}
+              onChange={(value) => setPackages(packages.map((p, i) => (i === index ? { ...p, width: value } : p)))} />
+            <DgField label={`Height (${details?.dimensionUnit || "CM"})`} type="number" value={pkg.height}
+              missing={missingByField.has(`packages.${index}.dimensions`)}
+              onChange={(value) => setPackages(packages.map((p, i) => (i === index ? { ...p, height: value } : p)))} />
+          </div>
+        ))}
+        <button className="btn btn-gh btn-sm" onClick={() => setPackages([...packages, { weight: "", length: "", width: "", height: "" }])}>
+          Add a package
+        </button>
+      </div>
+
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="card-title"><FileText /> Documents from the client</div>
+        {dg.documents.length === 0 ? (
+          <div className="field-hint">None uploaded. A safety data sheet is what the carrier checks the declaration against.</div>
+        ) : (
+          dg.documents.map((document, index) => (
+            <DgDocumentRow key={index} shipmentId={shipment.id} index={index} document={document} />
+          ))
+        )}
+      </div>
+
+      {missingByField.has("items") && (
+        <div className="alert alert-amber">
+          <AlertTriangle />
+          <div>
+            This international shipment has no customs line items. They cannot be entered here —
+            ask the client to add them from their quotation, or add them from the admin shipment
+            editor, before the declaration goes to the carrier.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button
+          className="btn btn-pr"
+          disabled={!editable || dg.missingFields.length > 0}
+          onClick={onReviewComplete}
+        >
+          Complete review → hand to carrier
+        </button>
+        <button className="btn btn-gh" disabled={!editable || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          {saveMutation.isPending ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+      {!editable && (
+        <div className="field-hint" style={{ marginTop: 8 }}>
+          Already sent to the carrier — the declaration is locked so what we emailed and what we
+          hold cannot drift apart.
+        </div>
+      )}
+      {editable && dg.missingFields.length > 0 && (
+        <div className="field-hint" style={{ marginTop: 8 }}>
+          Save your changes to clear the outstanding items above, then continue.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Stage 2 — carrier handover ───────────────────────────────────────────────────
+
+function DangerousGoodsHandoverStage({ shipment, dg, toast }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+  toast: ReturnType<typeof useToast>["toast"];
+}) {
+  const [carrierCode, setCarrierCode] = useState(shipment.carrierCode || "DHL");
+  const [note, setNote] = useState("");
+
+  const handoverMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/dangerous-goods/handover`, {
+        carrierCode,
+        note: note || undefined,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      toast({ title: "Marked as sent", description: "The wait for the carrier is now visible in the queue." });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not record the handover", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const alreadySent = Boolean(dg.handoverAt);
+
+  return (
+    <div>
+      <div className="alert alert-blue">
+        <Mail />
+        <div>
+          Dangerous goods are arranged with the carrier <b>outside this system</b>. Copy the block
+          below, email it with the safety data sheet attached, and come back with a cost and an
+          air waybill.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <button
+          className="btn btn-blue btn-sm"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(dg.carrierHandoverText);
+              toast({ title: "Copied", description: "Paste it into the email to the carrier." });
+            } catch {
+              toast({ title: "Could not copy", description: "Select the text below and copy it manually.", variant: "destructive" });
+            }
+          }}
+        >
+          <FileText /> Copy to clipboard
+        </button>
+      </div>
+
+      <pre className="dg-handover">{dg.carrierHandoverText}</pre>
+
+      <div className="checkpoint-grid" style={{ marginTop: 12 }}>
+        <div>
+          <label className="field-label">Carrier</label>
+          <select className="field-select" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+            <option value="DHL">DHL Express</option>
+            <option value="FEDEX">FedEx</option>
+            <option value="ARAMEX">Aramex</option>
+          </select>
+          <div className="field-hint">Must be an Ezhalha account, or carrier tracking will not sync once it ships.</div>
+        </div>
+        <div>
+          <label className="field-label">Note (internal)</label>
+          <input className="field-input" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Who you emailed, and when" />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button className="btn btn-pr" disabled={alreadySent || handoverMutation.isPending} onClick={() => handoverMutation.mutate()}>
+          {handoverMutation.isPending ? "Recording…" : "Mark as sent to carrier"}
+        </button>
+      </div>
+      <div className="field-hint" style={{ marginTop: 8 }}>
+        {alreadySent
+          ? `Sent to the carrier on ${dgDate(dg.handoverAt)}.`
+          : "Records who sent it and when, so the wait is visible in the queue rather than living in someone's inbox."}
+      </div>
+    </div>
+  );
+}
+
+// ── Stage 3 — enter the carrier's quotation ──────────────────────────────────────
+
+function DangerousGoodsQuoteStage({ shipment, dg }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+}) {
+  const { toast } = useToast();
+  const [carrierCode, setCarrierCode] = useState(shipment.carrierCode || "DHL");
+  const [cost, setCost] = useState(dg.carrierCostSar || "");
+  const [validUntil, setValidUntil] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 7);
+    return date.toISOString().slice(0, 10);
+  });
+  const [note, setNote] = useState(dg.quoteNote || "");
+  const [collectionDate, setCollectionDate] = useState(dg.preferredPickupDate || "");
+  const [override, setOverride] = useState("");
+
+  const quoteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/dangerous-goods/quote`, {
+        carrierCode,
+        carrierName: carrierCode === "DHL" ? "DHL Express" : carrierCode === "FEDEX" ? "FedEx" : carrierCode,
+        carrierCostSar: Number(cost),
+        validUntil: new Date(`${validUntil}T23:59:59`).toISOString(),
+        note: note || undefined,
+        collectionDate: collectionDate || undefined,
+        finalTotalOverrideSar: override ? Number(override) : undefined,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      toast({ title: "Quotation sent", description: "The client's primary contacts have been notified." });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not send the quotation", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const canSubmit = Number(cost) > 0 && Boolean(validUntil);
+
+  return (
+    <div>
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="checkpoint-grid">
+          <div>
+            <label className="field-label">Carrier</label>
+            <select className="field-select" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+              <option value="DHL">DHL Express</option>
+              <option value="FEDEX">FedEx</option>
+              <option value="ARAMEX">Aramex</option>
+            </select>
+            <div className="field-hint">Must be an Ezhalha account, or tracking will not sync.</div>
+          </div>
+          <DgField label="Carrier cost, SAR (excl. VAT)" type="number" value={String(cost)} onChange={setCost}
+            hint="What the carrier charges us, as quoted in the email thread." />
+          <DgField label="Quote valid until" type="date" value={validUntil} onChange={setValidUntil}
+            hint="After this the shipment is flagged so you can re-confirm the price. Nothing is cancelled automatically." />
+          <DgField label="Collection date agreed with the carrier" type="date" value={collectionDate} onChange={setCollectionDate}
+            hint="What the carrier said in the email. Carried into the booking step as the collection date — leave empty to use the usual cutoff default." />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="field-label">Note to the client (optional)</label>
+          <textarea className="field-textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)}
+            placeholder="e.g. Cargo aircraft only; collection confirmed for 8 September." />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title"><DollarSign /> What the client will be asked to pay</div>
+        <div className="field-hint" style={{ marginBottom: 8 }}>
+          The margin comes from this client's pricing profile and the VAT from the shipment's tax
+          scenario — the same engine every other shipment uses, so reporting and Zoho stay
+          consistent. The exact figures are computed server-side when you send it.
+        </div>
+        <div className="dg-money"><span className="lbl">Carrier cost</span><span className="val">{money(cost || "0", "SAR")}</span></div>
+        <div className="dg-money total"><span className="lbl">Client total</span><span className="val">{override ? money(override, "SAR") : "computed on send"}</span></div>
+        <div style={{ marginTop: 10 }}>
+          <DgField label="Override the final total, SAR (optional)" type="number" value={override} onChange={setOverride}
+            hint="Overriding back-solves the margin so the accounting still balances." />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn btn-pr" disabled={!canSubmit || quoteMutation.isPending} onClick={() => quoteMutation.mutate()}>
+          {quoteMutation.isPending ? "Sending…" : dg.quotedAt ? "Send a revised quotation" : "Send quotation to client"}
+        </button>
+      </div>
+      <div className="field-hint" style={{ marginTop: 8 }}>
+        Notifies the client's primary contacts by email and in-app, and unlocks payment. Do not
+        book anything with the carrier yet — the air waybill is recorded at stage 5, after the
+        client has paid, so an expired quote never leaves us holding a booking.
+      </div>
+    </div>
+  );
+}
+
+// ── Stage 4 — awaiting payment ───────────────────────────────────────────────────
+
+function DangerousGoodsAwaitingPaymentStage({ shipment, dg, onMessage }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+  onMessage: (options?: { channel?: CommunicationChannel; template?: string }) => void;
+}) {
+  const daysLeft = dgDaysLeft(dg.quoteExpiresAt);
+  const expired = daysLeft != null && daysLeft <= 0;
+
+  return (
+    <div>
+      <div className={`alert ${expired ? "alert-red" : "alert-amber"}`}>
+        <Clock3 />
+        <div>
+          {expired ? (
+            <>
+              <b>This quote expired on {dgDate(dg.quoteExpiresAt)}.</b>{" "}
+              {shipment.carrierTrackingNumber ? (
+                <>
+                  Air waybill {shipment.carrierTrackingNumber} is still open with the carrier and
+                  has to be cancelled by hand — only a person can unwind a booking that lives in
+                  an email thread.
+                </>
+              ) : (
+                <>
+                  Nothing is booked with the carrier, so nothing needs unwinding. Re-confirm the
+                  price and send a revised quotation, or close the shipment off.
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <b>Expires in {daysLeft} day{daysLeft === 1 ? "" : "s"}</b> — {dgDate(dg.quoteExpiresAt)}.
+              Nothing is booked with the carrier until the client pays, so letting this lapse
+              costs nothing but the price the carrier quoted.
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="sc-row"><span className="sc-key">Quoted</span><span className="sc-val">{dgDate(dg.quotedAt)}</span></div>
+      <div className="sc-row"><span className="sc-key">Carrier</span><span className="sc-val">{shipment.carrierName || shipment.carrierCode || "—"}</span></div>
+      <div className="sc-row"><span className="sc-key">Air waybill</span><span className="sc-val">{shipment.carrierTrackingNumber || "Booked after payment"}</span></div>
+      <div className="sc-row"><span className="sc-key">Carrier cost</span><span className="sc-val">{money(dg.carrierCostSar, "SAR")}</span></div>
+      <div className="sc-row"><span className="sc-key">Client total</span><span className="sc-val">{money(shipment.finalPrice, shipment.currency)}</span></div>
+      <div className="sc-row">
+        <span className="sc-key">Declaration</span>
+        <span className="sc-val">{dg.declinedAt ? "Declined by the client" : "Awaiting the client's confirmation and payment"}</span>
+      </div>
+      {dg.declineReason && (
+        <div className="sc-row"><span className="sc-key">Reason</span><span className="sc-val">{dg.declineReason}</span></div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button className="btn btn-gh btn-sm" onClick={() => onMessage({ channel: "email" })}>
+          <Mail /> Send a reminder
+        </button>
+      </div>
+      <div className="field-hint" style={{ marginTop: 8 }}>
+        To revise the price, reopen stage 3 and send a new quotation — the client is notified again.
+      </div>
+    </div>
+  );
+}
+
+// ── Stage 5 — book it and record the air waybill ─────────────────────────────────
+
+function DangerousGoodsBookingStage({ shipment, dg }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+}) {
+  const { toast } = useToast();
+  const [awb, setAwb] = useState(shipment.carrierTrackingNumber || "");
+  const [carrierCode, setCarrierCode] = useState(shipment.carrierCode || "DHL");
+  const [collectionDate, setCollectionDate] = useState(dg.preferredPickupDate || "");
+  const [note, setNote] = useState("");
+
+  const bookMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/dangerous-goods/booking`, {
+        carrierTrackingNumber: awb.trim(),
+        carrierCode,
+        carrierName: carrierCode === "DHL" ? "DHL Express" : carrierCode === "FEDEX" ? "FedEx" : carrierCode,
+        collectionDate: collectionDate || undefined,
+        note: note || undefined,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      toast({ title: "Booked", description: "The client has been told the waybill and the collection date." });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      invalidateOperations();
+    },
+    onError: (error: any) => {
+      toast({ title: "Could not record the booking", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  return (
+    <div>
+      <div className="alert alert-amber">
+        <Clock3 />
+        <div>
+          <b>The client has paid — {money(shipment.finalPrice, shipment.currency)} settled.</b> Go
+          back to {shipment.carrierName || shipment.carrierCode || "the carrier"} and confirm the
+          movement they quoted, then record the air waybill they issue. Nothing is tendered
+          through a carrier API here: a second booking would mean two Shipper's Declarations
+          against one consignment.
+        </div>
+      </div>
+
+      <div className="checkpoint-card" style={{ marginBottom: 10 }}>
+        <div className="checkpoint-grid">
+          <div>
+            <label className="field-label">Carrier</label>
+            <select className="field-select" value={carrierCode} onChange={(event) => setCarrierCode(event.target.value)}>
+              <option value="DHL">DHL Express</option>
+              <option value="FEDEX">FedEx</option>
+              <option value="ARAMEX">Aramex</option>
+            </select>
+            <div className="field-hint">Must be an Ezhalha account, or tracking will not sync.</div>
+          </div>
+          <DgField label="Air waybill number" value={awb} onChange={setAwb} placeholder="e.g. 2575108620"
+            hint="The waybill the carrier issued when you confirmed the booking." />
+          <DgField label="Collection date" type="date" value={collectionDate} onChange={setCollectionDate}
+            hint="The pickup is booked through the carrier API for this date — leave empty to use the usual cutoff default." />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="field-label">Internal note (optional)</label>
+          <textarea className="field-textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)}
+            placeholder="e.g. Cargo aircraft only; DHL confirmed acceptance at Jeddah counter." />
+        </div>
+      </div>
+
+      <div className="sc-row"><span className="sc-key">Carrier cost</span><span className="sc-val">{money(dg.carrierCostSar, "SAR")}</span></div>
+      <div className="sc-row"><span className="sc-key">Client paid</span><span className="sc-val">{money(shipment.finalPrice, shipment.currency)}</span></div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button className="btn btn-pr" disabled={awb.trim().length < 4 || bookMutation.isPending} onClick={() => bookMutation.mutate()}>
+          {bookMutation.isPending ? "Saving…" : "Record the air waybill & book collection"}
+        </button>
+      </div>
+      <div className="field-hint" style={{ marginTop: 8 }}>
+        Books the courier pickup, starts carrier tracking, and emails the client the waybill.
+      </div>
+    </div>
+  );
+}
+
+// ── Stage 6 — booked and moving ──────────────────────────────────────────────────
+
+function DangerousGoodsLiveStage({ shipment, dg }: {
+  shipment: OperationShipmentDetail;
+  dg: DangerousGoodsDetailData;
+}) {
+  return (
+    <div>
+      <div className="alert alert-green">
+        <CheckCircle2 />
+        <div>
+          Paid and booked. The air waybill was raised with the carrier by hand after payment, so
+          nothing was tendered through the carrier API — collection was booked for {dg.preferredPickupDate || shipment.pickup?.date || "the next working day"}.
+        </div>
+      </div>
+      <div className="sc-row"><span className="sc-key">Carrier / AWB</span><span className="sc-val">{shipment.carrierName || shipment.carrierCode || "—"} · {shipment.carrierTrackingNumber || "—"}</span></div>
+      <div className="sc-row"><span className="sc-key">Pickup</span><span className="sc-val">{shipment.pickup?.confirmationNumber || formatStatus(shipment.pickup?.status)}</span></div>
+      <div className="sc-row"><span className="sc-key">Client paid</span><span className="sc-val">{money(shipment.finalPrice, shipment.currency)}</span></div>
+      <div style={{ marginTop: 12 }}>
+        <TrackingSteps shipment={shipment} variant="express" />
+      </div>
+    </div>
+  );
+}
+
+interface DangerousGoodsReviewData {
+  status: string | null;
+  regulation: string | null;
+  summary: string | null;
+  declaration: DangerousGoodsDeclarationData | null;
+  documents: Array<{ fileName: string; objectPath: string; documentType: string }>;
+  rejectionReason: string | null;
+  reviewedAt: string | null;
+}
+
+/**
+ * The dangerous goods sign-off.
+ *
+ * Approving here is the moment Ezhalha offers the goods for transport as shipper of record —
+ * the carrier is only called after an operator has read this. So the panel shows the whole
+ * declaration verbatim rather than a summary badge, and rejection demands a written reason
+ * because the client is refunded and told why.
+ */
+function DangerousGoodsReview({ shipment }: { shipment: OperationShipmentDetail }) {
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+
+  const { data, isLoading } = useQuery<DangerousGoodsReviewData>({
+    queryKey: [`/api/operations/shipments/${shipment.id}/dangerous-goods`],
+    enabled: Boolean(shipment.hasDangerousGoods),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/dangerous-goods/approve`, {});
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}/dangerous-goods`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/operations/summary"] });
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/operations/shipments/${shipment.id}/dangerous-goods/reject`, {
+        reason: rejectReason,
+      });
+      return readJsonResponse(res);
+    },
+    onSuccess: () => {
+      setRejecting(false);
+      setRejectReason("");
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/operations/shipments/${shipment.id}/dangerous-goods`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/operations/summary"] });
+    },
+  });
+
+  if (!shipment.hasDangerousGoods) return null;
+  if (isLoading || !data) return null;
+
+  const pending = data.status === "pending_review";
+
+  return (
+    <div className={`alert ${pending ? "alert-amber" : "alert-blue"}`} style={{ display: "block" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <AlertTriangle />
+        <strong>Dangerous goods</strong>
+        <span className="si-meta">{data.summary || "declaration unreadable"}</span>
+        {!pending && (
+          <span className="si-meta" style={{ marginLeft: "auto" }}>
+            {data.status === "approved" ? "Approved" : data.status === "rejected" ? "Rejected" : data.status}
+          </span>
+        )}
+      </div>
+
+      {data.declaration ? (
+        <div>
+          <div className="sc-row">
+            <span className="sc-key">Regulation</span>
+            <span className="sc-val">{data.declaration.regulation}</span>
+          </div>
+          <div className="sc-row">
+            <span className="sc-key">Accessibility</span>
+            <span className="sc-val">{data.declaration.accessibility === "ACCESSIBLE" ? "Accessible" : data.declaration.accessibility === "INACCESSIBLE" ? "Inaccessible" : "Not set"}</span>
+          </div>
+          <div className="sc-row">
+            <span className="sc-key">Offeror</span>
+            <span className="sc-val">{data.declaration.offeror || "Not set"}</span>
+          </div>
+          <div className="sc-row">
+            <span className="sc-key">Emergency contact</span>
+            <span className="sc-val">{[data.declaration.emergencyContact?.name, data.declaration.emergencyContact?.phone].filter(Boolean).join(" · ") || "Not set"}</span>
+          </div>
+          <div className="sc-row">
+            <span className="sc-key">Signed by</span>
+            <span className="sc-val">
+              {data.declaration.signatory?.name || "Not set"}
+              {data.declaration.signatory?.title ? `, ${data.declaration.signatory.title}` : ""}
+              {data.declaration.signatory?.place ? ` · ${data.declaration.signatory.place}` : ""}
+            </span>
+          </div>
+
+          {data.declaration.packages.map((pkg) => (
+            <div key={pkg.packageIndex} style={{ marginTop: 8 }}>
+              <div className="si-meta">
+                Package {pkg.packageIndex + 1}
+                {pkg.containerType ? ` · ${pkg.containerType}` : ""}
+                {pkg.numberOfContainers ? ` × ${pkg.numberOfContainers}` : ""}
+              </div>
+              {pkg.commodities.map((commodity, index) => (
+                <div key={index} className="sc-row">
+                  <span className="sc-key">{commodity.unNumber || "UN?"}</span>
+                  <span className="sc-val">
+                    {commodity.properShippingName || "not yet classified"}
+                    {commodity.technicalName ? ` (${commodity.technicalName})` : ""}
+                    {" · class "}{commodity.hazardClass}
+                    {commodity.packingGroup && commodity.packingGroup !== "NONE" ? ` · PG ${commodity.packingGroup}` : ""}
+                    {commodity.packingInstruction ? ` · PI ${commodity.packingInstruction}` : ""}
+                    {commodity.quantity?.amount ? ` · ${commodity.quantity.amount}${commodity.quantity.units || ""} ${(commodity.quantity.quantityType || "").toLowerCase()}` : " · quantity not stated"}
+                    {commodity.cargoAircraftOnly ? " · CARGO AIRCRAFT ONLY" : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="si-meta">
+          The stored declaration could not be read. Reject this shipment and ask the client to
+          declare it again — it cannot be booked in this state.
+        </div>
+      )}
+
+      {data.documents.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className="si-meta">Paperwork</div>
+          {data.documents.map((document, index) => (
+            <DgDocumentRow key={index} shipmentId={shipment.id} index={index} document={document} />
+          ))}
+        </div>
+      )}
+
+      {data.rejectionReason && (
+        <div className="si-meta" style={{ marginTop: 8 }}>Rejected: {data.rejectionReason}</div>
+      )}
+
+      {pending && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          {rejecting ? (
+            <>
+              <textarea
+                className="field-textarea"
+                placeholder="Tell the client why this declaration was rejected"
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+                data-testid="input-dg-reject-reason"
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-red btn-xs"
+                  disabled={!rejectReason.trim() || rejectMutation.isPending}
+                  onClick={() => rejectMutation.mutate()}
+                  data-testid="button-dg-confirm-reject"
+                >
+                  {rejectMutation.isPending ? "Rejecting..." : "Reject and refund"}
+                </button>
+                <button type="button" className="btn btn-xs" onClick={() => setRejecting(false)}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-blue btn-xs"
+                disabled={!data.declaration || approveMutation.isPending}
+                onClick={() => approveMutation.mutate()}
+                data-testid="button-dg-approve"
+              >
+                {approveMutation.isPending ? "Booking with carrier..." : "Approve and book"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-xs"
+                onClick={() => setRejecting(true)}
+                data-testid="button-dg-reject"
+              >
+                Reject
+              </button>
+            </div>
+          )}
+          {(approveMutation.error || rejectMutation.error) && (
+            <div className="si-meta">
+              {(approveMutation.error as Error)?.message || (rejectMutation.error as Error)?.message}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The decoded carrier failure.
+ *
+ * Shows what the carrier objected to, what to do about it, and — the part that matters most —
+ * whether pressing the button again could possibly work. The carrier's own words are kept
+ * underneath, because the translation is a lens and never a replacement.
+ */
+function CarrierFailureExplanation({ flag }: { flag?: AttentionFlag }) {
+  if (!flag?.metadata) return null;
+
+  let meta: CarrierFailureMetadata;
+  try {
+    meta = JSON.parse(flag.metadata) as CarrierFailureMetadata;
+  } catch {
+    return null;
+  }
+
+  if (!meta.cause && !meta.action) return null;
+
+  const retryTone =
+    meta.retry === "retry" ? "b-green" : meta.retry === "after_fix" ? "b-amber" : "b-red";
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--amber-bd)" }}>
+      {meta.retryLabel && (
+        <span className={`badge ${retryTone}`} data-testid="badge-carrier-retry">
+          {meta.retryLabel}
+        </span>
+      )}
+      {meta.cause && (
+        <div className="sc-row" style={{ marginTop: 8 }}>
+          <span className="sc-key">Why</span>
+          <span className="sc-val">{meta.cause}</span>
+        </div>
+      )}
+      {meta.action && (
+        <div className="sc-row">
+          <span className="sc-key">What to do</span>
+          <span className="sc-val">{meta.action}</span>
+        </div>
+      )}
+      {meta.pickupDate && (
+        <div className="sc-row">
+          <span className="sc-key">Date rejected</span>
+          <span className="sc-val">{meta.pickupDate}</span>
+        </div>
+      )}
+      {meta.code && (
+        <div className="sc-row">
+          <span className="sc-key">Carrier code</span>
+          <span className="sc-val">{meta.code}</span>
+        </div>
+      )}
+      {meta.carrierMessage && (
+        <details style={{ marginTop: 6 }}>
+          <summary className="si-meta" style={{ cursor: "pointer" }}>
+            {meta.recognised ? "Carrier's own message" : "Carrier's own message (not yet translated)"}
+          </summary>
+          <div className="si-meta" style={{ marginTop: 4 }}>{meta.carrierMessage}</div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CarrierScanFeed({ shipment }: { shipment: OperationShipmentDetail }) {
+  const events = shipment.carrierTrackingEvents || [];
+  // Brand only — "DHL", not "EXPRESS WORLDWIDE". Now that shared/carriers.ts is on the same
+  // branch, the scan feed uses the same naming as the rest of the admin surfaces.
+  const carrier = carrierBrandName(shipment.carrierCode, shipment.carrierName) || "the carrier";
+
+  if (events.length === 0) {
+    return (
+      <div className="empty">
+        {shipment.carrierTrackingNumber
+          ? `No scans from ${carrier} yet. Press "Sync now" to poll, or wait for the next automatic refresh.`
+          : "This shipment has no carrier tracking number, so there is nothing for the carrier to report on yet."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="track-wrap">
+      {events.map((event, index) => {
+        const isException = Boolean(event.exceptionCode || event.exceptionDescription);
+        return (
+          <div className="track-step" key={event.id}>
+            <div className={`track-check ${isException ? "" : index === 0 ? "active-step" : "done"}`}>
+              {isException ? <AlertTriangle /> : index === 0 ? null : <CheckCircle2 />}
+            </div>
+            <div className="track-info">
+              {/* The carrier's exact wording. Never reformatted, never title-cased. */}
+              <div className="track-title">{event.description}</div>
+              <div className="track-sub">
+                {formatCarrierScanTime(event)}
+                {event.location ? ` · ${event.location}` : ""}
+                {event.eventCode ? ` · ${event.eventCode}` : ""}
+              </div>
+              {event.exceptionDescription && (
+                <div className="track-sub" style={{ color: "var(--red)" }}>
+                  {event.exceptionDescription}
+                  {event.exceptionCode ? ` (${event.exceptionCode})` : ""}
+                </div>
+              )}
+              {event.remarks && <div className="track-sub">{event.remarks}</div>}
+              {event.signedBy && <div className="track-sub">Signed by {event.signedBy}</div>}
             </div>
           </div>
         );

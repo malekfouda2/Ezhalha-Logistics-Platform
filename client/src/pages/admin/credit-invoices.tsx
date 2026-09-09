@@ -5,6 +5,7 @@ import { LoadingScreen } from "@/components/loading-spinner";
 import { PaginationControls } from "@/components/pagination-controls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -45,6 +46,7 @@ interface ShipmentDetail {
   shipmentType: string;
   serviceType: string;
   carrierCode: string;
+  carrierName: string | null;
   senderName: string;
   senderCity: string;
   senderCountry: string;
@@ -317,7 +319,14 @@ export default function AdminCreditInvoices() {
                             <TableCell data-testid={`text-tracking-${inv.id}`}>
                               <div className="font-mono text-sm">{inv.shipment?.trackingNumber || "-"}</div>
                               {inv.shipment?.carrierTrackingNumber && (
-                                <div className="text-xs text-muted-foreground font-mono">{inv.shipment.carrierTrackingNumber}</div>
+                                <div className="text-xs">
+                                  <CarrierTrackingLink
+                                    trackingNumber={inv.shipment.carrierTrackingNumber}
+                                    carrierCode={inv.shipment.carrierCode}
+                                    carrierName={inv.shipment.carrierName}
+                                    className="text-xs"
+                                  />
+                                </div>
                               )}
                               {inv.shipment?.serviceType && (
                                 <div className="text-xs text-muted-foreground">{inv.shipment.serviceType.replace(/_/g, " ")}</div>
@@ -503,7 +512,12 @@ export default function AdminCreditInvoices() {
                     {detailInvoice.shipment.carrierTrackingNumber && (
                       <>
                         <span className="text-muted-foreground">Carrier Tracking</span>
-                        <span className="font-mono text-xs">{detailInvoice.shipment.carrierTrackingNumber}</span>
+                        <CarrierTrackingLink
+                          trackingNumber={detailInvoice.shipment.carrierTrackingNumber}
+                          carrierCode={detailInvoice.shipment.carrierCode}
+                          carrierName={detailInvoice.shipment.carrierName}
+                          className="text-xs"
+                        />
                       </>
                     )}
                     <span className="text-muted-foreground">Type</span>

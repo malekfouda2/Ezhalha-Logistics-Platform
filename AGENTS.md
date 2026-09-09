@@ -104,7 +104,7 @@ Common integration env:
 - Integration accounts can be managed through admin apps and encrypted with `INTEGRATION_CONFIG_SECRET`.
 - Tap is current payment integration. Stripe references are legacy/backwards compatibility if present.
 - Credit/pay-later creates `credit_invoices` with 30-day terms and reminder scheduler; see `docs/credit-pay-later-feature.md`.
-- Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, or `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`.
+- Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, or `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`.
 - Default seed data creates admin/client demo users only when DB has no admin user; do not rely on seeded credentials for production.
 
 ## Frontend Conventions

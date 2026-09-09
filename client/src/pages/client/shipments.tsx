@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
 import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { StatusBadge } from "@/components/status-badge";
+import { carrierBrandName } from "@shared/carriers";
+import { ShipmentFiltersBar, type ShipmentFilterFacets } from "@/components/shipment-filters-bar";
+import {
+  DEFAULT_SHIPMENT_FILTERS,
+  matchesShipmentFilters,
+  SHIPMENT_FILTER_ALL,
+  type ShipmentFilters,
+} from "@shared/shipment-filters";
 import { TapCardForm } from "@/components/tap-card-form";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { NoShipments } from "@/components/empty-state";
@@ -26,18 +34,31 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil } from "lucide-react";
+import { Search, Plus, Eye, MapPin, Package, Calendar, Ban, Loader2, Tag, AlertTriangle, Download, CreditCard, Pencil, Clock } from "lucide-react";
+import { CancelShipmentDialog } from "@/components/cancel-shipment-dialog";
 import { EditPendingShipmentDialog } from "@/components/edit-pending-shipment-dialog";
 import { SarAmount, formatCurrencyAmount } from "@/components/sar-symbol";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { humanizeError } from "@/lib/friendly-error";
 import type { Shipment, ClientAccount, ShipmentItem } from "@shared/schema";
 import { format } from "date-fns";
 
 // Each filter tab covers a set of carrier-synced statuses; without this a shipment sitting at
 // "picked_up" or "customs_clearance" appears only under "All".
 const statusFilterGroups: Record<string, string[]> = {
-  processing: ["draft", "payment_pending", "created", "processing"],
+  // The three dangerous goods statuses all belong here: from the client's side each one means
+  // "we are working on it and it has not shipped yet". Leaving them out put a DG shipment
+  // under "All" and nowhere else — the exact problem this map exists to prevent.
+  processing: [
+    "draft",
+    "payment_pending",
+    "created",
+    "processing",
+    "dg_review",
+    "dg_awaiting_carrier",
+    "dg_booking",
+  ],
   in_transit: ["picked_up", "in_transit", "customs_clearance", "out_for_delivery"],
   attention: ["on_hold", "returned", "carrier_error"],
   delivered: ["delivered"],
@@ -51,7 +72,7 @@ function canCancelShipment(shipment: Shipment): boolean {
   const pickedUpOrLaterStatuses = ["picked_up", "in_transit", "out_for_delivery", "on_hold", "returned", "delivered", "cancelled"];
 
   return (
-    ["created", "processing", "carrier_error", "payment_pending"].includes(shipment.status) &&
+    ["created", "processing", "carrier_error", "payment_pending", "dg_review", "dg_booking"].includes(shipment.status) &&
     !pickedUpOrLaterStatuses.includes(carrierStatus)
   );
 }
@@ -70,6 +91,7 @@ function formatShipmentKindLabel(shipment: Shipment): string {
     return "Door to Door";
   }
   if (shipment.fulfillmentType === "local") return "Local";
+  if (shipment.fulfillmentType === "dg_manual") return "Dangerous Goods";
   return "Express";
 }
 
@@ -106,8 +128,8 @@ type ShipmentCheckoutSummary = {
 
 export default function ClientShipments() {
   const [location, navigate] = useLocation();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [filters, setFilters] = useState<ShipmentFilters>({ ...DEFAULT_SHIPMENT_FILTERS });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [editShipment, setEditShipment] = useState<Shipment | null>(null);
   const [resumedShipmentId, setResumedShipmentId] = useState<string | null>(null);
@@ -141,6 +163,32 @@ export default function ClientShipments() {
       return response.json();
     },
     enabled: Boolean(selectedShipment && canPayShipment(selectedShipment)),
+  });
+
+  // Whether this client may pay on credit. The create-shipment wizard already asks; this list is
+  // the only other place a pending shipment can be paid, so it has to ask too.
+  const { data: creditAccess } = useQuery<{ creditEnabled: boolean; request: { status?: string } | null }>({
+    queryKey: ["/api/client/credit-access"],
+  });
+
+  const payLaterMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      const res = await apiRequest("POST", `/api/client/shipments/${shipmentId}/pay-later`);
+      return res.json();
+    },
+    onSuccess: () => {
+      ["/api/client/shipments", "/api/client/shipments/recent", "/api/client/stats", "/api/client/credit-invoices"].forEach(
+        (key) => queryClient.invalidateQueries({ queryKey: [key] }),
+      );
+      setSelectedShipment(null);
+      toast({
+        title: "Credit invoice created",
+        description: "Your shipment is confirmed with Pay Later. The invoice is due in 30 days.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Pay Later failed", description: humanizeError(error), variant: "destructive" });
+    },
   });
 
   const cancelMutation = useMutation({
@@ -207,15 +255,20 @@ export default function ClientShipments() {
     },
   });
 
-  const filteredShipments = shipments?.filter((shipment) => {
-    const matchesSearch =
-      shipment.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      shipment.recipientName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilterGroups[statusFilter] ?? [statusFilter]).includes(shipment.status);
-    return matchesSearch && matchesStatus;
-  });
+  const filteredShipments = shipments?.filter((shipment) =>
+    matchesShipmentFilters(shipment as any, filters),
+  );
+
+  // Options come from the client's own shipments, so a filter can never select an empty set.
+  const facets = useMemo<ShipmentFilterFacets>(() => {
+    const distinct = (pick: (s: Shipment) => string | null | undefined) =>
+      Array.from(new Set((shipments ?? []).map(pick).filter((v): v is string => Boolean(v)))).sort();
+    return {
+      carrierCodes: distinct((s) => (s as any).carrierCode),
+      originCountries: distinct((s) => (s as any).senderCountry),
+      destinationCountries: distinct((s) => (s as any).recipientCountry),
+    };
+  }, [shipments]);
 
   useEffect(() => {
     if (!shipments?.length) {
@@ -232,7 +285,7 @@ export default function ClientShipments() {
       return;
     }
 
-    setStatusFilter("all");
+    setFilters((prev: ShipmentFilters) => ({ ...prev, status: SHIPMENT_FILTER_ALL }));
     setResumedShipmentId(resumeShipmentId);
     setSelectedShipment(shipmentToResume);
     window.history.replaceState(null, "", "/client/shipments");
@@ -266,18 +319,11 @@ export default function ClientShipments() {
         {/* Filters */}
         <Card>
           <CardContent className="py-4">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by shipment ID or recipient..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                  data-testid="input-search"
-                />
-              </div>
-              <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+            <div className="space-y-4">
+              <Tabs
+                value={filters.status}
+                onValueChange={(value) => setFilters((prev: ShipmentFilters) => ({ ...prev, status: value }))}
+              >
                 <TabsList>
                   <TabsTrigger value="all" data-testid="tab-all">
                     All
@@ -296,6 +342,18 @@ export default function ClientShipments() {
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
+
+              <ShipmentFiltersBar
+                filters={filters}
+                onChange={setFilters}
+                facets={facets}
+                statusOptions={[]}
+                showStatusSelect={false}
+                expanded={filtersExpanded}
+                onExpandedChange={setFiltersExpanded}
+                resultCount={filteredShipments?.length}
+                searchPlaceholder="Search by shipment ID, recipient, city, or sender..."
+              />
             </div>
           </CardContent>
         </Card>
@@ -331,7 +389,7 @@ export default function ClientShipments() {
                         {shipment.recipientCity}, {shipment.recipientCountry}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {shipment.carrierName || shipment.carrierCode || <span className="text-muted-foreground">—</span>}
+                        {carrierBrandName(shipment.carrierCode, shipment.carrierName) || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{formatShipmentKindLabel(shipment)}</Badge>
@@ -628,7 +686,34 @@ export default function ClientShipments() {
                 )}
               </div>
 
-              {canPayShipment(selectedShipment) && (
+              {/* Dangerous goods are quoted by hand and cannot be paid from here.
+                  The client must first re-confirm the declaration as operations left it —
+                  they may have corrected addresses, weights or commodity details while
+                  arranging carriage — and the server refuses payment until they have. Offering
+                  Pay Now here produced a dead end: the card tokenized, the request went out,
+                  and the only answer was "confirm the declaration first" with nowhere to do it. */}
+              {canPayShipment(selectedShipment) && selectedShipment.fulfillmentType === "dg_manual" && (
+                <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Quotation ready</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Our team has arranged this shipment with the carrier. Review the declaration
+                    and the price, then confirm and pay.
+                  </p>
+                  <Button
+                    className="w-full"
+                    data-testid="button-open-dg-quotation"
+                    onClick={() => navigate(`/client/quotations/${selectedShipment.id}`)}
+                  >
+                    <CreditCard className="mr-2 h-4 w-4" />
+                    Review &amp; pay quotation
+                  </Button>
+                </div>
+              )}
+
+              {canPayShipment(selectedShipment) && selectedShipment.fulfillmentType !== "dg_manual" && (
                 <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
                   <div className="flex items-center gap-2">
                     <CreditCard className="h-4 w-4 text-primary" />
@@ -660,6 +745,38 @@ export default function ClientShipments() {
                       This shipment is not available for online payment right now.
                     </p>
                   )}
+
+                  {checkoutSummary?.canPay && creditAccess?.creditEnabled && (
+                    <>
+                      <div className="relative flex items-center py-1">
+                        <div className="flex-grow border-t" />
+                        <span className="px-3 text-xs uppercase text-muted-foreground">or</span>
+                        <div className="flex-grow border-t" />
+                      </div>
+                      <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+                        <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                          <Clock className="h-4 w-4" />
+                          Credit / Pay Later
+                        </div>
+                        <p className="text-sm text-amber-600 dark:text-amber-400">
+                          Confirm this shipment now and receive an invoice with 30-day payment terms.
+                        </p>
+                        <Button
+                          variant="outline"
+                          className="w-full border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                          disabled={payLaterMutation.isPending || payShipmentMutation.isPending}
+                          onClick={() => payLaterMutation.mutate(selectedShipment.id)}
+                          data-testid="button-pay-later-selected-shipment"
+                        >
+                          {payLaterMutation.isPending ? (
+                            <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creating credit invoice...</>
+                          ) : (
+                            <>Use Credit / Pay Later</>
+                          )}
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -670,20 +787,28 @@ export default function ClientShipments() {
               </div>
 
               {canCancelShipment(selectedShipment) && (
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  onClick={() => cancelMutation.mutate(selectedShipment.id)}
-                  disabled={cancelMutation.isPending}
-                  data-testid="button-cancel-shipment"
+                <CancelShipmentDialog
+                  trackingNumber={selectedShipment.trackingNumber}
+                  carrierStatus={selectedShipment.carrierStatus}
+                  carrierName={selectedShipment.carrierName}
+                  hasPickupBooked={Boolean((selectedShipment as any).pickupConfirmationNumber)}
+                  isPending={cancelMutation.isPending}
+                  onConfirm={() => cancelMutation.mutate(selectedShipment.id)}
                 >
-                  {cancelMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Ban className="mr-2 h-4 w-4" />
-                  )}
-                  Cancel Shipment
-                </Button>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={cancelMutation.isPending}
+                    data-testid="button-cancel-shipment"
+                  >
+                    {cancelMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="mr-2 h-4 w-4" />
+                    )}
+                    Cancel Shipment
+                  </Button>
+                </CancelShipmentDialog>
               )}
             </div>
           )}

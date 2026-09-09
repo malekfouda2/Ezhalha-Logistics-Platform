@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CarrierTrackingLink } from "@/components/carrier-tracking-link";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -85,6 +86,8 @@ interface AdminRefundRequestSummary {
   shipmentId: string;
   shipmentTrackingNumber: string | null;
   carrierTrackingNumber: string | null;
+  carrierCode: string | null;
+  carrierName: string | null;
   shipmentStatus: string | null;
   clientName: string;
   clientAccountNumber: string | null;
@@ -474,8 +477,14 @@ export default function AdminDashboard() {
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-medium">{refundRequest.shipmentTrackingNumber || refundRequest.shipmentId}</span>
                               {refundRequest.carrierTrackingNumber && (
-                                <span className="text-sm text-muted-foreground">
-                                  Carrier: {refundRequest.carrierTrackingNumber}
+                                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  Carrier:
+                                  <CarrierTrackingLink
+                                    trackingNumber={refundRequest.carrierTrackingNumber}
+                                    carrierCode={refundRequest.carrierCode}
+                                    carrierName={refundRequest.carrierName}
+                                    className="text-sm"
+                                  />
                                 </span>
                               )}
                             </div>

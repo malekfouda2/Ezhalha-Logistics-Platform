@@ -90,6 +90,24 @@ export default function SalesChannelsPage() {
   // Wizard state
   const [open, setOpen] = useState(false);
   const [wStep, setWStep] = useState(1);
+  const [zidConnecting, setZidConnecting] = useState(false);
+  const [zidError, setZidError] = useState<string | null>(null);
+
+  // Zid is OAuth: we hand the merchant off to Zid and the channel is created by the callback
+  // once they approve, so there is nothing to submit from this form.
+  const startZidConnect = async () => {
+    setZidConnecting(true);
+    setZidError(null);
+    try {
+      const res = await apiRequest("GET", "/api/client/sales-channels/zid/connect");
+      const body = await res.json() as { authorizeUrl?: string };
+      if (!body.authorizeUrl) throw new Error("Zid did not return an authorization URL");
+      window.location.href = body.authorizeUrl;
+    } catch (error) {
+      setZidError(error instanceof Error ? error.message : "Could not start the Zid connection");
+      setZidConnecting(false);
+    }
+  };
   const [platform, setPlatform] = useState("woocommerce");
   const [form, setForm] = useState({ name: "", storeUrl: "", consumer_key: "", consumer_secret: "" });
   const [sync, setSync] = useState({ importPaidOnly: "paid", onNewOrder: "review", pickup: "default" });
@@ -334,9 +352,28 @@ export default function SalesChannelsPage() {
                     Generate a Read/Write REST API key in WooCommerce → Settings → Advanced → REST API.
                   </p>
                 </>
+              ) : meta.id === "zid" ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    You'll be sent to Zid to approve access for your store. Nothing is stored
+                    until you approve, and you can disconnect at any time.
+                  </p>
+                  <Button
+                    className="w-full"
+                    disabled={zidConnecting}
+                    onClick={startZidConnect}
+                    data-testid="button-connect-zid"
+                  >
+                    {zidConnecting ? "Opening Zid..." : "Continue to Zid"}
+                  </Button>
+                  {zidError && (
+                    <p className="text-sm rounded-lg bg-destructive/10 text-destructive p-3">{zidError}</p>
+                  )}
+                </div>
               ) : (
                 <p className="text-sm rounded-lg bg-amber-500/10 text-amber-600 p-3">
-                  {meta.label} uses a platform OAuth app that isn't live yet. WooCommerce is available today.
+                  {meta.label} uses a platform OAuth app that isn't live yet. WooCommerce and Zid
+                  are available today.
                 </p>
               )}
             </div>
@@ -432,11 +469,16 @@ export default function SalesChannelsPage() {
                 <Button variant="outline" onClick={() => (wStep === 1 ? closeWizard() : setWStep(wStep - 1))}>
                   <ArrowLeft className="h-4 w-4 mr-1.5" /> {wStep === 1 ? "Cancel" : "Back"}
                 </Button>
-                <Button onClick={advance} disabled={!canAdvance() || connectMutation.isPending} data-testid="button-wizard-next">
-                  {connectMutation.isPending ? "Connecting…" : (
-                    <>{nextLabel} <ArrowRight className="h-4 w-4 ml-1.5" /></>
-                  )}
-                </Button>
+                {/* An OAuth platform ends the wizard here — the merchant leaves for the
+                    provider and the channel is created by the callback when they approve.
+                    Advancing further would submit the key-based form Zid never fills in. */}
+                {!(meta.auth === "oauth" && wStep === 2) && (
+                  <Button onClick={advance} disabled={!canAdvance() || connectMutation.isPending} data-testid="button-wizard-next">
+                    {connectMutation.isPending ? "Connecting…" : (
+                      <>{nextLabel} <ArrowRight className="h-4 w-4 ml-1.5" /></>
+                    )}
+                  </Button>
+                )}
               </>
             )}
           </DialogFooter>
