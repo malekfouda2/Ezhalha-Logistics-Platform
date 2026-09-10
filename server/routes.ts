@@ -18959,7 +18959,15 @@ export async function registerRoutes(
     const shipment = await storage.getShipment(req.params.id);
     if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Quotation not found" });
     if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
-    res.json(serializeQuotation(shipment));
+    // Credit travels with the quotation rather than being inferred from the account alone: the
+    // page has to be able to say *why* credit is unavailable — no terms, or not enough left —
+    // instead of silently rendering a card-only page to a client who settles on account.
+    const quotationAccount = await storage.getClientAccount(user.clientAccountId);
+    const creditEnabled = Boolean(quotationAccount?.creditEnabled);
+    const creditAvailableSar = creditEnabled
+      ? (await storage.getClientCreditSummary(user.clientAccountId)).available
+      : 0;
+    res.json({ ...serializeQuotation(shipment), creditEnabled, creditAvailableSar });
   });
 
   app.patch("/api/client/quotations/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
@@ -22032,10 +22040,16 @@ export async function registerRoutes(
       // status that made the retry fail with "not in a payable state".
       //
       // Only carrier-booked flows are validated: it exists to stop a carrier API rejecting the
-      // booking. ddp_manual and local are fulfilled by operations with no carrier call, and the
-      // card path already skips both, so applying it here only to credit made Pay Later fail on
-      // domestic KSA shipments that Pay Now accepted.
-      if (shipment.fulfillmentType !== "ddp_manual" && shipment.fulfillmentType !== "local") {
+      // booking. ddp_manual, local and dangerous goods are fulfilled by operations with no
+      // carrier call, and the card path already skips all three, so applying it here only to
+      // credit made Pay Later fail on shipments that Pay Now accepted. Dangerous goods is the
+      // sharpest case: an operator has already agreed the movement with the carrier against
+      // this exact address, so rejecting it now rejects an address the carrier accepted.
+      if (
+        shipment.fulfillmentType !== "ddp_manual" &&
+        shipment.fulfillmentType !== "local" &&
+        shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE
+      ) {
         const payLaterAddrValidation = validateShippingAddresses(
           { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
           { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
