@@ -3189,7 +3189,50 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
   );
 }
 
-function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
+/**
+ * The basis for extra-weight pricing: the quantity the shipment was actually billed on.
+ *
+ * `weight` holds the actual weight and `chargeableWeight` the billable one, which is the
+ * volumetric figure whenever it wins. Deriving the per-unit rate from `weight` prices every
+ * extra kilo at the actual-weight rate, and on a light bulky parcel that is far above what the
+ * client paid per billable kilo: 8 kg actual against 20 kg volumetric on a SAR 1,000 shipment
+ * gives 125 SAR/kg instead of 50.
+ *
+ * The unit travels with the quantity on purpose. `chargeableWeightUnit` and `weightUnit` are
+ * separate columns and do not always agree, so returning a chargeable quantity under the
+ * shipment's own weight unit would quote a per-KG rate against a figure entered in LB.
+ */
+export function getExtraFeesBillableQuantity(shipment: Record<string, any>): { quantity: number; unit: string } {
+  const storedChargeable = parseMoneyValue(shipment.chargeableWeight);
+  if (storedChargeable > 0) {
+    return {
+      quantity: storedChargeable,
+      unit: shipment.chargeableWeightUnit || shipment.weightUnit || "KG",
+    };
+  }
+
+  const details = parseJsonObject(shipment.chargeableWeightDetails);
+  const detailQuantity = parseMoneyValue(
+    (details?.billableQuantity ?? details?.chargeableWeight) as string | number | null | undefined,
+  );
+  if (detailQuantity > 0) {
+    return {
+      quantity: detailQuantity,
+      unit:
+        (details?.billingUnit as string) ||
+        (details?.weightUnit as string) ||
+        shipment.chargeableWeightUnit ||
+        shipment.weightUnit ||
+        "KG",
+    };
+  }
+
+  // Older rows, and the dimensionless domestic flows, never stored a billable quantity. Nothing
+  // volumetric can apply there, so the actual weight is the billable weight.
+  return { quantity: parseMoneyValue(shipment.weight), unit: shipment.weightUnit || "KG" };
+}
+
+export function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   if (shipment.fulfillmentType === "ddp_manual") {
     const storedWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
     const storedExtraCostAmountSar = parseMoneyValue(shipment.extraFeesCostAmountSar);
@@ -3216,16 +3259,16 @@ function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   const grossTotalAmountSar = parseMoneyValue(
     shipment.clientTotalAmountSar ?? shipment.finalPrice,
   );
-  const weightValue = parseMoneyValue(shipment.weight);
+  const { quantity: billableQuantity } = getExtraFeesBillableQuantity(shipment);
 
-  if (weightValue <= 0) {
+  if (billableQuantity <= 0) {
     return 0;
   }
 
-  return roundMoney(grossTotalAmountSar / weightValue);
+  return roundMoney(grossTotalAmountSar / billableQuantity);
 }
 
-function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
+export function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
   if (
     shipment.fulfillmentType === "ddp_manual" &&
     (shipment.ddpBillingUnit === "KG" || shipment.ddpBillingUnit === "CBM")
@@ -3233,7 +3276,7 @@ function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
     return shipment.ddpBillingUnit;
   }
 
-  return shipment.weightUnit || "KG";
+  return getExtraFeesBillableQuantity(shipment).unit;
 }
 
 function deriveShipmentExtraFees(shipment: Record<string, any>) {
@@ -3427,6 +3470,7 @@ function serializeFinancialShipment(
     extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
     extraFeesQuantityUnit: getExtraFeesQuantityUnit(shipment),
+    extraFeesBillableQuantity: getExtraFeesBillableQuantity(shipment).quantity,
     extraFeesAddedAt: shipment.extraFeesAddedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt,
     extraWeightInvoiceStatus,
@@ -5733,7 +5777,7 @@ function serializeClientExtraFeeNotice(shipment: Record<string, any>) {
     extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
-    weightValue: parseMoneyValue(shipment.weight),
+    weightValue: getExtraFeesBillableQuantity(shipment).quantity,
     weightUnit: getExtraFeesQuantityUnit(shipment),
     grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
@@ -5896,7 +5940,7 @@ function serializeClientExtraFeeNotices(
       extraWeightAmountSar: effective.extraWeightAmountSar,
       extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
       extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
-      weightValue: parseMoneyValue(shipment.weight),
+      weightValue: getExtraFeesBillableQuantity(shipment).quantity,
       weightUnit: getExtraFeesQuantityUnit(shipment),
       grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
       extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
@@ -14238,6 +14282,10 @@ export async function registerRoutes(
       });
 
       const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
+      const quotationChargeableWeight = buildChargeableWeightSummaryFromShipmentInput(
+        { packages: data.packages, weightUnit: data.weightUnit, dimensionUnit: data.dimensionUnit },
+        data.carrierCode || "GENERIC",
+      );
       const first = data.packages[0];
       const fulfillmentType = data.type === "local" ? "local" : data.type === "ddp" ? "ddp_manual" : undefined;
 
@@ -14288,6 +14336,10 @@ export async function registerRoutes(
         recipientShortAddress: data.recipient.shortAddress || null,
         weight: totalWeightKg.toString(),
         weightUnit: data.weightUnit,
+        dimensionalWeight: formatWeightValue(quotationChargeableWeight.dimensionalWeight),
+        chargeableWeight: formatWeightValue(quotationChargeableWeight.chargeableWeight),
+        chargeableWeightUnit: quotationChargeableWeight.weightUnit,
+        chargeableWeightDetails: JSON.stringify(quotationChargeableWeight),
         length: first.length.toString(),
         width: first.width.toString(),
         height: first.height.toString(),
@@ -18907,7 +18959,15 @@ export async function registerRoutes(
     const shipment = await storage.getShipment(req.params.id);
     if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Quotation not found" });
     if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
-    res.json(serializeQuotation(shipment));
+    // Credit travels with the quotation rather than being inferred from the account alone: the
+    // page has to be able to say *why* credit is unavailable — no terms, or not enough left —
+    // instead of silently rendering a card-only page to a client who settles on account.
+    const quotationAccount = await storage.getClientAccount(user.clientAccountId);
+    const creditEnabled = Boolean(quotationAccount?.creditEnabled);
+    const creditAvailableSar = creditEnabled
+      ? (await storage.getClientCreditSummary(user.clientAccountId)).available
+      : 0;
+    res.json({ ...serializeQuotation(shipment), creditEnabled, creditAvailableSar });
   });
 
   app.patch("/api/client/quotations/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
@@ -20780,6 +20840,11 @@ export async function registerRoutes(
 
       const data = dangerousGoodsSubmitSchema.parse(req.body);
       const totalWeight = data.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+      // No carrier is chosen yet on a dangerous-goods shipment, so the generic divisor applies.
+      const dgChargeableWeight = buildChargeableWeightSummaryFromShipmentInput(
+        { packages: data.packages, weightUnit: data.weightUnit, dimensionUnit: data.dimensionUnit },
+        "GENERIC",
+      );
       const isInternational = data.shipper.countryCode !== data.recipient.countryCode;
 
       if (isInternational && data.items.length === 0) {
@@ -20828,6 +20893,13 @@ export async function registerRoutes(
         recipientShortAddress: data.recipient.shortAddress || null,
         weight: totalWeight.toString(),
         weightUnit: data.weightUnit,
+        // Stored at creation even though the price is quoted later by operations: the extra-weight
+        // rate is derived from the billable quantity, and without these columns it silently falls
+        // back to the actual weight and overcharges every volumetric shipment.
+        dimensionalWeight: formatWeightValue(dgChargeableWeight.dimensionalWeight),
+        chargeableWeight: formatWeightValue(dgChargeableWeight.chargeableWeight),
+        chargeableWeightUnit: dgChargeableWeight.weightUnit,
+        chargeableWeightDetails: JSON.stringify(dgChargeableWeight),
         length: data.packages[0].length.toString(),
         width: data.packages[0].width.toString(),
         height: data.packages[0].height.toString(),
@@ -21968,10 +22040,16 @@ export async function registerRoutes(
       // status that made the retry fail with "not in a payable state".
       //
       // Only carrier-booked flows are validated: it exists to stop a carrier API rejecting the
-      // booking. ddp_manual and local are fulfilled by operations with no carrier call, and the
-      // card path already skips both, so applying it here only to credit made Pay Later fail on
-      // domestic KSA shipments that Pay Now accepted.
-      if (shipment.fulfillmentType !== "ddp_manual" && shipment.fulfillmentType !== "local") {
+      // booking. ddp_manual, local and dangerous goods are fulfilled by operations with no
+      // carrier call, and the card path already skips all three, so applying it here only to
+      // credit made Pay Later fail on shipments that Pay Now accepted. Dangerous goods is the
+      // sharpest case: an operator has already agreed the movement with the carrier against
+      // this exact address, so rejecting it now rejects an address the carrier accepted.
+      if (
+        shipment.fulfillmentType !== "ddp_manual" &&
+        shipment.fulfillmentType !== "local" &&
+        shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE
+      ) {
         const payLaterAddrValidation = validateShippingAddresses(
           { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
           { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }
