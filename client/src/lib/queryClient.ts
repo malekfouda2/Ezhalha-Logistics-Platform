@@ -90,3 +90,35 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+/**
+ * What the client is *allowed* to do, as opposed to what they have done.
+ *
+ * These few responses are the ones an administrator changes from outside the client's browser:
+ * credit access is approved, dangerous goods is enabled, a permission is granted or taken away.
+ * Under the global `staleTime: Infinity` the first answer is kept for the life of the tab, so an
+ * approval that lands while the client is logged in is invisible to them until they hard-reload —
+ * and every gate reading it keeps rendering the "you cannot" branch.
+ *
+ * That is not hypothetical: a client requested credit access, an admin approved it 37 seconds
+ * later, and the quotation they were sitting on went on offering card payment only, against a
+ * SAR 5,000 limit they had just been granted.
+ *
+ * Entitlements are small, cheap reads. Always refetch them on mount and on focus; everything
+ * else keeps the aggressive cache.
+ */
+const ENTITLEMENT_QUERY_PATHS = [
+  "/api/client/account",
+  "/api/client/credit-access",
+  "/api/client/dangerous-goods",
+  "/api/client/sales-features",
+  "/api/client/my-permissions",
+] as const;
+
+for (const path of ENTITLEMENT_QUERY_PATHS) {
+  queryClient.setQueryDefaults([path], {
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+  });
+}
