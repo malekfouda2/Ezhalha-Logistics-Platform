@@ -17,8 +17,8 @@ import {
   withLegacyCarrierContacts,
   type CarrierContactChannel,
 } from "@shared/carrier-contact-channels";
-import { sendEmail } from "./email";
-import { getRenderedTemplate } from "./email-templates";
+import { dispatchTemplatedEmail } from "./email-delivery";
+import { hasNotificationTemplate, notificationTemplateSlug } from "./email-settings";
 import { logError, logInfo } from "./logger";
 import {
   clientAccounts,
@@ -950,19 +950,6 @@ export async function createOperationEvent(params: {
   return event;
 }
 
-function buildNotificationEmailHtml(title: string, body: string, actionUrl?: string | null): string {
-  const action = actionUrl
-    ? `<p><a href="${actionUrl}" style="display:inline-block;padding:10px 14px;background:#ff3d00;color:#fff;text-decoration:none;border-radius:8px;">Open in ezhalha</a></p>`
-    : "";
-  return `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
-      <h2>${title}</h2>
-      <p>${body}</p>
-      ${action}
-    </div>
-  `;
-}
-
 export async function notifyUser(params: {
   userId: string;
   title: string;
@@ -993,22 +980,33 @@ export async function notifyUser(params: {
         const actionBlock = params.actionUrl
           ? `<p style="text-align: center; margin: 30px 0;"><a href="${params.actionUrl}" class="button">Open in ezhalha</a></p>`
           : "";
-        const rendered = await getRenderedTemplate("operation_notification", {
+        const variables = {
           title: params.title,
           body: params.body,
           action_block: actionBlock,
           year: new Date().getFullYear().toString(),
-        });
-        const emailSent = await sendEmail({
+        };
+
+        // Each notification type has its own template so a quotation being ready and a
+        // colleague mentioning you can be worded differently. A type nobody has written a
+        // template for still goes out on the generic one rather than not at all.
+        const slug = hasNotificationTemplate(params.type)
+          ? notificationTemplateSlug(params.type!)
+          : "operation_notification";
+
+        const delivery = await dispatchTemplatedEmail({
+          slug,
           to: user.email,
-          subject: rendered?.subject ?? params.title,
-          html: rendered?.html ?? buildNotificationEmailHtml(params.title, params.body, params.actionUrl),
+          variables,
+          entityType: params.entityType ?? "notification",
+          entityId: params.entityId ?? notification.id,
         });
+
         await db
           .update(notifications)
           .set({
-            emailSentAt: emailSent ? new Date() : null,
-            emailStatus: emailSent ? "sent" : "not_configured",
+            emailSentAt: delivery.sent ? new Date() : null,
+            emailStatus: delivery.sent ? "sent" : delivery.skipped ? "not_configured" : "failed",
           })
           .where(eq(notifications.id, notification.id));
       }

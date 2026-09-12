@@ -104,7 +104,8 @@ Common integration env:
 - Integration accounts can be managed through admin apps and encrypted with `INTEGRATION_CONFIG_SECRET`.
 - Tap is current payment integration. Stripe references are legacy/backwards compatibility if present.
 - Credit/pay-later creates `credit_invoices` with 30-day terms and reminder scheduler; see `docs/credit-pay-later-feature.md`.
-- Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, or `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`.
+- Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry, email retries. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`, or `DISABLE_EMAIL_RETRY_SCHEDULER`.
+- Email: every templated send goes through `dispatchTemplatedEmail` (`server/services/email-delivery.ts`) and leaves an `email_deliveries` attempt trail; `/admin/email-settings` configures wording, retries, and the two scheduled emails' intervals and ladders. A new email needs both a `TemplateDefinition` (`email-templates.ts`) and a descriptor (`email-settings.ts`). Comparing these `timestamp` columns against SQL `now()` is wrong — the session timezone makes every row look due; bind a JS `Date` instead.
 - Default seed data creates admin/client demo users only when DB has no admin user; do not rely on seeded credentials for production.
 
 ## Frontend Conventions
