@@ -1,25 +1,58 @@
 import { storage } from "../storage";
 import { logInfo, logError } from "./logger";
 import { sendCreditInvoiceReminder } from "./email";
+import { configBoolean, configNumber, getEmailSettings, type ResolvedEmailSettings } from "./email-settings";
 
-const MAX_REMINDERS = 6;
+/**
+ * The chase ladder, which an admin now owns from the email settings page.
+ *
+ * These defaults are the values that used to be hardcoded here, so an installation that never
+ * touches the settings behaves exactly as before: two reminders before the due date, then one
+ * every three days once it is overdue, six in total.
+ */
+const DEFAULT_SWEEP_MINUTES = 60;
 
-function computeNextReminderAt(dueAt: Date, remindersSent: number): Date | null {
+const DEFAULT_LADDER = {
+  firstReminderDaysBefore: 7,
+  secondReminderDaysBefore: 1,
+  overdueEveryDays: 3,
+  maxReminders: 6,
+};
+
+interface ReminderLadder {
+  firstReminderDaysBefore: number;
+  secondReminderDaysBefore: number;
+  overdueEveryDays: number;
+  maxReminders: number;
+}
+
+function ladderFrom(settings: ResolvedEmailSettings): ReminderLadder {
+  return {
+    firstReminderDaysBefore: configNumber(settings, "firstReminderDaysBefore", DEFAULT_LADDER.firstReminderDaysBefore),
+    secondReminderDaysBefore: configNumber(settings, "secondReminderDaysBefore", DEFAULT_LADDER.secondReminderDaysBefore),
+    // A zero here would schedule every overdue reminder at the same instant and chase the
+    // client in a loop, so the floor is one day no matter what is stored.
+    overdueEveryDays: Math.max(1, configNumber(settings, "overdueEveryDays", DEFAULT_LADDER.overdueEveryDays)),
+    maxReminders: Math.max(1, configNumber(settings, "maxReminders", DEFAULT_LADDER.maxReminders)),
+  };
+}
+
+function computeNextReminderAt(dueAt: Date, remindersSent: number, ladder: ReminderLadder = DEFAULT_LADDER): Date | null {
   const now = new Date();
   const dueTime = dueAt.getTime();
   const dayMs = 24 * 60 * 60 * 1000;
 
-  if (remindersSent >= MAX_REMINDERS) {
+  if (remindersSent >= ladder.maxReminders) {
     return null;
   }
 
   if (remindersSent === 0) {
-    const sevenBefore = new Date(dueTime - 7 * dayMs);
-    if (sevenBefore > now) return sevenBefore;
+    const firstBefore = new Date(dueTime - ladder.firstReminderDaysBefore * dayMs);
+    if (firstBefore > now) return firstBefore;
   }
   if (remindersSent <= 1) {
-    const oneBefore = new Date(dueTime - 1 * dayMs);
-    if (oneBefore > now) return oneBefore;
+    const secondBefore = new Date(dueTime - ladder.secondReminderDaysBefore * dayMs);
+    if (secondBefore > now) return secondBefore;
   }
   if (remindersSent <= 2) {
     const onDue = new Date(dueTime);
@@ -27,8 +60,7 @@ function computeNextReminderAt(dueAt: Date, remindersSent: number): Date | null 
   }
 
   const overdueReminder = remindersSent - 2;
-  const nextOverdue = new Date(dueTime + (overdueReminder * 3 + 3) * dayMs);
-  return nextOverdue;
+  return new Date(dueTime + (overdueReminder * ladder.overdueEveryDays + ladder.overdueEveryDays) * dayMs);
 }
 
 function getDaysInfo(dueAt: Date): { daysInfo: string; isOverdue: boolean } {
@@ -56,11 +88,18 @@ export async function processCreditReminders(): Promise<void> {
       logInfo(`Marked credit invoice ${invoice.id} as OVERDUE`);
     }
 
+    const settings = await getEmailSettings("credit_invoice_reminder");
+    if (!settings.enabled || !settings.scheduleEnabled) {
+      logInfo("Credit invoice reminders are switched off in email settings");
+      return;
+    }
+    const ladder = ladderFrom(settings);
+
     const dueForReminder = await storage.getDueForReminderCreditInvoices();
     logInfo(`Found ${dueForReminder.length} credit invoices due for reminder`);
 
     for (const invoice of dueForReminder) {
-      if (invoice.remindersSent >= MAX_REMINDERS) {
+      if (invoice.remindersSent >= ladder.maxReminders) {
         await storage.updateCreditInvoice(invoice.id, { nextReminderAt: null });
         continue;
       }
@@ -73,7 +112,9 @@ export async function processCreditReminders(): Promise<void> {
         if (!shipment) continue;
 
         const { daysInfo, isOverdue } = getDaysInfo(invoice.dueAt);
-        const adminEmails = process.env.ADMIN_NOTIFICATION_EMAILS || process.env.ADMIN_EMAIL;
+        const adminEmails = configBoolean(settings, "copyAdmin", true)
+          ? process.env.ADMIN_NOTIFICATION_EMAILS || process.env.ADMIN_EMAIL
+          : undefined;
 
         await sendCreditInvoiceReminder(
           account.email,
@@ -88,7 +129,7 @@ export async function processCreditReminders(): Promise<void> {
         );
 
         const newRemindersSent = invoice.remindersSent + 1;
-        const nextReminderAt = computeNextReminderAt(invoice.dueAt, newRemindersSent);
+        const nextReminderAt = computeNextReminderAt(invoice.dueAt, newRemindersSent, ladder);
 
         await storage.updateCreditInvoice(invoice.id, {
           remindersSent: newRemindersSent,
@@ -143,10 +184,29 @@ export function startCreditReminderScheduler(): void {
     clearInterval(reminderInterval);
   }
 
-  logInfo("Starting credit reminder scheduler (hourly)");
-  reminderInterval = setInterval(processCreditReminders, 60 * 60 * 1000);
+  // Arm on the historical hourly cadence first, then re-arm once the configured interval has
+  // been read. Settings live in the database, and the scheduler must not depend on that read
+  // succeeding to run at all.
+  reminderInterval = setInterval(processCreditReminders, DEFAULT_SWEEP_MINUTES * 60 * 1000);
+  logInfo("Starting credit reminder scheduler");
+
+  void getEmailSettings("credit_invoice_reminder")
+    .then((settings) => {
+      const minutes = Math.max(1, settings.intervalMinutes ?? DEFAULT_SWEEP_MINUTES);
+      if (minutes === DEFAULT_SWEEP_MINUTES) return;
+      if (reminderInterval) clearInterval(reminderInterval);
+      reminderInterval = setInterval(processCreditReminders, minutes * 60 * 1000);
+      logInfo(`Credit reminder sweep set to every ${minutes} minute(s)`);
+    })
+    .catch((error) => logError("Failed to read credit reminder schedule; staying on the default", error));
 
   setTimeout(processCreditReminders, 30 * 1000);
+}
+
+/** Re-read the schedule after an admin changes it, without a deploy. */
+export function restartCreditReminderScheduler(): void {
+  stopCreditReminderScheduler();
+  startCreditReminderScheduler();
 }
 
 export function stopCreditReminderScheduler(): void {

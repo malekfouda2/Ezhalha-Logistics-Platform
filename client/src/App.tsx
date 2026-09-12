@@ -39,7 +39,7 @@ import AdminCreditRequests from "@/pages/admin/credit-requests";
 import AdminSalesFeatureRequests from "@/pages/admin/sales-feature-requests";
 import AdminDangerousGoodsRequests from "@/pages/admin/dangerous-goods-requests";
 import AdminIntegrationHealth from "@/pages/admin/integration-health";
-import AdminEmailTemplates from "@/pages/admin/email-templates";
+import AdminEmailSettings from "@/pages/admin/email-settings";
 import AdminSystemLogs from "@/pages/admin/system-logs";
 import AdminSettings from "@/pages/admin/settings";
 import OperationsHub from "@/pages/operations/hub";
@@ -375,9 +375,9 @@ function Router() {
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.dangerousGoodsRequests.anyOf}
         />
       </Route>
-      <Route path="/admin/email-templates">
+      <Route path="/admin/email-settings">
         <ProtectedRoute
-          component={AdminEmailTemplates}
+          component={AdminEmailSettings}
           requiredUserType="admin"
           requiredAdminPermissionsAnyOf={ADMIN_ROUTE_PERMISSIONS.emailTemplates.anyOf}
         />

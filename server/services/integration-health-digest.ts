@@ -1,6 +1,9 @@
 import { getIntegrationHealth, type IntegrationFailureGroup } from "./integration-health";
 import { CarrierRetryAdvice } from "@shared/carrier-errors";
-import { sendEmail } from "./email";
+import { dispatchTemplatedEmail } from "./email-delivery";
+import { configBoolean, configNumber, getEmailSettings } from "./email-settings";
+import { storage } from "../storage";
+import { EmailDeliveryStatus } from "@shared/schema";
 import { logError, logInfo } from "./logger";
 
 /**
@@ -33,6 +36,27 @@ function shouldRunDigestScheduler(): boolean {
 
 function digestRecipient(): string | undefined {
   return process.env.INTEGRATION_DIGEST_EMAIL || process.env.ADMIN_EMAIL;
+}
+
+/**
+ * Has today's digest already gone out?
+ *
+ * Answered from the delivery log rather than a new column: the log already records every send,
+ * and a second source of truth for "when did this last send" is one more thing to keep honest.
+ */
+async function digestAlreadySentToday(): Promise<boolean> {
+  const recent = await storage
+    .getEmailDeliveries({ templateSlug: "integration_health_digest", status: EmailDeliveryStatus.SENT, limit: 1 })
+    .catch(() => []);
+  const last = recent[0]?.sentAt ?? recent[0]?.createdAt;
+  if (!last) return false;
+  const now = new Date();
+  const lastSent = new Date(last);
+  return (
+    lastSent.getUTCFullYear() === now.getUTCFullYear() &&
+    lastSent.getUTCMonth() === now.getUTCMonth() &&
+    lastSent.getUTCDate() === now.getUTCDate()
+  );
 }
 
 function escapeHtml(value: string): string {
@@ -82,7 +106,27 @@ export async function sendIntegrationHealthDigest(): Promise<boolean> {
   }
 
   try {
-    const report = await getIntegrationHealth({ windowHours: DIGEST_WINDOW_HOURS, limit: 15 });
+    const settings = await getEmailSettings("integration_health_digest");
+    if (!settings.enabled || !settings.scheduleEnabled) {
+      logInfo("Integration digest is switched off in email settings");
+      return false;
+    }
+
+    // A pinned hour turns the sweep into a gate: the job runs often, and only the run inside the
+    // chosen hour sends. Without this the daily digest arrives at whatever time the process last
+    // restarted, which is how it ends up landing at 3am after a deploy.
+    if (settings.sendHourUtc !== null) {
+      if (new Date().getUTCHours() !== settings.sendHourUtc) {
+        return false;
+      }
+      if (await digestAlreadySentToday()) {
+        logInfo("Integration digest already sent today");
+        return false;
+      }
+    }
+
+    const windowHours = Math.max(1, configNumber(settings, "lookbackHours", DIGEST_WINDOW_HOURS));
+    const report = await getIntegrationHealth({ windowHours, limit: 15 });
 
     // Carrier 5xx blips resolve themselves and the schedulers retry them. Waking a human for
     // those is what turns a useful digest into noise.
@@ -90,8 +134,8 @@ export async function sendIntegrationHealthDigest(): Promise<boolean> {
       (group) => group.explanation.retry !== CarrierRetryAdvice.RETRY,
     );
 
-    if (actionable.length === 0) {
-      logInfo("Integration digest skipped: nothing needing attention in the last 24 hours");
+    if (actionable.length === 0 && configBoolean(settings, "skipWhenEmpty", true)) {
+      logInfo(`Integration digest skipped: nothing needing attention in the last ${windowHours} hours`);
       return false;
     }
 
@@ -104,7 +148,7 @@ export async function sendIntegrationHealthDigest(): Promise<boolean> {
       <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:720px">
         <h2 style="margin:0 0 4px">${escapeHtml(headline)}</h2>
         <p style="color:#666;margin:0 0 16px">
-          Last 24 hours. Transient carrier outages are excluded — everything below needs a person.
+          Last ${windowHours} hours. Transient carrier outages are excluded — everything below needs a person.
         </p>
         <table style="border-collapse:collapse;width:100%;font-size:14px">
           <thead>
@@ -121,20 +165,15 @@ export async function sendIntegrationHealthDigest(): Promise<boolean> {
         </p>
       </div>`;
 
-    const text = [
-      headline,
-      "",
-      ...actionable.map(
-        (group) =>
-          `${group.serviceName} ${group.operation} — ${group.count}x: ${group.explanation.title}. ${group.explanation.action}`,
-      ),
-    ].join("\n");
-
-    const sent = await sendEmail({
+    const { sent } = await dispatchTemplatedEmail({
+      slug: "integration_health_digest",
       to: recipient,
-      subject: `Ezhalha integrations — ${headline}`,
-      html,
-      text,
+      variables: {
+        failure_count: totalActionable.toLocaleString(),
+        period_text: `the last ${windowHours} hours`,
+        digest_body: html,
+        year: new Date().getFullYear().toString(),
+      },
     });
 
     if (sent) {
@@ -159,8 +198,29 @@ export function startIntegrationHealthDigestScheduler(): void {
     clearInterval(digestInterval);
   }
 
-  logInfo("Starting integration health digest scheduler (daily)");
+  // Arm on the historical daily cadence, then re-arm once the configured interval is read —
+  // the scheduler must not depend on a database read to run at all.
   digestInterval = setInterval(sendIntegrationHealthDigest, DIGEST_INTERVAL_MS);
+  logInfo("Starting integration health digest scheduler");
+
+  void getEmailSettings("integration_health_digest")
+    .then((settings) => {
+      let minutes = Math.max(1, settings.intervalMinutes ?? DIGEST_INTERVAL_MS / 60000);
+      // A pinned hour needs the sweep to come around at least hourly, or the one run per day can
+      // fall outside the chosen hour and the digest never sends at all.
+      if (settings.sendHourUtc !== null) minutes = Math.min(minutes, 60);
+      if (minutes * 60 * 1000 === DIGEST_INTERVAL_MS) return;
+      if (digestInterval) clearInterval(digestInterval);
+      digestInterval = setInterval(sendIntegrationHealthDigest, minutes * 60 * 1000);
+      logInfo(`Integration digest set to every ${minutes} minute(s)`);
+    })
+    .catch((error) => logError("Failed to read digest schedule; staying on the default", error));
+}
+
+/** Re-read the schedule after an admin changes it, without a deploy. */
+export function restartIntegrationHealthDigestScheduler(): void {
+  stopIntegrationHealthDigestScheduler();
+  startIntegrationHealthDigestScheduler();
 }
 
 export function stopIntegrationHealthDigestScheduler(): void {

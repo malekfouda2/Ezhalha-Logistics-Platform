@@ -78,8 +78,16 @@ import {
   type PricingAccountTypeValue,
 } from "@shared/pricing-account-types";
 import { logInfo, logWarn, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
-import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
+import { dispatchTemplatedEmail, resendDelivery } from "./services/email-delivery";
+import {
+  getAllEmailSettings,
+  getEmailTemplateDescriptor,
+  resolveEmailSettings,
+} from "./services/email-settings";
+import { restartCreditReminderScheduler } from "./services/credit-reminder";
+import { restartIntegrationHealthDigestScheduler } from "./services/integration-health-digest";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
 import type { CarrierAdapter, CreateShipmentRequest, ShippingAddress, PickupRequest, PackageDetails } from "./integrations/fedex";
 import { carrierService, getCarrierAdapter } from "./integrations/carriers";
@@ -720,18 +728,17 @@ async function sendPasswordSetupEmail(user: User, purpose: "onboard" | "reset"):
   });
   const url = `${APP_BASE_URL}/reset-password?token=${token}`;
   const onboard = purpose === "onboard";
-  const delivered = await sendEmail({
+  const { sent: delivered } = await dispatchTemplatedEmail({
+    slug: onboard ? "password_setup" : "password_reset",
     to: user.email,
-    subject: onboard ? "Welcome to ezhalha — set your password" : "Reset your ezhalha password",
-    html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-      <h2 style="margin:0 0 8px">${onboard ? "Welcome to ezhalha" : "Reset your password"}</h2>
-      <p style="color:#555;margin:0 0 16px">${onboard
-        ? "Your account is ready. Set a password to sign in."
-        : "We received a request to reset your password. Click below to choose a new one."}</p>
-      <a href="${url}" style="display:inline-block;background:#fe5200;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px">${onboard ? "Set my password" : "Reset my password"}</a>
-      <p style="color:#888;font-size:12px;margin-top:16px">This link expires in ${onboard ? "7 days" : "1 hour"}. If you didn't request this, you can ignore this email.</p>
-    </div>`,
-    text: `${onboard ? "Welcome to ezhalha. Set your password" : "Reset your ezhalha password"}: ${url} (expires in ${onboard ? "7 days" : "1 hour"})`,
+    variables: {
+      recipient_name: user.fullName || user.username,
+      action_url: url,
+      expiry_text: onboard ? "7 days" : "1 hour",
+      year: new Date().getFullYear().toString(),
+    },
+    entityType: "user",
+    entityId: user.id,
   });
   if (!delivered) {
     logError("Password setup/reset email was not delivered", undefined, { email: user.email, purpose });
@@ -5264,26 +5271,23 @@ async function sendStaffInvitationEmail(params: {
   const acceptUrl = buildInvitationAcceptUrl(params.token);
   const personalMessage = params.invitation.personalMessage?.trim();
 
-  const rendered = await getRenderedTemplate("staff_invitation", {
-    full_name: params.invitation.fullName,
-    role_name: params.role.name,
-    department_name: params.department.name,
-    personal_message: personalMessage ? `<p>${personalMessage}</p>` : "",
-    accept_url: acceptUrl,
-    expires_date: params.invitation.expiresAt.toLocaleDateString(),
-    year: new Date().getFullYear().toString(),
-  });
-
-  if (!rendered) {
-    logError("Failed to render staff_invitation template");
-    return false;
-  }
-
-  return sendEmail({
+  const { sent } = await dispatchTemplatedEmail({
+    slug: "staff_invitation",
     to: params.invitation.email,
-    subject: rendered.subject,
-    html: rendered.html,
+    variables: {
+      full_name: params.invitation.fullName,
+      role_name: params.role.name,
+      department_name: params.department.name,
+      personal_message: personalMessage ? `<p>${personalMessage}</p>` : "",
+      accept_url: acceptUrl,
+      expires_date: params.invitation.expiresAt.toLocaleDateString(),
+      year: new Date().getFullYear().toString(),
+    },
+    entityType: "staff_invitation",
+    entityId: params.invitation.id,
   });
+
+  return sent;
 }
 
 function getFallbackRoleByDepartmentSlug(
@@ -8103,23 +8107,24 @@ export async function registerRoutes(
             deliveryMessage = "Email is not configured for this client yet. The update was still saved to the shipment timeline.";
           } else {
             const safeMessage = sanitizeHtml(parsed.message, { allowedTags: [], allowedAttributes: {} }).replace(/\n/g, "<br />");
-            const rendered = await getRenderedTemplate("operations_shipment_update", {
-              tracking_number: shipment.trackingNumber,
-              message: safeMessage,
-              action_url: actionUrl,
-              year: new Date().getFullYear().toString(),
-            });
-            const emailResults = rendered
-              ? await Promise.all(
-                  recipientEmails.map((email) =>
-                    sendEmail({
-                      to: email,
-                      subject: rendered.subject,
-                      html: rendered.html,
-                    }),
-                  ),
-                )
-              : [];
+            const emailResults = await Promise.all(
+              recipientEmails.map(async (email) =>
+                (
+                  await dispatchTemplatedEmail({
+                    slug: "operations_shipment_update",
+                    to: email,
+                    variables: {
+                      tracking_number: shipment.trackingNumber,
+                      message: safeMessage,
+                      action_url: actionUrl,
+                      year: new Date().getFullYear().toString(),
+                    },
+                    entityType: "shipment",
+                    entityId: shipment.id,
+                  })
+                ).sent,
+              ),
+            );
 
             if (emailResults.some(Boolean)) {
               deliveryStatus = "sent";
@@ -9556,16 +9561,14 @@ export async function registerRoutes(
           codeHash: hashOtp(code),
           expiresAt: new Date(Date.now() + OTP_TTL_MS),
         });
-        const otpDelivered = await sendEmail({
+        const { sent: otpDelivered } = await dispatchTemplatedEmail({
+          slug: "login_otp",
           to: email,
-          subject: "Your ezhalha login code",
-          html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-            <h2 style="margin:0 0 8px">Your login code</h2>
-            <p style="color:#555;margin:0 0 16px">Use this code to sign in to ezhalha. It expires in 10 minutes.</p>
-            <div style="font-size:32px;font-weight:800;letter-spacing:8px;background:#f4f4f5;border-radius:12px;padding:16px;text-align:center">${code}</div>
-            <p style="color:#888;font-size:12px;margin-top:16px">If you didn't request this, you can ignore this email.</p>
-          </div>`,
-          text: `Your ezhalha login code is ${code}. It expires in 10 minutes.`,
+          variables: {
+            code,
+            expiry_text: `${Math.round(OTP_TTL_MS / 60000)} minutes`,
+            year: new Date().getFullYear().toString(),
+          },
         });
         if (!otpDelivered) {
           logError("OTP login code email was not delivered", undefined, { email });
@@ -10776,18 +10779,17 @@ export async function registerRoutes(
       let deliveryStatus = "queued";
 
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const rendered = await getRenderedTemplate("abandoned_discount_offer", {
-          tracking_number: shipment.trackingNumber,
-          message: message.replace(/\n/g, "<br>"),
-          year: new Date().getFullYear().toString(),
+        const { sent } = await dispatchTemplatedEmail({
+          slug: "abandoned_discount_offer",
+          to: client.email,
+          variables: {
+            tracking_number: shipment.trackingNumber,
+            message: message.replace(/\n/g, "<br>"),
+            year: new Date().getFullYear().toString(),
+          },
+          entityType: "shipment",
+          entityId: shipment.id,
         });
-        const sent = rendered
-          ? await sendEmail({
-              to: client.email,
-              subject: rendered.subject,
-              html: rendered.html,
-            })
-          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 
@@ -10863,18 +10865,17 @@ export async function registerRoutes(
       const resumeUrl = buildShipmentResumePaymentUrl(req, shipment.id);
       let deliveryStatus = "queued";
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const rendered = await getRenderedTemplate("abandoned_payment_reminder", {
-          tracking_number: shipment.trackingNumber,
-          resume_url: resumeUrl,
-          year: new Date().getFullYear().toString(),
+        const { sent } = await dispatchTemplatedEmail({
+          slug: "abandoned_payment_reminder",
+          to: client.email,
+          variables: {
+            tracking_number: shipment.trackingNumber,
+            resume_url: resumeUrl,
+            year: new Date().getFullYear().toString(),
+          },
+          entityType: "shipment",
+          entityId: shipment.id,
         });
-        const sent = rendered
-          ? await sendEmail({
-              to: client.email,
-              subject: rendered.subject,
-              html: rendered.html,
-            })
-          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 
@@ -13456,6 +13457,139 @@ export async function registerRoutes(
       res.json(templates);
     } catch (error: any) {
       logError("Error fetching email templates", { error: error.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // The templates page shows wording and behaviour side by side, so it is served as one payload:
+  // the template row, the resolved settings (stored values merged over the descriptor defaults),
+  // what actually triggers the email, and how recent deliveries went.
+  app.get("/api/admin/email-templates/overview", requireAdminPermission("email-templates", "read"), async (req, res) => {
+    try {
+      const [templates, settings, stats] = await Promise.all([
+        storage.getEmailTemplates(),
+        getAllEmailSettings(),
+        storage.getEmailDeliveryStats().catch(() => []),
+      ]);
+
+      const statsBySlug = new Map<string, { sent: number; failed: number; abandoned: number; skipped: number; pending: number; lastAt: Date | null }>();
+      for (const row of stats) {
+        const entry = statsBySlug.get(row.templateSlug) ?? { sent: 0, failed: 0, abandoned: 0, skipped: 0, pending: 0, lastAt: null };
+        if (row.status in entry) (entry as any)[row.status] = row.total;
+        if (row.lastAt && (!entry.lastAt || row.lastAt > entry.lastAt)) entry.lastAt = row.lastAt;
+        statsBySlug.set(row.templateSlug, entry);
+      }
+
+      res.json(
+        templates.map((template) => {
+          const descriptor = getEmailTemplateDescriptor(template.slug);
+          const resolved = settings.get(template.slug);
+          return {
+            ...template,
+            trigger: descriptor?.trigger ?? "event",
+            triggerDescription:
+              descriptor?.triggerDescription ?? "This email is sent in response to an event in the system.",
+            audience: descriptor?.audience ?? "client",
+            configFields: descriptor?.configFields ?? [],
+            settings: resolved ?? null,
+            deliveries: statsBySlug.get(template.slug) ?? { sent: 0, failed: 0, abandoned: 0, skipped: 0, pending: 0, lastAt: null },
+          };
+        }),
+      );
+    } catch (error: any) {
+      logError("Error building email settings overview", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.put("/api/admin/email-templates/:slug/settings", requireAdminPermission("email-templates", "update"), async (req, res) => {
+    try {
+      const slug = req.params.slug;
+      const descriptor = getEmailTemplateDescriptor(slug);
+      const template = await storage.getEmailTemplateBySlug(slug);
+      if (!template && !descriptor) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const settingsSchema = z.object({
+        enabled: z.boolean().optional(),
+        // A single attempt is a valid choice (a login code is worthless by the time a retry
+        // lands); the ceiling stops a typo turning one failure into a hundred sends.
+        maxAttempts: z.coerce.number().int().min(1).max(10).optional(),
+        retryBackoffSeconds: z.coerce.number().int().min(30).max(24 * 60 * 60).optional(),
+        scheduleEnabled: z.boolean().optional(),
+        // Null must survive as null. `z.coerce.number().nullable()` turns it into 0, and a union
+        // tries its branches in order — so with the number first, clearing a pinned hour coerced
+        // null to 0 and silently pinned the digest to midnight. Null goes first.
+        intervalMinutes: z.union([z.null(), z.coerce.number().int().min(1).max(7 * 24 * 60)]).optional(),
+        sendHourUtc: z.union([z.null(), z.coerce.number().int().min(0).max(23)]).optional(),
+        config: z.record(z.union([z.number(), z.boolean()])).optional(),
+      });
+
+      const parsed = settingsSchema.parse(req.body ?? {});
+
+      // Schedule fields on an event-driven template would be settings that change nothing, and
+      // an admin who sets one and sees no effect has been misled by the interface.
+      if (descriptor?.trigger !== "scheduled" && (parsed.intervalMinutes != null || parsed.sendHourUtc != null)) {
+        return res.status(400).json({
+          error: "This email is sent in response to an event, so it has no schedule to configure.",
+        });
+      }
+
+      const updated = await storage.upsertEmailTemplateSettings(slug, {
+        ...parsed,
+        config: parsed.config ? JSON.stringify(parsed.config) : undefined,
+        updatedByUserId: req.session.userId,
+      } as any);
+
+      // A changed sweep interval has to reach the running scheduler, otherwise the setting only
+      // takes effect at the next deploy and looks broken in the meantime.
+      if (descriptor?.trigger === "scheduled") {
+        if (slug === "credit_invoice_reminder") restartCreditReminderScheduler();
+        if (slug === "integration_health_digest") restartIntegrationHealthDigestScheduler();
+      }
+
+      await logAudit(req.session.userId, "update_email_settings", "email_template", slug,
+        `Updated email settings for ${slug}`, req.ip);
+
+      res.json(resolveEmailSettings(slug, updated));
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid settings" });
+      }
+      logError("Error updating email settings", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/email-deliveries", requireAdminPermission("email-templates", "read"), async (req, res) => {
+    try {
+      const deliveries = await storage.getEmailDeliveries({
+        templateSlug: typeof req.query.slug === "string" ? req.query.slug : undefined,
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        limit: Number(req.query.limit) || 50,
+      });
+      res.json(deliveries);
+    } catch (error: any) {
+      logError("Error fetching email deliveries", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/email-deliveries/:id/resend", requireAdminPermission("email-templates", "update"), async (req, res) => {
+    try {
+      const delivery = await storage.getEmailDelivery(req.params.id);
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+
+      const sent = await resendDelivery(delivery.id);
+      await logAudit(req.session.userId, "resend_email", "email_delivery", delivery.id,
+        `Resent ${delivery.templateSlug} to ${delivery.recipient}: ${sent ? "delivered" : "failed"}`, req.ip);
+
+      res.json({ sent, delivery: await storage.getEmailDelivery(delivery.id) });
+    } catch (error: any) {
+      logError("Error resending email", { error: error?.message });
       res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -74,6 +74,10 @@ import {
   type InsertPolicyVersion,
   type EmailTemplate,
   type InsertEmailTemplate,
+  type EmailTemplateSettings,
+  type InsertEmailTemplateSettings,
+  type EmailDelivery,
+  type InsertEmailDelivery,
   type CreditAccessRequest,
   type InsertCreditAccessRequest,
   type SalesFeatureAccessRequest,
@@ -141,6 +145,9 @@ import {
   policies,
   policyVersions,
   emailTemplates,
+  emailTemplateSettings,
+  emailDeliveries,
+  EmailDeliveryStatus,
   creditAccessRequests,
   salesFeatureAccessRequests,
   dangerousGoodsAccessRequests,
@@ -574,6 +581,15 @@ export interface IStorage {
   getEmailTemplateBySlug(slug: string): Promise<EmailTemplate | undefined>;
   createEmailTemplate(template: InsertEmailTemplate): Promise<EmailTemplate>;
   updateEmailTemplate(id: string, updates: Partial<EmailTemplate>): Promise<EmailTemplate | undefined>;
+  getAllEmailTemplateSettings(): Promise<EmailTemplateSettings[]>;
+  getEmailTemplateSettings(slug: string): Promise<EmailTemplateSettings | undefined>;
+  upsertEmailTemplateSettings(slug: string, updates: Partial<InsertEmailTemplateSettings>): Promise<EmailTemplateSettings>;
+  createEmailDelivery(delivery: InsertEmailDelivery): Promise<EmailDelivery>;
+  updateEmailDelivery(id: string, updates: Partial<EmailDelivery>): Promise<EmailDelivery | undefined>;
+  getEmailDelivery(id: string): Promise<EmailDelivery | undefined>;
+  getEmailDeliveriesDueForRetry(limit: number): Promise<EmailDelivery[]>;
+  getEmailDeliveries(params?: { templateSlug?: string; status?: string; limit?: number }): Promise<EmailDelivery[]>;
+  getEmailDeliveryStats(): Promise<Array<{ templateSlug: string; status: string; total: number; lastAt: Date | null }>>;
 
   // Credit Access Requests
   getCreditAccessRequests(params?: { status?: string; page?: number; limit?: number }): Promise<{ requests: CreditAccessRequest[]; total: number; page: number; totalPages: number }>;
@@ -3325,6 +3341,112 @@ export class DatabaseStorage implements IStorage {
   async updateEmailTemplate(id: string, updates: Partial<EmailTemplate>): Promise<EmailTemplate | undefined> {
     const [updated] = await db.update(emailTemplates).set({ ...updates, updatedAt: new Date() }).where(eq(emailTemplates.id, id)).returning();
     return updated;
+  }
+
+  // Email template settings — the operational half of a template (enabled, retries, schedule).
+  async getAllEmailTemplateSettings(): Promise<EmailTemplateSettings[]> {
+    return db.select().from(emailTemplateSettings).orderBy(emailTemplateSettings.templateSlug);
+  }
+
+  async getEmailTemplateSettings(slug: string): Promise<EmailTemplateSettings | undefined> {
+    const [row] = await db
+      .select()
+      .from(emailTemplateSettings)
+      .where(eq(emailTemplateSettings.templateSlug, slug));
+    return row;
+  }
+
+  async upsertEmailTemplateSettings(
+    slug: string,
+    updates: Partial<InsertEmailTemplateSettings>,
+  ): Promise<EmailTemplateSettings> {
+    // A settings row is created the first time an admin changes anything; until then the
+    // template runs on the descriptor defaults. `onConflictDoUpdate` keeps that first save and
+    // every later one on one code path, and avoids a read-modify-write race between workers.
+    const [row] = await db
+      .insert(emailTemplateSettings)
+      .values({ ...updates, templateSlug: slug } as InsertEmailTemplateSettings)
+      .onConflictDoUpdate({
+        target: emailTemplateSettings.templateSlug,
+        set: { ...updates, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  // Email deliveries — one attempt trail per email the system tried to send.
+  async createEmailDelivery(delivery: InsertEmailDelivery): Promise<EmailDelivery> {
+    const [created] = await db.insert(emailDeliveries).values(delivery).returning();
+    return created;
+  }
+
+  async updateEmailDelivery(id: string, updates: Partial<EmailDelivery>): Promise<EmailDelivery | undefined> {
+    const [updated] = await db
+      .update(emailDeliveries)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(emailDeliveries.id, id))
+      .returning();
+    return updated;
+  }
+
+  async getEmailDelivery(id: string): Promise<EmailDelivery | undefined> {
+    const [row] = await db.select().from(emailDeliveries).where(eq(emailDeliveries.id, id));
+    return row;
+  }
+
+  async getEmailDeliveriesDueForRetry(limit: number): Promise<EmailDelivery[]> {
+    // The cutoff is a bound JS Date, deliberately not Postgres `now()`.
+    //
+    // These columns are `timestamp without time zone`, and node-postgres writes a JS Date into
+    // them as UTC wall-clock. `now()` is a timestamptz, so comparing the two casts it to the
+    // session's local wall-clock — Africa/Cairo here, UTC+3. Every stored value therefore looked
+    // three hours in the past and *every* delivery came back due, which threw away the backoff
+    // entirely: a failure was retried on the next two-minute sweep and burned its whole attempt
+    // budget in minutes against a provider that had just refused it. Binding the cutoff keeps
+    // both sides in the representation Drizzle reads and writes.
+    const cutoff = new Date();
+    return db
+      .select()
+      .from(emailDeliveries)
+      .where(
+        and(
+          inArray(emailDeliveries.status, [EmailDeliveryStatus.PENDING, EmailDeliveryStatus.FAILED]),
+          sql`${emailDeliveries.attempts} < ${emailDeliveries.maxAttempts}`,
+          isNotNull(emailDeliveries.nextAttemptAt),
+          lte(emailDeliveries.nextAttemptAt, cutoff),
+        ),
+      )
+      .orderBy(emailDeliveries.nextAttemptAt)
+      .limit(limit);
+  }
+
+  async getEmailDeliveries(params?: {
+    templateSlug?: string;
+    status?: string;
+    limit?: number;
+  }): Promise<EmailDelivery[]> {
+    const conditions = [];
+    if (params?.templateSlug) conditions.push(eq(emailDeliveries.templateSlug, params.templateSlug));
+    if (params?.status) conditions.push(eq(emailDeliveries.status, params.status));
+    return db
+      .select()
+      .from(emailDeliveries)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(emailDeliveries.createdAt))
+      .limit(Math.min(params?.limit ?? 50, 200));
+  }
+
+  async getEmailDeliveryStats(): Promise<Array<{ templateSlug: string; status: string; total: number; lastAt: Date | null }>> {
+    const rows = await db
+      .select({
+        templateSlug: emailDeliveries.templateSlug,
+        status: emailDeliveries.status,
+        total: count(),
+        lastAt: sql<Date | null>`max(${emailDeliveries.createdAt})`,
+      })
+      .from(emailDeliveries)
+      .groupBy(emailDeliveries.templateSlug, emailDeliveries.status);
+    return rows.map((row) => ({ ...row, total: Number(row.total) }));
   }
 
   // Credit Access Requests

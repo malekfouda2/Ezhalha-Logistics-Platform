@@ -10,6 +10,7 @@ import { startAbandonedRecoveryScheduler } from "./services/abandoned-recovery";
 import { startExpressTrackingRefreshScheduler } from "./services/express-tracking-refresh";
 import { startSalesChannelSyncScheduler } from "./services/sales-channel-sync";
 import { startDangerousGoodsQuoteExpiryScheduler } from "./services/dangerous-goods-quote-expiry";
+import { startEmailRetryScheduler } from "./services/email-delivery";
 import { validateFedExEnvOnStartup } from "./integrations/fedex";
 import { validateAramexEnvOnStartup } from "./integrations/aramex";
 import { loadDefaultIntegrationAccountsIntoEnv } from "./services/integration-apps";
@@ -153,6 +154,7 @@ app.use((req, res, next) => {
       startExpressTrackingRefreshScheduler();
       startSalesChannelSyncScheduler();
       startDangerousGoodsQuoteExpiryScheduler();
+      startEmailRetryScheduler();
       if (typeof process.send === "function") {
         process.send("ready");
       }

@@ -2070,6 +2070,98 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
   updatedAt: true,
 });
 
+/**
+ * How one email behaves, as opposed to how it reads.
+ *
+ * The template row owns the wording; this row owns the operational side — whether the email is
+ * sent at all, how hard delivery is retried, and, for the few emails a scheduler produces
+ * rather than an event, when it runs and on what ladder.
+ *
+ * Every column is nullable or defaulted, and a template with no settings row behaves exactly as
+ * it did before: the defaults in `EMAIL_SETTING_DEFAULTS` are the current hardcoded values.
+ * `config` holds the knobs that only make sense for one template (the credit reminder ladder,
+ * the digest hour) as JSON text, matching how the rest of this schema stores structured values.
+ */
+export const emailTemplateSettings = pgTable("email_template_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateSlug: text("template_slug").notNull().unique(),
+  // Distinct from the template's own `isActive`: that one means "use my wording"; this means
+  // "send this email at all". An admin turning the email off should not have to blank the body.
+  enabled: boolean("enabled").notNull().default(true),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  retryBackoffSeconds: integer("retry_backoff_seconds").notNull().default(300),
+  // Scheduled emails only. `intervalMinutes` drives the sweep; `sendHourUtc` pins a daily send
+  // to an hour so a digest does not arrive at whatever time the process last restarted.
+  scheduleEnabled: boolean("schedule_enabled"),
+  intervalMinutes: integer("interval_minutes"),
+  sendHourUtc: integer("send_hour_utc"),
+  config: text("config"),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailTemplateSettingsSchema = createInsertSchema(emailTemplateSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEmailTemplateSettings = z.infer<typeof insertEmailTemplateSettingsSchema>;
+export type EmailTemplateSettings = typeof emailTemplateSettings.$inferSelect;
+
+export const EmailDeliveryStatus = {
+  PENDING: "pending",
+  SENT: "sent",
+  FAILED: "failed",
+  /** Retries exhausted. A person has to decide what happens next. */
+  ABANDONED: "abandoned",
+  /** The template is switched off, or mail is not configured. Recorded, never attempted. */
+  SKIPPED: "skipped",
+} as const;
+
+export type EmailDeliveryStatusValue = (typeof EmailDeliveryStatus)[keyof typeof EmailDeliveryStatus];
+
+/**
+ * One attempt trail per email the system tried to send.
+ *
+ * Until now a failed send was a log line: `sendEmail` returned false and the caller carried on,
+ * so "did this client ever receive the quotation?" had no answer and nothing could be re-driven.
+ * This row is what the retry worker walks and what the admin page reports.
+ *
+ * `variables` is kept so a retry re-renders from the current template rather than replaying a
+ * stale body — an admin who fixed a broken template wants the fixed one to go out.
+ */
+export const emailDeliveries = pgTable("email_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateSlug: text("template_slug").notNull(),
+  recipient: text("recipient").notNull(),
+  subject: text("subject").notNull(),
+  status: text("status").notNull().default(EmailDeliveryStatus.PENDING),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  lastError: text("last_error"),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  nextAttemptAt: timestamp("next_attempt_at"),
+  sentAt: timestamp("sent_at"),
+  provider: text("provider"),
+  messageId: text("message_id"),
+  variables: text("variables"),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailDeliverySchema = createInsertSchema(emailDeliveries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEmailDelivery = z.infer<typeof insertEmailDeliverySchema>;
+export type EmailDelivery = typeof emailDeliveries.$inferSelect;
+
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 
