@@ -1,7 +1,7 @@
 import "../load-env";
 import crypto from "crypto";
 import { calculateChargeableWeight, convertWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
-import { countryTimeZone } from "@shared/country-timezones";
+import { countryTimeZone, isBusinessDayInCountry, nextBusinessDayOnOrAfter, weekendDaysForCountry } from "@shared/country-timezones";
 import {
   isDryIceDeclaration,
   resolveDhlDangerousGoodsCodes,
@@ -50,16 +50,6 @@ const COUNTRY_REGEX: Record<string, RegExp> = {
   US: /^\d{5}(-\d{4})?$/,
   AE: /^\d{5,6}$/,
 };
-const FRIDAY_SATURDAY_WEEKEND_COUNTRIES = new Set([
-  "BH",
-  "EG",
-  "JO",
-  "KW",
-  "OM",
-  "QA",
-  "SA",
-]);
-
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
@@ -114,17 +104,12 @@ function isLikelyNonCommodityDescription(value: string): boolean {
   return false;
 }
 
-function getWeekendDays(countryCode?: string): number[] {
-  const normalizedCountryCode = countryCode ? normalizeCountryCode(countryCode) : "";
-  return FRIDAY_SATURDAY_WEEKEND_COUNTRIES.has(normalizedCountryCode) ? [5, 6] : [0, 6];
-}
-
 function alignToBusinessShippingHour(date: Date): void {
   date.setUTCHours(DEFAULT_PLANNED_SHIPPING_HOUR_UTC, 0, 0, 0);
 }
 
 function advanceToBusinessDay(date: Date, countryCode?: string): void {
-  const weekendDays = getWeekendDays(countryCode);
+  const weekendDays = weekendDaysForCountry(countryCode);
   while (weekendDays.includes(date.getUTCDay())) {
     date.setUTCDate(date.getUTCDate() + 1);
   }
@@ -1415,7 +1400,14 @@ export class DhlAdapter implements CarrierAdapter {
     }
     const s = request.shipper;
     const origin = await this.resolvePickupOrigin(s.countryCode, s.city, s.postalCode || "");
-    const offset = gmtOffsetForCountry(s.countryCode, request.pickupDate);
+    // Last line of defence. The caller normalizes the date, but this adapter already knows the
+    // origin's working week and a mismatch here costs a real collection: DHL answers
+    // `5006: Pickup is not allowed for this shipment date`, the waybill stays booked because that
+    // is a separate call, and the parcel travels with no courier ever dispatched.
+    const pickupDate = isBusinessDayInCountry(request.pickupDate, s.countryCode)
+      ? request.pickupDate
+      : nextBusinessDayOnOrAfter(request.pickupDate, s.countryCode);
+    const offset = gmtOffsetForCountry(s.countryCode, pickupDate);
     const packages = request.packages.map((p) => {
       const weightKg = p.weightUnit === "LB" ? Number(p.weight) * 0.453592 : Number(p.weight);
       const d = p.dimensions;
@@ -1426,7 +1418,7 @@ export class DhlAdapter implements CarrierAdapter {
       };
     });
     const body = {
-      plannedPickupDateAndTime: `${request.pickupDate}T${request.readyTime}:00 ${offset}`,
+      plannedPickupDateAndTime: `${pickupDate}T${request.readyTime}:00 ${offset}`,
       closeTime: request.closeTime,
       location: request.location || "Reception",
       locationType: "business",

@@ -299,6 +299,74 @@ describe("DhlAdapter", () => {
     expect(body.shipmentDetails[0].packages).toHaveLength(2);
   });
 
+  it("never asks for a collection on a non-working day at the origin", async () => {
+    // Production EZH861906362: a Turkish origin was sent a Sunday collection date, because the
+    // pickup date was chosen with Saudi weekend rules (Friday/Saturday) regardless of origin. DHL
+    // answered `400 - 5006: Pickup is not allowed for this shipment date`, and because the waybill
+    // is a separate call that had already succeeded, the parcel travelled through Leipzig with no
+    // courier ever dispatched. The adapter now refuses to send the date at all.
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/address-validate")
+          ? new Response(
+              JSON.stringify({ address: [{ countryCode: "TR", postalCode: "34275", cityName: "ISTANBUL", serviceArea: { code: "IST" } }] }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ dispatchConfirmationNumbers: ["IST260914000001"] }), { status: 201 }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    await adapter.requestPickup({
+      shipper: {
+        name: "Sender", streetLine1: "Fatih Cd 1", city: "Arnavutköy",
+        postalCode: "34275", countryCode: "TR", phone: "+905551112233", email: "ops@example.com",
+      },
+      packages: [{ weight: 5, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-09-13", // a Sunday
+      readyTime: "09:00", closeTime: "17:00",
+      isInternational: true, serviceType: "P", currency: "EUR",
+    });
+
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups"))!;
+    const body = JSON.parse(call[1].body);
+    // Moved to the Monday, in the origin's own calendar.
+    expect(body.plannedPickupDateAndTime).toMatch(/^2026-09-14T09:00:00 /);
+  });
+
+  it("keeps a Sunday collection out of Saudi Arabia, where Sunday is a working day", async () => {
+    // The fix is origin-aware, not a blanket ban on Sundays: most of these shipments start in the
+    // Gulf, where Sunday is an ordinary working day and Friday is not.
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/address-validate")
+          ? new Response(
+              JSON.stringify({ address: [{ countryCode: "SA", postalCode: "23442", cityName: "JEDDAH", serviceArea: { code: "JED" } }] }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ dispatchConfirmationNumbers: ["JED260913000001"] }), { status: 201 }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new DhlAdapter();
+    await adapter.requestPickup({
+      shipper: {
+        name: "Sender", streetLine1: "King Abdulaziz Rd", city: "Jeddah",
+        postalCode: "23442", countryCode: "SA", phone: "+966555123456", email: "ops@example.com",
+      },
+      packages: [{ weight: 5, weightUnit: "KG", packageType: "YOUR_PACKAGING" }],
+      pickupDate: "2026-09-13", // Sunday — a working day in KSA
+      readyTime: "09:00", closeTime: "17:00",
+      isInternational: true, serviceType: "P", currency: "SAR",
+    });
+
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/pickups"))!;
+    const body = JSON.parse(call[1].body);
+    expect(body.plannedPickupDateAndTime).toMatch(/^2026-09-13T09:00:00 /);
+  });
+
   it("replaces an unknown pickup city/postal with DHL's canonical location before booking", async () => {
     // Real failure: sender "Sariçam / 01000 / TR" books a waybill but has no DHL gazetteer entry,
     // so POST /pickups answers 400 "420504: The origin location is invalid".
