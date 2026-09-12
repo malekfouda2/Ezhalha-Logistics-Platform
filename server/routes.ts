@@ -90,7 +90,7 @@ import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
-import { isCarrierStatusStillBooked } from "@shared/domain";
+import { COLLECTED_OR_MOVING_CARRIER_STATUSES, isCarrierStatusStillBooked } from "@shared/domain";
 import { SHIPMENT_FILTER_ALL } from "@shared/shipment-filters";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
@@ -118,7 +118,7 @@ import {
 } from "./services/commercial-invoice";
 import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { normalizeCountryCode } from "@shared/countries";
-import { countryLocalNow } from "@shared/country-timezones";
+import { countryLocalNow, isBusinessDayInCountry, nextBusinessDayAfterInCountry } from "@shared/country-timezones";
 import {
   INTEGRATION_APP_DEFINITIONS,
   buildEnvAccount,
@@ -1370,10 +1370,6 @@ const PICKUP_DEFAULT_READY_TIME = "09:00";
 const PICKUP_DEFAULT_CLOSE_TIME = "17:00";
 
 /** KSA weekend = Friday (5) & Saturday (6). `dow` is a UTC day-of-week for a date-only value. */
-function isKsaWeekend(dow: number): boolean {
-  return dow === 5 || dow === 6;
-}
-
 /** Wall-clock date/time parts in the KSA timezone for a given instant. */
 function ksaDateParts(now: Date): { y: number; m: number; d: number; hour: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1387,18 +1383,25 @@ function ksaDateParts(now: Date): { y: number; m: number; d: number; hour: numbe
 }
 
 /**
- * Default carrier pickup date (YYYY-MM-DD) in KSA: same business day if created before the
- * cutoff hour, otherwise the next business day (weekends skipped).
+ * Default carrier pickup date (YYYY-MM-DD): same business day if we are still before our own
+ * cutoff hour, otherwise the next business day.
+ *
+ * The cutoff is ours to decide, so it is read in KSA time. Which days are *working* days is not
+ * ours to decide — it belongs to the origin. Skipping weekends by Saudi rules regardless of origin
+ * is what produced a Sunday collection date for shipments out of Turkey and China, which DHL
+ * refuses with `5006: Pickup is not allowed for this shipment date`.
  */
-function computeDefaultPickupDate(now: Date = new Date()): { date: string; sameDay: boolean } {
+function computeDefaultPickupDate(
+  now: Date = new Date(),
+  originCountry?: string | null,
+): { date: string; sameDay: boolean } {
   const { y, m, d, hour } = ksaDateParts(now);
-  const cur = new Date(Date.UTC(y, m - 1, d));
+  const today = new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
   const beforeCutoff = hour < PICKUP_CUTOFF_HOUR;
-  if (beforeCutoff && !isKsaWeekend(cur.getUTCDay())) {
-    return { date: cur.toISOString().slice(0, 10), sameDay: true };
+  if (beforeCutoff && isBusinessDayInCountry(today, originCountry)) {
+    return { date: today, sameDay: true };
   }
-  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
-  return { date: cur.toISOString().slice(0, 10), sameDay: false };
+  return { date: nextBusinessDayAfterInCountry(today, originCountry), sameDay: false };
 }
 
 /**
@@ -1442,29 +1445,31 @@ function normalizePickupWindow(
   }
   // Today is spent (or the date is stale) — roll to the next business day, default window.
   return {
-    date: nextBusinessDayAfter(local.date),
+    date: nextBusinessDayAfterInCountry(local.date, senderCountry),
     readyTime: PICKUP_DEFAULT_READY_TIME,
     closeTime: PICKUP_DEFAULT_CLOSE_TIME,
   };
 }
 
-/** The first business day strictly after a YYYY-MM-DD date (KSA weekend rules). */
-function nextBusinessDayAfter(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const cur = new Date(Date.UTC(y, m - 1, d));
-  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
-  return cur.toISOString().slice(0, 10);
-}
-
-/** True when a YYYY-MM-DD pickup date is today-or-later in KSA and lands on a business day. */
-function isBookablePickupDate(dateStr: string | null | undefined, now: Date = new Date()): boolean {
+/**
+ * True when a YYYY-MM-DD pickup date is today-or-later and lands on a working day at the origin.
+ *
+ * The origin country is required rather than optional on purpose: every caller knows the shipper's
+ * country, and an omitted one silently falls back to a Saturday/Sunday weekend — which is right
+ * for most of the world and wrong for the Gulf, where most of these shipments start.
+ */
+function isBookablePickupDate(
+  dateStr: string | null | undefined,
+  originCountry: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
   const { y, m, d } = ksaDateParts(now);
   const today = Date.UTC(y, m - 1, d);
   const [py, pm, pd] = dateStr.split("-").map(Number);
   const target = Date.UTC(py, pm - 1, pd);
   if (target < today) return false;
-  return !isKsaWeekend(new Date(target).getUTCDay());
+  return isBusinessDayInCountry(dateStr, originCountry);
 }
 
 /**
@@ -1522,9 +1527,12 @@ function dangerousGoodsInsertFields(
   };
 }
 
-function expressPickupInsertFields(pickup?: z.infer<typeof pickupInputSchema>) {
-  const custom = pickup?.date && isBookablePickupDate(pickup.date) ? pickup.date : null;
-  const date = custom || computeDefaultPickupDate().date;
+function expressPickupInsertFields(
+  pickup?: z.infer<typeof pickupInputSchema>,
+  originCountry?: string | null,
+) {
+  const custom = pickup?.date && isBookablePickupDate(pickup.date, originCountry) ? pickup.date : null;
+  const date = custom || computeDefaultPickupDate(new Date(), originCountry).date;
   return {
     pickupRequested: true,
     pickupStatus: "requested",
@@ -1572,12 +1580,29 @@ async function bookCarrierPickupIfRequested(
   if (!shipment.pickupRequested || shipment.pickupConfirmationNumber) return;
   if (!adapter.supportsPickup || !adapter.requestPickup) return;
 
+  // Never dispatch a courier for goods that have already left the shipper.
+  //
+  // Booking the waybill and booking the collection are two separate carrier calls, so a shipment
+  // whose pickup failed keeps moving and posting tracking updates — EZH861906362 reached Leipzig
+  // with its pickup still in `failed`. Retrying at that point sends a van to collect a parcel that
+  // is already in the carrier's network.
+  if (COLLECTED_OR_MOVING_CARRIER_STATUSES.has(String(shipment.status || "").toLowerCase())) {
+    logInfo(
+      `Skipping pickup for ${shipment.trackingNumber}: already ${shipment.status} — the goods have left the shipper`,
+    );
+    await storage.updateShipment(shipment.id, {
+      pickupStatus: "not_required",
+      pickupError: null,
+    });
+    return;
+  }
+
   // Normalize the pickup date at booking time: a missing / past / weekend date (e.g. a quote
   // created days ago, or paid after the cutoff) is bumped to the current cutoff-based default so
   // the carrier never rejects a stale date. The stored window is updated to match what is booked.
   let effectivePickupDate: string = shipment.pickupDate ?? "";
-  if (!isBookablePickupDate(effectivePickupDate)) {
-    effectivePickupDate = computeDefaultPickupDate().date;
+  if (!isBookablePickupDate(effectivePickupDate, shipment.senderCountry)) {
+    effectivePickupDate = computeDefaultPickupDate(new Date(), shipment.senderCountry).date;
   }
   // Then normalize the window against the SHIPPER's local clock — a date that is "today" in KSA
   // can already be past at an origin further east/west, which carriers reject outright.
@@ -7843,6 +7868,18 @@ export async function registerRoutes(
       if (!adapter.supportsPickup || !adapter.requestPickup) {
         return res.status(400).json({ error: `${shipment.carrierName || shipment.carrierCode || "This carrier"} does not support API pickup booking.` });
       }
+      // A pickup on a shipment that is already moving would send a courier to collect a parcel the
+      // carrier already has. Say so, rather than booking it and leaving a van to turn up.
+      if (COLLECTED_OR_MOVING_CARRIER_STATUSES.has(String(shipment.status || "").toLowerCase())) {
+        return res.status(400).json({
+          error: `This shipment is already ${String(shipment.status).replace(/_/g, " ")}, so the goods have left the shipper. Booking a collection now would send a courier for a parcel the carrier already has.`,
+        });
+      }
+      if (!isBookablePickupDate(parsed.date, shipment.senderCountry)) {
+        return res.status(400).json({
+          error: `${parsed.date} is not a working day at the origin (${shipment.senderCountry}), and the carrier will refuse a collection on it. Pick the next working day there.`,
+        });
+      }
       // Replace the pickup preference and clear any prior confirmation so re-booking runs.
       const updated = (await storage.updateShipment(shipment.id, {
         pickupRequested: true,
@@ -8875,9 +8912,9 @@ export async function registerRoutes(
       }
 
       const collectionDate = parsed.collectionDate || shipment.dgPreferredPickupDate || null;
-      const pickupDate = collectionDate && isBookablePickupDate(collectionDate)
+      const pickupDate = collectionDate && isBookablePickupDate(collectionDate, shipment.senderCountry)
         ? collectionDate
-        : computeDefaultPickupDate().date;
+        : computeDefaultPickupDate(new Date(), shipment.senderCountry).date;
 
       const previousStatus = shipment.status;
       const updated = await storage.updateShipment(shipment.id, {
@@ -14376,7 +14413,9 @@ export async function registerRoutes(
         quoteDiscountSar: pricing.discountSar ? pricing.discountSar.toFixed(2) : null,
         quoteExtraChargeSar: pricing.extraChargeSar ? pricing.extraChargeSar.toFixed(2) : null,
         quoteNote: data.note || null,
-        ...(data.type === "express" ? expressPickupInsertFields(data.pickup) : pickupInsertFields(undefined)),
+        ...(data.type === "express"
+          ? expressPickupInsertFields(data.pickup, data.shipper.countryCode)
+          : pickupInsertFields(undefined)),
       });
 
       await logAudit(req.session.userId, "create_quotation", "shipment", shipment.id,
@@ -21163,7 +21202,7 @@ export async function registerRoutes(
         serviceType: quote.serviceType,
         currency: quote.currency,
         status: "payment_pending",
-        ...expressPickupInsertFields(pickup),
+        ...expressPickupInsertFields(pickup, shipmentData.shipper.countryCode),
         baseRate: quote.baseRate,
         marginAmount: quote.marginAmount,
         margin: quote.marginAmount,
