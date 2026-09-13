@@ -16,9 +16,15 @@ export interface UploadResponse {
 
 interface UseUploadOptions {
   onError?: (error: Error) => void;
+  /**
+   * Defaults to the authenticated route. Screens with no session yet — apply/create-account
+   * runs before any login — must pass the public counterpart ("/api/public/uploads/request-url"),
+   * exactly as web's `useUpload({ requestUrlEndpoint: ... })` does.
+   */
+  requestUrlEndpoint?: string;
 }
 
-export function useUpload({ onError }: UseUploadOptions = {}) {
+export function useUpload({ onError, requestUrlEndpoint = "/api/uploads/request-url" }: UseUploadOptions = {}) {
   const [isUploading, setIsUploading] = useState(false);
 
   // Mirrors web's two-step presigned-URL flow (client/src/hooks/use-upload.ts):
@@ -33,7 +39,7 @@ export function useUpload({ onError }: UseUploadOptions = {}) {
     try {
       const token = getAccessToken();
 
-      const requestUrlResponse = await fetch(`${API_BASE_URL}/api/uploads/request-url`, {
+      const requestUrlResponse = await fetch(`${API_BASE_URL}${requestUrlEndpoint}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

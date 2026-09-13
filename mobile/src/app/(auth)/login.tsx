@@ -15,6 +15,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { loginSchema, type LoginData } from "@shared/schema";
 import { useSignIn } from "@/lib/hooks/useAuth";
+import { useGuestStore } from "@/store/useGuestStore";
 import Toast from "react-native-toast-message";
 
 export default function LoginScreen() {
@@ -23,6 +24,12 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const signInMutation = useSignIn();
+  const startGuestSession = useGuestStore((s) => s.startGuestSession);
+
+  const handleGuestSignIn = () => {
+    startGuestSession();
+    router.replace("/(protected)/(client)/(tabs)/");
+  };
 
   const {
     control,
@@ -156,6 +163,13 @@ export default function LoginScreen() {
         onPress={() => router.push("/otp-request")}
       />
 
+      <Button
+        title={t("auth.signInAsGuest")}
+        variant="outline"
+        onPress={handleGuestSignIn}
+        style={styles.guestButton}
+      />
+
       <View style={styles.footer}>
         <Text size="small" dimRate="70%" style={styles.subtitle}>
           {t("auth.newToEzhalha")}
@@ -222,6 +236,9 @@ const styles = StyleSheet.create({
   orText: {
     marginHorizontal: rs(12),
     color: Colors.textSecondary,
+  },
+  guestButton: {
+    marginTop: rvs(16),
   },
   footer: {
     flexDirection: "row",

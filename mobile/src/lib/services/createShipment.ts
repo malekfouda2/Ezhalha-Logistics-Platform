@@ -1,12 +1,31 @@
 import { apiRequest } from "@/api/client";
+import { isGuestActive } from "@/store/useGuestStore";
 import {
     Address,
     PackageItem,
     TradeDocument,
     RatesResponse,
+    RateQuote,
     CheckoutResponse,
     ConfirmResponse,
 } from "@/store/createExpressShipmentStore";
+
+// The unauthenticated counterpart to `/api/client/shipments/rates` — same request schema on
+// the server (`shipmentInputSchema`), so no payload translation is needed, just a different,
+// rate-limited URL with no Authorization header. It has no `expiresAt` (nothing is persisted
+// for a guest quote), so we synthesize one the same way the server does for a real quote.
+interface GuestRatesResponse {
+    quotes: RateQuote[];
+    availableCarriers?: Array<{ code: string; name: string }>;
+}
+
+function toRatesResponse(guest: GuestRatesResponse): RatesResponse {
+    return {
+        quotes: guest.quotes,
+        availableCarriers: guest.availableCarriers,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    };
+}
 
 export interface AddressBookEntry {
     id: string;
@@ -40,6 +59,13 @@ export async function fetchRates(payload: {
     packageType: string;
     currency: string;
 }): Promise<RatesResponse> {
+    if (isGuestActive()) {
+        const guestResponse = await apiRequest<GuestRatesResponse>(
+            "/api/public/guest/express-rates",
+            { method: "POST", anonymous: true, body: payload },
+        );
+        return toRatesResponse(guestResponse);
+    }
     return apiRequest<RatesResponse>("/api/client/shipments/rates", {
         method: "POST",
         body: payload,

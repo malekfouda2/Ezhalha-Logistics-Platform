@@ -30,11 +30,30 @@
     "emailSignInCode": "Email me a sign-in code",
     "newToEzhalha": "New to ezhalha?",
     "applyForAccount": " Apply for an account",
+    "signInAsGuest": "Sign in as a guest",
     "errors": {
       "identifierRequired": "Email, username or phone is required",
       "identifierMin": "Must be at least 3 characters",
       "passwordRequired": "Password is required",
       "passwordMin": "Password must be at least 6 characters"
+    }
+  },
+  "guest": {
+    "label": "Guest",
+    "notSignedIn": "Not signed in",
+    "banner": {
+      "message": "You're browsing as a guest. Build a shipment and see live rates — you'll need an account to pay.",
+      "createAccount": "Create account",
+      "exit": "Exit guest mode"
+    },
+    "profile": {
+      "createAccountSubtitle": "Save your details and unlock the full portal",
+      "exitGuestMode": "Exit guest mode"
+    },
+    "gate": {
+      "cta": "Create an account",
+      "checkoutTitle": "Create an account to finalize this shipment",
+      "checkoutDescription": "Your shipment details are saved. Register and you'll pick up right where you left off."
     }
   },
   "otp": {
@@ -146,7 +165,8 @@
       "addressLine2": "Suite, unit, floor, etc. (optional)",
       "stateProvince": "State or Province",
       "city": "City",
-      "postalCode": "Postal/ZIP code"
+      "postalCode": "Postal/ZIP code",
+      "shortAddress": "National Address (e.g. RCTB4359)"
     },
     "submit": "Submit application",
     "errors": {
@@ -1134,7 +1154,9 @@
       "successTitle": "Application submitted",
       "successMessage": "Your application has been submitted successfully. We'll review it and get back to you within one business day.",
       "errorTitle": "Application failed",
-      "errorMessage": "We couldn't submit your application. Please check your information and try again."
+      "errorMessage": "We couldn't submit your application. Please check your information and try again.",
+      "uploadErrorTitle": "We couldn't upload that document. Please try again.",
+      "extractionErrorTitle": "We couldn't read your documents"
     },
     "otp": {
       "request": {

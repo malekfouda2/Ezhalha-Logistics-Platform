@@ -80,6 +80,9 @@ export default function PaymentsScreen() {
   );
   const paidTotal = useMemo(() => chartData.reduce((sum, m) => sum + m.paid, 0), [chartData]);
 
+  // No point drawing an all-zero chart for an account with no billing history yet.
+  const hasChartData = billedTotal > 0 || paidTotal > 0;
+
   const outstanding = useMemo(
     () =>
       (invoices ?? [])
@@ -133,24 +136,32 @@ export default function PaymentsScreen() {
             </InfoCard>
 
             <SectionLabel>{t("invoices.payments.chartTitle")}</SectionLabel>
-            <View style={styles.chartCard}>
-              <BilledPaidChart data={chartData} />
+            {hasChartData ? (
+              <View style={styles.chartCard}>
+                <BilledPaidChart data={chartData} />
 
-              <View style={styles.legendRow}>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, styles.legendDotBilled]} />
-                  <Text size="xs" dimRate="60%">
-                    {t("invoices.payments.billed")}
-                  </Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, styles.legendDotPaid]} />
-                  <Text size="xs" dimRate="60%">
-                    {t("invoices.payments.paid")}
-                  </Text>
+                <View style={styles.legendRow}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, styles.legendDotBilled]} />
+                    <Text size="xs" dimRate="60%">
+                      {t("invoices.payments.billed")}
+                    </Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, styles.legendDotPaid]} />
+                    <Text size="xs" dimRate="60%">
+                      {t("invoices.payments.paid")}
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            ) : (
+              <View style={[styles.chartCard, styles.chartEmpty]}>
+                <Text size="small" style={styles.chartEmptyText}>
+                  No shipments yet
+                </Text>
+              </View>
+            )}
 
             {feesLoading ? null : sortedFees.length > 0 ? (
               <>
@@ -241,6 +252,14 @@ const styles = StyleSheet.create({
   },
   legendDotPaid: {
     backgroundColor: Colors.primary,
+  },
+  chartEmpty: {
+    minHeight: rvs(100),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chartEmptyText: {
+    color: "#65748B",
   },
   listCard: {
     backgroundColor: Colors.white,

@@ -1,16 +1,18 @@
 import { Redirect, Stack } from "expo-router";
 
 import { useCurrentUser } from "@/lib/hooks/useAuth";
+import { useGuestMode } from "@/store/useGuestStore";
 
 export default function ClientLayout() {
   const { data: user, isLoading } = useCurrentUser();
+  const { isGuest, hasHydrated } = useGuestMode();
 
-  if (isLoading) {
+  if (isLoading || !hasHydrated) {
     return null;
   }
 
-  // Not logged in → send to login
-  if (!user) {
+  // Not logged in and not browsing as a guest → send to login
+  if (!user && !isGuest) {
     return <Redirect href="/(auth)/login" />;
   }
 

@@ -15,6 +15,7 @@ import { useClientAccount } from "@/lib/hooks/useClientAccount";
 import { useMyPermissions } from "@/lib/hooks/useTeam";
 import { useLogout } from "@/lib/hooks/useLogout";
 import { useLanguageStore } from "@/store/useLanguageStore";
+import { useGuestMode } from "@/store/useGuestStore";
 import { ClientPermission } from "@shared/domain";
 
 export default function ProfileScreen() {
@@ -23,11 +24,19 @@ export default function ProfileScreen() {
   const { data: user } = useCurrentUser();
   const { data: account, isLoading: accountLoading } = useClientAccount();
   const { data: myPerms } = useMyPermissions();
+  const { isGuest, end: endGuest } = useGuestMode();
 
   const language = useLanguageStore((state) => state.language);
   const { logout } = useLogout();
 
-  const displayName = user?.username || account?.name || t("profile.noCompanyName");
+  const handleExitGuest = () => {
+    endGuest();
+    router.replace("/(auth)/login");
+  };
+
+  const displayName = isGuest
+    ? t("guest.label")
+    : user?.username || account?.name || t("profile.noCompanyName");
   const companyLine = [ account?.name, account?.accountNumber]
     .filter(Boolean)
     .join(" · ");
@@ -63,89 +72,106 @@ export default function ProfileScreen() {
 
         <View style={styles.profileInfo}>
           <Text size="large" weight="bold" numberOfLines={1}>
-            {accountLoading ? t("common.loading") : displayName}
+            {isGuest ? t("guest.label") : accountLoading ? t("common.loading") : displayName}
           </Text>
           <Text size="small" dimRate="60%" numberOfLines={1} style={styles.companyLine}>
-            {companyLine}
+            {isGuest ? t("guest.notSignedIn") : companyLine}
           </Text>
 
-          <View style={styles.pricingBadge}>
-            <Text size="small" weight="semibold">
-              {t("profile.pricingTier")}
-            </Text>
-            <Text size="small" weight="bold" style={styles.pricingValue}>
-              {pricingTierLabel}
-            </Text>
-          </View>
+          {!isGuest && (
+            <View style={styles.pricingBadge}>
+              <Text size="small" weight="semibold">
+                {t("profile.pricingTier")}
+              </Text>
+              <Text size="small" weight="bold" style={styles.pricingValue}>
+                {pricingTierLabel}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
-      <SectionLabel style={styles.sectionSpacing}>
-        {t("profile.sections.account")}
-      </SectionLabel>
-      <InfoCard>
-        <SettingsRow
-          icon="person-outline"
-          title={t("profile.rows.profileInformation.title")}
-          subtitle={t("profile.rows.profileInformation.subtitle")}
-          onPress={() => router.push("/profile-information")}
-        />
-        <SettingsRow
-          icon="location-outline"
-          title={t("profile.rows.defaultShippingAddress.title")}
-          subtitle={
-            account?.shippingCity ||
-            account?.shippingAddressLine1 ||
-            t("profile.rows.defaultShippingAddress.subtitle")
-          }
-          onPress={() => router.push("/default-shipping-address")}
-        />
-        <SettingsRow
-          icon="globe-outline"
-          title={t("profile.rows.billingCurrency.title")}
-          subtitle={
-            account?.preferredCurrency === "USD"
-              ? t("profile.rows.billingCurrency.subtitleUsd")
-              : t("profile.rows.billingCurrency.subtitle")
-          }
-          onPress={() => router.push("/billing-currency")}
-        />
-        {canManageTeam ? (
+      {isGuest && (
+        <InfoCard>
           <SettingsRow
-            icon="people-outline"
-            title={t("profile.rows.teamMembers.title")}
-            subtitle={t("profile.rows.teamMembers.subtitle")}
-            onPress={() => router.push("/team-members")}
+            icon="person-add-outline"
+            title={t("guest.banner.createAccount")}
+            subtitle={t("guest.profile.createAccountSubtitle")}
+            onPress={() => router.push("/apply")}
           />
-        ) : null}
-        <SettingsRow
-          icon="storefront-outline"
-          title={t("profile.rows.salesChannels.title")}
-          subtitle={t("profile.rows.salesChannels.subtitle")}
-          onPress={() => router.push("/sales-channels")}
-        />
-        <SettingsRow
-          icon="card-outline"
-          title={t("profile.rows.savedCards.title")}
-          subtitle={t("profile.rows.savedCards.subtitle")}
-          onPress={() => router.push("/saved-cards")}
-        />
-      </InfoCard>
+        </InfoCard>
+      )}
 
-      <SectionLabel>{t("profile.sections.security")}</SectionLabel>
-      <InfoCard>
-        <SettingsRow
-          icon="lock-closed-outline"
-          title={t("profile.rows.changePassword.title")}
-          subtitle={t("profile.rows.changePassword.subtitle")}
-          onPress={() => router.push("/change-password")}
-        />
-        <SettingsRow
-          icon="shield-checkmark-outline"
-          title={t("profile.rows.signedInDevices.title")}
-          onPress={() => router.push("/signed-in-devices")}
-        />
-      </InfoCard>
+      {!isGuest && (
+        <>
+          <SectionLabel style={styles.sectionSpacing}>
+            {t("profile.sections.account")}
+          </SectionLabel>
+          <InfoCard>
+            <SettingsRow
+              icon="person-outline"
+              title={t("profile.rows.profileInformation.title")}
+              subtitle={t("profile.rows.profileInformation.subtitle")}
+              onPress={() => router.push("/profile-information")}
+            />
+            <SettingsRow
+              icon="location-outline"
+              title={t("profile.rows.defaultShippingAddress.title")}
+              subtitle={
+                account?.shippingCity ||
+                account?.shippingAddressLine1 ||
+                t("profile.rows.defaultShippingAddress.subtitle")
+              }
+              onPress={() => router.push("/default-shipping-address")}
+            />
+            <SettingsRow
+              icon="globe-outline"
+              title={t("profile.rows.billingCurrency.title")}
+              subtitle={
+                account?.preferredCurrency === "USD"
+                  ? t("profile.rows.billingCurrency.subtitleUsd")
+                  : t("profile.rows.billingCurrency.subtitle")
+              }
+              onPress={() => router.push("/billing-currency")}
+            />
+            {canManageTeam ? (
+              <SettingsRow
+                icon="people-outline"
+                title={t("profile.rows.teamMembers.title")}
+                subtitle={t("profile.rows.teamMembers.subtitle")}
+                onPress={() => router.push("/team-members")}
+              />
+            ) : null}
+            <SettingsRow
+              icon="storefront-outline"
+              title={t("profile.rows.salesChannels.title")}
+              subtitle={t("profile.rows.salesChannels.subtitle")}
+              onPress={() => router.push("/sales-channels")}
+            />
+            <SettingsRow
+              icon="card-outline"
+              title={t("profile.rows.savedCards.title")}
+              subtitle={t("profile.rows.savedCards.subtitle")}
+              onPress={() => router.push("/saved-cards")}
+            />
+          </InfoCard>
+
+          <SectionLabel>{t("profile.sections.security")}</SectionLabel>
+          <InfoCard>
+            <SettingsRow
+              icon="lock-closed-outline"
+              title={t("profile.rows.changePassword.title")}
+              subtitle={t("profile.rows.changePassword.subtitle")}
+              onPress={() => router.push("/change-password")}
+            />
+            <SettingsRow
+              icon="shield-checkmark-outline"
+              title={t("profile.rows.signedInDevices.title")}
+              onPress={() => router.push("/signed-in-devices")}
+            />
+          </InfoCard>
+        </>
+      )}
 
       <SectionLabel>{t("profile.sections.preferences")}</SectionLabel>
       <InfoCard>
@@ -157,8 +183,8 @@ export default function ProfileScreen() {
         />
         <SettingsRow
           icon="log-out-outline"
-          title={t("profile.rows.logout.title")}
-          onPress={logout}
+          title={isGuest ? t("guest.profile.exitGuestMode") : t("profile.rows.logout.title")}
+          onPress={isGuest ? handleExitGuest : logout}
           showChevron={false}
           danger
         />

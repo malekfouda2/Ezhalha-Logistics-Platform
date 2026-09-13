@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { useCreateLocalShipmentStore } from "@/store/createLocalShipmentStore";
 import { submitLocalCheckout } from "@/lib/services/localShipment";
+import { isGuestActive } from "@/store/useGuestStore";
 
 export function useLocalRatesStep() {
   const router = useRouter();
@@ -26,6 +27,13 @@ export function useLocalRatesStep() {
     }
 
     if (isSubmitting) return;
+
+    // A guest has no client account to create a real shipment against — the local wizard
+    // checks out straight from rate selection, so this is the only gate point it needs.
+    if (isGuestActive()) {
+      router.push("/createShipment/guest-checkout");
+      return;
+    }
 
     if (store.checkoutData && store.lastCheckoutSignature === selectedQuoteId) {
       router.push("/createShipment/local/step-5");

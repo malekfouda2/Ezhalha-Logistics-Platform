@@ -34,6 +34,7 @@ import {
   useCreateApplication,
   useExtractCompanyDetails,
 } from "@/lib/hooks/useAuth";
+import { useUpload } from "@/lib/hooks/useUpload";
 
 import type { UploadedDocument } from "@/lib/services/auth";
 import Toast from "react-native-toast-message";
@@ -83,6 +84,16 @@ export default function ApplyScreen() {
   const { t, i18n } = useTranslation();
 
   const [isScanning, setIsScanning] = useState(false);
+  const [uploadingField, setUploadingField] = useState<DocumentField | null>(null);
+
+  // Applying happens before any account exists, so this must hit the public upload route —
+  // the authenticated one 401s here. The picked file has to actually be uploaded to get a
+  // server-recognized objectPath ("/objects/..." or "/uploads/...") before extraction or
+  // submission can read it back; a bare local file:// URI (what expo-document-picker returns)
+  // isn't something the server can open.
+  const { uploadFile } = useUpload({
+    requestUrlEndpoint: "/api/public/uploads/request-url",
+  });
 
   /*
    * Store the complete uploaded document objects.
@@ -221,6 +232,11 @@ export default function ApplyScreen() {
 
     } catch (error) {
       console.error("Document extraction failed:", error);
+      Toast.show({
+        type: "error",
+        text1: t("toast.apply.extractionErrorTitle"),
+        text2: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setIsScanning(false);
     }
@@ -287,15 +303,31 @@ export default function ApplyScreen() {
       }
 
       const file = result.assets[0];
-
       const config = DOCUMENT_CONFIG[field];
+
+      setUploadingField(field);
+      const uploaded = await uploadFile({
+        uri: file.uri,
+        name: file.name,
+        type: file.mimeType || "application/octet-stream",
+        size: file.size ?? 0,
+      });
+      setUploadingField(null);
+
+      if (!uploaded) {
+        Toast.show({
+          type: "error",
+          text1: t("toast.apply.uploadErrorTitle"),
+        });
+        return;
+      }
 
       const document: UploadedDocument = {
         type: config.type,
         label: config.label,
-        name: file.name,
-        path: file.uri,
-        contentType: file.mimeType || "application/octet-stream",
+        name: uploaded.metadata.name,
+        path: uploaded.objectPath,
+        contentType: uploaded.metadata.contentType,
       };
 
       /*
@@ -791,6 +823,7 @@ export default function ApplyScreen() {
             subLabel={t("documents.requiredNote")}
             fileName={uploadedDocuments.taxCertificate?.name || ""}
             error={errors.documents?.message}
+            isLoading={uploadingField === "taxCertificate"}
             onPick={() => pickDocument("taxCertificate")}
             onRemove={() => removeDocument("taxCertificate")}
             uploadText={t("documents.upload")}
@@ -805,6 +838,7 @@ export default function ApplyScreen() {
             subLabel={t("documents.requiredNote")}
             fileName={uploadedDocuments.commercialRegistration?.name || ""}
             error={errors.documents?.message}
+            isLoading={uploadingField === "commercialRegistration"}
             onPick={() => pickDocument("commercialRegistration")}
             onRemove={() => removeDocument("commercialRegistration")}
             uploadText={t("documents.upload")}
@@ -819,6 +853,7 @@ export default function ApplyScreen() {
             subLabel={t("documents.requiredNote")}
             fileName={uploadedDocuments.memorandumOfAssociation?.name || ""}
             error={errors.documents?.message}
+            isLoading={uploadingField === "memorandumOfAssociation"}
             onPick={() => pickDocument("memorandumOfAssociation")}
             onRemove={() => removeDocument("memorandumOfAssociation")}
             uploadText={t("documents.upload")}
@@ -833,6 +868,7 @@ export default function ApplyScreen() {
             subLabel={t("documents.requiredNote")}
             fileName={uploadedDocuments.directorId?.name || ""}
             error={errors.documents?.message}
+            isLoading={uploadingField === "directorId"}
             onPick={() => pickDocument("directorId")}
             onRemove={() => removeDocument("directorId")}
             uploadText={t("documents.upload")}

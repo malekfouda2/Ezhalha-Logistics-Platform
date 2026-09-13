@@ -6,6 +6,8 @@ import {
   setAccessToken,
   setRefreshToken,
 } from "./tokens";
+import { isGuestActive } from "@/store/useGuestStore";
+import { getGuestQueryResponse } from "@/lib/guestMode";
 
 // Typed fetch wrapper for the ezhalha API.
 //
@@ -154,6 +156,25 @@ export async function apiRequest<T = unknown>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
+  // A guest holds no token, so there is nothing an authenticated call against the client/
+  // notification surface could do but 401. Reads answer with canned/empty data (this is the one
+  // place that has to catch every caller, including hooks that build their own queryFn and
+  // bypass queryClient's default one — see mobile/src/lib/guestMode.ts); mutations are refused
+  // up front with a clear message rather than being sent to 401 and surfacing as a confusing
+  // "session expired" (a guest never had one) via the endSession() path below.
+  const method = (options.method ?? "GET").toUpperCase();
+  const isGuestGatedPath = path.startsWith("/api/client/") || path.startsWith("/api/notifications");
+  if (!options.anonymous && isGuestGatedPath && isGuestActive()) {
+    if (method === "GET") {
+      const guestResponse = getGuestQueryResponse(path);
+      if (guestResponse !== undefined) {
+        return guestResponse as T;
+      }
+    } else {
+      throw new ApiError(403, "Create an account to continue.", "guest_mode_blocked");
+    }
+  }
+
   let token = options.anonymous ? null : getAccessToken();
 
   // No usable access token but we do have a refresh token — refresh before the round trip

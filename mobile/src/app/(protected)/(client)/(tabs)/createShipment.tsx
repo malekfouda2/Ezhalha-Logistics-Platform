@@ -15,6 +15,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { Feather, MaterialIcons, Fontisto, Ionicons } from "@expo/vector-icons";
 import { useDangerousGoodsAccessStatus } from "@/lib/hooks/useDangerousGoodsAccessGate";
+import { useGuestMode } from "@/store/useGuestStore";
 
 type ShipmentTypeIcon =
   | {
@@ -93,6 +94,12 @@ export default function CreateShipmentScreen() {
   const dangerousGoodsLocked = !(dangerousGoodsAccess?.enabled ?? false);
   const dangerousGoodsPending = dangerousGoodsAccess?.request?.status === "pending";
 
+  const { isGuest } = useGuestMode();
+  // Guests can price and walk Express/Local without an account, same as web — but Door-to-Door
+  // and Dangerous Goods have no public/guest pricing surface, so they stay behind the same
+  // "locked" tile treatment used for an un-approved DG account.
+  const guestLockedTypeIds = new Set(["freight", "dangerousGoods"]);
+
   // Approval can land while the client is elsewhere in the app (this tab stays mounted, so
   // the query alone wouldn't refetch just from switching back to it) — re-check every time
   // this screen gains focus so a freshly-approved account doesn't still show "locked".
@@ -118,7 +125,8 @@ export default function CreateShipmentScreen() {
           // admin approves. Tapping still navigates through either way: the wizard's own
           // index route shows the request screen when locked. Mirrors the web chooser
           // (client/src/pages/client/create-shipment-select.tsx).
-          const locked = item.id === "dangerousGoods" && dangerousGoodsLocked;
+          const guestLocked = isGuest && guestLockedTypeIds.has(item.id);
+          const locked = guestLocked || (item.id === "dangerousGoods" && dangerousGoodsLocked);
 
           return (
             <View key={item.id} style={styles.card}>
@@ -165,7 +173,13 @@ export default function CreateShipmentScreen() {
                   styles.continueRow,
                   pressed && { opacity: 0.6 },
                 ]}
-                onPress={() => router.push(item.route as any)}
+                onPress={() => {
+                  if (guestLocked) {
+                    router.push("/apply");
+                    return;
+                  }
+                  router.push(item.route as any);
+                }}
               >
                 {locked ? (
                   <>
@@ -176,9 +190,11 @@ export default function CreateShipmentScreen() {
                       style={styles.lockIcon}
                     />
                     <Text size="medium" weight="semibold" style={styles.continueText}>
-                      {dangerousGoodsPending
-                        ? t("createShipment.dangerousGoods.tile.pending")
-                        : t("createShipment.dangerousGoods.tile.requestAccess")}
+                      {guestLocked
+                        ? t("guest.gate.cta")
+                        : dangerousGoodsPending
+                          ? t("createShipment.dangerousGoods.tile.pending")
+                          : t("createShipment.dangerousGoods.tile.requestAccess")}
                     </Text>
                   </>
                 ) : (

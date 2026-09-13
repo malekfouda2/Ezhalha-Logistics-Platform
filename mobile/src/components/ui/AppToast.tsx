@@ -67,7 +67,9 @@ const toastConfig = {
       text1Style={toastStyles.text1}
       text2Style={toastStyles.text2}
       text1NumberOfLines={2}
-      text2NumberOfLines={5}
+      // Error messages (e.g. a raw server/API error surfaced verbatim) run longer than the
+      // success copy we write ourselves — give them room instead of cutting them off.
+      text2NumberOfLines={0}
     />
   ),
 };

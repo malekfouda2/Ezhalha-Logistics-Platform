@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useCreateShipmentStore, isInternationalShipment } from "@/store/createExpressShipmentStore";
 import { CheckoutPayload, submitCheckout } from "@/lib/services/createShipment";
+import { isGuestActive } from "@/store/useGuestStore";
 
 const PICKUP_CUTOFF_HOUR = 15; // keep in sync with server
 
@@ -78,6 +79,13 @@ export function usePickupStep() {
     const payload = buildCheckoutPayload();
     if (!payload) return;
     if (isSubmitting) return;
+
+    // A guest has no client account to create a real shipment against — this is exactly where
+    // web asks a browsing visitor to register, so route there instead of hitting checkout.
+    if (isGuestActive()) {
+      router.push("/createShipment/guest-checkout");
+      return;
+    }
 
     const signature = JSON.stringify(payload);
     if (signature === lastCheckoutSignature && store.checkoutData) {

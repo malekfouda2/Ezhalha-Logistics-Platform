@@ -18,6 +18,7 @@ import {
   signOut,
   UploadedDocument,
 } from "../services/auth";
+import { endGuestSession } from "@/store/useGuestStore";
 
 
 
@@ -46,6 +47,8 @@ export function useSignIn() {
     }) => signIn(username, password),
 
     onSuccess: (user) => {
+      // A real session always outranks a stale guest flag.
+      endGuestSession();
       // Drop every cached query from the previous session so a different
       // account doesn't briefly see stale data (e.g. permissions), but
       // leave the "auth" namespace alone — clearing it here would reset
@@ -78,6 +81,8 @@ export function useSignInWithCode() {
     }) => signInWithCode(email, code),
 
     onSuccess: (user) => {
+      // A real session always outranks a stale guest flag.
+      endGuestSession();
       // Drop every cached query from the previous session so a different
       // account doesn't briefly see stale data (e.g. permissions), but
       // leave the "auth" namespace alone — clearing it here would reset

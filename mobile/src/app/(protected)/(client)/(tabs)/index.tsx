@@ -24,9 +24,11 @@ import { useNotifications } from "@/lib/hooks/useNotifications";
 import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { useCurrentUser } from "@/lib/hooks/useAuth";
+import { useGuestMode } from "@/store/useGuestStore";
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
+  const { isGuest, end: endGuest } = useGuestMode();
   const { data: account, isLoading: accountLoading } = useQuery<ClientAccount>({
     queryKey: ["/api/client/account"],
   });
@@ -95,9 +97,39 @@ export default function ClientDashboard() {
     return monthMap[label.trim().toLowerCase()] ?? label;
   };
 
+  const handleExitGuest = () => {
+    endGuest();
+    router.replace("/(auth)/login");
+  };
+
+  // No point drawing a chart that's all zeros — a brand-new account (or a guest) has nothing
+  // to plot yet.
+  const hasActivityData = (stats?.shipmentsByMonth ?? []).some((m) => m.value > 0);
+
   return (
     <RefreshableScreen contentContainerStyle={styles.content}>
       {/* <LanguageSwitch /> */}
+
+      {isGuest && (
+        <View style={styles.guestBanner} testID="guest-banner">
+          <Text size="small" style={styles.guestBannerText}>
+            {t("guest.banner.message")}
+          </Text>
+          <View style={styles.guestBannerActions}>
+            <Pressable style={styles.guestBannerButton} onPress={() => router.push("/apply")}>
+              <Text size="xs" weight="bold" style={styles.guestBannerButtonText}>
+                {t("guest.banner.createAccount")}
+              </Text>
+            </Pressable>
+            <Pressable onPress={handleExitGuest}>
+              <Text size="xs" weight="semibold" style={styles.guestBannerExit}>
+                {t("guest.banner.exit")}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
@@ -118,7 +150,7 @@ export default function ClientDashboard() {
             </Text>
 
             <Text size="xs" style={styles.userName} numberOfLines={1}>
-              {account?.name} · {account?.accountNumber}
+              {isGuest ? t("guest.notSignedIn") : `${account?.name} · ${account?.accountNumber}`}
             </Text>
           </View>
         </View>
@@ -225,6 +257,12 @@ export default function ClientDashboard() {
             >
               <ActivityIndicator color={Colors.primary} />
             </View>
+          ) : !hasActivityData ? (
+            <View style={styles.chartEmpty}>
+              <Text size="small" style={styles.chartEmptyText}>
+                No shipments yet
+              </Text>
+            </View>
           ) : (
             (() => {
               const rawMax = Math.max(
@@ -292,6 +330,37 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: rs(16),
     paddingTop: rvs(8),
+  },
+  guestBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFF3EC",
+    borderRadius: rs(14),
+    paddingHorizontal: rs(14),
+    paddingVertical: rvs(10),
+    marginBottom: rvs(12),
+    gap: rs(10),
+  },
+  guestBannerText: {
+    flex: 1,
+    color: Colors.text,
+  },
+  guestBannerActions: {
+    alignItems: "center",
+    gap: rs(10),
+  },
+  guestBannerButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: rs(20),
+    paddingHorizontal: rs(12),
+    paddingVertical: rvs(6),
+  },
+  guestBannerButtonText: {
+    color: Colors.white,
+  },
+  guestBannerExit: {
+    color: Colors.primary,
   },
   header: {
     flexDirection: "row",
@@ -438,6 +507,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
+  },
+  chartEmpty: {
+    minHeight: rvs(100),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chartEmptyText: {
+    color: "#65748B",
   },
   chartColumn: {
     flex: 1,
