@@ -9,6 +9,9 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "db:migrate": "tsx script/migrate.ts",
+    "db:migrate:check": "tsx script/migrate.ts --check",
+    "db:check": "tsx script/check-schema.ts",
     "openapi": "tsx script/generate-openapi.ts"
   },
   "dependencies": {

@@ -139,13 +139,35 @@ the new schema. This is what makes the deploy zero-downtime.
 ```bash
 cd /www/wwwroot/app.ezhalha.co
 git fetch --tags
-/www/server/pgsql/bin/psql "$(grep -E '^DATABASE_URL=' .env | cut -d= -f2-)" \
-  -v ON_ERROR_STOP=1 --single-transaction -f migrations/<new-migration>.sql
+git checkout v7.1.0          # the migrations you need are the ones in THIS tag
+npm install --no-audit --no-fund
+
+npm run db:migrate:check -- --expect-db=ezhalha   # what is pending? exits 1 if anything is
+npm run db:migrate -- --expect-db=ezhalha         # apply it, recorded in schema_migrations
+npm run db:check                                  # does the DB have everything the code needs?
 ```
+
+**`npm run db:check` is the gate. A non-zero exit stops the deploy.** It compares every table and
+column in `shared/schema.ts` against the live database and names whatever is missing. Do not
+reload pm2 until it passes.
+
+> **Never decide "no migrations in this release" by reading your own pull request.** A tag contains
+> everything merged since the *previously deployed* tag, which can include migrations from work
+> somebody else released to staging only. This is exactly how production spent three days on
+> 2026-09-10 unable to read `client_applications`: the release shipped guest-mode code that selects
+> `shipment_draft`, while that column's migration had only ever been applied to staging. `db:migrate`
+> and `db:check` answer this from the database instead of from memory — use them and never the diff.
+>
+> To see it yourself before deploying: `git diff --name-only <deployed-tag>..<new-tag> -- migrations/`
 
 > **Never run `npm run db:push` against production.** The `session` table is created at
 > runtime and is not a Drizzle entity, so push treats it as drift and offers to drop it.
 > Additive SQL only.
+
+> Migrations must stay **idempotent** (`IF NOT EXISTS`, `NOT EXISTS` guards). That is what makes a
+> re-run after a partial failure safe, and what `migrate.ts --repair` relies on to recover a
+> database whose ledger cannot be trusted. `tests/schema-drift.test.ts` fails the build if a new
+> migration is not guarded.
 
 ### 5. Deploy the tag
 
