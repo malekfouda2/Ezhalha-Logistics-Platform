@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-context";
+import { useGuestMode } from "@/lib/guest-mode";
+import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "./notification-bell";
 import { ProfileBadge } from "./profile-badge";
@@ -68,8 +70,9 @@ const navItems: NavItem[] = [
 ];
 
 export function ClientLayout({ children, clientProfile = "regular" }: ClientLayoutProps) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const { user, logout } = useAuth();
+  const { isGuest, end: endGuest } = useGuestMode();
 
   const { data: myPerms } = useQuery<MyPermissions>({
     queryKey: ["/api/client/my-permissions"],
@@ -103,6 +106,11 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const handleExitGuest = () => {
+    endGuest();
+    navigate("/");
   };
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -182,20 +190,22 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
             >
               <Avatar className="h-9 w-9">
                 <AvatarFallback className="bg-primary text-primary-foreground text-sm">
-                  {user?.username?.charAt(0).toUpperCase() || "C"}
+                  {isGuest ? "G" : user?.username?.charAt(0).toUpperCase() || "C"}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-medium truncate">{user?.username}</p>
-                <p className="text-xs text-muted-foreground">Client</p>
+                <p className="text-sm font-medium truncate">{isGuest ? "Guest" : user?.username}</p>
+                <p className="text-xs text-muted-foreground">{isGuest ? "Not signed in" : "Client"}</p>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <div className="px-2 py-1.5">
-              <p className="text-sm font-medium">{user?.username}</p>
-              <p className="text-xs text-muted-foreground">{user?.email}</p>
+              <p className="text-sm font-medium">{isGuest ? "Guest" : user?.username}</p>
+              <p className="text-xs text-muted-foreground">
+                {isGuest ? "Browsing without an account" : user?.email}
+              </p>
             </div>
             <DropdownMenuSeparator />
             <Link href="/client/settings" onClick={closeMobileNav}>
@@ -205,9 +215,12 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
               </DropdownMenuItem>
             </Link>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+            <DropdownMenuItem
+              onClick={isGuest ? handleExitGuest : handleLogout}
+              data-testid="menu-logout"
+            >
               <LogOut className="mr-2 h-4 w-4" />
-              Logout
+              {isGuest ? "Exit guest mode" : "Logout"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -250,6 +263,34 @@ export function ClientLayout({ children, clientProfile = "regular" }: ClientLayo
             <ThemeToggle />
           </div>
         </header>
+
+        {/* Guest-mode banner — a guest is browsing without an account, and should always know it. */}
+        {isGuest && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/30 bg-primary/10 px-4 py-2.5 sm:px-6"
+            data-testid="guest-banner"
+          >
+            <p className="text-sm">
+              <span className="font-medium">You're browsing as a guest.</span>{" "}
+              <span className="text-muted-foreground">
+                Build a shipment and see live rates — you'll need an account to pay.
+              </span>
+            </p>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => navigate("/apply?resume=1")} data-testid="button-guest-signup">
+                Create an account
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleExitGuest}
+                data-testid="button-guest-exit"
+              >
+                Exit
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto bg-gradient-to-b from-background via-background to-muted/25">

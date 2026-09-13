@@ -1,5 +1,6 @@
 import "../load-env";
 import { calculateChargeableWeight } from "@shared/chargeable-weight";
+import { isBusinessDayInCountry, nextBusinessDayOnOrAfter } from "@shared/country-timezones";
 import {
   CarrierError,
   extractUtcOffset,
@@ -755,6 +756,12 @@ export class AramexAdapter implements CarrierAdapter {
     const s = request.shipper;
     const isInternational = Boolean(request.isInternational);
     const totalWeightKg = request.packages.reduce((sum, p) => sum + kgValue(p.weight, p.weightUnit), 0);
+    // Never ask for a collection on a day the origin does not work. The caller normalizes this,
+    // but a pickup rejected for its date costs a real collection while the waybill — booked by a
+    // separate call — stays live, so the parcel travels with no courier dispatched.
+    const pickupDate = isBusinessDayInCountry(request.pickupDate, s.countryCode)
+      ? request.pickupDate
+      : nextBusinessDayOnOrAfter(request.pickupDate, s.countryCode);
     // Aramex uses WCF JSON dates: /Date(epochMillis)/.
     const wcf = (dateISO: string, time: string) => `/Date(${new Date(`${dateISO}T${time}:00Z`).getTime()})/`;
     const payload = {
@@ -777,10 +784,10 @@ export class AramexAdapter implements CarrierAdapter {
           EmailAddress: s.email || "",
         },
         PickupLocation: request.location || "Reception",
-        PickupDate: wcf(request.pickupDate, request.readyTime),
-        ReadyTime: wcf(request.pickupDate, request.readyTime),
-        LastPickupTime: wcf(request.pickupDate, request.closeTime),
-        ClosingTime: wcf(request.pickupDate, request.closeTime),
+        PickupDate: wcf(pickupDate, request.readyTime),
+        ReadyTime: wcf(pickupDate, request.readyTime),
+        LastPickupTime: wcf(pickupDate, request.closeTime),
+        ClosingTime: wcf(pickupDate, request.closeTime),
         Comments: request.instructions || "",
         Reference1: request.trackingNumber || "",
         Vehicle: "",

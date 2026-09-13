@@ -632,6 +632,52 @@ describe("paying for it", () => {
     expect(settled!.carrierErrorCode).toBeFalsy();
   });
 
+  it("offers credit alongside the card on the quotation the client is sent", async () => {
+    // The quotation page decides what to show from three values: `canPay` and the consent pair
+    // on the quotation itself, and `creditEnabled` on the account. A dangerous goods quote is
+    // the one flow where the client is sent to that page by an operator rather than arriving
+    // from checkout, so this pins the payload it lands on — a card-only page means a client
+    // with credit terms has to pay up front for the one shipment type they cannot self-serve.
+    const { shipment, cookies, clientAccount } = await submitDangerousGoodsShipment();
+    await handOverToCarrier(shipment.id);
+    await quoteShipment(shipment.id);
+    await storage.updateClientAccount(clientAccount.id, { creditEnabled: true, creditLimitSar: "100000" });
+
+    await withCookies(
+      request.post(`/api/client/quotations/${shipment.id}/confirm-declaration`).send({ declarationConfirmed: true }),
+      cookies,
+    );
+
+    const quotation = await withCookies(request.get(`/api/client/quotations/${shipment.id}`), cookies);
+    expect(quotation.status).toBe(200);
+    expect(quotation.body.canPay).toBe(true);
+    expect(quotation.body.requiresConsent).toBe(true);
+    expect(quotation.body.consentAccepted).toBe(true);
+    expect(quotation.body.creditEnabled).toBe(true);
+    expect(quotation.body.creditAvailableSar).toBeGreaterThanOrEqual(quotation.body.pricing.clientTotalSar);
+
+    const paid = await withCookies(request.post(`/api/client/shipments/${shipment.id}/pay-later`).send({}), cookies);
+    expect(paid.status).toBe(200);
+  });
+
+  it("reports credit as unavailable rather than hiding it", async () => {
+    // Two different "no": no credit terms at all, and terms whose remaining balance will not
+    // cover this quote. The page can only tell the client which one it is if the quotation
+    // says so — otherwise both render as a card-only page.
+    const { shipment, cookies, clientAccount } = await submitDangerousGoodsShipment();
+    await handOverToCarrier(shipment.id);
+    await quoteShipment(shipment.id);
+
+    const noTerms = await withCookies(request.get(`/api/client/quotations/${shipment.id}`), cookies);
+    expect(noTerms.body.creditEnabled).toBe(false);
+    expect(noTerms.body.creditAvailableSar).toBe(0);
+
+    await storage.updateClientAccount(clientAccount.id, { creditEnabled: true, creditLimitSar: "10" });
+    const shortBalance = await withCookies(request.get(`/api/client/quotations/${shipment.id}`), cookies);
+    expect(shortBalance.body.creditEnabled).toBe(true);
+    expect(shortBalance.body.creditAvailableSar).toBeLessThan(shortBalance.body.pricing.clientTotalSar);
+  });
+
   it("goes live on the waybill and collection date the operator records after payment", async () => {
     const { shipment, cookies } = await submitDangerousGoodsShipment();
     await payQuotedShipment(shipment.id, cookies, { collectionDate: "2026-09-14" });

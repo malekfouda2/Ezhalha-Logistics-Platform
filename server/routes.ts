@@ -73,12 +73,21 @@ import {
 } from "@shared/internal-users";
 import {
   normalizePricingAccountType,
+  PricingAccountType,
   PRICING_ACCOUNT_TYPES,
   type PricingAccountTypeValue,
 } from "@shared/pricing-account-types";
 import { logInfo, logWarn, logError, logAuditToFile, logApiRequest, logWebhook, logPricingChange, logProfileChange } from "./services/logger";
-import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification, sendEmail } from "./services/email";
+import { sendAccountCredentials, sendApplicationReceived, sendApplicationRejected, notifyAdminNewApplication, sendCreditInvoiceCreated, sendCreditInvoiceReminder, sendShipmentExtraFeesNotification } from "./services/email";
 import { getRenderedTemplate } from "./services/email-templates";
+import { dispatchTemplatedEmail, resendDelivery } from "./services/email-delivery";
+import {
+  getAllEmailSettings,
+  getEmailTemplateDescriptor,
+  resolveEmailSettings,
+} from "./services/email-settings";
+import { restartCreditReminderScheduler } from "./services/credit-reminder";
+import { restartIntegrationHealthDigestScheduler } from "./services/integration-health-digest";
 import { fedexAdapter, CarrierError } from "./integrations/fedex";
 import type { CarrierAdapter, CreateShipmentRequest, ShippingAddress, PickupRequest, PackageDetails } from "./integrations/fedex";
 import { carrierService, getCarrierAdapter } from "./integrations/carriers";
@@ -89,7 +98,7 @@ import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
 import sanitizeHtml from "sanitize-html";
-import { isCarrierStatusStillBooked } from "@shared/domain";
+import { COLLECTED_OR_MOVING_CARRIER_STATUSES, isCarrierStatusStillBooked } from "@shared/domain";
 import { SHIPMENT_FILTER_ALL } from "@shared/shipment-filters";
 import { validateShippingAddresses, POSTAL_CODE_EXEMPT_COUNTRIES, STATE_REQUIRED_COUNTRIES, formatValidationErrors } from "./validation/shippingAddress";
 import {
@@ -117,7 +126,7 @@ import {
 } from "./services/commercial-invoice";
 import { calculateChargeableWeight, type ChargeableWeightSummary } from "@shared/chargeable-weight";
 import { normalizeCountryCode } from "@shared/countries";
-import { countryLocalNow } from "@shared/country-timezones";
+import { countryLocalNow, isBusinessDayInCountry, nextBusinessDayAfterInCountry } from "@shared/country-timezones";
 import {
   INTEGRATION_APP_DEFINITIONS,
   buildEnvAccount,
@@ -618,7 +627,7 @@ class EmailInUseError extends Error {
 async function approveClientApplication(
   application: ClientApplication,
   options: { profile?: string; reviewedByUserId?: string; reviewNotes?: string; ipAddress?: string; auditAction?: string },
-): Promise<ClientAccount> {
+): Promise<{ clientAccount: ClientAccount; user: User }> {
   const existingUser = await storage.getUserByEmail(application.email);
   if (existingUser) {
     throw new EmailInUseError();
@@ -699,7 +708,10 @@ async function approveClientApplication(
 
   await sendPasswordSetupEmail(createdUser, "onboard");
 
-  return clientAccount;
+  // The created user is returned so an auto-approved individual can be signed in on the spot.
+  // The onboard email still goes out: it is how they get back in on their next visit, since no
+  // password was chosen here.
+  return { clientAccount, user: createdUser };
 }
 
 // Issue a one-time token and email a set/reset-password link. purpose "onboard" (7-day) for new
@@ -716,18 +728,17 @@ async function sendPasswordSetupEmail(user: User, purpose: "onboard" | "reset"):
   });
   const url = `${APP_BASE_URL}/reset-password?token=${token}`;
   const onboard = purpose === "onboard";
-  const delivered = await sendEmail({
+  const { sent: delivered } = await dispatchTemplatedEmail({
+    slug: onboard ? "password_setup" : "password_reset",
     to: user.email,
-    subject: onboard ? "Welcome to ezhalha — set your password" : "Reset your ezhalha password",
-    html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-      <h2 style="margin:0 0 8px">${onboard ? "Welcome to ezhalha" : "Reset your password"}</h2>
-      <p style="color:#555;margin:0 0 16px">${onboard
-        ? "Your account is ready. Set a password to sign in."
-        : "We received a request to reset your password. Click below to choose a new one."}</p>
-      <a href="${url}" style="display:inline-block;background:#fe5200;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px">${onboard ? "Set my password" : "Reset my password"}</a>
-      <p style="color:#888;font-size:12px;margin-top:16px">This link expires in ${onboard ? "7 days" : "1 hour"}. If you didn't request this, you can ignore this email.</p>
-    </div>`,
-    text: `${onboard ? "Welcome to ezhalha. Set your password" : "Reset your ezhalha password"}: ${url} (expires in ${onboard ? "7 days" : "1 hour"})`,
+    variables: {
+      recipient_name: user.fullName || user.username,
+      action_url: url,
+      expiry_text: onboard ? "7 days" : "1 hour",
+      year: new Date().getFullYear().toString(),
+    },
+    entityType: "user",
+    entityId: user.id,
   });
   if (!delivered) {
     logError("Password setup/reset email was not delivered", undefined, { email: user.email, purpose });
@@ -1366,10 +1377,6 @@ const PICKUP_DEFAULT_READY_TIME = "09:00";
 const PICKUP_DEFAULT_CLOSE_TIME = "17:00";
 
 /** KSA weekend = Friday (5) & Saturday (6). `dow` is a UTC day-of-week for a date-only value. */
-function isKsaWeekend(dow: number): boolean {
-  return dow === 5 || dow === 6;
-}
-
 /** Wall-clock date/time parts in the KSA timezone for a given instant. */
 function ksaDateParts(now: Date): { y: number; m: number; d: number; hour: number } {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1383,18 +1390,25 @@ function ksaDateParts(now: Date): { y: number; m: number; d: number; hour: numbe
 }
 
 /**
- * Default carrier pickup date (YYYY-MM-DD) in KSA: same business day if created before the
- * cutoff hour, otherwise the next business day (weekends skipped).
+ * Default carrier pickup date (YYYY-MM-DD): same business day if we are still before our own
+ * cutoff hour, otherwise the next business day.
+ *
+ * The cutoff is ours to decide, so it is read in KSA time. Which days are *working* days is not
+ * ours to decide — it belongs to the origin. Skipping weekends by Saudi rules regardless of origin
+ * is what produced a Sunday collection date for shipments out of Turkey and China, which DHL
+ * refuses with `5006: Pickup is not allowed for this shipment date`.
  */
-function computeDefaultPickupDate(now: Date = new Date()): { date: string; sameDay: boolean } {
+function computeDefaultPickupDate(
+  now: Date = new Date(),
+  originCountry?: string | null,
+): { date: string; sameDay: boolean } {
   const { y, m, d, hour } = ksaDateParts(now);
-  const cur = new Date(Date.UTC(y, m - 1, d));
+  const today = new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
   const beforeCutoff = hour < PICKUP_CUTOFF_HOUR;
-  if (beforeCutoff && !isKsaWeekend(cur.getUTCDay())) {
-    return { date: cur.toISOString().slice(0, 10), sameDay: true };
+  if (beforeCutoff && isBusinessDayInCountry(today, originCountry)) {
+    return { date: today, sameDay: true };
   }
-  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
-  return { date: cur.toISOString().slice(0, 10), sameDay: false };
+  return { date: nextBusinessDayAfterInCountry(today, originCountry), sameDay: false };
 }
 
 /**
@@ -1438,29 +1452,31 @@ function normalizePickupWindow(
   }
   // Today is spent (or the date is stale) — roll to the next business day, default window.
   return {
-    date: nextBusinessDayAfter(local.date),
+    date: nextBusinessDayAfterInCountry(local.date, senderCountry),
     readyTime: PICKUP_DEFAULT_READY_TIME,
     closeTime: PICKUP_DEFAULT_CLOSE_TIME,
   };
 }
 
-/** The first business day strictly after a YYYY-MM-DD date (KSA weekend rules). */
-function nextBusinessDayAfter(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const cur = new Date(Date.UTC(y, m - 1, d));
-  do { cur.setUTCDate(cur.getUTCDate() + 1); } while (isKsaWeekend(cur.getUTCDay()));
-  return cur.toISOString().slice(0, 10);
-}
-
-/** True when a YYYY-MM-DD pickup date is today-or-later in KSA and lands on a business day. */
-function isBookablePickupDate(dateStr: string | null | undefined, now: Date = new Date()): boolean {
+/**
+ * True when a YYYY-MM-DD pickup date is today-or-later and lands on a working day at the origin.
+ *
+ * The origin country is required rather than optional on purpose: every caller knows the shipper's
+ * country, and an omitted one silently falls back to a Saturday/Sunday weekend — which is right
+ * for most of the world and wrong for the Gulf, where most of these shipments start.
+ */
+function isBookablePickupDate(
+  dateStr: string | null | undefined,
+  originCountry: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
   const { y, m, d } = ksaDateParts(now);
   const today = Date.UTC(y, m - 1, d);
   const [py, pm, pd] = dateStr.split("-").map(Number);
   const target = Date.UTC(py, pm - 1, pd);
   if (target < today) return false;
-  return !isKsaWeekend(new Date(target).getUTCDay());
+  return isBusinessDayInCountry(dateStr, originCountry);
 }
 
 /**
@@ -1518,9 +1534,12 @@ function dangerousGoodsInsertFields(
   };
 }
 
-function expressPickupInsertFields(pickup?: z.infer<typeof pickupInputSchema>) {
-  const custom = pickup?.date && isBookablePickupDate(pickup.date) ? pickup.date : null;
-  const date = custom || computeDefaultPickupDate().date;
+function expressPickupInsertFields(
+  pickup?: z.infer<typeof pickupInputSchema>,
+  originCountry?: string | null,
+) {
+  const custom = pickup?.date && isBookablePickupDate(pickup.date, originCountry) ? pickup.date : null;
+  const date = custom || computeDefaultPickupDate(new Date(), originCountry).date;
   return {
     pickupRequested: true,
     pickupStatus: "requested",
@@ -1568,12 +1587,29 @@ async function bookCarrierPickupIfRequested(
   if (!shipment.pickupRequested || shipment.pickupConfirmationNumber) return;
   if (!adapter.supportsPickup || !adapter.requestPickup) return;
 
+  // Never dispatch a courier for goods that have already left the shipper.
+  //
+  // Booking the waybill and booking the collection are two separate carrier calls, so a shipment
+  // whose pickup failed keeps moving and posting tracking updates — EZH861906362 reached Leipzig
+  // with its pickup still in `failed`. Retrying at that point sends a van to collect a parcel that
+  // is already in the carrier's network.
+  if (COLLECTED_OR_MOVING_CARRIER_STATUSES.has(String(shipment.status || "").toLowerCase())) {
+    logInfo(
+      `Skipping pickup for ${shipment.trackingNumber}: already ${shipment.status} — the goods have left the shipper`,
+    );
+    await storage.updateShipment(shipment.id, {
+      pickupStatus: "not_required",
+      pickupError: null,
+    });
+    return;
+  }
+
   // Normalize the pickup date at booking time: a missing / past / weekend date (e.g. a quote
   // created days ago, or paid after the cutoff) is bumped to the current cutoff-based default so
   // the carrier never rejects a stale date. The stored window is updated to match what is booked.
   let effectivePickupDate: string = shipment.pickupDate ?? "";
-  if (!isBookablePickupDate(effectivePickupDate)) {
-    effectivePickupDate = computeDefaultPickupDate().date;
+  if (!isBookablePickupDate(effectivePickupDate, shipment.senderCountry)) {
+    effectivePickupDate = computeDefaultPickupDate(new Date(), shipment.senderCountry).date;
   }
   // Then normalize the window against the SHIPPER's local clock — a date that is "today" in KSA
   // can already be past at an origin further east/west, which carriers reject outright.
@@ -3185,7 +3221,50 @@ function aggregateAccounting(shipments: Array<Record<string, any>>) {
   );
 }
 
-function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
+/**
+ * The basis for extra-weight pricing: the quantity the shipment was actually billed on.
+ *
+ * `weight` holds the actual weight and `chargeableWeight` the billable one, which is the
+ * volumetric figure whenever it wins. Deriving the per-unit rate from `weight` prices every
+ * extra kilo at the actual-weight rate, and on a light bulky parcel that is far above what the
+ * client paid per billable kilo: 8 kg actual against 20 kg volumetric on a SAR 1,000 shipment
+ * gives 125 SAR/kg instead of 50.
+ *
+ * The unit travels with the quantity on purpose. `chargeableWeightUnit` and `weightUnit` are
+ * separate columns and do not always agree, so returning a chargeable quantity under the
+ * shipment's own weight unit would quote a per-KG rate against a figure entered in LB.
+ */
+export function getExtraFeesBillableQuantity(shipment: Record<string, any>): { quantity: number; unit: string } {
+  const storedChargeable = parseMoneyValue(shipment.chargeableWeight);
+  if (storedChargeable > 0) {
+    return {
+      quantity: storedChargeable,
+      unit: shipment.chargeableWeightUnit || shipment.weightUnit || "KG",
+    };
+  }
+
+  const details = parseJsonObject(shipment.chargeableWeightDetails);
+  const detailQuantity = parseMoneyValue(
+    (details?.billableQuantity ?? details?.chargeableWeight) as string | number | null | undefined,
+  );
+  if (detailQuantity > 0) {
+    return {
+      quantity: detailQuantity,
+      unit:
+        (details?.billingUnit as string) ||
+        (details?.weightUnit as string) ||
+        shipment.chargeableWeightUnit ||
+        shipment.weightUnit ||
+        "KG",
+    };
+  }
+
+  // Older rows, and the dimensionless domestic flows, never stored a billable quantity. Nothing
+  // volumetric can apply there, so the actual weight is the billable weight.
+  return { quantity: parseMoneyValue(shipment.weight), unit: shipment.weightUnit || "KG" };
+}
+
+export function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   if (shipment.fulfillmentType === "ddp_manual") {
     const storedWeightValue = parseMoneyValue(shipment.extraFeesWeightValue);
     const storedExtraCostAmountSar = parseMoneyValue(shipment.extraFeesCostAmountSar);
@@ -3212,16 +3291,16 @@ function getExtraFeesRateSarPerWeight(shipment: Record<string, any>): number {
   const grossTotalAmountSar = parseMoneyValue(
     shipment.clientTotalAmountSar ?? shipment.finalPrice,
   );
-  const weightValue = parseMoneyValue(shipment.weight);
+  const { quantity: billableQuantity } = getExtraFeesBillableQuantity(shipment);
 
-  if (weightValue <= 0) {
+  if (billableQuantity <= 0) {
     return 0;
   }
 
-  return roundMoney(grossTotalAmountSar / weightValue);
+  return roundMoney(grossTotalAmountSar / billableQuantity);
 }
 
-function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
+export function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
   if (
     shipment.fulfillmentType === "ddp_manual" &&
     (shipment.ddpBillingUnit === "KG" || shipment.ddpBillingUnit === "CBM")
@@ -3229,7 +3308,7 @@ function getExtraFeesQuantityUnit(shipment: Record<string, any>): string {
     return shipment.ddpBillingUnit;
   }
 
-  return shipment.weightUnit || "KG";
+  return getExtraFeesBillableQuantity(shipment).unit;
 }
 
 function deriveShipmentExtraFees(shipment: Record<string, any>) {
@@ -3423,6 +3502,7 @@ function serializeFinancialShipment(
     extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
     extraFeesQuantityUnit: getExtraFeesQuantityUnit(shipment),
+    extraFeesBillableQuantity: getExtraFeesBillableQuantity(shipment).quantity,
     extraFeesAddedAt: shipment.extraFeesAddedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt,
     extraWeightInvoiceStatus,
@@ -3630,6 +3710,18 @@ const companyExtractionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Guest rating on the public `/api/public/guest/*` endpoints. Every request here spends a live
+// call to FedEx/DHL/Aramex or a local carrier with no account behind it, so this is deliberately
+// tighter than the authenticated client path: enough to walk the wizard and re-rate a few times,
+// not enough to scrape a rate card.
+const guestRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: { error: "Too many rate requests. Please wait a few minutes, or create an account." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Email-OTP login: throttle per email address rather than per IP, for the carrier-NAT
 // reason above. The handler additionally caps codes per email in the database (4 per 10
 // minutes), and authIpCeilingLimiter bounds the whole endpoint per network.
@@ -3691,6 +3783,7 @@ function clearFailedLogins(identifier: string) {
 import {
   loginSchema,
   applicationFormSchema,
+  guestShipmentDraftSchema,
   createShipmentSchema,
   TASK_PERMISSION_NAMES,
   mobileDeviceSchema,
@@ -5178,26 +5271,23 @@ async function sendStaffInvitationEmail(params: {
   const acceptUrl = buildInvitationAcceptUrl(params.token);
   const personalMessage = params.invitation.personalMessage?.trim();
 
-  const rendered = await getRenderedTemplate("staff_invitation", {
-    full_name: params.invitation.fullName,
-    role_name: params.role.name,
-    department_name: params.department.name,
-    personal_message: personalMessage ? `<p>${personalMessage}</p>` : "",
-    accept_url: acceptUrl,
-    expires_date: params.invitation.expiresAt.toLocaleDateString(),
-    year: new Date().getFullYear().toString(),
-  });
-
-  if (!rendered) {
-    logError("Failed to render staff_invitation template");
-    return false;
-  }
-
-  return sendEmail({
+  const { sent } = await dispatchTemplatedEmail({
+    slug: "staff_invitation",
     to: params.invitation.email,
-    subject: rendered.subject,
-    html: rendered.html,
+    variables: {
+      full_name: params.invitation.fullName,
+      role_name: params.role.name,
+      department_name: params.department.name,
+      personal_message: personalMessage ? `<p>${personalMessage}</p>` : "",
+      accept_url: acceptUrl,
+      expires_date: params.invitation.expiresAt.toLocaleDateString(),
+      year: new Date().getFullYear().toString(),
+    },
+    entityType: "staff_invitation",
+    entityId: params.invitation.id,
   });
+
+  return sent;
 }
 
 function getFallbackRoleByDepartmentSlug(
@@ -5716,7 +5806,7 @@ function serializeClientExtraFeeNotice(shipment: Record<string, any>) {
     extraWeightAmountSar: effective.extraWeightAmountSar,
     extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
     extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
-    weightValue: parseMoneyValue(shipment.weight),
+    weightValue: getExtraFeesBillableQuantity(shipment).quantity,
     weightUnit: getExtraFeesQuantityUnit(shipment),
     grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
     extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
@@ -5879,7 +5969,7 @@ function serializeClientExtraFeeNotices(
       extraWeightAmountSar: effective.extraWeightAmountSar,
       extraFeesAddedAt: shipment.extraFeesAddedAt || shipment.updatedAt,
       extraFeesEmailSentAt: shipment.extraFeesEmailSentAt || null,
-      weightValue: parseMoneyValue(shipment.weight),
+      weightValue: getExtraFeesBillableQuantity(shipment).quantity,
       weightUnit: getExtraFeesQuantityUnit(shipment),
       grossTotalAmountSar: parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice),
       extraFeesRateSarPerWeight: effective.extraFeesRateSarPerWeight,
@@ -7782,6 +7872,18 @@ export async function registerRoutes(
       if (!adapter.supportsPickup || !adapter.requestPickup) {
         return res.status(400).json({ error: `${shipment.carrierName || shipment.carrierCode || "This carrier"} does not support API pickup booking.` });
       }
+      // A pickup on a shipment that is already moving would send a courier to collect a parcel the
+      // carrier already has. Say so, rather than booking it and leaving a van to turn up.
+      if (COLLECTED_OR_MOVING_CARRIER_STATUSES.has(String(shipment.status || "").toLowerCase())) {
+        return res.status(400).json({
+          error: `This shipment is already ${String(shipment.status).replace(/_/g, " ")}, so the goods have left the shipper. Booking a collection now would send a courier for a parcel the carrier already has.`,
+        });
+      }
+      if (!isBookablePickupDate(parsed.date, shipment.senderCountry)) {
+        return res.status(400).json({
+          error: `${parsed.date} is not a working day at the origin (${shipment.senderCountry}), and the carrier will refuse a collection on it. Pick the next working day there.`,
+        });
+      }
       // Replace the pickup preference and clear any prior confirmation so re-booking runs.
       const updated = (await storage.updateShipment(shipment.id, {
         pickupRequested: true,
@@ -8005,23 +8107,24 @@ export async function registerRoutes(
             deliveryMessage = "Email is not configured for this client yet. The update was still saved to the shipment timeline.";
           } else {
             const safeMessage = sanitizeHtml(parsed.message, { allowedTags: [], allowedAttributes: {} }).replace(/\n/g, "<br />");
-            const rendered = await getRenderedTemplate("operations_shipment_update", {
-              tracking_number: shipment.trackingNumber,
-              message: safeMessage,
-              action_url: actionUrl,
-              year: new Date().getFullYear().toString(),
-            });
-            const emailResults = rendered
-              ? await Promise.all(
-                  recipientEmails.map((email) =>
-                    sendEmail({
-                      to: email,
-                      subject: rendered.subject,
-                      html: rendered.html,
-                    }),
-                  ),
-                )
-              : [];
+            const emailResults = await Promise.all(
+              recipientEmails.map(async (email) =>
+                (
+                  await dispatchTemplatedEmail({
+                    slug: "operations_shipment_update",
+                    to: email,
+                    variables: {
+                      tracking_number: shipment.trackingNumber,
+                      message: safeMessage,
+                      action_url: actionUrl,
+                      year: new Date().getFullYear().toString(),
+                    },
+                    entityType: "shipment",
+                    entityId: shipment.id,
+                  })
+                ).sent,
+              ),
+            );
 
             if (emailResults.some(Boolean)) {
               deliveryStatus = "sent";
@@ -8814,9 +8917,9 @@ export async function registerRoutes(
       }
 
       const collectionDate = parsed.collectionDate || shipment.dgPreferredPickupDate || null;
-      const pickupDate = collectionDate && isBookablePickupDate(collectionDate)
+      const pickupDate = collectionDate && isBookablePickupDate(collectionDate, shipment.senderCountry)
         ? collectionDate
-        : computeDefaultPickupDate().date;
+        : computeDefaultPickupDate(new Date(), shipment.senderCountry).date;
 
       const previousStatus = shipment.status;
       const updated = await storage.updateShipment(shipment.id, {
@@ -9458,16 +9561,14 @@ export async function registerRoutes(
           codeHash: hashOtp(code),
           expiresAt: new Date(Date.now() + OTP_TTL_MS),
         });
-        const otpDelivered = await sendEmail({
+        const { sent: otpDelivered } = await dispatchTemplatedEmail({
+          slug: "login_otp",
           to: email,
-          subject: "Your ezhalha login code",
-          html: `<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:auto;padding:24px">
-            <h2 style="margin:0 0 8px">Your login code</h2>
-            <p style="color:#555;margin:0 0 16px">Use this code to sign in to ezhalha. It expires in 10 minutes.</p>
-            <div style="font-size:32px;font-weight:800;letter-spacing:8px;background:#f4f4f5;border-radius:12px;padding:16px;text-align:center">${code}</div>
-            <p style="color:#888;font-size:12px;margin-top:16px">If you didn't request this, you can ignore this email.</p>
-          </div>`,
-          text: `Your ezhalha login code is ${code}. It expires in 10 minutes.`,
+          variables: {
+            code,
+            expiry_text: `${Math.round(OTP_TTL_MS / 60000)} minutes`,
+            year: new Date().getFullYear().toString(),
+          },
         });
         if (!otpDelivered) {
           logError("OTP login code email was not delivered", undefined, { email });
@@ -10015,6 +10116,10 @@ export async function registerRoutes(
       }
       
       const data = applicationFormSchema.parse(req.body);
+      // A shipment the applicant built as a guest, carried over so registering does not cost
+      // them the work. Opaque here — only the wizard understands its shape — so it is length-
+      // capped and stored verbatim rather than validated field by field.
+      const shipmentDraft = guestShipmentDraftSchema.parse(req.body.shipmentDraft ?? null);
       if (data.accountType === "company") {
         const missingDocumentTypes = getMissingCompanyApplicationDocumentTypes(data.documents);
         if (missingDocumentTypes.length > 0) {
@@ -10036,18 +10141,35 @@ export async function registerRoutes(
         ...data,
         country,
         documents: data.documents || null,
+        shipmentDraft: shipmentDraft ? JSON.stringify(shipmentDraft) : null,
         status: "pending",
       });
 
       // Individual applicants are auto-approved — no manual review. Companies stay pending for
       // an admin to review their documents.
       let autoApproved = false;
+      let sessionEstablished = false;
       if (data.accountType === "individual") {
         try {
-          await approveClientApplication(application, {
+          const { user: createdUser } = await approveClientApplication(application, {
             auditAction: "auto_approve_application",
           });
           autoApproved = true;
+
+          // Signed in immediately. Approval creates the user with a deliberately unusable
+          // random password (they set a real one from the emailed link), so without this the
+          // applicant would be approved and still locked out — and would lose the shipment
+          // they just built waiting for an email.
+          const sessionResult = await establishUserSession(req, createdUser, "auto_approval");
+          if ("error" in sessionResult) {
+            logWarn("Auto-approved applicant could not be signed in", {
+              applicationId: application.id,
+              reason: sessionResult.error,
+            });
+          } else {
+            sessionEstablished = true;
+          }
+
           logInfo("Individual application auto-approved", { applicationId: application.id, email: data.email });
         } catch (error) {
           if (!(error instanceof EmailInUseError)) {
@@ -10077,7 +10199,8 @@ export async function registerRoutes(
       });
 
       // Return the current application state (approved for auto-approved individuals).
-      const response = (await storage.getClientApplication(application.id)) || application;
+      const applicationState = (await storage.getClientApplication(application.id)) || application;
+      const response = { ...applicationState, autoApproved, authenticated: sessionEstablished };
 
       // Store idempotency record
       if (idempotencyKey) {
@@ -10656,18 +10779,17 @@ export async function registerRoutes(
       let deliveryStatus = "queued";
 
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const rendered = await getRenderedTemplate("abandoned_discount_offer", {
-          tracking_number: shipment.trackingNumber,
-          message: message.replace(/\n/g, "<br>"),
-          year: new Date().getFullYear().toString(),
+        const { sent } = await dispatchTemplatedEmail({
+          slug: "abandoned_discount_offer",
+          to: client.email,
+          variables: {
+            tracking_number: shipment.trackingNumber,
+            message: message.replace(/\n/g, "<br>"),
+            year: new Date().getFullYear().toString(),
+          },
+          entityType: "shipment",
+          entityId: shipment.id,
         });
-        const sent = rendered
-          ? await sendEmail({
-              to: client.email,
-              subject: rendered.subject,
-              html: rendered.html,
-            })
-          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 
@@ -10743,18 +10865,17 @@ export async function registerRoutes(
       const resumeUrl = buildShipmentResumePaymentUrl(req, shipment.id);
       let deliveryStatus = "queued";
       if (parsed.channel === AbandonedShipmentRecoveryChannel.EMAIL && client?.email) {
-        const rendered = await getRenderedTemplate("abandoned_payment_reminder", {
-          tracking_number: shipment.trackingNumber,
-          resume_url: resumeUrl,
-          year: new Date().getFullYear().toString(),
+        const { sent } = await dispatchTemplatedEmail({
+          slug: "abandoned_payment_reminder",
+          to: client.email,
+          variables: {
+            tracking_number: shipment.trackingNumber,
+            resume_url: resumeUrl,
+            year: new Date().getFullYear().toString(),
+          },
+          entityType: "shipment",
+          entityId: shipment.id,
         });
-        const sent = rendered
-          ? await sendEmail({
-              to: client.email,
-              subject: rendered.subject,
-              html: rendered.html,
-            })
-          : false;
         deliveryStatus = sent ? "sent" : "email_not_configured";
       }
 
@@ -11219,7 +11340,7 @@ export async function registerRoutes(
 
       if (action === "approve") {
         try {
-          const clientAccount = await approveClientApplication(application, {
+          const { clientAccount } = await approveClientApplication(application, {
             profile,
             reviewedByUserId: req.session.userId,
             reviewNotes: notes,
@@ -13340,6 +13461,139 @@ export async function registerRoutes(
     }
   });
 
+  // The templates page shows wording and behaviour side by side, so it is served as one payload:
+  // the template row, the resolved settings (stored values merged over the descriptor defaults),
+  // what actually triggers the email, and how recent deliveries went.
+  app.get("/api/admin/email-templates/overview", requireAdminPermission("email-templates", "read"), async (req, res) => {
+    try {
+      const [templates, settings, stats] = await Promise.all([
+        storage.getEmailTemplates(),
+        getAllEmailSettings(),
+        storage.getEmailDeliveryStats().catch(() => []),
+      ]);
+
+      const statsBySlug = new Map<string, { sent: number; failed: number; abandoned: number; skipped: number; pending: number; lastAt: Date | null }>();
+      for (const row of stats) {
+        const entry = statsBySlug.get(row.templateSlug) ?? { sent: 0, failed: 0, abandoned: 0, skipped: 0, pending: 0, lastAt: null };
+        if (row.status in entry) (entry as any)[row.status] = row.total;
+        if (row.lastAt && (!entry.lastAt || row.lastAt > entry.lastAt)) entry.lastAt = row.lastAt;
+        statsBySlug.set(row.templateSlug, entry);
+      }
+
+      res.json(
+        templates.map((template) => {
+          const descriptor = getEmailTemplateDescriptor(template.slug);
+          const resolved = settings.get(template.slug);
+          return {
+            ...template,
+            trigger: descriptor?.trigger ?? "event",
+            triggerDescription:
+              descriptor?.triggerDescription ?? "This email is sent in response to an event in the system.",
+            audience: descriptor?.audience ?? "client",
+            configFields: descriptor?.configFields ?? [],
+            settings: resolved ?? null,
+            deliveries: statsBySlug.get(template.slug) ?? { sent: 0, failed: 0, abandoned: 0, skipped: 0, pending: 0, lastAt: null },
+          };
+        }),
+      );
+    } catch (error: any) {
+      logError("Error building email settings overview", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.put("/api/admin/email-templates/:slug/settings", requireAdminPermission("email-templates", "update"), async (req, res) => {
+    try {
+      const slug = req.params.slug;
+      const descriptor = getEmailTemplateDescriptor(slug);
+      const template = await storage.getEmailTemplateBySlug(slug);
+      if (!template && !descriptor) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+
+      const settingsSchema = z.object({
+        enabled: z.boolean().optional(),
+        // A single attempt is a valid choice (a login code is worthless by the time a retry
+        // lands); the ceiling stops a typo turning one failure into a hundred sends.
+        maxAttempts: z.coerce.number().int().min(1).max(10).optional(),
+        retryBackoffSeconds: z.coerce.number().int().min(30).max(24 * 60 * 60).optional(),
+        scheduleEnabled: z.boolean().optional(),
+        // Null must survive as null. `z.coerce.number().nullable()` turns it into 0, and a union
+        // tries its branches in order — so with the number first, clearing a pinned hour coerced
+        // null to 0 and silently pinned the digest to midnight. Null goes first.
+        intervalMinutes: z.union([z.null(), z.coerce.number().int().min(1).max(7 * 24 * 60)]).optional(),
+        sendHourUtc: z.union([z.null(), z.coerce.number().int().min(0).max(23)]).optional(),
+        config: z.record(z.union([z.number(), z.boolean()])).optional(),
+      });
+
+      const parsed = settingsSchema.parse(req.body ?? {});
+
+      // Schedule fields on an event-driven template would be settings that change nothing, and
+      // an admin who sets one and sees no effect has been misled by the interface.
+      if (descriptor?.trigger !== "scheduled" && (parsed.intervalMinutes != null || parsed.sendHourUtc != null)) {
+        return res.status(400).json({
+          error: "This email is sent in response to an event, so it has no schedule to configure.",
+        });
+      }
+
+      const updated = await storage.upsertEmailTemplateSettings(slug, {
+        ...parsed,
+        config: parsed.config ? JSON.stringify(parsed.config) : undefined,
+        updatedByUserId: req.session.userId,
+      } as any);
+
+      // A changed sweep interval has to reach the running scheduler, otherwise the setting only
+      // takes effect at the next deploy and looks broken in the meantime.
+      if (descriptor?.trigger === "scheduled") {
+        if (slug === "credit_invoice_reminder") restartCreditReminderScheduler();
+        if (slug === "integration_health_digest") restartIntegrationHealthDigestScheduler();
+      }
+
+      await logAudit(req.session.userId, "update_email_settings", "email_template", slug,
+        `Updated email settings for ${slug}`, req.ip);
+
+      res.json(resolveEmailSettings(slug, updated));
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message || "Invalid settings" });
+      }
+      logError("Error updating email settings", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/email-deliveries", requireAdminPermission("email-templates", "read"), async (req, res) => {
+    try {
+      const deliveries = await storage.getEmailDeliveries({
+        templateSlug: typeof req.query.slug === "string" ? req.query.slug : undefined,
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        limit: Number(req.query.limit) || 50,
+      });
+      res.json(deliveries);
+    } catch (error: any) {
+      logError("Error fetching email deliveries", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/email-deliveries/:id/resend", requireAdminPermission("email-templates", "update"), async (req, res) => {
+    try {
+      const delivery = await storage.getEmailDelivery(req.params.id);
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+
+      const sent = await resendDelivery(delivery.id);
+      await logAudit(req.session.userId, "resend_email", "email_delivery", delivery.id,
+        `Resent ${delivery.templateSlug} to ${delivery.recipient}: ${sent ? "delivered" : "failed"}`, req.ip);
+
+      res.json({ sent, delivery: await storage.getEmailDelivery(delivery.id) });
+    } catch (error: any) {
+      logError("Error resending email", { error: error?.message });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/admin/email-templates/:id", requireAdminPermission("email-templates", "read"), async (req, res) => {
     try {
       const template = await storage.getEmailTemplate(req.params.id);
@@ -14199,6 +14453,10 @@ export async function registerRoutes(
       });
 
       const totalWeightKg = data.packages.reduce((sum, p) => sum + p.weight, 0);
+      const quotationChargeableWeight = buildChargeableWeightSummaryFromShipmentInput(
+        { packages: data.packages, weightUnit: data.weightUnit, dimensionUnit: data.dimensionUnit },
+        data.carrierCode || "GENERIC",
+      );
       const first = data.packages[0];
       const fulfillmentType = data.type === "local" ? "local" : data.type === "ddp" ? "ddp_manual" : undefined;
 
@@ -14249,6 +14507,10 @@ export async function registerRoutes(
         recipientShortAddress: data.recipient.shortAddress || null,
         weight: totalWeightKg.toString(),
         weightUnit: data.weightUnit,
+        dimensionalWeight: formatWeightValue(quotationChargeableWeight.dimensionalWeight),
+        chargeableWeight: formatWeightValue(quotationChargeableWeight.chargeableWeight),
+        chargeableWeightUnit: quotationChargeableWeight.weightUnit,
+        chargeableWeightDetails: JSON.stringify(quotationChargeableWeight),
         length: first.length.toString(),
         width: first.width.toString(),
         height: first.height.toString(),
@@ -14285,7 +14547,9 @@ export async function registerRoutes(
         quoteDiscountSar: pricing.discountSar ? pricing.discountSar.toFixed(2) : null,
         quoteExtraChargeSar: pricing.extraChargeSar ? pricing.extraChargeSar.toFixed(2) : null,
         quoteNote: data.note || null,
-        ...(data.type === "express" ? expressPickupInsertFields(data.pickup) : pickupInsertFields(undefined)),
+        ...(data.type === "express"
+          ? expressPickupInsertFields(data.pickup, data.shipper.countryCode)
+          : pickupInsertFields(undefined)),
       });
 
       await logAudit(req.session.userId, "create_quotation", "shipment", shipment.id,
@@ -17754,6 +18018,56 @@ export async function registerRoutes(
   });
 
   // Client - Get Current User's Permissions
+  // A shipment the client built as a guest before they registered, handed back once their
+  // account exists. Individuals pick theirs up from the browser and never hit this; it is the
+  // company path that needs it, because approval can take days and the browser copy may be gone.
+  app.get("/api/client/pending-draft", requireClient, async (req, res) => {
+    try {
+      const account = req.currentClientAccount;
+      if (!account) {
+        return res.json({ draft: null });
+      }
+
+      const application = await storage.getApprovedApplicationWithDraft(account.email);
+      if (!application?.shipmentDraft) {
+        return res.json({ draft: null });
+      }
+
+      let draft: unknown;
+      try {
+        draft = JSON.parse(application.shipmentDraft);
+      } catch {
+        // A draft we cannot parse is a draft we cannot replay. Drop it rather than hand the
+        // client a banner that leads nowhere.
+        await storage.updateClientApplication(application.id, { shipmentDraft: null });
+        return res.json({ draft: null });
+      }
+
+      res.json({ draft, applicationId: application.id });
+    } catch (error) {
+      logError("Failed to load pending shipment draft", error);
+      res.status(500).json({ error: "Failed to load pending shipment draft" });
+    }
+  });
+
+  // Consuming the draft clears it, so a refresh cannot replay the same shipment twice.
+  app.post("/api/client/pending-draft/dismiss", requireClient, async (req, res) => {
+    try {
+      const account = req.currentClientAccount;
+      if (!account) {
+        return res.json({ success: true });
+      }
+      const application = await storage.getApprovedApplicationWithDraft(account.email);
+      if (application) {
+        await storage.updateClientApplication(application.id, { shipmentDraft: null });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      logError("Failed to clear pending shipment draft", error);
+      res.status(500).json({ error: "Failed to clear pending shipment draft" });
+    }
+  });
+
   app.get("/api/client/my-permissions", requireClient, async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -18818,7 +19132,15 @@ export async function registerRoutes(
     const shipment = await storage.getShipment(req.params.id);
     if (!shipment || shipment.clientAccountId !== user.clientAccountId) return res.status(404).json({ error: "Quotation not found" });
     if (!shipment.isQuote) return res.status(400).json({ error: "This shipment is not a quotation." });
-    res.json(serializeQuotation(shipment));
+    // Credit travels with the quotation rather than being inferred from the account alone: the
+    // page has to be able to say *why* credit is unavailable — no terms, or not enough left —
+    // instead of silently rendering a card-only page to a client who settles on account.
+    const quotationAccount = await storage.getClientAccount(user.clientAccountId);
+    const creditEnabled = Boolean(quotationAccount?.creditEnabled);
+    const creditAvailableSar = creditEnabled
+      ? (await storage.getClientCreditSummary(user.clientAccountId)).available
+      : 0;
+    res.json({ ...serializeQuotation(shipment), creditEnabled, creditAvailableSar });
   });
 
   app.patch("/api/client/quotations/:id", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
@@ -19153,6 +19475,314 @@ export async function registerRoutes(
   });
 
   // STEP 1: Rate Discovery - Get rates from all carriers
+  // ── GUEST RATING (public) ─────────────────────────────────────────────────────
+  // A visitor who has not registered can walk the create-shipment wizard and see a real live
+  // rate. These two endpoints are the ONLY unauthenticated surface guest mode adds.
+  //
+  // They mirror the client handlers immediately below/above them, with the per-client inputs
+  // replaced by constants, and they differ from them in three deliberate ways:
+  //
+  //  1. They persist NOTHING. `shipment_rate_quotes.clientAccountId` is NOT NULL, and a guest
+  //     has no account — so, exactly like `/api/client/quick-quote`, no quote row is written.
+  //     The returned figure is indicative and is re-priced for real once the visitor registers.
+  //  2. They price at the standard `regular` profile and the INDIVIDUAL account type. A guest
+  //     has not chosen a type yet, and individual is the one they can actually get today
+  //     without waiting for approval.
+  //  3. Dangerous goods are refused outright: DG needs a per-client approval flag and an
+  //     approved carrier account, neither of which a guest can have.
+  //
+  // Carrier selection still works without an account: `clientAccountId` is optional in
+  // IntegrationAccountRoutingOptions, and the default country basis is the shipping country,
+  // so a guest reaches the same carrier accounts a real client on this lane would.
+  const GUEST_PRICING_PROFILE = "regular";
+  const GUEST_ACCOUNT_TYPE = PricingAccountType.INDIVIDUAL;
+
+  app.post("/api/public/guest/express-rates", guestRateLimiter, async (req, res) => {
+    try {
+      // Checked before the schema, deliberately: dangerous goods are refused for a guest whether
+      // or not the declaration is well-formed. Validating first would answer a malformed DG
+      // payload with a field error, implying it would be quoted once corrected.
+      if (req.body?.dangerousGoods) {
+        return res.status(403).json({
+          error: "Dangerous goods shipments need an approved account. Please create one to continue.",
+        });
+      }
+
+      const data = shipmentInputSchema.parse(req.body);
+
+      if (data.isDdp) {
+        return res.status(400).json({
+          error: "Door-to-door freight is arranged with our team. Please create an account.",
+        });
+      }
+
+      const addrValidation = validateShippingAddresses(data.shipper, data.recipient);
+      if (!addrValidation.valid) {
+        return res.status(400).json({ error: "Address validation failed", details: addrValidation.errors });
+      }
+
+      const pricingRule = await storage.getPricingRuleByProfile(GUEST_PRICING_PROFILE);
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+
+      const carrierAdapters = data.carrier?.trim()
+        ? [getCarrierAdapter(resolveCarrierCode(data.carrier))]
+        : carrierService.getSupportedCarriers();
+
+      const rateRequest = {
+        shipper: {
+          name: data.shipper.name,
+          streetLine1: data.shipper.addressLine1,
+          streetLine2: data.shipper.addressLine2,
+          streetLine3: data.shipper.shortAddress,
+          city: data.shipper.city,
+          stateOrProvince: data.shipper.stateOrProvince,
+          postalCode: data.shipper.postalCode,
+          countryCode: data.shipper.countryCode,
+          phone: data.shipper.phone,
+          email: data.shipper.email,
+        },
+        recipient: {
+          name: data.recipient.name,
+          streetLine1: data.recipient.addressLine1,
+          streetLine2: data.recipient.addressLine2,
+          streetLine3: data.recipient.shortAddress,
+          city: data.recipient.city,
+          stateOrProvince: data.recipient.stateOrProvince,
+          postalCode: data.recipient.postalCode,
+          countryCode: data.recipient.countryCode,
+          phone: data.recipient.phone,
+          email: data.recipient.email,
+        },
+        packages: data.packages.map((pkg) => ({
+          weight: pkg.weight,
+          weightUnit: data.weightUnit,
+          dimensions: {
+            length: pkg.length,
+            width: pkg.width,
+            height: pkg.height,
+            unit: data.dimensionUnit,
+          },
+          packageType: data.packageType,
+        })),
+        serviceType: data.serviceType,
+        packagingType: data.packageType,
+        currency: data.currency,
+        shipDate: data.shipDate,
+      };
+
+      const carrierRateResults = await Promise.all(
+        carrierAdapters.map(async (carrierAdapter) => {
+          const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
+          const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, {
+            shipperCountryCode: data.shipper.countryCode,
+            recipientCountryCode: data.recipient.countryCode,
+          });
+
+          const accountRateResults = await Promise.all(
+            managedAccounts.map(async (integrationAccount) => {
+              try {
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: await withIntegrationAccount(
+                    integrationAccount,
+                    () => carrierAdapter.getRates(rateRequest),
+                  ),
+                };
+              } catch (error) {
+                logError("Guest carrier account rate lookup failed", {
+                  carrierCode: carrierAdapter.carrierCode,
+                  integrationAccountId: integrationAccount.id,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>>,
+                };
+              }
+            }),
+          );
+
+          if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
+            try {
+              accountRateResults.push({
+                integrationAccountId: `env:${appKey}`,
+                carrierRates: await carrierAdapter.getRates(rateRequest),
+              });
+            } catch (error) {
+              logError("Guest carrier environment rate lookup failed", {
+                carrierCode: carrierAdapter.carrierCode,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          const winningAccountResult = selectCheapestCarrierAccountPortfolio(accountRateResults);
+          return {
+            carrierAdapter,
+            carrierRates: winningAccountResult?.carrierRates || [],
+          };
+        }),
+      );
+
+      const availableCarriers = carrierRateResults
+        .filter((result) => result.carrierRates.length > 0)
+        .map(({ carrierAdapter }) => ({ code: carrierAdapter.carrierCode, name: carrierAdapter.name }));
+
+      const quotes: Array<Record<string, unknown>> = [];
+      let quoteIndex = 0;
+
+      for (const { carrierAdapter, carrierRates } of carrierRateResults) {
+        for (const rate of carrierRates) {
+          const marginPercentage = pricingRule
+            ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, GUEST_ACCOUNT_TYPE)
+            : defaultMarginPercentage;
+          const marginAmount = rate.baseRate * (marginPercentage / 100);
+          const accountingSnapshot = calculateShipmentAccounting({
+            shipmentType: data.shipmentType,
+            isDdp: data.isDdp,
+            recipientCountryCode: data.recipient.countryCode,
+            baseRate: rate.baseRate,
+            marginAmount,
+          });
+
+          const chargeableWeightDetails =
+            rate.chargeableWeightDetails
+            || buildChargeableWeightSummaryFromShipmentInput(data, carrierAdapter.carrierCode);
+
+          quotes.push({
+            // Not a `shipment_rate_quotes` id — nothing was stored. The id exists only so the
+            // wizard can key its rate list, and it is discarded on registration.
+            quoteId: `guest-${quoteIndex++}`,
+            carrierCode: carrierAdapter.carrierCode,
+            carrierName: carrierAdapter.name,
+            serviceType: rate.serviceType,
+            serviceName: rate.serviceName,
+            finalPrice: accountingSnapshot.clientTotalAmountSar,
+            currency: "SAR",
+            transitDays: rate.transitDays,
+            estimatedDelivery: rate.deliveryDate,
+            actualWeight: chargeableWeightDetails.actualWeight,
+            dimensionalWeight: chargeableWeightDetails.dimensionalWeight,
+            chargeableWeight: chargeableWeightDetails.chargeableWeight,
+            chargeableWeightUnit: chargeableWeightDetails.weightUnit,
+            chargeableWeightSource: rate.chargeableWeightSource || "system",
+          });
+        }
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({ error: "No carrier rates were available for this shipment." });
+      }
+
+      res.json({ quotes, availableCarriers, indicative: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get guest express rates", error);
+      res.status(500).json({ error: "Failed to get shipping rates" });
+    }
+  });
+
+  app.post("/api/public/guest/local-rates", guestRateLimiter, async (req, res) => {
+    try {
+      const data = localShipmentInputSchema.parse(req.body);
+
+      const totalWeightKg = data.weightUnit === "LB" ? data.weight * 0.453592 : data.weight;
+      const localCarriers = carrierService.getLocalCarriers("SA");
+      const localPricingRule = await storage.getPricingRuleByProfile(GUEST_PRICING_PROFILE);
+
+      const quotes: Array<Record<string, unknown>> = [];
+      const availableCarriers: Array<{ code: string; name: string }> = [];
+      let quoteIndex = 0;
+
+      const pushQuote = (
+        carrierCode: string,
+        carrierName: string,
+        serviceName: string,
+        baseRate: number,
+        marginAmount: number,
+      ) => {
+        const accountingSnapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate,
+          marginAmount,
+        });
+        availableCarriers.push({ code: carrierCode, name: carrierName });
+        quotes.push({
+          quoteId: `guest-${quoteIndex++}`,
+          carrierCode,
+          carrierName,
+          serviceType: "LOCAL",
+          serviceName,
+          finalPrice: accountingSnapshot.clientTotalAmountSar,
+          currency: "SAR",
+          transitDays: 2,
+          actualWeight: totalWeightKg,
+          chargeableWeight: totalWeightKg,
+          chargeableWeightUnit: "KG",
+          chargeableWeightSource: "system",
+        });
+      };
+
+      for (const carrierAdapter of localCarriers) {
+        const liveBaseRateSar = await resolveLiveLocalBaseRate(
+          carrierAdapter,
+          data.shipper.city,
+          data.recipient.city,
+          totalWeightKg,
+        );
+        const liveFallbackMarginPercent =
+          liveBaseRateSar != null && liveBaseRateSar > 0
+            ? localPricingRule
+              ? await storage.getMarginForAmount(localPricingRule.id, liveBaseRateSar, GUEST_ACCOUNT_TYPE)
+              : 20
+            : null;
+        const local = await resolveLocalRate({
+          carrierCode: carrierAdapter.carrierCode,
+          weightKg: totalWeightKg,
+          clientProfile: GUEST_PRICING_PROFILE,
+          liveBaseRateSar,
+          liveFallbackMarginPercent,
+        });
+        if (!local) continue;
+        pushQuote(
+          carrierAdapter.carrierCode,
+          carrierAdapter.name,
+          `${carrierAdapter.name} Domestic`,
+          local.baseRate,
+          local.marginAmount,
+        );
+      }
+
+      const virtualCarrierList = await storage.listVirtualCarriers(true);
+      for (const vc of virtualCarrierList) {
+        const local = await resolveLocalRate({
+          carrierCode: vc.code,
+          weightKg: totalWeightKg,
+          clientProfile: GUEST_PRICING_PROFILE,
+          liveBaseRateSar: null,
+        });
+        if (!local) continue;
+        pushQuote(vc.code, vc.name, vc.name, local.baseRate, local.marginAmount);
+      }
+
+      if (quotes.length === 0) {
+        return res.status(502).json({ error: "No local carrier rates available for this weight." });
+      }
+
+      res.json({ quotes, availableCarriers, indicative: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to get guest local rates", error);
+      res.status(500).json({ error: "Failed to get local rates" });
+    }
+  });
+
   app.post("/api/client/shipments/rates", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -20383,6 +21013,11 @@ export async function registerRoutes(
 
       const data = dangerousGoodsSubmitSchema.parse(req.body);
       const totalWeight = data.packages.reduce((sum, pkg) => sum + pkg.weight, 0);
+      // No carrier is chosen yet on a dangerous-goods shipment, so the generic divisor applies.
+      const dgChargeableWeight = buildChargeableWeightSummaryFromShipmentInput(
+        { packages: data.packages, weightUnit: data.weightUnit, dimensionUnit: data.dimensionUnit },
+        "GENERIC",
+      );
       const isInternational = data.shipper.countryCode !== data.recipient.countryCode;
 
       if (isInternational && data.items.length === 0) {
@@ -20431,6 +21066,13 @@ export async function registerRoutes(
         recipientShortAddress: data.recipient.shortAddress || null,
         weight: totalWeight.toString(),
         weightUnit: data.weightUnit,
+        // Stored at creation even though the price is quoted later by operations: the extra-weight
+        // rate is derived from the billable quantity, and without these columns it silently falls
+        // back to the actual weight and overcharges every volumetric shipment.
+        dimensionalWeight: formatWeightValue(dgChargeableWeight.dimensionalWeight),
+        chargeableWeight: formatWeightValue(dgChargeableWeight.chargeableWeight),
+        chargeableWeightUnit: dgChargeableWeight.weightUnit,
+        chargeableWeightDetails: JSON.stringify(dgChargeableWeight),
         length: data.packages[0].length.toString(),
         width: data.packages[0].width.toString(),
         height: data.packages[0].height.toString(),
@@ -20694,7 +21336,7 @@ export async function registerRoutes(
         serviceType: quote.serviceType,
         currency: quote.currency,
         status: "payment_pending",
-        ...expressPickupInsertFields(pickup),
+        ...expressPickupInsertFields(pickup, shipmentData.shipper.countryCode),
         baseRate: quote.baseRate,
         marginAmount: quote.marginAmount,
         margin: quote.marginAmount,
@@ -21571,10 +22213,16 @@ export async function registerRoutes(
       // status that made the retry fail with "not in a payable state".
       //
       // Only carrier-booked flows are validated: it exists to stop a carrier API rejecting the
-      // booking. ddp_manual and local are fulfilled by operations with no carrier call, and the
-      // card path already skips both, so applying it here only to credit made Pay Later fail on
-      // domestic KSA shipments that Pay Now accepted.
-      if (shipment.fulfillmentType !== "ddp_manual" && shipment.fulfillmentType !== "local") {
+      // booking. ddp_manual, local and dangerous goods are fulfilled by operations with no
+      // carrier call, and the card path already skips all three, so applying it here only to
+      // credit made Pay Later fail on shipments that Pay Now accepted. Dangerous goods is the
+      // sharpest case: an operator has already agreed the movement with the carrier against
+      // this exact address, so rejecting it now rejects an address the carrier accepted.
+      if (
+        shipment.fulfillmentType !== "ddp_manual" &&
+        shipment.fulfillmentType !== "local" &&
+        shipment.fulfillmentType !== DG_MANUAL_FULFILLMENT_TYPE
+      ) {
         const payLaterAddrValidation = validateShippingAddresses(
           { countryCode: shipment.senderCountry, city: shipment.senderCity, addressLine1: shipment.senderAddress, postalCode: shipment.senderPostalCode || "", phone: shipment.senderPhone, stateOrProvince: shipment.senderStateOrProvince || "" },
           { countryCode: shipment.recipientCountry, city: shipment.recipientCity, addressLine1: shipment.recipientAddress, postalCode: shipment.recipientPostalCode || "", phone: shipment.recipientPhone, stateOrProvince: shipment.recipientStateOrProvince || "" }

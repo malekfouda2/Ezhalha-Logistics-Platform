@@ -3,18 +3,28 @@ import { useLocation, useSearch, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ClientLayout } from "@/components/client-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/phone-input";
 import { Label } from "@/components/ui/label";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { SarAmount } from "@/components/sar-symbol";
 import { TapCardForm } from "@/components/tap-card-form";
+import { GuestCheckoutGate } from "@/components/guest-gate";
 import { CarrierLogo } from "@/components/carrier-logo";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { humanizeError } from "@/lib/friendly-error";
 import { useQuotationMode } from "@/lib/quotation-mode";
+import {
+  useGuestMode,
+  saveGuestDraft,
+  consumeGuestDraft,
+  fetchPendingShipmentDraft,
+  dismissPendingShipmentDraft,
+  type GuestDraft,
+  type GuestIndicativeQuote,
+} from "@/lib/guest-mode";
 import { ArrowLeft, ArrowRight, Check, Clock, MapPin, Package, Truck } from "lucide-react";
 import type { ClientAccount } from "@shared/schema";
 
@@ -81,6 +91,12 @@ export default function CreateLocalShipment() {
   const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
   const [checkout, setCheckout] = useState<LocalCheckout | null>(null);
   const [confirmed, setConfirmed] = useState<{ trackingNumber: string; carrierName: string } | null>(null);
+  // Guest mode: the wizard and the rates are real; the wall is at payment.
+  const { isGuest } = useGuestMode();
+  const hydratedDraftRef = useRef(false);
+  // What the visitor was quoted before they had an account, so the re-price is shown as a
+  // change rather than sprung on them.
+  const [indicativeQuote, setIndicativeQuote] = useState<GuestIndicativeQuote | null>(null);
 
   const { data: account } = useQuery<ClientAccount>({ queryKey: [quoteMode ? `/api/admin/quotations/client/${quotation!.clientAccountId}` : "/api/client/account"] });
   const { data: creditAccess } = useQuery<{ creditEnabled: boolean }>({ queryKey: ["/api/client/credit-access"], enabled: !quoteMode });
@@ -124,7 +140,9 @@ export default function CreateLocalShipment() {
         setAdminRateOptions(map);
         return { quotes };
       }
-      const res = await apiRequest("POST", "/api/client/local/rates", {
+      // Guests have no account, so they rate through the public endpoint — same engine, priced
+      // at the standard individual rate, and nothing persisted.
+      const res = await apiRequest("POST", isGuest ? "/api/public/guest/local-rates" : "/api/client/local/rates", {
         shipper,
         recipient,
         pieces: Number(pieces) || 1,
@@ -232,6 +250,27 @@ export default function CreateLocalShipment() {
   };
   const submitLocalCheckout = () => {
     if (!selectedQuoteId || checkoutMutation.isPending) return;
+
+    // The one wall in guest mode: save the shipment and send them to register. Nothing is
+    // posted — a guest must never create a shipment row.
+    if (isGuest) {
+      const selected = quotes.find((quote) => quote.quoteId === selectedQuoteId);
+      saveGuestDraft({
+        kind: "local",
+        formData: { shipper, recipient, pieces, weight },
+        indicativeQuote: selected
+          ? {
+              carrierName: selected.carrierName,
+              serviceName: selected.serviceName,
+              totalSar: selected.finalPrice,
+              currency: selected.currency || "SAR",
+            }
+          : undefined,
+      });
+      setStep(5);
+      return;
+    }
+
     const signature = JSON.stringify({ selectedQuoteId, shipper, recipient, pieces, weight });
     if (signature === lastCheckoutSignatureRef.current && (checkout || quotationSent)) {
       setStep(quoteMode ? 6 : 5);
@@ -240,6 +279,52 @@ export default function CreateLocalShipment() {
     lastCheckoutSignatureRef.current = signature;
     checkoutMutation.mutate(selectedQuoteId);
   };
+
+  // Pick a local shipment back up after the visitor registers. Same rule as express: the draft
+  // is only form input, and the price is re-quoted against the real account before they pay.
+  useEffect(() => {
+    if (isGuest || quoteMode || hydratedDraftRef.current) return;
+    let cancelled = false;
+
+    const hydrate = (draft: GuestDraft | null) => {
+      if (!draft || draft.kind !== "local" || !draft.formData) return false;
+      hydratedDraftRef.current = true;
+      const form = draft.formData as {
+        shipper?: LocalAddress;
+        recipient?: LocalAddress;
+        pieces?: string;
+        weight?: string;
+      };
+      if (form.shipper) setShipper(form.shipper);
+      if (form.recipient) setRecipient(form.recipient);
+      if (form.pieces) setPieces(form.pieces);
+      if (form.weight) setWeight(form.weight);
+      setIndicativeQuote(draft.indicativeQuote ?? null);
+      setStep(3);
+      toast({
+        title: "Your shipment is back",
+        description: "Check the details, then we'll price it against your account.",
+      });
+      return true;
+    };
+
+    // Browser copy first (an instantly-approved individual), then the server-held one (a
+    // company coming back after review, possibly on a different device).
+    if (hydrate(consumeGuestDraft())) return;
+
+    (async () => {
+      const draft = await fetchPendingShipmentDraft();
+      if (cancelled) return;
+      if (hydrate(draft)) {
+        await dismissPendingShipmentDraft();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGuest, quoteMode]);
 
   const addressForm = (value: LocalAddress, set: (a: LocalAddress) => void) => (
     <div className="space-y-4">
@@ -335,8 +420,29 @@ export default function CreateLocalShipment() {
 
         {step === 4 && (
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Truck className="h-4 w-4" /> Select Rate · {shipper.city} → {recipient.city} · {weight} kg</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><Truck className="h-4 w-4" /> Select Rate · {shipper.city} → {recipient.city} · {weight} kg</CardTitle>
+              {isGuest && (
+                <CardDescription>
+                  Indicative pricing at our standard individual rate. We'll confirm the exact
+                  total against your account before you pay.
+                </CardDescription>
+              )}
+            </CardHeader>
             <CardContent className="space-y-3">
+              {indicativeQuote && (
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" data-testid="indicative-price-notice">
+                  <p className="text-sm font-medium">This is your account's price</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Before you registered we showed an indicative{" "}
+                    <span className="font-medium tabular-nums">
+                      {indicativeQuote.currency} {indicativeQuote.totalSar.toFixed(2)}
+                    </span>{" "}
+                    for {indicativeQuote.carrierName}. The rates below are priced against your
+                    account — pick the one you want.
+                  </p>
+                </div>
+              )}
               {quotes.map((q) => (
                 <div
                   key={q.quoteId}
@@ -364,7 +470,23 @@ export default function CreateLocalShipment() {
           </Card>
         )}
 
-        {step === 5 && checkout && (
+        {step === 5 && isGuest && (
+          <GuestCheckoutGate
+            quote={(() => {
+              const selected = quotes.find((quote) => quote.quoteId === selectedQuoteId);
+              return selected
+                ? {
+                    carrierName: selected.carrierName,
+                    serviceName: selected.serviceName,
+                    totalSar: selected.finalPrice,
+                    currency: selected.currency || "SAR",
+                  }
+                : null;
+            })()}
+          />
+        )}
+
+        {step === 5 && !isGuest && checkout && (
           <Card>
             <CardHeader><CardTitle className="text-base">Payment · {checkout.carrierName}</CardTitle></CardHeader>
             <CardContent className="space-y-4">

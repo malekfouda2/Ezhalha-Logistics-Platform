@@ -135,7 +135,7 @@ export const ADMIN_NAV_ITEMS = [
       { href: "/admin/integration-health", label: "Integration Health", permissions: ADMIN_ROUTE_PERMISSIONS.integrationHealth },
       { href: "/admin/apps", label: "Apps", permissions: ADMIN_ROUTE_PERMISSIONS.apps },
       { href: "/admin/webhook-events", label: "Webhooks", permissions: ADMIN_ROUTE_PERMISSIONS.webhooks },
-      { href: "/admin/email-templates", label: "Email Templates", permissions: ADMIN_ROUTE_PERMISSIONS.emailTemplates },
+      { href: "/admin/email-settings", label: "Email Settings", permissions: ADMIN_ROUTE_PERMISSIONS.emailTemplates },
     ],
   },
   { href: "/admin/tasks", label: "Tasks", permissions: ADMIN_ROUTE_PERMISSIONS.tasks },

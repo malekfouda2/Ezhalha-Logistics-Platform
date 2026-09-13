@@ -152,6 +152,7 @@ type FinancialShipment = Omit<
   extraWeightInvoiceStatus: "paid" | "pending" | "failed" | null;
   isExtraWeightPaid: boolean;
   weightValue: number;
+  extraFeesBillableQuantity: number;
   carrierTrackingId: string | null;
   carrierStatus: string | null;
   pickupConfirmationNumber: string | null;
@@ -225,11 +226,15 @@ function getExtraFeesRate(shipment: FinancialShipment): number {
     return shipment.extraFeesRateSarPerWeight;
   }
 
-  if (!shipment.weightValue || shipment.weightValue <= 0) {
+  // Billable, not actual: a volumetric shipment bills on the dimensional weight, so dividing
+  // the total by the actual weight quotes every extra kilo well above what the client paid.
+  const billableQuantity = shipment.extraFeesBillableQuantity || shipment.weightValue;
+
+  if (!billableQuantity || billableQuantity <= 0) {
     return 0;
   }
 
-  return roundMoney((shipment.clientTotalAmountSar || 0) / shipment.weightValue);
+  return roundMoney((shipment.clientTotalAmountSar || 0) / billableQuantity);
 }
 
 function getExtraFeesUnit(shipment: FinancialShipment): string {

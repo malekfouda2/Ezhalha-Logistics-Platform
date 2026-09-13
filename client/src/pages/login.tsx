@@ -22,7 +22,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { humanizeError } from "@/lib/friendly-error";
-import { LogIn, UserPlus, Mail, KeyRound, ArrowLeft, Truck, Globe2, ShieldCheck, Zap } from "lucide-react";
+import { LogIn, UserPlus, Mail, KeyRound, ArrowLeft, Truck, Globe2, ShieldCheck, Zap, Compass } from "lucide-react";
+import { startGuestSession } from "@/lib/guest-mode";
 
 export default function LoginPage() {
   const [, navigate] = useLocation();
@@ -116,6 +117,11 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGuestSignIn = () => {
+    startGuestSession();
+    navigate("/client");
   };
 
   const highlights = [
@@ -358,6 +364,21 @@ export default function LoginPage() {
                   Apply for an Account
                 </Button>
               </Link>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                className="w-full h-11"
+                onClick={handleGuestSignIn}
+                data-testid="button-guest"
+              >
+                <Compass className="mr-2 h-4 w-4" />
+                Sign in as a guest
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                Look around and price a shipment. You'll need an account to pay for it.
+              </p>
             </div>
 
             {/* mobile-only footer links (left panel covers desktop) */}

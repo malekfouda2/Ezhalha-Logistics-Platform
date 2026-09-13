@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ClientLayout } from "@/components/client-layout";
+import { useGuestMode } from "@/lib/guest-mode";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingScreen } from "@/components/loading-spinner";
@@ -101,6 +102,7 @@ type ActiveRecoveryOffer = {
 };
 
 export default function ClientDashboard() {
+  const { isGuest } = useGuestMode();
   const [, navigate] = useLocation();
 
   const { data: account, isLoading: accountLoading } = useQuery<ClientAccount>({
@@ -119,6 +121,15 @@ export default function ClientDashboard() {
     queryKey: ["/api/client/abandoned-recovery/offers"],
   });
 
+  // A shipment built before this account existed. Companies wait days for approval, so without
+  // surfacing it here the shipment sits on their application and they never learn it survived —
+  // the resume would only fire if they happened to reopen the wizard on their own.
+  const { data: pendingDraft } = useQuery<{ draft: { kind?: string } | null }>({
+    queryKey: ["/api/client/pending-draft"],
+    enabled: !isGuest,
+  });
+  const waitingDraftKind = pendingDraft?.draft?.kind;
+
   if (accountLoading || statsLoading) {
     return (
       <ClientLayout>
@@ -133,9 +144,13 @@ export default function ClientDashboard() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-4">
             <div>
-              <h1 className="text-2xl font-bold">Welcome back!</h1>
+              <h1 className="text-2xl font-bold">
+                {isGuest ? "Welcome to ezhalha" : "Welcome back!"}
+              </h1>
               <p className="text-muted-foreground">
-                Here's an overview of your shipping activity
+                {isGuest
+                  ? "This is your dashboard. Build a shipment to see live rates."
+                  : "Here's an overview of your shipping activity"}
               </p>
             </div>
             {account?.profile && (
@@ -165,6 +180,34 @@ export default function ClientDashboard() {
             Create Shipment
           </Button>
         </div>
+
+        {waitingDraftKind && (
+          <Card className="border-primary/30 bg-primary/5" data-testid="pending-draft-banner">
+            <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="rounded-2xl bg-primary/15 p-3 text-primary">
+                  <Package className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="font-semibold">Your shipment is waiting</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    You started this before your account was approved. Pick it up and we'll price
+                    it against your account.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={() =>
+                  navigate(waitingDraftKind === "local" ? "/client/local/new" : "/client/create-shipment")
+                }
+                data-testid="button-resume-draft"
+              >
+                Continue shipment
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {activeOffers && activeOffers.length > 0 && (
           <Card className="overflow-hidden border-primary/30 bg-gradient-to-r from-primary/10 via-amber-500/10 to-background">

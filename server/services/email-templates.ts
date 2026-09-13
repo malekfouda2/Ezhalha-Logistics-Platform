@@ -1,5 +1,6 @@
 import { storage } from "../storage";
 import { logInfo } from "./logger";
+import { NOTIFICATION_TEMPLATE_TYPES, notificationTemplateSlug } from "./email-settings";
 
 export interface TemplateDefinition {
   slug: string;
@@ -452,7 +453,163 @@ export const DEFAULT_TEMPLATES: TemplateDefinition[] = [
 </body>
 </html>`,
   },
+  {
+    slug: "password_setup",
+    name: "Set Your Password",
+    description: "Sent when a new user is created and needs to choose their first password",
+    subject: "Welcome to ezhalha — set your password",
+    availableVariables: ["recipient_name", "action_url", "expiry_text", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Welcome to ezhalha</h1>
+    </div>
+    <div class="content">
+      <p>Hello {{recipient_name}},</p>
+      <p>Your account is ready. Choose a password to sign in.</p>
+      <p style="text-align:center;margin:30px 0"><a href="{{action_url}}" class="button">Set my password</a></p>
+      <p style="color:#888;font-size:12px">This link expires in {{expiry_text}}. If you were not expecting this, you can ignore this email.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "password_reset",
+    name: "Reset Your Password",
+    description: "Sent when someone asks to reset their password",
+    subject: "Reset your ezhalha password",
+    availableVariables: ["recipient_name", "action_url", "expiry_text", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Reset your password</h1>
+    </div>
+    <div class="content">
+      <p>Hello {{recipient_name}},</p>
+      <p>We received a request to reset your password. Choose a new one below.</p>
+      <p style="text-align:center;margin:30px 0"><a href="{{action_url}}" class="button">Reset my password</a></p>
+      <p style="color:#888;font-size:12px">This link expires in {{expiry_text}}. If you did not request this, you can ignore this email and your password stays unchanged.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "login_otp",
+    name: "Login Code",
+    description: "One-time code emailed to someone signing in without a password",
+    subject: "Your ezhalha login code",
+    availableVariables: ["code", "expiry_text", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Your login code</h1>
+    </div>
+    <div class="content">
+      <p>Use this code to sign in to ezhalha. It expires in {{expiry_text}}.</p>
+      <div style="font-size:32px;font-weight:800;letter-spacing:8px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;text-align:center;margin:20px 0">{{code}}</div>
+      <p style="color:#888;font-size:12px">If you did not request this, you can ignore this email. Nobody can sign in without the code.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
+  {
+    slug: "integration_health_digest",
+    name: "Integration Health Digest",
+    description: "Scheduled summary of carrier and integration failures, sent to the team",
+    subject: "Integration health digest — {{failure_count}} issue(s)",
+    availableVariables: ["failure_count", "period_text", "digest_body", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Integration health</h1>
+    </div>
+    <div class="content">
+      <p>{{failure_count}} issue(s) recorded in {{period_text}}.</p>
+      {{digest_body}}
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  },
 ];
+
+/**
+ * Every in-app notification used to be emailed through one generic template, so a quotation
+ * being ready and a colleague mentioning you arrived looking identical and could not be worded
+ * differently. Each notification type now seeds its own template, generated from one shape so
+ * they stay consistent until an admin edits one — at which point only that one changes.
+ *
+ * Anything with no template of its own still falls back to `operation_notification`.
+ */
+for (const notification of NOTIFICATION_TEMPLATE_TYPES) {
+  DEFAULT_TEMPLATES.push({
+    slug: notificationTemplateSlug(notification.type),
+    name: `Notification: ${notification.label}`,
+    description: notification.trigger,
+    subject: "{{title}}",
+    availableVariables: ["title", "body", "action_block", "year"],
+    htmlBody: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>${DEFAULT_STYLES}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{title}}</h1>
+    </div>
+    <div class="content">
+      <p>{{body}}</p>
+      {{action_block}}
+    </div>
+    <div class="footer">
+      <p>&copy; {{year}} ezhalha. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  });
+}
 
 const HTML_SAFE_VARIABLES = new Set([
   "rejection_reason",
@@ -463,6 +620,8 @@ const HTML_SAFE_VARIABLES = new Set([
   "message",
   "action_block",
   "body",
+  "digest_body",
+  "notification_body",
 ]);
 
 function escapeHtml(str: string): string {

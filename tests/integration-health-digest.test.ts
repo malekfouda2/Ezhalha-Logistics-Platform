@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const sendEmailMock = vi.fn().mockResolvedValue(true);
+const dispatchMock = vi.fn().mockResolvedValue({ sent: true, deliveryId: "test-delivery", skipped: false });
 const getIntegrationHealthMock = vi.fn();
 
-vi.mock("../server/services/email", () => ({
-  sendEmail: (...args: unknown[]) => sendEmailMock(...args),
+// The digest is a template now: its subject and wrapper are editable in Admin > Email Settings,
+// and it hands the dispatcher the numbers and the table it built. So these tests assert what the
+// digest still decides — who it goes to, what it counted, and what went into the body — rather
+// than a subject line it no longer owns.
+vi.mock("../server/services/email-delivery", () => ({
+  dispatchTemplatedEmail: (...args: unknown[]) => dispatchMock(...args),
 }));
 
 vi.mock("../server/services/integration-health", () => ({
@@ -36,7 +40,7 @@ function group(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  sendEmailMock.mockClear();
+  dispatchMock.mockClear();
   getIntegrationHealthMock.mockReset();
   process.env.INTEGRATION_DIGEST_EMAIL = "ops@ezhalha.co";
 });
@@ -51,13 +55,14 @@ describe("when the digest sends", () => {
     getIntegrationHealthMock.mockResolvedValue({ services: [], failureGroups: [group()] });
 
     await expect(sendIntegrationHealthDigest()).resolves.toBe(true);
-    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
 
-    const email = sendEmailMock.mock.calls[0][0];
-    expect(email.to).toBe("ops@ezhalha.co");
-    expect(email.subject).toMatch(/needs? attention/i);
+    const call = dispatchMock.mock.calls[0][0];
+    expect(call.slug).toBe("integration_health_digest");
+    expect(call.to).toBe("ops@ezhalha.co");
+    expect(call.variables.failure_count).toBe("21");
     // Leads with the fix, not the carrier's raw string.
-    expect(email.html).toContain("Set the pickup date to the next working day");
+    expect(call.variables.digest_body).toContain("Set the pickup date to the next working day");
   });
 
   it("falls back to ADMIN_EMAIL", async () => {
@@ -66,7 +71,7 @@ describe("when the digest sends", () => {
     getIntegrationHealthMock.mockResolvedValue({ services: [], failureGroups: [group()] });
 
     await sendIntegrationHealthDigest();
-    expect(sendEmailMock.mock.calls[0][0].to).toBe("admin@ezhalha.co");
+    expect(dispatchMock.mock.calls[0][0].to).toBe("admin@ezhalha.co");
   });
 });
 
@@ -75,7 +80,7 @@ describe("when the digest stays quiet", () => {
     getIntegrationHealthMock.mockResolvedValue({ services: [], failureGroups: [] });
 
     await expect(sendIntegrationHealthDigest()).resolves.toBe(false);
-    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(dispatchMock).not.toHaveBeenCalled();
   });
 
   it("ignores transient carrier outages", async () => {
@@ -92,7 +97,7 @@ describe("when the digest stays quiet", () => {
     });
 
     await expect(sendIntegrationHealthDigest()).resolves.toBe(false);
-    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(dispatchMock).not.toHaveBeenCalled();
   });
 
   it("still sends when actionable failures sit alongside transient ones", async () => {
@@ -105,9 +110,8 @@ describe("when the digest stays quiet", () => {
     });
 
     await expect(sendIntegrationHealthDigest()).resolves.toBe(true);
-    const email = sendEmailMock.mock.calls[0][0];
-    // Only the actionable one is counted in the headline.
-    expect(email.subject).toContain("7");
+    // Only the actionable one is counted; the transient group is left out entirely.
+    expect(dispatchMock.mock.calls[0][0].variables.failure_count).toBe("7");
   });
 
   it("sends nothing when no recipient is configured", async () => {
@@ -115,7 +119,7 @@ describe("when the digest stays quiet", () => {
     getIntegrationHealthMock.mockResolvedValue({ services: [], failureGroups: [group()] });
 
     await expect(sendIntegrationHealthDigest()).resolves.toBe(false);
-    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(dispatchMock).not.toHaveBeenCalled();
   });
 
   it("never lets a reporting failure escape", async () => {
@@ -139,8 +143,8 @@ describe("escaping", () => {
     });
 
     await sendIntegrationHealthDigest();
-    const email = sendEmailMock.mock.calls[0][0];
-    expect(email.html).not.toContain("<script>");
-    expect(email.html).toContain("&lt;script&gt;");
+    const body = dispatchMock.mock.calls[0][0].variables.digest_body;
+    expect(body).not.toContain("<script>");
+    expect(body).toContain("&lt;script&gt;");
   });
 });

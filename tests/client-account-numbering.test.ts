@@ -54,8 +54,11 @@ describe("client account numbering", () => {
     const before = await numericMax();
     const created = await createAccount("Numbering");
 
-    expect(created.accountNumber).toBe(`EZ${before + 1}`);
+    // Greater-than rather than exactly `before + 1`: test files run in parallel, and another
+    // one creating an account in between is legitimate. What must hold is that the generator
+    // counted past the planted wide number instead of reissuing beneath it.
     expect(Number(created.accountNumber.slice(2))).toBeGreaterThan(before);
+    expect(created.accountNumber).toMatch(/^EZ[0-9]+$/);
   });
 
   it("issues distinct numbers for accounts created back to back", async () => {
@@ -63,5 +66,28 @@ describe("client account numbering", () => {
     const second = await createAccount("Sequential B");
     expect(first.accountNumber).not.toBe(second.accountNumber);
     expect(Number(second.accountNumber.slice(2))).toBe(Number(first.accountNumber.slice(2)) + 1);
+  });
+
+  it("issues distinct numbers when accounts are created concurrently", async () => {
+    // The generator reads `max(...) + 1` and then inserts, so simultaneous callers all propose
+    // the same number and all but one hit the unique constraint. A retry loop exists for
+    // exactly this — but its conflict check read `code`/`constraint` off the error Drizzle
+    // throws, while the Postgres fields live on `error.cause`. The check never matched, the
+    // retry never ran, and the loser got a 500 with no account.
+    //
+    // Self-serve signup makes this ordinary rather than rare: guests register whenever they
+    // finish a shipment, with no admin serialising the work.
+    const created = await Promise.all([
+      createAccount("Concurrent A"),
+      createAccount("Concurrent B"),
+      createAccount("Concurrent C"),
+      createAccount("Concurrent D"),
+    ]);
+
+    const numbers = created.map((account) => account.accountNumber);
+    expect(new Set(numbers).size).toBe(numbers.length);
+    for (const number of numbers) {
+      expect(number).toMatch(/^EZ[0-9]+$/);
+    }
   });
 });

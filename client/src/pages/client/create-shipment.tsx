@@ -35,6 +35,15 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { useQuotationMode } from "@/lib/quotation-mode";
+import {
+  useGuestMode,
+  saveGuestDraft,
+  consumeGuestDraft,
+  fetchPendingShipmentDraft,
+  dismissPendingShipmentDraft,
+  type GuestIndicativeQuote,
+} from "@/lib/guest-mode";
+import { GuestCheckoutGate } from "@/components/guest-gate";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { humanizeError } from "@/lib/friendly-error";
 import { GeoSuggestInput, type GeoSuggestion } from "@/components/geo-suggest-input";
@@ -877,6 +886,13 @@ export default function CreateShipment() {
   const lastRatesSignatureRef = useRef<string | null>(null);
   const [isProcessingCallback, setIsProcessingCallback] = useState(false);
 
+  // Guest mode: the whole wizard runs, rates are live, and the wall is at payment.
+  const { isGuest } = useGuestMode();
+  // The price the visitor was shown before they had an account. Kept so that after they
+  // register we can show what changed rather than silently moving the number under them.
+  const [indicativeQuote, setIndicativeQuote] = useState<GuestIndicativeQuote | null>(null);
+  const hydratedDraftRef = useRef(false);
+
   const [formData, setFormData] = useState<ShipmentFormData>({
     shipmentType: "" as "domestic" | "inbound" | "outbound",
     isDdp: false,
@@ -1115,7 +1131,11 @@ export default function CreateShipment() {
         // surcharge in a quote that declares the goods.
         ...(data.hasDangerousGoods ? { dangerousGoods: toDangerousGoodsPayload(data.dangerousGoods) } : {}),
       };
-      const res = await apiRequest("POST", "/api/client/shipments/rates", payload);
+      // Guests have no account, so they cannot use the client rate endpoint (and nothing is
+      // persisted for them). The public endpoint prices at the standard individual rate and
+      // returns the same shape, flagged indicative.
+      const ratesEndpoint = isGuest ? "/api/public/guest/express-rates" : "/api/client/shipments/rates";
+      const res = await apiRequest("POST", ratesEndpoint, payload);
       return res.json() as Promise<RatesResponse>;
     },
     onSuccess: (data) => {
@@ -1501,6 +1521,56 @@ export default function CreateShipment() {
   }, [dangerousGoodsAccess, isDangerousGoodsFlow, quoteMode, navigate, toast]);
 
   // Permission check - show access denied if user lacks create_shipments permission
+  // Pick up a shipment that was built before this visitor had an account.
+  //
+  // Must sit above every early return in this component. Below the `permsLoading` guard it is
+  // skipped on the first render and runs on the second, which changes the hook count and
+  // crashes the whole wizard with "Rendered more hooks than during the previous render".
+  //
+  // Two sources, one behaviour: individuals come straight back with the draft still in their
+  // browser, companies come back days later after approval with it held on their application.
+  // Either way the draft is only form input — it is re-rated against the real account here, so
+  // the price they pay is their price, not the indicative individual rate they were shown.
+  useEffect(() => {
+    if (isGuest || quoteMode || hydratedDraftRef.current) return;
+    // A Tap redirect owns this render; the shipment already exists by then.
+    if (new URLSearchParams(searchString).get("shipmentId")) return;
+
+    let cancelled = false;
+
+    const hydrate = (draft: { kind?: string; formData?: unknown; indicativeQuote?: GuestIndicativeQuote } | null | undefined) => {
+      if (!draft || draft.kind !== "express" || !draft.formData) return false;
+      hydratedDraftRef.current = true;
+      const draftForm = draft.formData as ShipmentFormData;
+      setFormData(draftForm);
+      setIndicativeQuote(draft.indicativeQuote ?? null);
+      lastRatesSignatureRef.current = null;
+      lastCheckoutSignatureRef.current = null;
+      getRatesMutation.mutate(draftForm);
+      toast({
+        title: "Your shipment is back",
+        description: "We're re-checking the price against your account before you pay.",
+      });
+      return true;
+    };
+
+    if (hydrate(consumeGuestDraft())) return;
+
+    (async () => {
+      const draft = await fetchPendingShipmentDraft();
+      if (cancelled) return;
+      if (hydrate(draft)) {
+        // Clear it server-side too, so it is offered exactly once.
+        await dismissPendingShipmentDraft();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGuest, quoteMode, searchString]);
+
   if (permsLoading) {
     return <LoadingScreen />;
   }
@@ -2386,6 +2456,27 @@ export default function CreateShipment() {
     });
 
   const submitCheckout = () => {
+    // The one wall in guest mode. Everything up to here was real; this is where an account is
+    // needed, so the shipment is saved and the visitor is sent to register. Nothing is posted —
+    // /api/client/shipments/checkout would 401, and a guest must not create a shipment row.
+    if (isGuest) {
+      const selectedRate = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId);
+      saveGuestDraft({
+        kind: "express",
+        formData,
+        indicativeQuote: selectedRate
+          ? {
+              carrierName: selectedRate.carrierName,
+              serviceName: selectedRate.serviceName,
+              totalSar: selectedRate.finalPrice,
+              currency: selectedRate.currency || "SAR",
+            }
+          : undefined,
+      });
+      setStep(paymentStep);
+      return;
+    }
+
     const payload = buildCheckoutPayload();
     if (!payload) return;
     if (checkoutMutation.isPending) return; // a checkout is already in flight — ignore repeats
@@ -3504,10 +3595,30 @@ export default function CreateShipment() {
                 Select Shipping Rate
               </CardTitle>
               <CardDescription>
-                Choose your preferred shipping option. Rates expire at {format(new Date(rates.expiresAt), "h:mm a")}
+                {/* Guest quotes are not stored, so nothing expires — only a real quote has a
+                    reservation to run out. */}
+                {isGuest
+                  ? "Choose your preferred shipping option. This is an indicative price at our standard individual rate."
+                  : `Choose your preferred shipping option. Rates expire at ${format(new Date(rates.expiresAt), "h:mm a")}`}
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {indicativeQuote && (
+                <div
+                  className="mb-6 rounded-lg border border-primary/30 bg-primary/5 p-4"
+                  data-testid="indicative-price-notice"
+                >
+                  <p className="text-sm font-medium">This is your account's price</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Before you registered we showed an indicative{" "}
+                    <span className="font-medium tabular-nums">
+                      {indicativeQuote.currency} {indicativeQuote.totalSar.toFixed(2)}
+                    </span>{" "}
+                    for {indicativeQuote.carrierName} {indicativeQuote.serviceName}. The rates below
+                    are priced against your account — pick the one you want.
+                  </p>
+                </div>
+              )}
               <RadioGroup
                 value={selectedQuoteId || ""}
                 onValueChange={setSelectedQuoteId}
@@ -4126,7 +4237,23 @@ export default function CreateShipment() {
           </Card>
         )}
 
-        {step === paymentStep && checkoutData && (
+        {step === paymentStep && isGuest && (
+          <GuestCheckoutGate
+            quote={(() => {
+              const selected = rates?.quotes.find((quote) => quote.quoteId === selectedQuoteId);
+              return selected
+                ? {
+                    carrierName: selected.carrierName,
+                    serviceName: selected.serviceName,
+                    totalSar: selected.finalPrice,
+                    currency: selected.currency || "SAR",
+                  }
+                : null;
+            })()}
+          />
+        )}
+
+        {step === paymentStep && !isGuest && checkoutData && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

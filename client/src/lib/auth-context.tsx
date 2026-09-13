@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import type { User } from "@shared/schema";
 import { apiRequest, queryClient } from "./queryClient";
+import { endGuestSession } from "./guest-mode";
 
 interface AuthContextType {
   user: User | null;
@@ -23,6 +24,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
+        // A real session outranks guest mode; leaving the flag set would keep serving this
+        // user canned guest data from getQueryFn.
+        endGuestSession();
         setUser(data.user);
       } else {
         setUser(null);
@@ -41,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const res = await apiRequest("POST", "/api/auth/login", { username, password });
     const data = await res.json();
+    endGuestSession();
     setUser(data.user);
     // Clear all cached queries to ensure fresh data for new user
     queryClient.clear();
@@ -53,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const verifyEmailOtp = useCallback(async (email: string, code: string) => {
     const res = await apiRequest("POST", "/api/auth/otp/verify", { email, code });
     const data = await res.json();
+    endGuestSession();
     setUser(data.user);
     queryClient.clear();
   }, []);

@@ -39,3 +39,58 @@ export function countryLocalNow(
     dayOfWeek: new Date(Date.UTC(y, m - 1, d)).getUTCDay(),
   };
 }
+
+/**
+ * Countries whose working week runs Sunday–Thursday, so the weekend is Friday and Saturday.
+ *
+ * Everywhere else is assumed Saturday/Sunday. This list is the one that matters for pickups: a
+ * carrier refuses a collection booked on a non-working day at the *origin*, and the origin is
+ * usually not where this system runs.
+ *
+ * The UAE is deliberately absent — it moved to a Saturday/Sunday weekend in 2022.
+ */
+const FRIDAY_SATURDAY_WEEKEND_COUNTRIES = new Set([
+  "SA", "KW", "QA", "BH", "OM", "EG", "JO", "IQ", "SY", "YE", "LY", "SD", "PS", "IL",
+]);
+
+/** Day-of-week numbers (0 = Sunday) that are weekend in a country. */
+export function weekendDaysForCountry(countryCode?: string | null): number[] {
+  const normalized = (countryCode || "").trim().toUpperCase();
+  return FRIDAY_SATURDAY_WEEKEND_COUNTRIES.has(normalized) ? [5, 6] : [0, 6];
+}
+
+function dayOfWeekForDateString(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * Is this `YYYY-MM-DD` a working day in the given country?
+ *
+ * Pickup dates were previously checked against Saudi weekend rules regardless of origin, which
+ * meant a Sunday was always considered a working day. A Sunday collection from Turkey or China is
+ * refused outright — DHL answers `5006: Pickup is not allowed for this shipment date` — and the
+ * parcel then travels with no courier ever booked, because the waybill call succeeds separately.
+ */
+export function isBusinessDayInCountry(dateStr: string, countryCode?: string | null): boolean {
+  return !weekendDaysForCountry(countryCode).includes(dayOfWeekForDateString(dateStr));
+}
+
+/** The first working day at or after `dateStr`, in the given country's calendar. */
+export function nextBusinessDayOnOrAfter(dateStr: string, countryCode?: string | null): string {
+  const weekend = weekendDaysForCountry(countryCode);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  while (weekend.includes(cur.getUTCDay())) {
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return cur.toISOString().slice(0, 10);
+}
+
+/** The first working day strictly after `dateStr`, in the given country's calendar. */
+export function nextBusinessDayAfterInCountry(dateStr: string, countryCode?: string | null): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  cur.setUTCDate(cur.getUTCDate() + 1);
+  return nextBusinessDayOnOrAfter(cur.toISOString().slice(0, 10), countryCode);
+}

@@ -40,7 +40,9 @@ All DB access flows through Drizzle ([server/db.ts](server/db.ts)). Prefer the `
 Carrier adapters (FedEx, DHL, Aramex) register via `server/integrations/carriers.ts`. Tap is the current payment integration (Stripe references are legacy). Zoho Books handles customer/invoice sync with bilingual fields. Integration account credentials are encrypted with `INTEGRATION_CONFIG_SECRET` — keep that secret stable across deploys or existing credentials become unreadable.
 
 ### Background schedulers
-Start after the HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry. Disable individually with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`.
+Start after the HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry, email retries. Disable individually with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`, `DISABLE_EMAIL_RETRY_SCHEDULER`.
+
+Email behaviour is data, not code: `/admin/email-settings` owns each template's wording *and* its operational settings (enabled, retry attempts and backoff, and for the two scheduler-driven emails the sweep interval and their own logic knobs). Every templated send goes through `dispatchTemplatedEmail` ([server/services/email-delivery.ts](server/services/email-delivery.ts)), which records an `email_deliveries` row per attempt — so a failed email is retryable and reportable rather than a log line. Add a new email by adding a `TemplateDefinition` in [server/services/email-templates.ts](server/services/email-templates.ts) **and** a descriptor in [server/services/email-settings.ts](server/services/email-settings.ts); a template with no descriptor reaches the settings page with no trigger text and looks broken.
 
 ## Environment
 

@@ -1450,6 +1450,14 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   )}
                 </div>
               )}
+              {/* The goods left the shipper before a collection was ever booked — a pickup would
+                  now send a courier for a parcel the carrier already has. Nothing to do. */}
+              {(selectedShipment as any).pickupStatus === "not_required" && !(selectedShipment as any).pickupConfirmationNumber && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Pickup</p>
+                  <p className="text-sm font-medium">Not needed — already collected</p>
+                </div>
+              )}
               {selectedShipment.status === "payment_pending" && !selectedShipment.carrierTrackingNumber && (
                 <Button
                   variant="outline"

@@ -55,6 +55,9 @@ interface Quote {
   shipper: Party; recipient: Party; packages: Pkg[]; note: string; canPay: boolean;
   items: Item[]; tradeDocuments: TradeDoc[]; supplierName: string; supplierPhone: string; specialInstructions: string;
   requiresConsent: boolean; consentAccepted: boolean;
+  // Credit comes down with the quotation so the page can explain an unavailable credit option
+  // rather than quietly falling back to card-only.
+  creditEnabled: boolean; creditAvailableSar: number;
   dangerousGoods: DangerousGoodsQuoteData | null;
   pricing: { baseRate: number; marginAmount: number; discountSar: number; extraChargeSar: number; vatAmountSar: number; clientTotalSar: number };
 }
@@ -75,6 +78,13 @@ export default function QuotationDetail() {
   const { data: quote, isLoading, error } = useQuery<Quote>({
     queryKey: [`/api/client/quotations/${id}`],
     enabled: Boolean(id),
+    // This page is a money decision, and everything it decides on moves outside this tab: the
+    // price, the quote's expiry, and whether the client may pay on account. The global default
+    // is `staleTime: Infinity` with no refetch on focus, so a quotation opened before an admin
+    // approved the client's credit access kept rendering card-only for the life of the tab —
+    // which is exactly how a client with SAR 5,000 of credit ended up unable to use it.
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   useEffect(() => {
@@ -168,6 +178,9 @@ export default function QuotationDetail() {
 
   const p = quote.pricing;
   const paid = quote.paymentStatus === "paid";
+  const creditEnabled = quote.creditEnabled ?? Boolean(account?.creditEnabled);
+  const creditAvailable = quote.creditAvailableSar ?? 0;
+  const creditCovers = creditAvailable >= p.clientTotalSar;
 
   const partyFields = (side: "shipper" | "recipient", label: string) => {
     const party = draft[side];
@@ -432,13 +445,36 @@ export default function QuotationDetail() {
                 onSubmit={(payload) => payCard.mutate(payload)}
                 testId="button-pay-quote-card"
               />
-              {account?.creditEnabled && (
+              {creditEnabled && (
                 <>
                   <div className="relative text-center text-xs text-muted-foreground"><span className="bg-background px-2">or</span><div className="absolute inset-x-0 top-1/2 -z-10 h-px bg-border" /></div>
-                  <Button variant="outline" className="w-full" disabled={payCredit.isPending} onClick={() => payCredit.mutate()}>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={payCredit.isPending || !creditCovers}
+                    onClick={() => payCredit.mutate()}
+                    data-testid="button-pay-quote-credit"
+                  >
                     {payCredit.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wallet className="mr-2 h-4 w-4" />} Pay with credit
                   </Button>
+                  <p className="text-center text-xs text-muted-foreground">
+                    {creditCovers
+                      ? `Invoiced to your account, due in 30 days. ${sar(creditAvailable)} available.`
+                      : `Not enough credit left — ${sar(creditAvailable)} available against ${sar(p.clientTotalSar)}.`}
+                  </p>
                 </>
+              )}
+              {!creditEnabled && (
+                // A dangerous goods quote reaches the client from an operator rather than from
+                // checkout, so this page is the whole payment surface for it. Saying nothing at
+                // all about credit reads as "card only" to a client who expected terms.
+                <p className="text-center text-xs text-muted-foreground">
+                  Prefer to pay on account?{" "}
+                  <button type="button" className="underline underline-offset-2" onClick={() => navigate("/client/billing")}>
+                    Request credit terms
+                  </button>
+                  .
+                </p>
               )}
             </CardContent>
           </Card>

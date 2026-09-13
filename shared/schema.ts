@@ -165,6 +165,15 @@ export const clientApplications = pgTable("client_applications", {
   shippingAddressLine2: text("shipping_address_line2"),
   shippingShortAddress: text("shipping_short_address"), // Short address code for KSA
   documents: text("documents").array(), // Array of document object paths
+  /**
+   * A shipment the applicant had already built as a guest, carried across registration as JSON.
+   *
+   * It is held here rather than in `shipments` on purpose: a shipment row would be NOT NULL on
+   * `clientAccountId` (which does not exist yet) and would land in the admin Abandoned queue
+   * immediately, since that queue has no age threshold. Materialised into a real shipment only
+   * after the account exists and the price has been re-quoted.
+   */
+  shipmentDraft: text("shipment_draft"),
   status: text("status").notNull().default("pending"),
   reviewedBy: varchar("reviewed_by"),
   reviewNotes: text("review_notes"),
@@ -1218,6 +1227,36 @@ export const mobileRefreshRequestSchema = z.object({
   refreshToken: z.string().min(20, "refreshToken is required"),
 });
 
+/**
+ * A guest-built shipment carried across registration.
+ *
+ * The payload is the create-shipment wizard's own form state, which only the wizard understands,
+ * so it is accepted opaquely rather than validated field by field — it is re-validated properly
+ * by the real rate/checkout endpoints when it is replayed. What IS enforced is a size ceiling:
+ * this arrives on an unauthenticated endpoint and is stored as text.
+ */
+export const guestShipmentDraftSchema = z
+  .object({
+    kind: z.enum(["express", "local"]),
+    formData: z.unknown(),
+    indicativeQuote: z
+      .object({
+        carrierName: z.string().max(120),
+        serviceName: z.string().max(120),
+        totalSar: z.number(),
+        currency: z.string().max(8),
+      })
+      .optional(),
+  })
+  .refine(
+    (value) => JSON.stringify(value).length <= 200_000,
+    { message: "Shipment draft is too large" },
+  )
+  .nullable()
+  .optional();
+
+export type GuestShipmentDraft = NonNullable<z.infer<typeof guestShipmentDraftSchema>>;
+
 // Application form schema
 export const applicationFormSchema = z.object({
   accountType: z.enum(["company", "individual"]),
@@ -2030,6 +2069,98 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
   createdAt: true,
   updatedAt: true,
 });
+
+/**
+ * How one email behaves, as opposed to how it reads.
+ *
+ * The template row owns the wording; this row owns the operational side — whether the email is
+ * sent at all, how hard delivery is retried, and, for the few emails a scheduler produces
+ * rather than an event, when it runs and on what ladder.
+ *
+ * Every column is nullable or defaulted, and a template with no settings row behaves exactly as
+ * it did before: the defaults in `EMAIL_SETTING_DEFAULTS` are the current hardcoded values.
+ * `config` holds the knobs that only make sense for one template (the credit reminder ladder,
+ * the digest hour) as JSON text, matching how the rest of this schema stores structured values.
+ */
+export const emailTemplateSettings = pgTable("email_template_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateSlug: text("template_slug").notNull().unique(),
+  // Distinct from the template's own `isActive`: that one means "use my wording"; this means
+  // "send this email at all". An admin turning the email off should not have to blank the body.
+  enabled: boolean("enabled").notNull().default(true),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  retryBackoffSeconds: integer("retry_backoff_seconds").notNull().default(300),
+  // Scheduled emails only. `intervalMinutes` drives the sweep; `sendHourUtc` pins a daily send
+  // to an hour so a digest does not arrive at whatever time the process last restarted.
+  scheduleEnabled: boolean("schedule_enabled"),
+  intervalMinutes: integer("interval_minutes"),
+  sendHourUtc: integer("send_hour_utc"),
+  config: text("config"),
+  updatedByUserId: varchar("updated_by_user_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailTemplateSettingsSchema = createInsertSchema(emailTemplateSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEmailTemplateSettings = z.infer<typeof insertEmailTemplateSettingsSchema>;
+export type EmailTemplateSettings = typeof emailTemplateSettings.$inferSelect;
+
+export const EmailDeliveryStatus = {
+  PENDING: "pending",
+  SENT: "sent",
+  FAILED: "failed",
+  /** Retries exhausted. A person has to decide what happens next. */
+  ABANDONED: "abandoned",
+  /** The template is switched off, or mail is not configured. Recorded, never attempted. */
+  SKIPPED: "skipped",
+} as const;
+
+export type EmailDeliveryStatusValue = (typeof EmailDeliveryStatus)[keyof typeof EmailDeliveryStatus];
+
+/**
+ * One attempt trail per email the system tried to send.
+ *
+ * Until now a failed send was a log line: `sendEmail` returned false and the caller carried on,
+ * so "did this client ever receive the quotation?" had no answer and nothing could be re-driven.
+ * This row is what the retry worker walks and what the admin page reports.
+ *
+ * `variables` is kept so a retry re-renders from the current template rather than replaying a
+ * stale body — an admin who fixed a broken template wants the fixed one to go out.
+ */
+export const emailDeliveries = pgTable("email_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateSlug: text("template_slug").notNull(),
+  recipient: text("recipient").notNull(),
+  subject: text("subject").notNull(),
+  status: text("status").notNull().default(EmailDeliveryStatus.PENDING),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  lastError: text("last_error"),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  nextAttemptAt: timestamp("next_attempt_at"),
+  sentAt: timestamp("sent_at"),
+  provider: text("provider"),
+  messageId: text("message_id"),
+  variables: text("variables"),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailDeliverySchema = createInsertSchema(emailDeliveries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEmailDelivery = z.infer<typeof insertEmailDeliverySchema>;
+export type EmailDelivery = typeof emailDeliveries.$inferSelect;
 
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
