@@ -1699,6 +1699,7 @@
     "calculating": "Calculating rates…",
     "noRates": "No instant rates for this route. Contact support to arrange this shipment.",
     "quoteError": "Could not calculate a quote. Please try again.",
+    "quoteErrorTitle": "Quote failed",
     "bestValue": "Best value",
     "sections": {
       "express": "Express (International & Domestic)",

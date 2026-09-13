@@ -187,11 +187,11 @@ export default function QuickQuote() {
             <div>
               <div className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">Shipment details</div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {numField("pieces", "Packages", "1")}
                 {numField("weight", "Weight (kg)")}
                 {numField("length", "Length (cm)")}
                 {numField("width", "Width (cm)")}
                 {numField("height", "Height (cm)")}
-                {numField("pieces", "Packages", "1")}
               </div>
               {(specs.totalWeight > 0 || specs.cbm > 0) && (
                 <div className="mt-3 flex flex-wrap gap-2">

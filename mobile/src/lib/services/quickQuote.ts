@@ -1,5 +1,4 @@
-import { api, apiRequest } from "@/api/client";
-import { isGuestActive } from "@/store/useGuestStore";
+import { api } from "@/api/client";
 
 export interface QuickQuoteRequest {
   origin: { countryCode: string; city?: string };
@@ -55,14 +54,5 @@ export interface QuickQuoteResponse {
 }
 
 export function fetchQuickQuote(payload: QuickQuoteRequest) {
-  // Same request/response shape as the authenticated route — the guest endpoint just prices
-  // at the standard "regular"/individual profile and has no client account to route by.
-  if (isGuestActive()) {
-    return apiRequest<QuickQuoteResponse>("/api/public/guest/quick-quote", {
-      method: "POST",
-      anonymous: true,
-      body: payload,
-    });
-  }
   return api.post<QuickQuoteResponse>("/api/client/quick-quote", payload);
 }

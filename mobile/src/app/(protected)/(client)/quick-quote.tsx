@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation } from "@tanstack/react-query";
+import Toast from "react-native-toast-message";
 
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
@@ -49,6 +50,14 @@ export default function QuickQuoteScreen() {
 
   const quote = useMutation({
     mutationFn: fetchQuickQuote,
+    onError: (error) => {
+      Toast.show({
+        type: "error",
+        text1: t("quickQuote.quoteErrorTitle"),
+        text2:
+          error instanceof ApiError ? error.message : t("quickQuote.quoteError"),
+      });
+    },
   });
 
   const mutate = quote.mutate;
@@ -124,12 +133,17 @@ export default function QuickQuoteScreen() {
         <SectionLabel>{t("quickQuote.shipment")}</SectionLabel>
         <View style={styles.grid}>
           <GridField
+            label={t("quickQuote.piecesPlaceholder")}
+            value={piecesText}
+            onChangeText={setPiecesText}
+            keyboardType="number-pad"
+          />
+          <GridField
             label={t("quickQuote.weightPlaceholder")}
             value={weightText}
             onChangeText={setWeightText}
             keyboardType="decimal-pad"
           />
-
           <GridField
             label={t("quickQuote.lengthPlaceholder")}
             value={lengthText}
@@ -148,12 +162,6 @@ export default function QuickQuoteScreen() {
             onChangeText={setHeightText}
             keyboardType="decimal-pad"
           />
-          <GridField
-            label={t("quickQuote.piecesPlaceholder")}
-            value={piecesText}
-            onChangeText={setPiecesText}
-            keyboardType="number-pad"
-          />
         </View>
 
         <View style={styles.gap} />
@@ -167,21 +175,6 @@ export default function QuickQuoteScreen() {
         {quote.isPending && canQuote && (
           <View style={styles.centered}>
             <ActivityIndicator color={Colors.primary} />
-          </View>
-        )}
-
-        {quote.isError && canQuote && (
-          <View style={styles.notice}>
-            <Ionicons
-              name="alert-circle-outline"
-              size={rs(16)}
-              color={Colors.error}
-            />
-            <Text size="small" style={styles.noticeText}>
-              {quote.error instanceof ApiError
-                ? quote.error.message
-                : t("quickQuote.quoteError")}
-            </Text>
           </View>
         )}
 
