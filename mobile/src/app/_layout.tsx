@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
 import { onSessionExpired } from "@/api/client";
@@ -13,6 +13,11 @@ import AppLayout from "@/components/layout/AppLayout";
 import toastConfig from "@/components/ui/AppToast";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+function AppToast() {
+  const insets = useSafeAreaInsets();
+  return <Toast config={toastConfig} topOffset={insets.top + 10} />;
+}
 
 export default function RootLayout() {
   const init = useLanguageStore((state) => state.init);
@@ -48,8 +53,8 @@ export default function RootLayout() {
         <AppLayout>
           <Stack screenOptions={{ headerShown: false }} />
         </AppLayout>
+        <AppToast />
       </SafeAreaProvider>
-     <Toast config={toastConfig} />
     </QueryClientProvider>
   );
 }
