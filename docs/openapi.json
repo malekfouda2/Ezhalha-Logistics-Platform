@@ -883,7 +883,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/account-managers",
-        "description": "Guard `requireAdminPermission` · Permission `account-managers:read`\n\nSource: `server/routes.ts:16978`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-managers:read`\n\nSource: `server/routes.ts:16995`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -913,7 +913,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-managers:read`"
         ],
-        "x-source": "server/routes.ts:16978"
+        "x-source": "server/routes.ts:16995"
       },
       "post": {
         "operationId": "postAdminAccountManagers",
@@ -921,7 +921,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/account-managers",
-        "description": "Guard `requireAdminPermission` · Permission `account-managers:create`\n\nSource: `server/routes.ts:16994`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-managers:create`\n\nSource: `server/routes.ts:17011`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -961,7 +961,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-managers:create`"
         ],
-        "x-source": "server/routes.ts:16994"
+        "x-source": "server/routes.ts:17011"
       }
     },
     "/api/admin/account-managers/{userId}/clients": {
@@ -971,7 +971,7 @@
           "admin"
         ],
         "summary": "PUT /api/admin/account-managers/:userId/clients",
-        "description": "Guard `requireAdminPermission` · Permission `account-managers:assign`\n\nSource: `server/routes.ts:17056`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-managers:assign`\n\nSource: `server/routes.ts:17073`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "userId",
@@ -1031,7 +1031,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-managers:assign`"
         ],
-        "x-source": "server/routes.ts:17056"
+        "x-source": "server/routes.ts:17073"
       }
     },
     "/api/admin/account-managers/change-requests": {
@@ -1041,7 +1041,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/account-managers/change-requests",
-        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:read`\n\nSource: `server/routes.ts:17094`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:read`\n\nSource: `server/routes.ts:17111`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "status",
@@ -1081,7 +1081,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-manager-requests:read`"
         ],
-        "x-source": "server/routes.ts:17094"
+        "x-source": "server/routes.ts:17111"
       }
     },
     "/api/admin/account-managers/change-requests/{id}/approve": {
@@ -1091,7 +1091,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/account-managers/change-requests/:id/approve",
-        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:approve`\n\nSource: `server/routes.ts:17144`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:approve`\n\nSource: `server/routes.ts:17161`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -1151,7 +1151,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-manager-requests:approve`"
         ],
-        "x-source": "server/routes.ts:17144"
+        "x-source": "server/routes.ts:17161"
       }
     },
     "/api/admin/account-managers/change-requests/{id}/reject": {
@@ -1161,7 +1161,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/account-managers/change-requests/:id/reject",
-        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:reject`\n\nSource: `server/routes.ts:17200`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `account-manager-requests:reject`\n\nSource: `server/routes.ts:17217`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -1221,7 +1221,7 @@
           "Guard `requireAdminPermission`",
           "Permission `account-manager-requests:reject`"
         ],
-        "x-source": "server/routes.ts:17200"
+        "x-source": "server/routes.ts:17217"
       }
     },
     "/api/admin/applications": {
@@ -1404,7 +1404,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/apps",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:15414`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:15431`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -1434,7 +1434,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:read`"
         ],
-        "x-source": "server/routes.ts:15414"
+        "x-source": "server/routes.ts:15431"
       }
     },
     "/api/admin/apps/{appKey}/logo": {
@@ -1444,7 +1444,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/apps/:appKey/logo",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15521`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15538`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "appKey",
@@ -1484,7 +1484,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15521"
+        "x-source": "server/routes.ts:15538"
       },
       "put": {
         "operationId": "putAdminAppsByAppKeyLogo",
@@ -1492,7 +1492,7 @@
           "admin"
         ],
         "summary": "PUT /api/admin/apps/:appKey/logo",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15498`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15515`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "appKey",
@@ -1562,7 +1562,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15498"
+        "x-source": "server/routes.ts:15515"
       }
     },
     "/api/admin/apps/accounts": {
@@ -1572,7 +1572,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/apps/accounts",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15560`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15577`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -1612,7 +1612,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15560"
+        "x-source": "server/routes.ts:15577"
       }
     },
     "/api/admin/apps/accounts/{id}": {
@@ -1622,7 +1622,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/apps/accounts/:id",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15718`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15735`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -1682,7 +1682,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15718"
+        "x-source": "server/routes.ts:15735"
       },
       "patch": {
         "operationId": "patchAdminAppsAccountsById",
@@ -1690,7 +1690,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/apps/accounts/:id",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15629`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15646`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -1750,7 +1750,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15629"
+        "x-source": "server/routes.ts:15646"
       }
     },
     "/api/admin/apps/accounts/{id}/test": {
@@ -1760,7 +1760,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/apps/accounts/:id/test",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15761`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:configure`\n\nSource: `server/routes.ts:15778`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -1810,7 +1810,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:configure`"
         ],
-        "x-source": "server/routes.ts:15761"
+        "x-source": "server/routes.ts:15778"
       }
     },
     "/api/admin/audit-logs": {
@@ -1820,7 +1820,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/audit-logs",
-        "description": "Guard `requireAdminPermission` · Permission `audit-logs:read`\n\nSource: `server/routes.ts:15267`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `audit-logs:read`\n\nSource: `server/routes.ts:15284`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "page",
@@ -1908,7 +1908,7 @@
           "Guard `requireAdminPermission`",
           "Permission `audit-logs:read`"
         ],
-        "x-source": "server/routes.ts:15267"
+        "x-source": "server/routes.ts:15284"
       }
     },
     "/api/admin/audit-logs/stats": {
@@ -1918,7 +1918,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/audit-logs/stats",
-        "description": "Guard `requireAdminPermission` · Permission `audit-logs:read`\n\nSource: `server/routes.ts:15295`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `audit-logs:read`\n\nSource: `server/routes.ts:15312`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -1948,7 +1948,7 @@
           "Guard `requireAdminPermission`",
           "Permission `audit-logs:read`"
         ],
-        "x-source": "server/routes.ts:15295"
+        "x-source": "server/routes.ts:15312"
       }
     },
     "/api/admin/carrier-payout-batches": {
@@ -4076,7 +4076,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/departments",
-        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:15826`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:15843`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -4106,7 +4106,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:read`"
         ],
-        "x-source": "server/routes.ts:15826"
+        "x-source": "server/routes.ts:15843"
       },
       "post": {
         "operationId": "postAdminDepartments",
@@ -4114,7 +4114,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/departments",
-        "description": "Guard `requireAdminPermission` · Permission `roles:create`\n\nSource: `server/routes.ts:15869`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:create`\n\nSource: `server/routes.ts:15886`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -4154,7 +4154,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:create`"
         ],
-        "x-source": "server/routes.ts:15869"
+        "x-source": "server/routes.ts:15886"
       }
     },
     "/api/admin/departments/{id}": {
@@ -4164,7 +4164,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/departments/:id",
-        "description": "Guard `requireAdminPermission` · Permission `roles:update`\n\nSource: `server/routes.ts:15917`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:update`\n\nSource: `server/routes.ts:15934`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -4224,7 +4224,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:update`"
         ],
-        "x-source": "server/routes.ts:15917"
+        "x-source": "server/routes.ts:15934"
       }
     },
     "/api/admin/email-deliveries": {
@@ -5168,7 +5168,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/integration-health",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:18485`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:18502`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "windowHours",
@@ -5208,7 +5208,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:read`"
         ],
-        "x-source": "server/routes.ts:18485"
+        "x-source": "server/routes.ts:18502"
       }
     },
     "/api/admin/integration-logs": {
@@ -5218,7 +5218,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/integration-logs",
-        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:15306`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `integrations:read`\n\nSource: `server/routes.ts:15323`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "page",
@@ -5290,7 +5290,7 @@
           "Guard `requireAdminPermission`",
           "Permission `integrations:read`"
         ],
-        "x-source": "server/routes.ts:15306"
+        "x-source": "server/routes.ts:15323"
       }
     },
     "/api/admin/invitations": {
@@ -5300,7 +5300,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/invitations",
-        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16626`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16643`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "search",
@@ -5364,7 +5364,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:read`"
         ],
-        "x-source": "server/routes.ts:16626"
+        "x-source": "server/routes.ts:16643"
       },
       "post": {
         "operationId": "postAdminInvitations",
@@ -5372,7 +5372,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/invitations",
-        "description": "Guard `requireAdminPermission` · Permission `users:create`\n\nSource: `server/routes.ts:16673`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:create`\n\nSource: `server/routes.ts:16690`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -5432,7 +5432,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:create`"
         ],
-        "x-source": "server/routes.ts:16673"
+        "x-source": "server/routes.ts:16690"
       }
     },
     "/api/admin/invitations/{id}/resend": {
@@ -5442,7 +5442,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/invitations/:id/resend",
-        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16747`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16764`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -5502,7 +5502,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:update`"
         ],
-        "x-source": "server/routes.ts:16747"
+        "x-source": "server/routes.ts:16764"
       }
     },
     "/api/admin/invitations/{id}/revoke": {
@@ -5512,7 +5512,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/invitations/:id/revoke",
-        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16811`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16828`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -5572,7 +5572,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:update`"
         ],
-        "x-source": "server/routes.ts:16811"
+        "x-source": "server/routes.ts:16828"
       }
     },
     "/api/admin/invoices": {
@@ -6073,7 +6073,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/permissions",
-        "description": "Guard `requireAdminPermission` · Permission `permissions:read`\n\nSource: `server/routes.ts:16175`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `permissions:read`\n\nSource: `server/routes.ts:16192`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -6103,7 +6103,7 @@
           "Guard `requireAdminPermission`",
           "Permission `permissions:read`"
         ],
-        "x-source": "server/routes.ts:16175"
+        "x-source": "server/routes.ts:16192"
       },
       "post": {
         "operationId": "postAdminPermissions",
@@ -6111,7 +6111,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/permissions",
-        "description": "Guard `requireAdminPermission` · Permission `permissions:create`\n\nSource: `server/routes.ts:16185`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `permissions:create`\n\nSource: `server/routes.ts:16202`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -6151,7 +6151,7 @@
           "Guard `requireAdminPermission`",
           "Permission `permissions:create`"
         ],
-        "x-source": "server/routes.ts:16185"
+        "x-source": "server/routes.ts:16202"
       }
     },
     "/api/admin/permissions/{id}": {
@@ -6161,7 +6161,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/permissions/:id",
-        "description": "Guard `requireAdminPermission` · Permission `permissions:delete`\n\nSource: `server/routes.ts:16204`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `permissions:delete`\n\nSource: `server/routes.ts:16221`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6211,7 +6211,7 @@
           "Guard `requireAdminPermission`",
           "Permission `permissions:delete`"
         ],
-        "x-source": "server/routes.ts:16204"
+        "x-source": "server/routes.ts:16221"
       }
     },
     "/api/admin/policies": {
@@ -6221,7 +6221,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/policies",
-        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17389`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17406`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -6251,7 +6251,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:read`"
         ],
-        "x-source": "server/routes.ts:17389"
+        "x-source": "server/routes.ts:17406"
       },
       "post": {
         "operationId": "postAdminPolicies",
@@ -6259,7 +6259,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/policies",
-        "description": "Guard `requireAdminPermission` · Permission `policies:create`\n\nSource: `server/routes.ts:17435`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:create`\n\nSource: `server/routes.ts:17452`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -6309,7 +6309,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:create`"
         ],
-        "x-source": "server/routes.ts:17435"
+        "x-source": "server/routes.ts:17452"
       }
     },
     "/api/admin/policies/{id}": {
@@ -6319,7 +6319,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/policies/:id",
-        "description": "Guard `requireAdminPermission` · Permission `policies:delete`\n\nSource: `server/routes.ts:17540`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:delete`\n\nSource: `server/routes.ts:17557`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6369,7 +6369,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:delete`"
         ],
-        "x-source": "server/routes.ts:17540"
+        "x-source": "server/routes.ts:17557"
       },
       "get": {
         "operationId": "getAdminPoliciesById",
@@ -6377,7 +6377,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/policies/:id",
-        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17399`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17416`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6427,7 +6427,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:read`"
         ],
-        "x-source": "server/routes.ts:17399"
+        "x-source": "server/routes.ts:17416"
       },
       "patch": {
         "operationId": "patchAdminPoliciesById",
@@ -6435,7 +6435,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/policies/:id",
-        "description": "Guard `requireAdminPermission` · Permission `policies:update`\n\nSource: `server/routes.ts:17471`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:update`\n\nSource: `server/routes.ts:17488`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6495,7 +6495,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:update`"
         ],
-        "x-source": "server/routes.ts:17471"
+        "x-source": "server/routes.ts:17488"
       }
     },
     "/api/admin/policies/{id}/versions": {
@@ -6505,7 +6505,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/policies/:id/versions",
-        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17513`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17530`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6555,7 +6555,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:read`"
         ],
-        "x-source": "server/routes.ts:17513"
+        "x-source": "server/routes.ts:17530"
       }
     },
     "/api/admin/policies/{id}/versions/{versionId}": {
@@ -6565,7 +6565,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/policies/:id/versions/:versionId",
-        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17527`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `policies:read`\n\nSource: `server/routes.ts:17544`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6623,7 +6623,7 @@
           "Guard `requireAdminPermission`",
           "Permission `policies:read`"
         ],
-        "x-source": "server/routes.ts:17527"
+        "x-source": "server/routes.ts:17544"
       }
     },
     "/api/admin/pricing": {
@@ -6633,7 +6633,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/pricing",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:14585`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:14602`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -6653,7 +6653,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:read`"
         ],
-        "x-source": "server/routes.ts:14585"
+        "x-source": "server/routes.ts:14602"
       },
       "post": {
         "operationId": "postAdminPricing",
@@ -6661,7 +6661,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/pricing",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:create`\n\nSource: `server/routes.ts:14742`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:create`\n\nSource: `server/routes.ts:14759`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -6701,7 +6701,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:create`"
         ],
-        "x-source": "server/routes.ts:14742"
+        "x-source": "server/routes.ts:14759"
       }
     },
     "/api/admin/pricing/{id}": {
@@ -6711,7 +6711,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/pricing/:id",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:delete`\n\nSource: `server/routes.ts:15002`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:delete`\n\nSource: `server/routes.ts:15019`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6771,7 +6771,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:delete`"
         ],
-        "x-source": "server/routes.ts:15002"
+        "x-source": "server/routes.ts:15019"
       },
       "patch": {
         "operationId": "patchAdminPricingById",
@@ -6779,7 +6779,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/pricing/:id",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:14854`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:14871`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6839,7 +6839,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:14854"
+        "x-source": "server/routes.ts:14871"
       }
     },
     "/api/admin/pricing/{id}/ddp-tiers": {
@@ -6849,7 +6849,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/pricing/:id/ddp-tiers",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:15149`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:15166`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6897,7 +6897,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:read`"
         ],
-        "x-source": "server/routes.ts:15149"
+        "x-source": "server/routes.ts:15166"
       },
       "post": {
         "operationId": "postAdminPricingByIdDdpTiers",
@@ -6905,7 +6905,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/pricing/:id/ddp-tiers",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15163`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15180`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -6965,7 +6965,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15163"
+        "x-source": "server/routes.ts:15180"
       }
     },
     "/api/admin/pricing/{id}/tiers": {
@@ -6975,7 +6975,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/pricing/:id/tiers",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:15035`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:15052`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -7023,7 +7023,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:read`"
         ],
-        "x-source": "server/routes.ts:15035"
+        "x-source": "server/routes.ts:15052"
       },
       "post": {
         "operationId": "postAdminPricingByIdTiers",
@@ -7031,7 +7031,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/pricing/:id/tiers",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15060`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15077`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -7091,7 +7091,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15060"
+        "x-source": "server/routes.ts:15077"
       }
     },
     "/api/admin/pricing/ddp-tiers/{tierId}": {
@@ -7101,7 +7101,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/pricing/ddp-tiers/:tierId",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15214`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15231`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tierId",
@@ -7141,7 +7141,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15214"
+        "x-source": "server/routes.ts:15231"
       },
       "patch": {
         "operationId": "patchAdminPricingDdpTiersByTierId",
@@ -7149,7 +7149,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/pricing/ddp-tiers/:tierId",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15190`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15207`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tierId",
@@ -7209,7 +7209,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15190"
+        "x-source": "server/routes.ts:15207"
       }
     },
     "/api/admin/pricing/preview": {
@@ -7219,7 +7219,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/pricing/preview",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:14594`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:read`\n\nSource: `server/routes.ts:14611`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -7269,7 +7269,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:read`"
         ],
-        "x-source": "server/routes.ts:14594"
+        "x-source": "server/routes.ts:14611"
       }
     },
     "/api/admin/pricing/tiers/{tierId}": {
@@ -7279,7 +7279,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/pricing/tiers/:tierId",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15133`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15150`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tierId",
@@ -7319,7 +7319,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15133"
+        "x-source": "server/routes.ts:15150"
       },
       "patch": {
         "operationId": "patchAdminPricingTiersByTierId",
@@ -7327,7 +7327,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/pricing/tiers/:tierId",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15104`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15121`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tierId",
@@ -7387,7 +7387,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15104"
+        "x-source": "server/routes.ts:15121"
       }
     },
     "/api/admin/quotations": {
@@ -7497,7 +7497,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/quotations/client/:clientAccountId/address-book",
-        "description": "Guard `requireAdminPermission` · Permission `shipments:create`\n\nSource: `server/routes.ts:17791`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `shipments:create`\n\nSource: `server/routes.ts:17808`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "clientAccountId",
@@ -7547,7 +7547,7 @@
           "Guard `requireAdminPermission`",
           "Permission `shipments:create`"
         ],
-        "x-source": "server/routes.ts:17791"
+        "x-source": "server/routes.ts:17808"
       }
     },
     "/api/admin/quotations/ddp-lanes": {
@@ -8065,7 +8065,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/roles",
-        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:15960`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:15977`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -8095,7 +8095,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:read`"
         ],
-        "x-source": "server/routes.ts:15960"
+        "x-source": "server/routes.ts:15977"
       },
       "post": {
         "operationId": "postAdminRoles",
@@ -8103,7 +8103,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/roles",
-        "description": "Guard `requireAdminPermission` · Permission `roles:create`\n\nSource: `server/routes.ts:16021`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:create`\n\nSource: `server/routes.ts:16038`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -8153,7 +8153,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:create`"
         ],
-        "x-source": "server/routes.ts:16021"
+        "x-source": "server/routes.ts:16038"
       }
     },
     "/api/admin/roles/{id}": {
@@ -8163,7 +8163,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/roles/:id",
-        "description": "Guard `requireAdminPermission` · Permission `roles:delete`\n\nSource: `server/routes.ts:16152`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:delete`\n\nSource: `server/routes.ts:16169`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -8223,7 +8223,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:delete`"
         ],
-        "x-source": "server/routes.ts:16152"
+        "x-source": "server/routes.ts:16169"
       },
       "get": {
         "operationId": "getAdminRolesById",
@@ -8231,7 +8231,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/roles/:id",
-        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:15986`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:16003`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -8281,7 +8281,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:read`"
         ],
-        "x-source": "server/routes.ts:15986"
+        "x-source": "server/routes.ts:16003"
       },
       "patch": {
         "operationId": "patchAdminRolesById",
@@ -8289,7 +8289,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/roles/:id",
-        "description": "Guard `requireAdminPermission` · Permission `roles:update`\n\nSource: `server/routes.ts:16077`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:update`\n\nSource: `server/routes.ts:16094`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -8359,7 +8359,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:update`"
         ],
-        "x-source": "server/routes.ts:16077"
+        "x-source": "server/routes.ts:16094"
       }
     },
     "/api/admin/roles/{roleId}/permissions/{permissionId}": {
@@ -8369,7 +8369,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/roles/:roleId/permissions/:permissionId",
-        "description": "Guard `requireAdminPermission` · Permission `permissions:assign`\n\nSource: `server/routes.ts:16249`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `permissions:assign`\n\nSource: `server/routes.ts:16266`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "roleId",
@@ -8427,7 +8427,7 @@
           "Guard `requireAdminPermission`",
           "Permission `permissions:assign`"
         ],
-        "x-source": "server/routes.ts:16249"
+        "x-source": "server/routes.ts:16266"
       },
       "post": {
         "operationId": "postAdminRolesByRoleIdPermissionsByPermissionId",
@@ -8435,7 +8435,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/roles/:roleId/permissions/:permissionId",
-        "description": "Guard `requireAdminPermission` · Permission `permissions:assign`\n\nSource: `server/routes.ts:16223`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `permissions:assign`\n\nSource: `server/routes.ts:16240`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "roleId",
@@ -8503,7 +8503,7 @@
           "Guard `requireAdminPermission`",
           "Permission `permissions:assign`"
         ],
-        "x-source": "server/routes.ts:16223"
+        "x-source": "server/routes.ts:16240"
       }
     },
     "/api/admin/sales-feature-requests": {
@@ -8759,7 +8759,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/settings/web-app",
-        "description": "Guard `requireAdminPermission` · Permission `settings:read`\n\nSource: `server/routes.ts:15381`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `settings:read`\n\nSource: `server/routes.ts:15398`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -8779,7 +8779,7 @@
           "Guard `requireAdminPermission`",
           "Permission `settings:read`"
         ],
-        "x-source": "server/routes.ts:15381"
+        "x-source": "server/routes.ts:15398"
       },
       "patch": {
         "operationId": "patchAdminSettingsWebApp",
@@ -8787,7 +8787,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/settings/web-app",
-        "description": "Guard `requireAdminPermission` · Permission `settings:update`\n\nSource: `server/routes.ts:15387`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `settings:update`\n\nSource: `server/routes.ts:15404`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -8827,7 +8827,7 @@
           "Guard `requireAdminPermission`",
           "Permission `settings:update`"
         ],
-        "x-source": "server/routes.ts:15387"
+        "x-source": "server/routes.ts:15404"
       }
     },
     "/api/admin/shipments": {
@@ -8983,7 +8983,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/shipments/:id",
-        "description": "Guard `requireAdminPermission` · Permission `shipments:update`\n\nSource: `server/routes.ts:19202`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `shipments:update`\n\nSource: `server/routes.ts:19219`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -9033,7 +9033,7 @@
           "Guard `requireAdminPermission`",
           "Permission `shipments:update`"
         ],
-        "x-source": "server/routes.ts:19202"
+        "x-source": "server/routes.ts:19219"
       }
     },
     "/api/admin/shipments/{id}/abandoned-recovery/discount": {
@@ -9756,7 +9756,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/shipping/rates",
-        "description": "Guard `requireAdminPermission` · Permission `shipments:read`\n\nSource: `server/routes.ts:23196`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `shipments:read`\n\nSource: `server/routes.ts:23213`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -9796,7 +9796,7 @@
           "Guard `requireAdminPermission`",
           "Permission `shipments:read`"
         ],
-        "x-source": "server/routes.ts:23196"
+        "x-source": "server/routes.ts:23213"
       }
     },
     "/api/admin/stats": {
@@ -9836,7 +9836,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/system-logs",
-        "description": "Guard `requireAdminPermission` · Permission `system-logs:read`\n\nSource: `server/routes.ts:15227`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `system-logs:read`\n\nSource: `server/routes.ts:15244`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "page",
@@ -9916,7 +9916,7 @@
           "Guard `requireAdminPermission`",
           "Permission `system-logs:read`"
         ],
-        "x-source": "server/routes.ts:15227"
+        "x-source": "server/routes.ts:15244"
       }
     },
     "/api/admin/system-logs/{id}/resolve": {
@@ -9926,7 +9926,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/system-logs/:id/resolve",
-        "description": "Guard `requireAdminPermission` · Permission `system-logs:resolve`\n\nSource: `server/routes.ts:15252`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `system-logs:resolve`\n\nSource: `server/routes.ts:15269`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -9976,7 +9976,7 @@
           "Guard `requireAdminPermission`",
           "Permission `system-logs:resolve`"
         ],
-        "x-source": "server/routes.ts:15252"
+        "x-source": "server/routes.ts:15269"
       }
     },
     "/api/admin/system-logs/stats": {
@@ -9986,7 +9986,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/system-logs/stats",
-        "description": "Guard `requireAdminPermission` · Permission `system-logs:read`\n\nSource: `server/routes.ts:15243`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `system-logs:read`\n\nSource: `server/routes.ts:15260`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -10016,7 +10016,7 @@
           "Guard `requireAdminPermission`",
           "Permission `system-logs:read`"
         ],
-        "x-source": "server/routes.ts:15243"
+        "x-source": "server/routes.ts:15260"
       }
     },
     "/api/admin/users": {
@@ -10026,7 +10026,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/users",
-        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16270`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16287`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "search",
@@ -10090,7 +10090,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:read`"
         ],
-        "x-source": "server/routes.ts:16270"
+        "x-source": "server/routes.ts:16287"
       },
       "post": {
         "operationId": "postAdminUsers",
@@ -10098,7 +10098,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/users",
-        "description": "Guard `requireAdminPermission` · Permission `users:create`\n\nSource: `server/routes.ts:16337`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:create`\n\nSource: `server/routes.ts:16354`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -10138,7 +10138,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:create`"
         ],
-        "x-source": "server/routes.ts:16337"
+        "x-source": "server/routes.ts:16354"
       }
     },
     "/api/admin/users/{id}": {
@@ -10148,7 +10148,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/users/:id",
-        "description": "Guard `requireAdminPermission` · Permission `users:delete`\n\nSource: `server/routes.ts:16543`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:delete`\n\nSource: `server/routes.ts:16560`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10218,7 +10218,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:delete`"
         ],
-        "x-source": "server/routes.ts:16543"
+        "x-source": "server/routes.ts:16560"
       },
       "patch": {
         "operationId": "patchAdminUsersById",
@@ -10226,7 +10226,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/users/:id",
-        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16467`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16484`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10296,7 +10296,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:update`"
         ],
-        "x-source": "server/routes.ts:16467"
+        "x-source": "server/routes.ts:16484"
       }
     },
     "/api/admin/users/{id}/detail": {
@@ -10306,7 +10306,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/users/:id/detail",
-        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16323`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:read`\n\nSource: `server/routes.ts:16340`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10356,7 +10356,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:read`"
         ],
-        "x-source": "server/routes.ts:16323"
+        "x-source": "server/routes.ts:16340"
       }
     },
     "/api/admin/users/{id}/status": {
@@ -10366,7 +10366,7 @@
           "admin"
         ],
         "summary": "PATCH /api/admin/users/:id/status",
-        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16587`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `users:update`\n\nSource: `server/routes.ts:16604`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10426,7 +10426,7 @@
           "Guard `requireAdminPermission`",
           "Permission `users:update`"
         ],
-        "x-source": "server/routes.ts:16587"
+        "x-source": "server/routes.ts:16604"
       }
     },
     "/api/admin/users/{userId}/roles": {
@@ -10436,7 +10436,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/users/:userId/roles",
-        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:17240`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:read`\n\nSource: `server/routes.ts:17257`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "userId",
@@ -10486,7 +10486,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:read`"
         ],
-        "x-source": "server/routes.ts:17240"
+        "x-source": "server/routes.ts:17257"
       }
     },
     "/api/admin/users/{userId}/roles/{roleId}": {
@@ -10496,7 +10496,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/users/:userId/roles/:roleId",
-        "description": "Guard `requireAdminPermission` · Permission `roles:assign`\n\nSource: `server/routes.ts:17328`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:assign`\n\nSource: `server/routes.ts:17345`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "userId",
@@ -10564,7 +10564,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:assign`"
         ],
-        "x-source": "server/routes.ts:17328"
+        "x-source": "server/routes.ts:17345"
       },
       "post": {
         "operationId": "postAdminUsersByUserIdRolesByRoleId",
@@ -10572,7 +10572,7 @@
           "admin"
         ],
         "summary": "POST /api/admin/users/:userId/roles/:roleId",
-        "description": "Guard `requireAdminPermission` · Permission `roles:assign`\n\nSource: `server/routes.ts:17254`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `roles:assign`\n\nSource: `server/routes.ts:17271`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "userId",
@@ -10650,7 +10650,7 @@
           "Guard `requireAdminPermission`",
           "Permission `roles:assign`"
         ],
-        "x-source": "server/routes.ts:17254"
+        "x-source": "server/routes.ts:17271"
       }
     },
     "/api/admin/virtual-carriers": {
@@ -10866,7 +10866,7 @@
           "admin"
         ],
         "summary": "DELETE /api/admin/virtual-carriers/:id/logo",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15552`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15569`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10906,7 +10906,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15552"
+        "x-source": "server/routes.ts:15569"
       },
       "put": {
         "operationId": "putAdminVirtualCarriersByIdLogo",
@@ -10914,7 +10914,7 @@
           "admin"
         ],
         "summary": "PUT /api/admin/virtual-carriers/:id/logo",
-        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15532`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `pricing-rules:update`\n\nSource: `server/routes.ts:15549`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -10984,7 +10984,7 @@
           "Guard `requireAdminPermission`",
           "Permission `pricing-rules:update`"
         ],
-        "x-source": "server/routes.ts:15532"
+        "x-source": "server/routes.ts:15549"
       }
     },
     "/api/admin/webhook-events": {
@@ -10994,7 +10994,7 @@
           "admin"
         ],
         "summary": "GET /api/admin/webhook-events",
-        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:15806`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:15823`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "page",
@@ -11066,7 +11066,7 @@
           "Guard `requireAdminPermission`",
           "Permission `webhooks:read`"
         ],
-        "x-source": "server/routes.ts:15806"
+        "x-source": "server/routes.ts:15823"
       }
     },
     "/api/applications": {
@@ -11978,7 +11978,7 @@
           "shared"
         ],
         "summary": "GET /api/carrier-logos",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:15469`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:15486`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -12007,7 +12007,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:15469"
+        "x-source": "server/routes.ts:15486"
       }
     },
     "/api/client/abandoned-recovery/offers": {
@@ -12017,7 +12017,7 @@
           "client"
         ],
         "summary": "Recovery offers on abandoned shipments",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18181`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18198`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12057,7 +12057,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18181"
+        "x-source": "server/routes.ts:18198"
       }
     },
     "/api/client/account": {
@@ -12067,7 +12067,7 @@
           "client"
         ],
         "summary": "The signed-in user's client account",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:17561`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:17578`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12096,7 +12096,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:17561"
+        "x-source": "server/routes.ts:17578"
       },
       "patch": {
         "operationId": "patchClientAccount",
@@ -12104,7 +12104,7 @@
           "client"
         ],
         "summary": "Update the client account profile",
-        "description": "Primary contact only. Bilingual (EN/AR) fields are accepted.\n\nGuard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17616`",
+        "description": "Primary contact only. Bilingual (EN/AR) fields are accepted.\n\nGuard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17633`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12164,7 +12164,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:17616"
+        "x-source": "server/routes.ts:17633"
       }
     },
     "/api/client/address-book": {
@@ -12174,7 +12174,7 @@
           "client"
         ],
         "summary": "Saved sender and recipient addresses",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:17774`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:17791`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12204,7 +12204,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:17774"
+        "x-source": "server/routes.ts:17791"
       }
     },
     "/api/client/carrier-rules": {
@@ -12214,7 +12214,7 @@
           "client"
         ],
         "summary": "Automatic carrier-assignment rules",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20694`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20711`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12244,7 +12244,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20694"
+        "x-source": "server/routes.ts:20711"
       },
       "post": {
         "operationId": "postClientCarrierRules",
@@ -12252,7 +12252,7 @@
           "client"
         ],
         "summary": "Create a carrier-assignment rule",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20700`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20717`",
         "responses": {
           "201": {
             "description": "Created"
@@ -12302,7 +12302,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20700"
+        "x-source": "server/routes.ts:20717"
       }
     },
     "/api/client/carrier-rules/{id}": {
@@ -12312,7 +12312,7 @@
           "client"
         ],
         "summary": "Delete a carrier-assignment rule",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20734`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20751`",
         "parameters": [
           {
             "name": "id",
@@ -12352,7 +12352,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20734"
+        "x-source": "server/routes.ts:20751"
       },
       "patch": {
         "operationId": "patchClientCarrierRulesById",
@@ -12360,7 +12360,7 @@
           "client"
         ],
         "summary": "Update a carrier-assignment rule",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20716`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20733`",
         "parameters": [
           {
             "name": "id",
@@ -12420,7 +12420,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20716"
+        "x-source": "server/routes.ts:20733"
       }
     },
     "/api/client/credit-access": {
@@ -12430,7 +12430,7 @@
           "client"
         ],
         "summary": "Credit status and available balance",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:21980`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:21997`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12469,7 +12469,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:21980"
+        "x-source": "server/routes.ts:21997"
       }
     },
     "/api/client/credit-access/request": {
@@ -12479,7 +12479,7 @@
           "client"
         ],
         "summary": "Request credit access",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:21998`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:22015`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12529,7 +12529,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:21998"
+        "x-source": "server/routes.ts:22015"
       }
     },
     "/api/client/credit-invoices": {
@@ -12539,7 +12539,7 @@
           "client"
         ],
         "summary": "Credit (pay-later) invoices, 30-day terms",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22477`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22494`",
         "parameters": [
           {
             "name": "status",
@@ -12589,7 +12589,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:22477"
+        "x-source": "server/routes.ts:22494"
       }
     },
     "/api/client/credit-invoices/{id}": {
@@ -12599,7 +12599,7 @@
           "client"
         ],
         "summary": "One credit invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22523`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22540`",
         "parameters": [
           {
             "name": "id",
@@ -12649,7 +12649,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:22523"
+        "x-source": "server/routes.ts:22540"
       }
     },
     "/api/client/dangerous-goods": {
@@ -12659,7 +12659,7 @@
           "client"
         ],
         "summary": "GET /api/client/dangerous-goods",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22035`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22052`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -12698,7 +12698,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22035"
+        "x-source": "server/routes.ts:22052"
       }
     },
     "/api/client/dangerous-goods/request": {
@@ -12708,7 +12708,7 @@
           "client"
         ],
         "summary": "POST /api/client/dangerous-goods/request",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:22053`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:22070`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -12758,7 +12758,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:22053"
+        "x-source": "server/routes.ts:22070"
       }
     },
     "/api/client/ddp/checkout": {
@@ -12768,7 +12768,7 @@
           "client"
         ],
         "summary": "Create a pending DDP shipment from a quote",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19336`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19353`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12818,7 +12818,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19336"
+        "x-source": "server/routes.ts:19353"
       }
     },
     "/api/client/ddp/lanes": {
@@ -12828,7 +12828,7 @@
           "client"
         ],
         "summary": "Available Door-to-Door Freight lanes",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18561`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18578`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12848,7 +12848,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18561"
+        "x-source": "server/routes.ts:18578"
       }
     },
     "/api/client/ddp/rates": {
@@ -12868,7 +12868,7 @@
             }
           }
         },
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18577`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18594`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12908,7 +12908,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18577"
+        "x-source": "server/routes.ts:18594"
       }
     },
     "/api/client/extra-fees": {
@@ -12918,7 +12918,7 @@
           "client"
         ],
         "summary": "Extra charges raised against the account",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:22878`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:22895`",
         "responses": {
           "200": {
             "description": "Success"
@@ -12978,7 +12978,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:22878"
+        "x-source": "server/routes.ts:22895"
       }
     },
     "/api/client/fx-rate": {
@@ -12988,7 +12988,7 @@
           "client"
         ],
         "summary": "Display currency and the SAR conversion rate for this account",
-        "description": "Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.\n\nSource: `server/routes.ts:17579`",
+        "description": "Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.\n\nSource: `server/routes.ts:17596`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13005,7 +13005,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:17579"
+        "x-source": "server/routes.ts:17596"
       }
     },
     "/api/client/hs-code/confirm": {
@@ -13015,7 +13015,7 @@
           "client"
         ],
         "summary": "Confirm the HS code chosen for an item",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:23157`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:23174`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13064,7 +13064,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:23157"
+        "x-source": "server/routes.ts:23174"
       }
     },
     "/api/client/invoices": {
@@ -13074,7 +13074,7 @@
           "client"
         ],
         "summary": "Invoices",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22546`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES`\n\nSource: `server/routes.ts:22563`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13104,7 +13104,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_INVOICES`"
         ],
-        "x-source": "server/routes.ts:22546"
+        "x-source": "server/routes.ts:22563"
       }
     },
     "/api/client/invoices/{id}/pdf": {
@@ -13114,7 +13114,7 @@
           "client"
         ],
         "summary": "Invoice (PDF)",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES` · Returns `text/html`\n\nSource: `server/routes.ts:22559`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_INVOICES` · Returns `text/html`\n\nSource: `server/routes.ts:22576`",
         "parameters": [
           {
             "name": "id",
@@ -13175,7 +13175,7 @@
           "Permission `ClientPermission.VIEW_INVOICES`",
           "Returns `text/html`"
         ],
-        "x-source": "server/routes.ts:22559"
+        "x-source": "server/routes.ts:22576"
       }
     },
     "/api/client/local/checkout": {
@@ -13185,7 +13185,7 @@
           "client"
         ],
         "summary": "Create a pending domestic shipment",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:20294`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:20311`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13246,7 +13246,7 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`",
           "Accepts `Idempotency-Key`"
         ],
-        "x-source": "server/routes.ts:20294"
+        "x-source": "server/routes.ts:20311"
       }
     },
     "/api/client/local/rates": {
@@ -13256,7 +13256,7 @@
           "client"
         ],
         "summary": "Quote a domestic shipment via local carriers",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20091`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20108`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13316,7 +13316,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20091"
+        "x-source": "server/routes.ts:20108"
       }
     },
     "/api/client/my-permissions": {
@@ -13326,7 +13326,7 @@
           "client"
         ],
         "summary": "Effective ClientPermission list for the caller",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18071`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18088`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13365,7 +13365,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:18071"
+        "x-source": "server/routes.ts:18088"
       }
     },
     "/api/client/orders": {
@@ -13375,7 +13375,7 @@
           "client"
         ],
         "summary": "Storefront orders awaiting fulfilment",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20674`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20691`",
         "parameters": [
           {
             "name": "status",
@@ -13423,7 +13423,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20674"
+        "x-source": "server/routes.ts:20691"
       }
     },
     "/api/client/orders/{id}": {
@@ -13433,7 +13433,7 @@
           "client"
         ],
         "summary": "One storefront order",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20683`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20700`",
         "parameters": [
           {
             "name": "id",
@@ -13473,7 +13473,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20683"
+        "x-source": "server/routes.ts:20700"
       }
     },
     "/api/client/orders/{id}/fulfill": {
@@ -13483,7 +13483,7 @@
           "client"
         ],
         "summary": "Fulfil an order as a shipment",
-        "description": "409 means the order was already fulfilled.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20813`",
+        "description": "409 means the order was already fulfilled.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20830`",
         "parameters": [
           {
             "name": "id",
@@ -13553,7 +13553,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20813"
+        "x-source": "server/routes.ts:20830"
       }
     },
     "/api/client/orders/{id}/rates": {
@@ -13563,7 +13563,7 @@
           "client"
         ],
         "summary": "Rate options for fulfilling an order",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20747`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20764`",
         "parameters": [
           {
             "name": "id",
@@ -13631,7 +13631,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20747"
+        "x-source": "server/routes.ts:20764"
       }
     },
     "/api/client/payments": {
@@ -13641,7 +13641,7 @@
           "client"
         ],
         "summary": "Payment history",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:22730`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_PAYMENTS`\n\nSource: `server/routes.ts:22747`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13671,7 +13671,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:22730"
+        "x-source": "server/routes.ts:22747"
       }
     },
     "/api/client/payments/create-charge": {
@@ -13681,7 +13681,7 @@
           "client"
         ],
         "summary": "Charge an outstanding invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:23032`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:23049`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13701,7 +13701,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.MAKE_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:23032"
+        "x-source": "server/routes.ts:23049"
       }
     },
     "/api/client/payments/create-intent": {
@@ -13711,7 +13711,7 @@
           "client"
         ],
         "summary": "Create a payment intent for an invoice",
-        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:23033`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.MAKE_PAYMENTS`\n\nSource: `server/routes.ts:23050`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13731,7 +13731,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.MAKE_PAYMENTS`"
         ],
-        "x-source": "server/routes.ts:23033"
+        "x-source": "server/routes.ts:23050"
       }
     },
     "/api/client/payments/tap/config": {
@@ -13741,7 +13741,7 @@
           "client"
         ],
         "summary": "Public Tap config for the checkout SDK",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22742`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22759`",
         "parameters": [
           {
             "name": "shipmentId",
@@ -13808,7 +13808,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22742"
+        "x-source": "server/routes.ts:22759"
       }
     },
     "/api/client/payments/tap/saved-cards": {
@@ -13818,7 +13818,7 @@
           "client"
         ],
         "summary": "Saved cards",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22783`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22800`",
         "responses": {
           "200": {
             "description": "Success"
@@ -13857,7 +13857,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22783"
+        "x-source": "server/routes.ts:22800"
       }
     },
     "/api/client/payments/tap/saved-cards/{id}": {
@@ -13867,7 +13867,7 @@
           "client"
         ],
         "summary": "Delete a saved card",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22828`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22845`",
         "parameters": [
           {
             "name": "id",
@@ -13916,7 +13916,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22828"
+        "x-source": "server/routes.ts:22845"
       }
     },
     "/api/client/payments/tap/saved-cards/{id}/default": {
@@ -13926,7 +13926,7 @@
           "client"
         ],
         "summary": "Make a saved card the default",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22798`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22815`",
         "parameters": [
           {
             "name": "id",
@@ -13975,7 +13975,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22798"
+        "x-source": "server/routes.ts:22815"
       }
     },
     "/api/client/pending-draft": {
@@ -13985,7 +13985,7 @@
           "client"
         ],
         "summary": "GET /api/client/pending-draft",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18024`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18041`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -14014,7 +14014,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:18024"
+        "x-source": "server/routes.ts:18041"
       }
     },
     "/api/client/pending-draft/dismiss": {
@@ -14024,7 +14024,7 @@
           "client"
         ],
         "summary": "POST /api/client/pending-draft/dismiss",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18054`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18071`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -14053,7 +14053,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:18054"
+        "x-source": "server/routes.ts:18071"
       }
     },
     "/api/client/quick-quote": {
@@ -14063,7 +14063,7 @@
           "client"
         ],
         "summary": "Indicative price without creating a quote",
-        "description": "Read-only estimate for a price-check screen. Produces no `quoteId`.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18663`",
+        "description": "Read-only estimate for a price-check screen. Produces no `quoteId`.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18680`",
         "requestBody": {
           "required": true,
           "content": {
@@ -14123,7 +14123,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18663"
+        "x-source": "server/routes.ts:18680"
       }
     },
     "/api/client/quotations/{id}": {
@@ -14133,64 +14133,6 @@
           "client"
         ],
         "summary": "An admin-prepared quotation",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19129`",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "x-requirements": [
-          "Guard `requireClient`",
-          "Permission `ClientPermission.CREATE_SHIPMENTS`"
-        ],
-        "x-source": "server/routes.ts:19129"
-      },
-      "patch": {
-        "operationId": "patchClientQuotationsById",
-        "tags": [
-          "client"
-        ],
-        "summary": "Amend a quotation before accepting it",
         "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19146`",
         "parameters": [
           {
@@ -14242,6 +14184,64 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
         "x-source": "server/routes.ts:19146"
+      },
+      "patch": {
+        "operationId": "patchClientQuotationsById",
+        "tags": [
+          "client"
+        ],
+        "summary": "Amend a quotation before accepting it",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19163`",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-requirements": [
+          "Guard `requireClient`",
+          "Permission `ClientPermission.CREATE_SHIPMENTS`"
+        ],
+        "x-source": "server/routes.ts:19163"
       }
     },
     "/api/client/quotations/{id}/accept-terms": {
@@ -14251,7 +14251,7 @@
           "client"
         ],
         "summary": "Accept a quotation's terms",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19221`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19238`",
         "parameters": [
           {
             "name": "id",
@@ -14301,7 +14301,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19221"
+        "x-source": "server/routes.ts:19238"
       }
     },
     "/api/client/quotations/{id}/confirm-declaration": {
@@ -14311,7 +14311,7 @@
           "client"
         ],
         "summary": "POST /api/client/quotations/:id/confirm-declaration",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19249`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19266`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -14361,7 +14361,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19249"
+        "x-source": "server/routes.ts:19266"
       }
     },
     "/api/client/quotations/{id}/decline": {
@@ -14371,7 +14371,7 @@
           "client"
         ],
         "summary": "POST /api/client/quotations/:id/decline",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19282`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19299`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -14421,7 +14421,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19282"
+        "x-source": "server/routes.ts:19299"
       }
     },
     "/api/client/sales-channels": {
@@ -14431,7 +14431,7 @@
           "client"
         ],
         "summary": "Connected storefronts",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20449`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20466`",
         "responses": {
           "200": {
             "description": "Success"
@@ -14461,7 +14461,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20449"
+        "x-source": "server/routes.ts:20466"
       },
       "post": {
         "operationId": "postClientSalesChannels",
@@ -14469,7 +14469,7 @@
           "client"
         ],
         "summary": "Connect a storefront",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20570`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20587`",
         "responses": {
           "201": {
             "description": "Created"
@@ -14519,7 +14519,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20570"
+        "x-source": "server/routes.ts:20587"
       }
     },
     "/api/client/sales-channels/{id}": {
@@ -14529,7 +14529,7 @@
           "client"
         ],
         "summary": "Disconnect a storefront",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20636`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20653`",
         "parameters": [
           {
             "name": "id",
@@ -14569,7 +14569,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20636"
+        "x-source": "server/routes.ts:20653"
       },
       "patch": {
         "operationId": "patchClientSalesChannelsById",
@@ -14577,7 +14577,7 @@
           "client"
         ],
         "summary": "Update a storefront connection",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20606`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20623`",
         "parameters": [
           {
             "name": "id",
@@ -14637,7 +14637,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20606"
+        "x-source": "server/routes.ts:20623"
       }
     },
     "/api/client/sales-channels/{id}/sync": {
@@ -14647,7 +14647,7 @@
           "client"
         ],
         "summary": "Pull orders from the storefront now",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20650`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20667`",
         "parameters": [
           {
             "name": "id",
@@ -14707,7 +14707,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20650"
+        "x-source": "server/routes.ts:20667"
       }
     },
     "/api/client/sales-channels/zid/connect": {
@@ -14717,7 +14717,7 @@
           "client"
         ],
         "summary": "GET /api/client/sales-channels/zid/connect",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20493`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:20510`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -14767,7 +14767,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:20493"
+        "x-source": "server/routes.ts:20510"
       }
     },
     "/api/client/sales-features": {
@@ -14777,7 +14777,7 @@
           "client"
         ],
         "summary": "Sales-feature entitlement status",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22099`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:22116`",
         "responses": {
           "200": {
             "description": "Success"
@@ -14816,7 +14816,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:22099"
+        "x-source": "server/routes.ts:22116"
       }
     },
     "/api/client/sales-features/request": {
@@ -14826,7 +14826,7 @@
           "client"
         ],
         "summary": "Request sales features",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:22117`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:22134`",
         "responses": {
           "200": {
             "description": "Success"
@@ -14876,7 +14876,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:22117"
+        "x-source": "server/routes.ts:22134"
       }
     },
     "/api/client/shipments": {
@@ -14886,7 +14886,7 @@
           "client"
         ],
         "summary": "List shipments",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18236`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18253`",
         "responses": {
           "200": {
             "description": "Success"
@@ -14916,7 +14916,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18236"
+        "x-source": "server/routes.ts:18253"
       },
       "post": {
         "operationId": "postClientShipments",
@@ -14924,7 +14924,7 @@
           "client"
         ],
         "summary": "Create a shipment directly (legacy flat form)",
-        "description": "The simple non-carrier path. The express flow is rates → checkout → pay → confirm.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21709`",
+        "description": "The simple non-carrier path. The express flow is rates → checkout → pay → confirm.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21726`",
         "requestBody": {
           "required": true,
           "content": {
@@ -14985,7 +14985,7 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`",
           "Accepts `Idempotency-Key`"
         ],
-        "x-source": "server/routes.ts:21709"
+        "x-source": "server/routes.ts:21726"
       }
     },
     "/api/client/shipments/{id}": {
@@ -14995,7 +14995,7 @@
           "client"
         ],
         "summary": "One shipment, with items, documents and tracking",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18249`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18266`",
         "parameters": [
           {
             "name": "id",
@@ -15055,7 +15055,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18249"
+        "x-source": "server/routes.ts:18266"
       },
       "patch": {
         "operationId": "patchClientShipmentsById",
@@ -15063,7 +15063,7 @@
           "client"
         ],
         "summary": "Edit a shipment that has not been paid yet",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19181`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19198`",
         "parameters": [
           {
             "name": "id",
@@ -15113,7 +15113,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19181"
+        "x-source": "server/routes.ts:19198"
       }
     },
     "/api/client/shipments/{id}/cancel": {
@@ -15123,7 +15123,7 @@
           "client"
         ],
         "summary": "Cancel a shipment",
-        "description": "A still-booked cancellation auto-issues a Tap refund and cancels any carrier pickup. DHL exposes no cancel API, so the carrier-side cancel is a no-op there.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21789`",
+        "description": "A still-booked cancellation auto-issues a Tap refund and cancels any carrier pickup. DHL exposes no cancel API, so the carrier-side cancel is a no-op there.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21806`",
         "parameters": [
           {
             "name": "id",
@@ -15203,7 +15203,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:21789"
+        "x-source": "server/routes.ts:21806"
       }
     },
     "/api/client/shipments/{id}/checkout-summary": {
@@ -15213,7 +15213,7 @@
           "client"
         ],
         "summary": "Priced summary of a pending shipment before payment",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21399`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21416`",
         "parameters": [
           {
             "name": "id",
@@ -15281,7 +15281,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:21399"
+        "x-source": "server/routes.ts:21416"
       }
     },
     "/api/client/shipments/{id}/commercial-invoice.html": {
@@ -15291,7 +15291,7 @@
           "client"
         ],
         "summary": "Commercial invoice (HTML)",
-        "description": "Guard `requireClient` · Returns `text/html`\n\nSource: `server/routes.ts:21951`",
+        "description": "Guard `requireClient` · Returns `text/html`\n\nSource: `server/routes.ts:21968`",
         "parameters": [
           {
             "name": "id",
@@ -15361,7 +15361,7 @@
           "Guard `requireClient`",
           "Returns `text/html`"
         ],
-        "x-source": "server/routes.ts:21951"
+        "x-source": "server/routes.ts:21968"
       }
     },
     "/api/client/shipments/{id}/commercial-invoice.pdf": {
@@ -15371,7 +15371,7 @@
           "client"
         ],
         "summary": "Commercial invoice (PDF)",
-        "description": "Guard `requireClient` · Returns `application/pdf`\n\nSource: `server/routes.ts:21923`",
+        "description": "Guard `requireClient` · Returns `application/pdf`\n\nSource: `server/routes.ts:21940`",
         "parameters": [
           {
             "name": "id",
@@ -15441,7 +15441,7 @@
           "Guard `requireClient`",
           "Returns `application/pdf`"
         ],
-        "x-source": "server/routes.ts:21923"
+        "x-source": "server/routes.ts:21940"
       }
     },
     "/api/client/shipments/{id}/label.pdf": {
@@ -15451,7 +15451,7 @@
           "client"
         ],
         "summary": "Shipping label (PDF)",
-        "description": "Binary behind the auth guard. Native clients must fetch this with the Authorization header and write it to a file — a plain URL open will 401.\n\nGuard `requireClient` · Returns `application/pdf`\n\nSource: `server/routes.ts:21895`",
+        "description": "Binary behind the auth guard. Native clients must fetch this with the Authorization header and write it to a file — a plain URL open will 401.\n\nGuard `requireClient` · Returns `application/pdf`\n\nSource: `server/routes.ts:21912`",
         "parameters": [
           {
             "name": "id",
@@ -15511,7 +15511,7 @@
           "Guard `requireClient`",
           "Returns `application/pdf`"
         ],
-        "x-source": "server/routes.ts:21895"
+        "x-source": "server/routes.ts:21912"
       }
     },
     "/api/client/shipments/{id}/pay-later": {
@@ -15521,7 +15521,7 @@
           "client"
         ],
         "summary": "Place a shipment on credit terms instead of charging a card",
-        "description": "Requires an approved credit limit with sufficient available balance.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:22156`",
+        "description": "Requires an approved credit limit with sufficient available balance.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:22173`",
         "parameters": [
           {
             "name": "id",
@@ -15601,7 +15601,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:22156"
+        "x-source": "server/routes.ts:22173"
       }
     },
     "/api/client/shipments/{id}/track": {
@@ -15611,7 +15611,7 @@
           "client"
         ],
         "summary": "Carrier tracking checkpoints",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:23036`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:23053`",
         "parameters": [
           {
             "name": "id",
@@ -15680,7 +15680,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:23036"
+        "x-source": "server/routes.ts:23053"
       }
     },
     "/api/client/shipments/checkout": {
@@ -15690,7 +15690,7 @@
           "client"
         ],
         "summary": "Step 2 — turn a quote into a pending shipment",
-        "description": "Consumes a `quoteId` from step 1 and creates the shipment in a pending state. Commercial-invoice items and a pickup preference may be attached here.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21131`",
+        "description": "Consumes a `quoteId` from step 1 and creates the shipment in a pending state. Commercial-invoice items and a pickup preference may be attached here.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21148`",
         "requestBody": {
           "required": true,
           "content": {
@@ -15761,7 +15761,7 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`",
           "Accepts `Idempotency-Key`"
         ],
-        "x-source": "server/routes.ts:21131"
+        "x-source": "server/routes.ts:21148"
       }
     },
     "/api/client/shipments/confirm": {
@@ -15771,7 +15771,7 @@
           "client"
         ],
         "summary": "Step 4 — book with the carrier after payment settles",
-        "description": "Produces the label, tracking number and commercial invoice.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21580`",
+        "description": "Produces the label, tracking number and commercial invoice.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21597`",
         "requestBody": {
           "required": true,
           "content": {
@@ -15852,7 +15852,7 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`",
           "Accepts `Idempotency-Key`"
         ],
-        "x-source": "server/routes.ts:21580"
+        "x-source": "server/routes.ts:21597"
       }
     },
     "/api/client/shipments/dangerous-goods": {
@@ -15862,7 +15862,7 @@
           "client"
         ],
         "summary": "POST /api/client/shipments/dangerous-goods",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:20995`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`\n\nSource: `server/routes.ts:21012`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "201": {
             "description": "Created"
@@ -15923,7 +15923,7 @@
           "Permission `ClientPermission.CREATE_SHIPMENTS`",
           "Accepts `Idempotency-Key`"
         ],
-        "x-source": "server/routes.ts:20995"
+        "x-source": "server/routes.ts:21012"
       }
     },
     "/api/client/shipments/extract-dangerous-goods": {
@@ -15933,7 +15933,7 @@
           "client"
         ],
         "summary": "POST /api/client/shipments/extract-dangerous-goods",
-        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18498`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18515`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -15993,7 +15993,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18498"
+        "x-source": "server/routes.ts:18515"
       }
     },
     "/api/client/shipments/extract-invoice-items": {
@@ -16003,7 +16003,7 @@
           "client"
         ],
         "summary": "Extract commercial-invoice line items from an uploaded invoice",
-        "description": "AI extraction (Gemini). Upload the file through the signed-URL flow first and pass its reference. Returns items shaped for the `items` array on checkout.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18376`",
+        "description": "AI extraction (Gemini). Upload the file through the signed-URL flow first and pass its reference. Returns items shaped for the `items` array on checkout.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18393`",
         "responses": {
           "200": {
             "description": "Success"
@@ -16043,7 +16043,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18376"
+        "x-source": "server/routes.ts:18393"
       }
     },
     "/api/client/shipments/extract-package-details": {
@@ -16053,7 +16053,7 @@
           "client"
         ],
         "summary": "Extract package dimensions and weight from an uploaded document",
-        "description": "AI extraction (Gemini). Same upload-first pattern as invoice extraction.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18444`",
+        "description": "AI extraction (Gemini). Same upload-first pattern as invoice extraction.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:18461`",
         "responses": {
           "200": {
             "description": "Success"
@@ -16093,7 +16093,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18444"
+        "x-source": "server/routes.ts:18461"
       }
     },
     "/api/client/shipments/pay": {
@@ -16103,7 +16103,7 @@
           "client"
         ],
         "summary": "Step 3 — pay for a pending shipment",
-        "description": "Charges through Tap. `tapTokenId` comes from the Tap SDK; omit it to charge the account's default saved card. Browser clients are redirected; native clients must use the mobile payment path (Workstream D) rather than following the redirect.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21450`",
+        "description": "Charges through Tap. `tapTokenId` comes from the Tap SDK; omit it to charge the account's default saved card. Browser clients are redirected; native clients must use the mobile payment path (Workstream D) rather than following the redirect.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:21467`",
         "requestBody": {
           "required": true,
           "content": {
@@ -16173,7 +16173,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:21450"
+        "x-source": "server/routes.ts:21467"
       }
     },
     "/api/client/shipments/rates": {
@@ -16183,7 +16183,7 @@
           "client"
         ],
         "summary": "Step 1 — quote carrier rates",
-        "description": "Returns rate options, each with a `quoteId` that step 2 consumes. Quotes expire. A 502 means the carrier API failed, not that the request was invalid.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19786`",
+        "description": "Returns rate options, each with a `quoteId` that step 2 consumes. Quotes expire. A 502 means the carrier API failed, not that the request was invalid.\n\nGuard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`\n\nSource: `server/routes.ts:19803`",
         "requestBody": {
           "required": true,
           "content": {
@@ -16273,7 +16273,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.CREATE_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:19786"
+        "x-source": "server/routes.ts:19803"
       }
     },
     "/api/client/shipments/recent": {
@@ -16283,7 +16283,7 @@
           "client"
         ],
         "summary": "Most recent shipments, for the dashboard",
-        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18169`",
+        "description": "Guard `requireClient` · Permission `ClientPermission.VIEW_SHIPMENTS`\n\nSource: `server/routes.ts:18186`",
         "responses": {
           "200": {
             "description": "Success"
@@ -16313,7 +16313,7 @@
           "Guard `requireClient`",
           "Permission `ClientPermission.VIEW_SHIPMENTS`"
         ],
-        "x-source": "server/routes.ts:18169"
+        "x-source": "server/routes.ts:18186"
       }
     },
     "/api/client/stats": {
@@ -16323,7 +16323,7 @@
           "client"
         ],
         "summary": "Dashboard counters for the account",
-        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18098`",
+        "description": "Guard `requireClient`\n\nSource: `server/routes.ts:18115`",
         "responses": {
           "200": {
             "description": "Success"
@@ -16352,7 +16352,7 @@
         "x-requirements": [
           "Guard `requireClient`"
         ],
-        "x-source": "server/routes.ts:18098"
+        "x-source": "server/routes.ts:18115"
       }
     },
     "/api/client/users": {
@@ -16362,7 +16362,7 @@
           "client"
         ],
         "summary": "Users on the account",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17810`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17827`",
         "responses": {
           "200": {
             "description": "Success"
@@ -16402,7 +16402,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:17810"
+        "x-source": "server/routes.ts:17827"
       },
       "post": {
         "operationId": "postClientUsers",
@@ -16410,7 +16410,7 @@
           "client"
         ],
         "summary": "Invite a user to the account",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17855`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17872`",
         "responses": {
           "201": {
             "description": "Created"
@@ -16460,7 +16460,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:17855"
+        "x-source": "server/routes.ts:17872"
       }
     },
     "/api/client/users/{userId}": {
@@ -16470,7 +16470,7 @@
           "client"
         ],
         "summary": "Remove a user from the account",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17981`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17998`",
         "parameters": [
           {
             "name": "userId",
@@ -16530,7 +16530,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:17981"
+        "x-source": "server/routes.ts:17998"
       }
     },
     "/api/client/users/{userId}/permissions": {
@@ -16540,7 +16540,7 @@
           "client"
         ],
         "summary": "Set a user's permissions",
-        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17927`",
+        "description": "Guard `requireClient` · **Primary contact only**\n\nSource: `server/routes.ts:17944`",
         "parameters": [
           {
             "name": "userId",
@@ -16600,7 +16600,7 @@
           "Guard `requireClient`",
           "**Primary contact only**"
         ],
-        "x-source": "server/routes.ts:17927"
+        "x-source": "server/routes.ts:17944"
       }
     },
     "/api/config/branding": {
@@ -16628,7 +16628,7 @@
           "shared"
         ],
         "summary": "GET /api/fedex/service-options",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23495`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23512`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -16668,7 +16668,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:23495"
+        "x-source": "server/routes.ts:23512"
       }
     },
     "/api/fedex/validate-address": {
@@ -16678,7 +16678,7 @@
           "shared"
         ],
         "summary": "POST /api/fedex/validate-address",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23642`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23659`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -16728,7 +16728,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:23642"
+        "x-source": "server/routes.ts:23659"
       }
     },
     "/api/fedex/validate-postal": {
@@ -16738,7 +16738,7 @@
           "shared"
         ],
         "summary": "GET /api/fedex/validate-postal",
-        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23690`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `fedexApiLimiter`\n\nSource: `server/routes.ts:23707`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -16788,7 +16788,7 @@
           "Guard `requireAuth`",
           "Rate limit `fedexApiLimiter`"
         ],
-        "x-source": "server/routes.ts:23690"
+        "x-source": "server/routes.ts:23707"
       }
     },
     "/api/geo/postal-suggest": {
@@ -16798,7 +16798,7 @@
           "shared"
         ],
         "summary": "GET /api/geo/postal-suggest",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:17728`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:17745`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "country",
@@ -16843,7 +16843,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:17728"
+        "x-source": "server/routes.ts:17745"
       }
     },
     "/api/health": {
@@ -16871,7 +16871,7 @@
           "shared"
         ],
         "summary": "GET /api/hs-lookup",
-        "description": "Guard `requireAuth` · Rate limit `hsLookupLimiter`\n\nSource: `server/routes.ts:23121`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth` · Rate limit `hsLookupLimiter`\n\nSource: `server/routes.ts:23138`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -16911,7 +16911,7 @@
           "Guard `requireAuth`",
           "Rate limit `hsLookupLimiter`"
         ],
-        "x-source": "server/routes.ts:23121"
+        "x-source": "server/routes.ts:23138"
       }
     },
     "/api/notifications": {
@@ -19515,7 +19515,7 @@
           "shared"
         ],
         "summary": "GET /api/payments/tap/redirect",
-        "description": "Source: `server/routes.ts:23924`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:23941`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "tap_id",
@@ -19542,7 +19542,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:23924"
+        "x-source": "server/routes.ts:23941"
       }
     },
     "/api/policies": {
@@ -19768,7 +19768,7 @@
           "shared"
         ],
         "summary": "GET /api/profile-badges",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:14723`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:14740`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -19787,7 +19787,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:14723"
+        "x-source": "server/routes.ts:14740"
       }
     },
     "/api/public/applications/extract-company-details": {
@@ -19847,7 +19847,7 @@
           "shared"
         ],
         "summary": "POST /api/public/guest/express-rates",
-        "description": "Rate limit `guestRateLimiter`\n\nSource: `server/routes.ts:19500`\n\n_Body schema not documented yet — see source._",
+        "description": "Rate limit `guestRateLimiter`\n\nSource: `server/routes.ts:19517`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -19897,7 +19897,7 @@
         "x-requirements": [
           "Rate limit `guestRateLimiter`"
         ],
-        "x-source": "server/routes.ts:19500"
+        "x-source": "server/routes.ts:19517"
       }
     },
     "/api/public/guest/local-rates": {
@@ -19907,7 +19907,7 @@
           "shared"
         ],
         "summary": "POST /api/public/guest/local-rates",
-        "description": "Rate limit `guestRateLimiter`\n\nSource: `server/routes.ts:19687`\n\n_Body schema not documented yet — see source._",
+        "description": "Rate limit `guestRateLimiter`\n\nSource: `server/routes.ts:19704`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -19947,7 +19947,7 @@
         "x-requirements": [
           "Rate limit `guestRateLimiter`"
         ],
-        "x-source": "server/routes.ts:19687"
+        "x-source": "server/routes.ts:19704"
       }
     },
     "/api/public/invitations/{token}": {
@@ -19957,7 +19957,7 @@
           "shared"
         ],
         "summary": "GET /api/public/invitations/:token",
-        "description": "Source: `server/routes.ts:16847`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:16864`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "token",
@@ -20005,7 +20005,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:16847"
+        "x-source": "server/routes.ts:16864"
       }
     },
     "/api/public/invitations/{token}/accept": {
@@ -20015,7 +20015,7 @@
           "shared"
         ],
         "summary": "POST /api/public/invitations/:token/accept",
-        "description": "Source: `server/routes.ts:16882`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:16899`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "token",
@@ -20083,7 +20083,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:16882"
+        "x-source": "server/routes.ts:16899"
       }
     },
     "/api/public/uploads/request-url": {
@@ -20163,7 +20163,7 @@
           "shared"
         ],
         "summary": "GET /api/sales-channels/zid/callback",
-        "description": "Source: `server/routes.ts:20516`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:20533`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "code",
@@ -20198,7 +20198,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:20516"
+        "x-source": "server/routes.ts:20533"
       }
     },
     "/api/shipments/{id}/track": {
@@ -20208,7 +20208,7 @@
           "shared"
         ],
         "summary": "GET /api/shipments/:id/track",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23419`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23436`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "id",
@@ -20267,7 +20267,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:23419"
+        "x-source": "server/routes.ts:23436"
       }
     },
     "/api/shipments/check-service": {
@@ -20277,7 +20277,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/check-service",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23318`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23335`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -20316,7 +20316,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:23318"
+        "x-source": "server/routes.ts:23335"
       }
     },
     "/api/shipments/rates": {
@@ -20326,7 +20326,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/rates",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23358`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23375`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -20365,7 +20365,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:23358"
+        "x-source": "server/routes.ts:23375"
       }
     },
     "/api/shipments/validate-address": {
@@ -20375,7 +20375,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/validate-address",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23257`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23274`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -20414,7 +20414,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:23257"
+        "x-source": "server/routes.ts:23274"
       }
     },
     "/api/shipments/validate-postal-code": {
@@ -20424,7 +20424,7 @@
           "shared"
         ],
         "summary": "POST /api/shipments/validate-postal-code",
-        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23289`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAuth`\n\nSource: `server/routes.ts:23306`\n\n_Body schema not documented yet — see source._",
         "responses": {
           "200": {
             "description": "Success"
@@ -20463,7 +20463,7 @@
         "x-requirements": [
           "Guard `requireAuth`"
         ],
-        "x-source": "server/routes.ts:23289"
+        "x-source": "server/routes.ts:23306"
       }
     },
     "/api/tasks": {
@@ -21051,7 +21051,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/fedex",
-        "description": "Source: `server/routes.ts:23808`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:23825`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -21089,7 +21089,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:23808"
+        "x-source": "server/routes.ts:23825"
       }
     },
     "/api/webhooks/sales-channel/{platform}": {
@@ -21099,7 +21099,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/sales-channel/:platform",
-        "description": "Source: `server/routes.ts:23727`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:23744`\n\n_Body schema not documented yet — see source._",
         "parameters": [
           {
             "name": "platform",
@@ -21155,7 +21155,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:23727"
+        "x-source": "server/routes.ts:23744"
       }
     },
     "/api/webhooks/status": {
@@ -21165,7 +21165,7 @@
           "webhooks"
         ],
         "summary": "GET /api/webhooks/status",
-        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:24042`\n\n_Body schema not documented yet — see source._",
+        "description": "Guard `requireAdminPermission` · Permission `webhooks:read`\n\nSource: `server/routes.ts:24059`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -21196,7 +21196,7 @@
           "Guard `requireAdminPermission`",
           "Permission `webhooks:read`"
         ],
-        "x-source": "server/routes.ts:24042"
+        "x-source": "server/routes.ts:24059"
       }
     },
     "/api/webhooks/tap": {
@@ -21206,7 +21206,7 @@
           "webhooks"
         ],
         "summary": "POST /api/webhooks/tap",
-        "description": "Source: `server/routes.ts:23995`\n\n_Body schema not documented yet — see source._",
+        "description": "Source: `server/routes.ts:24012`\n\n_Body schema not documented yet — see source._",
         "security": [],
         "responses": {
           "200": {
@@ -21234,7 +21234,7 @@
           }
         },
         "x-requirements": [],
-        "x-source": "server/routes.ts:23995"
+        "x-source": "server/routes.ts:24012"
       }
     }
   }
