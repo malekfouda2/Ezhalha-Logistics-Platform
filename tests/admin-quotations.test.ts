@@ -217,6 +217,19 @@ describe("Admin quotations", () => {
   });
 
   it("still requires an uploaded commercial invoice for Door To Door Freight", async () => {
+    // The lane has to exist first: a Door To Door Freight quotation is priced from one, and the
+    // endpoint answers "no lane configured" before it ever reaches the document check. Seeded here
+    // rather than relied on from a sibling test — on a fresh database there is nothing to rely on,
+    // which is exactly how this passed locally and failed in CI.
+    const lane = (await storage.findDdpPricingLane({ originCountryCode: "US", destinationCountryCode: "SA" })) ||
+      (await storage.createDdpPricingLane({
+        originCountryCode: "US", originCity: "", destinationCountryCode: "SA", destinationCity: "",
+        currency: "SAR", airBaseRatePerKg: "40.00", seaBaseRatePerCbm: null,
+        minimumBillableKg: "1.000", kgRoundingIncrement: "0.500", minimumBillableCbm: "0.0000",
+        cbmRoundingIncrement: "0.1000", minimumShipmentCharge: "40.00", volumetricDivisor: 6000, isActive: true,
+      }));
+    expect(lane).toBeTruthy();
+
     const items = [{ itemName: "Widget", category: "Machinery", countryOfOrigin: "US", price: 100, quantity: 1 }];
     const res = await withCookies(request.post("/api/admin/quotations"), adminCookies).send({
       clientAccountId, type: "ddp" as const, ddpTransportMethod: "air",
