@@ -32,7 +32,14 @@ const RULES: Rule[] = [
     message: "The state / province is missing or invalid for the selected country. Please correct it and try again.",
   },
   {
-    match: ["customsclearancedetail", "customs", "commercial invoice", "hs code", "hscode"],
+    // Must sit before the general customs entry. A missing commercial-invoice document was being
+    // reported as "review your HS codes", which sent an operator through the item list looking for
+    // a fault that was not there — the document had simply never been attached.
+    match: ["commercial invoice"],
+    message: "A commercial invoice document needs to be attached before this can be sent. Go back to the customs step and upload it.",
+  },
+  {
+    match: ["customsclearancedetail", "customs", "hs code", "hscode"],
     message: "Some customs details are missing or invalid. Please review the item information (HS codes, values, country of origin) and try again.",
   },
   {

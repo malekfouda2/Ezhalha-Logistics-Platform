@@ -14334,8 +14334,25 @@ export async function registerRoutes(
         if (quoteItems.length === 0) {
           return res.status(400).json({ error: "At least one line item is required for international / Door To Door Freight quotations." });
         }
-        if (!data.tradeDocuments.some((d) => d.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)) {
-          return res.status(400).json({ error: "A commercial invoice document is required for international / Door To Door Freight quotations." });
+        // An uploaded commercial invoice is required for Door To Door Freight only.
+        //
+        // International *express* used to demand one here as well, which made the admin quotation
+        // stricter than the client checkout for the identical shipment: a client can create an
+        // international express shipment from typed line items with no document at all
+        // (`/api/client/shipments/checkout` takes tradeDocuments as optional), while quoting the
+        // same shipment was refused. The wizard defaults to entering customs details manually and
+        // sends no documents in that mode, so every manually-entered international express
+        // quotation failed at the final step — and the client mapped the message to "check your
+        // HS codes", which sent the operator looking in the wrong place entirely.
+        //
+        // The line items above are the customs data; the commercial invoice is generated from
+        // them. Door To Door Freight is different — its own checkout requires the document too,
+        // because a broker needs the original.
+        if (
+          data.type === "ddp" &&
+          !data.tradeDocuments.some((d) => d.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)
+        ) {
+          return res.status(400).json({ error: "A commercial invoice document is required for Door To Door Freight quotations." });
         }
         if (data.type === "ddp" && (!data.supplierName?.trim() || !data.supplierPhone?.trim())) {
           return res.status(400).json({ error: "Supplier name and phone are required for Door To Door Freight quotations." });
