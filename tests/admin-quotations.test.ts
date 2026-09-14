@@ -174,7 +174,18 @@ describe("Admin quotations", () => {
     expect([...totals].sort((a, b) => a - b)).toEqual(totals);
   });
 
-  it("requires items + commercial invoice for an international express quote, and enriches HS", async () => {
+  it("requires line items for an international express quote, but not an uploaded invoice", async () => {
+    // Production, 2026-09-14: an operator was stopped at the last step of an express quotation,
+    // seven attempts in four minutes, because no commercial-invoice document was attached. The
+    // wizard defaults to entering customs details manually and sends no documents in that mode, so
+    // the default path could never satisfy the rule — and the message shown was "review your HS
+    // codes", which sent them hunting through an item list that was fine.
+    //
+    // The rule was also stricter than the client's own flow: `/api/client/shipments/checkout`
+    // takes tradeDocuments as optional, so a client can create the identical shipment from typed
+    // line items. Those items *are* the customs data; the commercial invoice is generated from
+    // them by `buildCommercialInvoiceDocument`. Door To Door Freight still requires the upload,
+    // because its own checkout does too — a broker needs the original.
     const base = {
       clientAccountId, type: "express" as const,
       shipper: addr("Riyadh", "SA", "12211"),
@@ -183,23 +194,54 @@ describe("Admin quotations", () => {
       carrierCode: "FEDEX", serviceType: "FEDEX_INTERNATIONAL_PRIORITY", serviceName: "FedEx International Priority",
       baseRateSar: 300, sendNotification: false,
     };
-    // No items → rejected.
+    // No items → still rejected. The customs data itself is not optional.
     const noItems = await withCookies(request.post("/api/admin/quotations"), adminCookies).send(base);
     expect(noItems.status).toBe(400);
     expect(noItems.body.error).toMatch(/line item/i);
 
     const items = [{ itemName: "Cotton shirt", category: "Apparel", countryOfOrigin: "SA", price: 50, quantity: 3 }];
-    // Items but no commercial-invoice document → rejected.
-    const noDoc = await withCookies(request.post("/api/admin/quotations"), adminCookies).send({ ...base, items });
-    expect(noDoc.status).toBe(400);
-    expect(noDoc.body.error).toMatch(/commercial invoice/i);
 
+    // Items typed in, no document attached — the manual path the wizard defaults to.
+    const manual = await withCookies(request.post("/api/admin/quotations"), adminCookies).send({ ...base, items });
+    expect(manual.status).toBe(201);
+    const manualShipment = await storage.getShipment(manual.body.shipmentId);
+    expect(manualShipment?.itemsData).toBeTruthy();
+
+    // An uploaded invoice is still accepted and stored when the operator has one.
     const tradeDocuments = [{ fileName: "ci.pdf", objectPath: "/uploads/ci.pdf", contentType: "application/pdf", size: 1000, documentType: "COMMERCIAL_INVOICE" }];
     const ok = await withCookies(request.post("/api/admin/quotations"), adminCookies).send({ ...base, items, tradeDocuments });
     expect(ok.status).toBe(201);
     const shipment = await storage.getShipment(ok.body.shipmentId);
     expect(shipment?.itemsData).toBeTruthy();
     expect(shipment?.tradeDocumentsData).toBeTruthy();
+  });
+
+  it("still requires an uploaded commercial invoice for Door To Door Freight", async () => {
+    // The lane has to exist first: a Door To Door Freight quotation is priced from one, and the
+    // endpoint answers "no lane configured" before it ever reaches the document check. Seeded here
+    // rather than relied on from a sibling test — on a fresh database there is nothing to rely on,
+    // which is exactly how this passed locally and failed in CI.
+    const lane = (await storage.findDdpPricingLane({ originCountryCode: "US", destinationCountryCode: "SA" })) ||
+      (await storage.createDdpPricingLane({
+        originCountryCode: "US", originCity: "", destinationCountryCode: "SA", destinationCity: "",
+        currency: "SAR", airBaseRatePerKg: "40.00", seaBaseRatePerCbm: null,
+        minimumBillableKg: "1.000", kgRoundingIncrement: "0.500", minimumBillableCbm: "0.0000",
+        cbmRoundingIncrement: "0.1000", minimumShipmentCharge: "40.00", volumetricDivisor: 6000, isActive: true,
+      }));
+    expect(lane).toBeTruthy();
+
+    const items = [{ itemName: "Widget", category: "Machinery", countryOfOrigin: "US", price: 100, quantity: 1 }];
+    const res = await withCookies(request.post("/api/admin/quotations"), adminCookies).send({
+      clientAccountId, type: "ddp" as const, ddpTransportMethod: "air",
+      shipper: addr("New York", "US", "10001"),
+      recipient: addr("Riyadh", "SA", "12211"),
+      packages: [{ weight: 5, length: 20, width: 15, height: 10 }],
+      items, supplierName: "ACME Corp", supplierPhone: "12025550000", sendNotification: false,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/commercial invoice/i);
+    expect(res.body.error).toMatch(/Door To Door Freight/i);
   });
 
   it("requires a supplier for DDP and gates payment behind the client's consent", async () => {
