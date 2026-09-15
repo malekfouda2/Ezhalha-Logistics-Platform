@@ -536,6 +536,30 @@ const DETAILED_OPERATIONS: Record<string, Record<string, unknown>> = {
   "GET /api/client/payments/tap/saved-cards": { summary: "Saved cards" },
   "POST /api/client/payments/tap/saved-cards/:id/default": { summary: "Make a saved card the default" },
   "DELETE /api/client/payments/tap/saved-cards/:id": { summary: "Delete a saved card" },
+  "POST /api/client/payments/tap/checkout-session": {
+    summary: "Signed session for Tap's native Checkout SDK",
+    description:
+      "For native clients that want to take payment inside the app instead of following the " +
+      "hosted redirect. Unlike POST /shipments/pay and POST /payments/create-charge this does " +
+      "**not** create a charge — Tap's mobile SDK does that on the device from the public key. " +
+      "This returns the `configurations` object to hand the SDK, signed with `hashString`.\n\n" +
+      "Send exactly one of `shipmentId` or `invoiceId` and nothing else that affects money: the " +
+      "amount, currency, reference and webhook URL are decided server-side and signed. An " +
+      "`amount` in the body is ignored.\n\n" +
+      "Pass `configurations` to the SDK unchanged — editing any signed field invalidates " +
+      "`hashString` and Tap rejects the session. Check `configured` first; when it is false Tap " +
+      "is not set up for this account and there is nothing to open.\n\n" +
+      "Settlement is unchanged: the charge reaches `POST /api/webhooks/tap` like every other " +
+      "flow, and the shipment or invoice is reconciled there. After `onSuccess` returns a " +
+      "`chargeId`, poll the shipment or invoice rather than treating the callback as final.",
+    requestBody: { required: true, ...json(ref("TapCheckoutSessionRequest")) },
+    responses: {
+      "200": { description: "Signed SDK session", ...json(ref("TapCheckoutSession")) },
+      "400": { description: "Not payable, or neither/both targets given", ...json(ref("Error")) },
+      "403": { description: "Target belongs to another client account", ...json(ref("Error")) },
+      "404": { description: "Shipment or invoice not found", ...json(ref("Error")) },
+    },
+  },
   "POST /api/client/payments/create-charge": { summary: "Charge an outstanding invoice" },
   "POST /api/client/payments/create-intent": { summary: "Create a payment intent for an invoice" },
 
@@ -555,6 +579,37 @@ const DETAILED_OPERATIONS: Record<string, Record<string, unknown>> = {
 };
 
 const COMPONENT_SCHEMAS = {
+  TapCheckoutSessionRequest: {
+    type: "object",
+    description: "Exactly one of shipmentId or invoiceId. No amount — the server prices it.",
+    properties: {
+      shipmentId: { type: "string", format: "uuid" },
+      invoiceId: { type: "string" },
+      language: { type: "string", enum: ["en", "ar"], default: "en" },
+      saveCardForFuture: { type: "boolean" },
+      returnPath: { type: "string", description: "Echoed back in charge metadata." },
+    },
+  },
+  TapCheckoutSession: {
+    type: "object",
+    required: ["configured", "configurations"],
+    properties: {
+      configured: {
+        type: "boolean",
+        description: "False when Tap has no public key for this account — do not open the sheet.",
+      },
+      configurations: {
+        type: "object",
+        description: "Pass to the Tap Checkout SDK unchanged. Contains gateway, customer, order, transaction and hashString.",
+      },
+      target: { type: "string", enum: ["shipment", "invoice"] },
+      amount: { type: "number", description: "Charge amount in `currency`." },
+      currency: { type: "string" },
+      amountSar: { type: "number", description: "Shipment targets only — the SAR accounting figure." },
+      fxRate: { type: "number", description: "Shipment targets only." },
+      tapIntegrationAccountId: { type: "string" },
+    },
+  },
   PaginationMeta: {
     type: "object",
     description: "Returned as `pagination` alongside `data` when a request opts in via X-Paginate.",

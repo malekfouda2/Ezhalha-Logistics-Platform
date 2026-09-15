@@ -6,7 +6,7 @@
 > `DETAILED_OPERATIONS` in that script and regenerate.
 > Machine-readable equivalent: [`docs/openapi.json`](docs/openapi.json).
 
-Covers **338 routes**.
+Covers **339 routes**.
 
 ## Contents
 
@@ -174,7 +174,7 @@ Revokes the whole token family for that device.
 
 Requirements: Guard `requireAuth`
 
-Source: `server/routes.ts:9929`
+Source: `server/routes.ts:9943`
 
 ##### `POST /api/auth/forgot-password`
 
@@ -192,7 +192,7 @@ Request body — `ForgotPasswordRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:9949`
+Source: `server/routes.ts:9963`
 
 ##### `POST /api/auth/login`
 
@@ -202,7 +202,7 @@ Used by the web SPA. Native clients should use POST /api/auth/token instead.
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:9491`
+Source: `server/routes.ts:9505`
 
 ##### `POST /api/auth/otp/request`
 
@@ -212,7 +212,7 @@ Always returns success — never reveals whether the address exists.
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:9562`
+Source: `server/routes.ts:9576`
 
 ##### `POST /api/auth/refresh`
 
@@ -228,7 +228,7 @@ Request body — `RefreshRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:9824`
+Source: `server/routes.ts:9838`
 
 ##### `POST /api/auth/reset-password`
 
@@ -247,7 +247,7 @@ Request body — `ResetPasswordRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:9979`
+Source: `server/routes.ts:9993`
 
 ##### `GET /api/auth/reset-password/:token`
 
@@ -255,7 +255,7 @@ Check whether a reset token is still usable
 
 Lets the reset screen show "this link has expired" before the user types a password. Consumes nothing and never errors on a bad token — an unknown token simply returns `valid: false`. Use `mode` to choose between "Set your password" (onboard) and "Reset your password" (reset).
 
-Source: `server/routes.ts:9968`
+Source: `server/routes.ts:9982`
 
 ##### `POST /api/auth/revoke`
 
@@ -269,7 +269,7 @@ Request body — `RefreshRequest`:
 | --- | --- | --- | --- |
 | `refreshToken` | string | yes | min length 20 |
 
-Source: `server/routes.ts:9888`
+Source: `server/routes.ts:9902`
 
 ##### `POST /api/auth/token`
 
@@ -290,7 +290,7 @@ Request body — `TokenRequest`:
 
 Requirements: Rate limit `authLimiter`
 
-Source: `server/routes.ts:9702`
+Source: `server/routes.ts:9716`
 
 ##### `POST /api/auth/token/otp`
 
@@ -311,11 +311,11 @@ Request body — `OtpTokenRequest`:
 
 Requirements: Rate limit `otpLimiter`
 
-Source: `server/routes.ts:9764`
+Source: `server/routes.ts:9778`
 
 ### Client portal
 
-77 routes.
+78 routes.
 
 | Method | Path | Description | Requirements |
 | --- | --- | --- | --- |
@@ -351,6 +351,7 @@ Source: `server/routes.ts:9764`
 | `GET` | `/api/client/payments` | Payment history | Guard `requireClient`<br>Permission `ClientPermission.VIEW_PAYMENTS` |
 | `POST` | `/api/client/payments/create-charge` | Charge an outstanding invoice | Guard `requireClient`<br>Permission `ClientPermission.MAKE_PAYMENTS` |
 | `POST` | `/api/client/payments/create-intent` | Create a payment intent for an invoice | Guard `requireClient`<br>Permission `ClientPermission.MAKE_PAYMENTS` |
+| `POST` | `/api/client/payments/tap/checkout-session` | Signed session for Tap's native Checkout SDK | Guard `requireClient` |
 | `GET` | `/api/client/payments/tap/config` | Public Tap config for the checkout SDK | Guard `requireClient` |
 | `GET` | `/api/client/payments/tap/saved-cards` | Saved cards | Guard `requireClient` |
 | `DELETE` | `/api/client/payments/tap/saved-cards/:id` | Delete a saved card | Guard `requireClient` |
@@ -407,7 +408,7 @@ Primary contact only. Bilingual (EN/AR) fields are accepted.
 
 Requirements: Guard `requireClient` · **Primary contact only**
 
-Source: `server/routes.ts:17661`
+Source: `server/routes.ts:17675`
 
 ##### `GET /api/client/fx-rate`
 
@@ -415,7 +416,7 @@ Display currency and the SAR conversion rate for this account
 
 Returns SAR for non-client sessions. Money is stored in SAR; this is the display layer. Never convert on the client — send what the API returns.
 
-Source: `server/routes.ts:17624`
+Source: `server/routes.ts:17638`
 
 ##### `POST /api/client/orders/:id/fulfill`
 
@@ -425,7 +426,35 @@ Fulfil an order as a shipment
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:20858`
+Source: `server/routes.ts:20872`
+
+##### `POST /api/client/payments/tap/checkout-session`
+
+Signed session for Tap's native Checkout SDK
+
+For native clients that want to take payment inside the app instead of following the hosted redirect. Unlike POST /shipments/pay and POST /payments/create-charge this does **not** create a charge — Tap's mobile SDK does that on the device from the public key. This returns the `configurations` object to hand the SDK, signed with `hashString`.
+
+Send exactly one of `shipmentId` or `invoiceId` and nothing else that affects money: the amount, currency, reference and webhook URL are decided server-side and signed. An `amount` in the body is ignored.
+
+Pass `configurations` to the SDK unchanged — editing any signed field invalidates `hashString` and Tap rejects the session. Check `configured` first; when it is false Tap is not set up for this account and there is nothing to open.
+
+Settlement is unchanged: the charge reaches `POST /api/webhooks/tap` like every other flow, and the shipment or invoice is reconciled there. After `onSuccess` returns a `chargeId`, poll the shipment or invoice rather than treating the callback as final.
+
+Request body — `TapCheckoutSessionRequest`:
+
+> Exactly one of shipmentId or invoiceId. No amount — the server prices it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `shipmentId` | string (uuid) | no |  |
+| `invoiceId` | string | no |  |
+| `language` | enum: `en`, `ar` | no | default `en` |
+| `saveCardForFuture` | boolean | no |  |
+| `returnPath` | string | no | Echoed back in charge metadata. |
+
+Requirements: Guard `requireClient`
+
+Source: `server/routes.ts:22888`
 
 ##### `POST /api/client/quick-quote`
 
@@ -447,7 +476,7 @@ Request body — `QuickQuoteRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18708`
+Source: `server/routes.ts:18722`
 
 ##### `POST /api/client/shipments`
 
@@ -477,7 +506,7 @@ Request body — `LegacyShipmentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:21754`
+Source: `server/routes.ts:21785`
 
 ##### `POST /api/client/shipments/:id/cancel`
 
@@ -487,7 +516,7 @@ A still-booked cancellation auto-issues a Tap refund and cancels any carrier pic
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:21834`
+Source: `server/routes.ts:21865`
 
 ##### `GET /api/client/shipments/:id/label.pdf`
 
@@ -497,7 +526,7 @@ Binary behind the auth guard. Native clients must fetch this with the Authorizat
 
 Requirements: Guard `requireClient` · Returns `application/pdf`
 
-Source: `server/routes.ts:21940`
+Source: `server/routes.ts:21971`
 
 ##### `POST /api/client/shipments/:id/pay-later`
 
@@ -507,7 +536,7 @@ Requires an approved credit limit with sufficient available balance.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:22201`
+Source: `server/routes.ts:22232`
 
 ##### `POST /api/client/shipments/checkout`
 
@@ -526,7 +555,7 @@ Request body — `CheckoutRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:21176`
+Source: `server/routes.ts:21190`
 
 ##### `POST /api/client/shipments/confirm`
 
@@ -543,7 +572,7 @@ Request body — `ConfirmRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS` · Accepts `Idempotency-Key`
 
-Source: `server/routes.ts:21625`
+Source: `server/routes.ts:21656`
 
 ##### `POST /api/client/shipments/extract-invoice-items`
 
@@ -553,7 +582,7 @@ AI extraction (Gemini). Upload the file through the signed-URL flow first and pa
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18421`
+Source: `server/routes.ts:18435`
 
 ##### `POST /api/client/shipments/extract-package-details`
 
@@ -563,7 +592,7 @@ AI extraction (Gemini). Same upload-first pattern as invoice extraction.
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:18489`
+Source: `server/routes.ts:18503`
 
 ##### `POST /api/client/shipments/pay`
 
@@ -582,7 +611,7 @@ Request body — `ShipmentPaymentRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:21495`
+Source: `server/routes.ts:21549`
 
 ##### `POST /api/client/shipments/rates`
 
@@ -611,7 +640,7 @@ Request body — `ShipmentRateRequest`:
 
 Requirements: Guard `requireClient` · Permission `ClientPermission.CREATE_SHIPMENTS`
 
-Source: `server/routes.ts:19831`
+Source: `server/routes.ts:19845`
 
 ### Operations portal
 
