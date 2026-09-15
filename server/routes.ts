@@ -6,6 +6,7 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { storage } from "./storage";
+import { paginationEnvelope } from "./pagination";
 import type {
   Department,
   ClientAccount,
@@ -6808,6 +6809,11 @@ export async function registerRoutes(
   await ensureSuperAdminBootstrap();
   await ensureHierarchicalRoleBootstrap();
   
+  // Normalises every list response for callers that send `X-Paginate: 1`. Registered here rather
+  // than in server/index.ts so the contract holds wherever the routes are mounted, tests included,
+  // and ahead of every route below so `req.pagination` is set by the time a handler reads it.
+  app.use(paginationEnvelope());
+
   // Trust proxy for rate limiting behind reverse proxy
   app.set("trust proxy", 1);
 
@@ -7365,7 +7371,12 @@ export async function registerRoutes(
       // Number("abc") is NaN, and Math.max/min propagate it straight into SQL LIMIT — fall back
       // to the default instead of 500ing on a typo'd query string.
       const requestedLimit = Number(req.query.limit);
-      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
+      // `limit` is this route's own result cap, and under the pagination envelope it doubles as the
+      // page size — applying both would cap the queue at one page and report that cap as the total.
+      // When the caller is paging, the cap goes to its ceiling and the envelope does the slicing.
+      const limit = req.pagination?.requested
+        ? 200
+        : Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
       // Unknown sort keys fall back to the queue default rather than 400ing: a stale bookmark
       // carrying an old key should still show an operator their queue.
       const sort = normalizeOperationSort(typeof req.query.sort === "string" ? req.query.sort : undefined);
@@ -10325,7 +10336,9 @@ export async function registerRoutes(
         typeof req.query.status === "string" && req.query.status.trim()
           ? req.query.status.trim().toUpperCase()
           : ShipmentRefundRequestStatus.PENDING;
-      const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 50));
+      // See the operations queue above: `limit` is a cap here, so the envelope owns the slicing
+      // when the caller is paging.
+      const limit = req.pagination?.requested ? 50 : Math.max(1, Math.min(Number(req.query.limit || 10), 50));
       const scopedClientAccountIds = await getScopedClientAccountIds(adminUser);
       const refundRequests = await storage.getShipmentRefundRequests({
         status: status === "ALL" ? "all" : status,
@@ -13576,7 +13589,8 @@ export async function registerRoutes(
       const deliveries = await storage.getEmailDeliveries({
         templateSlug: typeof req.query.slug === "string" ? req.query.slug : undefined,
         status: typeof req.query.status === "string" ? req.query.status : undefined,
-        limit: Number(req.query.limit) || 50,
+        // `limit` is a cap, not a page size; the envelope slices when the caller is paging.
+        limit: req.pagination?.requested ? 500 : Number(req.query.limit) || 50,
       });
       res.json(deliveries);
     } catch (error: any) {

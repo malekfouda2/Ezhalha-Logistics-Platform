@@ -218,6 +218,44 @@ function toOpenApiPath(path: string): string {
 // ── Hand-authored detail (tier 2) ────────────────────────────────────────────
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+
+/**
+ * The opt-in pagination controls, attached to every GET operation.
+ *
+ * Implemented once in `server/pagination.ts` as response middleware rather than per handler, so
+ * there is no route-by-route list to keep in sync here — any GET can be asked for the envelope.
+ */
+const PAGINATION_PARAMETERS = [
+  {
+    name: "X-Paginate",
+    in: "header" as const,
+    required: false,
+    description:
+      "Set to `1` to receive the response as `{ data, pagination }`. Omit it and the endpoint returns its legacy shape unchanged.",
+    schema: { type: "string" as const, enum: ["1"] },
+  },
+  {
+    name: "paginate",
+    in: "query" as const,
+    required: false,
+    description: "Query-string equivalent of the `X-Paginate` header, for clients that cannot set headers.",
+    schema: { type: "string" as const, enum: ["1"] },
+  },
+  {
+    name: "page",
+    in: "query" as const,
+    required: false,
+    description: "1-indexed page number. A page past the end returns an empty `data` array, not an error.",
+    schema: { type: "integer" as const, minimum: 1, default: 1 },
+  },
+  {
+    name: "pageSize",
+    in: "query" as const,
+    required: false,
+    description: "Items per page, clamped to 100. Aliases: `perPage`, `limit`.",
+    schema: { type: "integer" as const, minimum: 1, maximum: 100, default: 25 },
+  },
+];
 const json = (schema: unknown) => ({ content: { "application/json": { schema } } });
 
 const DETAILED_OPERATIONS: Record<string, Record<string, unknown>> = {
@@ -517,6 +555,30 @@ const DETAILED_OPERATIONS: Record<string, Record<string, unknown>> = {
 };
 
 const COMPONENT_SCHEMAS = {
+  PaginationMeta: {
+    type: "object",
+    description: "Returned as `pagination` alongside `data` when a request opts in via X-Paginate.",
+    required: ["page", "pageSize", "total", "totalPages", "hasNextPage", "hasPreviousPage"],
+    properties: {
+      page: { type: "integer", description: "1-indexed page returned" },
+      pageSize: { type: "integer", description: "Items per page, clamped to 100" },
+      total: { type: "integer", description: "Items across all pages, not just this one" },
+      totalPages: { type: "integer", description: "At least 1; an empty list is one empty page" },
+      hasNextPage: { type: "boolean" },
+      hasPreviousPage: { type: "boolean" },
+    },
+  },
+  PaginatedResponse: {
+    type: "object",
+    description:
+      "The shape every list endpoint returns under X-Paginate. Endpoints may include additional " +
+      "top-level keys they already returned beside their list.",
+    required: ["data", "pagination"],
+    properties: {
+      data: { type: "array", items: { type: "object" } },
+      pagination: ref("PaginationMeta"),
+    },
+  },
   Error: {
     type: "object",
     properties: {
@@ -1057,6 +1119,27 @@ function writeMarkdown(
     "**Idempotency.** Endpoints marked *Accepts `Idempotency-Key`* de-duplicate on that header.",
     "Reuse the same key when retrying a payment or booking.",
     "",
+    "**Pagination is opt-in, and uniform once you opt in.** List endpoints return one of three",
+    "legacy shapes — a bare array, `{ shipments, total, page, totalPages }`, or",
+    "`{ items, total, page, pageSize }`. Send `X-Paginate: 1` (or `?paginate=1`) on any GET and",
+    "every one of them returns the same envelope instead:",
+    "",
+    "```json",
+    "{",
+    "  \"data\": [ /* … */ ],",
+    "  \"pagination\": {",
+    "    \"page\": 2, \"pageSize\": 25, \"total\": 143, \"totalPages\": 6,",
+    "    \"hasNextPage\": true, \"hasPreviousPage\": true",
+    "  }",
+    "}",
+    "```",
+    "",
+    "Page with `?page=` and `?pageSize=` (aliases `perPage`, `limit`; size clamps to 100).",
+    "`total` counts every item, not the page; `totalPages` is never 0. Keys an endpoint already",
+    "returned beside its list — `recoveries`, `metrics` — stay at the top level. Errors and",
+    "single-resource responses are never wrapped. Without the header nothing changes, which is",
+    "why the web SPA is unaffected. Details: [`docs/api-pagination.md`](docs/api-pagination.md).",
+    "",
     "**Request bodies cap at 1MB.** Never base64 a file into JSON; use the signed-URL upload",
     "flow (`POST /api/uploads/request-url`). Oversized bodies return",
     "`413 { \"code\": \"payload_too_large\" }`.",
@@ -1242,6 +1325,17 @@ function build() {
       }
     }
 
+    // Every GET can return the shared `{ data, pagination }` envelope on request — see the
+    // Pagination section of the API description. Listing the controls on each operation is what
+    // makes them discoverable in Swagger UI, which is where the mobile client reads this from.
+    if (route.method === "get") {
+      for (const pagination of PAGINATION_PARAMETERS) {
+        if (!parameters.some((existing) => existing.name === pagination.name && existing.in === pagination.in)) {
+          parameters.push(pagination as never);
+        }
+      }
+    }
+
     paths[openApiPath][route.method] = {
       operationId: toOperationId(route.method, route.path),
       tags: [audience],
@@ -1276,6 +1370,29 @@ function build() {
         "  access token plus a rotating refresh token. Send `Authorization: Bearer <token>`.",
         "",
         "A bearer request never creates a server session row.",
+        "",
+        "## Pagination",
+        "",
+        "List endpoints grew three different shapes: a bare array, a resource-keyed object",
+        "(`{ shipments, total, page, totalPages }`), and an items-keyed one",
+        "(`{ items, total, page, pageSize }`). Any GET can be asked for a single shape instead:",
+        "",
+        "```",
+        "X-Paginate: 1        (or ?paginate=1)",
+        "?page=2&pageSize=25  (aliases: perPage, limit)",
+        "```",
+        "",
+        "```json",
+        '{ "data": [], "pagination": { "page": 2, "pageSize": 25, "total": 143,',
+        '  "totalPages": 6, "hasNextPage": true, "hasPreviousPage": true } }',
+        "```",
+        "",
+        "`total` counts every item, not the page. `totalPages` is at least 1. Keys the endpoint",
+        "returned beside its list (`recoveries`, `metrics`) are preserved at the top level.",
+        "Errors and single-resource responses are never wrapped.",
+        "",
+        "Without the opt-in every endpoint returns its existing shape unchanged — the web SPA",
+        "sends no such header. See `docs/api-pagination.md`.",
         "",
         "## Error shape",
         "",

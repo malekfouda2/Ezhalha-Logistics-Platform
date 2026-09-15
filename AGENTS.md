@@ -127,6 +127,10 @@ Common integration env:
 - Return JSON errors consistently, usually `{ error: "..." }` or `{ message: "..." }` depending on existing local pattern.
 - Preserve audit logs for sensitive changes: auth, account/profile changes, pricing, payments, credit invoices, shipment status, refund decisions, and integration changes.
 - Do not log secrets, payment card data, or integration credentials.
+- List endpoints can be returned in a single `{ data, pagination }` envelope when the caller sends
+  `X-Paginate: 1` — see [docs/api-pagination.md](docs/api-pagination.md). It is opt-in: without the
+  header the existing bare-array and resource-keyed shapes are unchanged, which is what keeps the
+  web portal working. New list endpoints need no special handling to participate.
 - Keep carrier-specific details inside integration adapters or shipment builder services.
 - Keep financial calculations in service/shared helpers instead of duplicating formulas in route handlers.
 - When adding database columns/tables, update `shared/schema.ts`, storage/service code, and relevant tests.
