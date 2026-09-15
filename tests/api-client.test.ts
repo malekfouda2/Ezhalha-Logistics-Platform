@@ -3,6 +3,7 @@ import supertest from "supertest";
 import express from "express";
 import { createServer } from "http";
 import bcrypt from "bcrypt";
+import { createHmac } from "crypto";
 import { registerRoutes } from "../server/routes";
 import { fedexAdapter } from "../server/integrations/fedex";
 import { dhlAdapter } from "../server/integrations/dhl";
@@ -18,6 +19,30 @@ let server: ReturnType<typeof createServer>;
 let clientAgent: supertest.SuperAgentTest;
 let testClientUsername: string;
 const TEST_CLIENT_PASSWORD = "TestClient123!";
+
+/**
+ * Sign a webhook body the way Tap does, so the signature gate is exercised rather than bypassed.
+ *
+ * With no secret configured the server already treats non-production webhooks as trusted, so this
+ * returns a harmless value and the test still runs.
+ */
+function tapWebhookSignature(charge: Record<string, any>): string {
+  const secret = process.env.TAP_SECRET_KEY;
+  if (!secret) return "unsigned";
+
+  const currency = String(charge.currency || "").toUpperCase();
+  const amount = Number(charge.amount || 0).toFixed(2);
+  const payload =
+    `x_id${charge.id}` +
+    `x_amount${amount}` +
+    `x_currency${currency}` +
+    `x_gateway_reference${charge.reference?.gateway || ""}` +
+    `x_payment_reference${charge.reference?.payment || ""}` +
+    `x_status${charge.status}` +
+    `x_created${charge.transaction?.created || ""}`;
+
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
 
 async function uploadTradeDocumentThroughApi(
   agent: supertest.SuperAgentTest,
@@ -1005,6 +1030,95 @@ describe("Client - Payments", () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  it("POST /api/client/payments/tap/checkout-session should sign a session the mobile SDK can open", async () => {
+    // The native SDK creates the charge on the device, so the server's only leverage over the
+    // amount is the signature it puts on this session.
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    const invoice = await storage.createInvoice({
+      clientAccountId: clientUser!.clientAccountId!,
+      amount: "245.00",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      status: "pending",
+      shipmentId: null,
+    });
+
+    const res = await clientAgent
+      .post("/api/client/payments/tap/checkout-session")
+      // An amount in the body must not reach Tap. The schema drops it; the server prices the
+      // invoice itself.
+      .send({ invoiceId: invoice.id, amount: "1.00", language: "ar" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.target).toBe("invoice");
+    expect(res.body.amount).toBe(245);
+    expect(res.body.currency).toBe("SAR");
+
+    const config = res.body.configurations;
+    expect(config.order.amount).toBe("245.00");
+    expect(config.language).toBe("ar");
+    expect(config.transaction.charge.metadata.invoiceId).toBe(invoice.id);
+    expect(config.transaction.charge.reference.order).toBe(invoice.id);
+    expect(config.transaction.charge.post.url).toContain("/api/webhooks/tap");
+    // No charge is created here — that is the SDK's job once the customer submits.
+    expect(res.body.paymentId).toBeUndefined();
+
+    const untouched = await storage.getInvoice(invoice.id);
+    expect(untouched?.status).toBe("pending");
+  });
+
+  it("POST /api/client/payments/tap/checkout-session should refuse an invoice that is not the caller's", async () => {
+    const otherAccount = await storage.createClientAccount({
+      name: `Tap Session Outsider ${Date.now()}`,
+      email: `tap_session_outsider_${Date.now()}@test.com`,
+      phone: "5558200001",
+      country: "Saudi Arabia",
+      profile: "regular",
+      isActive: true,
+    });
+    const foreignInvoice = await storage.createInvoice({
+      clientAccountId: otherAccount.id,
+      amount: "99.00",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      status: "pending",
+      shipmentId: null,
+    });
+
+    const res = await clientAgent
+      .post("/api/client/payments/tap/checkout-session")
+      .send({ invoiceId: foreignInvoice.id });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /api/client/payments/tap/checkout-session should require exactly one target", async () => {
+    const neither = await clientAgent.post("/api/client/payments/tap/checkout-session").send({});
+    expect(neither.status).toBe(400);
+
+    const both = await clientAgent.post("/api/client/payments/tap/checkout-session").send({
+      invoiceId: "inv_1",
+      shipmentId: "3f6c1d9e-0000-4000-8000-000000000001",
+    });
+    expect(both.status).toBe(400);
+  });
+
+  it("POST /api/client/payments/tap/checkout-session should refuse an invoice that is already paid", async () => {
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    const paidInvoice = await storage.createInvoice({
+      clientAccountId: clientUser!.clientAccountId!,
+      amount: "50.00",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      status: "paid",
+      shipmentId: null,
+    });
+
+    const res = await clientAgent
+      .post("/api/client/payments/tap/checkout-session")
+      .send({ invoiceId: paidInvoice.id });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("already paid");
+  });
+
   it("POST /api/client/payments/create-charge should create and complete a Tap payment for an invoice in mock mode", async () => {
     const clientUser = await storage.getUserByUsername(testClientUsername);
     expect(clientUser?.clientAccountId).toBeDefined();
@@ -1036,6 +1150,43 @@ describe("Client - Payments", () => {
     expect(matchingPayment?.paymentMethod).toBe("tap");
     expect(matchingPayment?.status).toBe("completed");
     expect(matchingPayment?.transactionId).toBe(res.body.paymentId);
+  });
+
+  it("POST /api/webhooks/tap should settle a charge that carries only reference.order", async () => {
+    // What the native Checkout SDK produces. The charge is built on the device, so our metadata
+    // reaches Tap through the SDK rather than through our own API call, and there is no charge id
+    // recorded here beforehand to match on. `reference` is the field Tap always echoes.
+    const clientUser = await storage.getUserByUsername(testClientUsername);
+    const invoice = await storage.createInvoice({
+      clientAccountId: clientUser!.clientAccountId!,
+      amount: "175.00",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      status: "pending",
+      shipmentId: null,
+    });
+
+    const charge = {
+      id: `chg_test_sdk_reference_${Date.now()}`,
+      object: "charge",
+      status: "CAPTURED",
+      amount: 175,
+      currency: "SAR",
+      transaction: { created: String(Date.now()) },
+      // Deliberately no invoiceId — only the kind and the reference survive.
+      metadata: { kind: "invoice" },
+      reference: { transaction: invoice.invoiceNumber, order: invoice.id },
+    };
+
+    const res = await clientAgent
+      .post("/api/webhooks/tap")
+      .set("hashstring", tapWebhookSignature(charge))
+      .send(charge);
+
+    expect(res.status).toBe(200);
+
+    const settled = await storage.getInvoice(invoice.id);
+    expect(settled?.status).toBe("paid");
+    expect(settled?.paidAt).toBeTruthy();
   });
 
   it("POST /api/webhooks/tap should mark shipment payments as paid", async () => {

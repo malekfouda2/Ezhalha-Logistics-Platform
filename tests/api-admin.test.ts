@@ -2279,6 +2279,42 @@ describe("Admin - Payments", () => {
   });
 });
 
+describe("Pagination envelope over real routes", () => {
+  // tests/pagination.test.ts covers the middleware in isolation. These two pin it against the
+  // shapes that actually exist in this API: a route that paginates in SQL and one that returns a
+  // bare array. The mobile client sees the same envelope from both.
+  it("normalises a route that already paginates in SQL", async () => {
+    const res = await asAdmin.get("/api/admin/shipments?page=1&pageSize=5").set("X-Paginate", "1");
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.pagination).toMatchObject({ page: 1 });
+    expect(typeof res.body.pagination.total).toBe("number");
+    expect(typeof res.body.pagination.totalPages).toBe("number");
+    expect(res.body).not.toHaveProperty("shipments");
+  });
+
+  it("wraps a route that returns a bare array", async () => {
+    const res = await asAdmin.get("/api/admin/pricing?pageSize=2").set("X-Paginate", "1");
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeLessThanOrEqual(2);
+    expect(res.body.pagination.pageSize).toBe(2);
+  });
+
+  it("leaves both untouched for callers that do not opt in", async () => {
+    // The web portal reads `response.shipments` and a plain array; this is the regression that
+    // would take the whole admin panel down.
+    const paginated = await asAdmin.get("/api/admin/shipments");
+    expect(Array.isArray(paginated.body.shipments)).toBe(true);
+    expect(paginated.body).not.toHaveProperty("pagination");
+
+    const bare = await asAdmin.get("/api/admin/pricing");
+    expect(Array.isArray(bare.body)).toBe(true);
+  });
+});
+
 describe("Admin - Pricing Rules", () => {
   it("GET /api/admin/pricing should return pricing rules", async () => {
     const res = await asAdmin.get("/api/admin/pricing");
