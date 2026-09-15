@@ -50,6 +50,25 @@ export async function mergePdfLabels(encodedLabels: string[]): Promise<string | 
  * A piece can carry more than one document (the label, and on some lanes a doc-tab); all of them
  * belong in the file, because the carrier expects what it returned to be what is attached.
  */
+/**
+ * The tracking number of each piece, in the order the carrier returned them.
+ *
+ * FedEx numbers every box separately; the master only aggregates them. Falling back to the piece's
+ * own `masterTrackingNumber` covers the single-piece case, where FedEx repeats the master rather
+ * than issuing a distinct child number.
+ */
+export function collectFedexPieceTrackingNumbers(shipmentData: any): string[] {
+  const pieces = Array.isArray(shipmentData?.pieceResponses) ? shipmentData.pieceResponses : [];
+  const numbers: string[] = [];
+
+  for (const piece of pieces) {
+    const number = piece?.trackingNumber || piece?.masterTrackingNumber;
+    if (number) numbers.push(String(number));
+  }
+
+  return numbers;
+}
+
 export function collectFedexPieceLabels(shipmentData: any): string[] {
   const pieces = Array.isArray(shipmentData?.pieceResponses) ? shipmentData.pieceResponses : [];
   const labels: string[] = [];
