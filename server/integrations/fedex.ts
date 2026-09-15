@@ -18,6 +18,7 @@ import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 import { buildIntegrationLogResponse } from "../services/integration-log-payload";
+import { collectFedexPieceLabels, mergePdfLabels } from "../services/label-merge";
 
 /**
  * FedEx carries dangerous goods per package, not per shipment: `packageSpecialServices` sits
@@ -2161,10 +2162,25 @@ export class FedExAdapter implements CarrierAdapter {
           const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest, 1);
           const shipmentData = data.output.transactionShipments[0];
 
+          // Every piece gets its own label. Keeping only `pieceResponses[0]` gave a 25-piece
+          // shipment one page — "## MASTER ## 1 of 25" — and nothing for the other 24 boxes.
+          // PDFs are merged into one document to print; any other format (PNG, ZPL) cannot be
+          // merged, so the first is returned as before rather than silently mangled.
+          const pieceLabels = collectFedexPieceLabels(shipmentData);
+          const labelData = request.labelFormat === "PNG"
+            ? pieceLabels[0]
+            : await mergePdfLabels(pieceLabels);
+
+          if (pieceLabels.length > 1 && request.labelFormat === "PNG") {
+            logWarn(
+              `FedEx returned ${pieceLabels.length} piece labels as PNG; only the first can be kept. Request PDF for multi-piece shipments.`,
+            );
+          }
+
           return {
             trackingNumber: shipmentData.masterTrackingNumber,
             carrierTrackingNumber: shipmentData.masterTrackingNumber,
-            labelData: shipmentData.pieceResponses[0]?.packageDocuments?.[0]?.encodedLabel,
+            labelData,
             estimatedDelivery: shipmentData.completedShipmentDetail?.operationalDetail?.deliveryDate
               ? new Date(shipmentData.completedShipmentDetail.operationalDetail.deliveryDate)
               : undefined,
