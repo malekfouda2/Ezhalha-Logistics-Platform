@@ -14398,7 +14398,12 @@ export async function registerRoutes(
         width: first.width.toString(),
         height: first.height.toString(),
         dimensionUnit: data.dimensionUnit,
-        packageType: "PARCEL",
+        // "PARCEL" is our word for a local-carrier parcel, not a carrier packaging type. Hardcoding
+        // it here put it on express and Door To Door Freight quotations too, and FedEx rejects it
+        // outright — EZH043868517 was quoted, paid for, and then failed eleven booking attempts on
+        // `400 PACKAGINGTYPE.INVALID`. A carrier-booked shipment defaults to the shipper's own
+        // packaging, which is what every one of these quotations actually is.
+        packageType: data.type === "local" ? "PARCEL" : "YOUR_PACKAGING",
         numberOfPackages: data.packages.length,
         packagesData: JSON.stringify(data.packages),
         itemsData: quoteItems.length ? JSON.stringify(quoteItems) : undefined,
