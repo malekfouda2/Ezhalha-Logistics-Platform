@@ -245,7 +245,7 @@ export default function NotificationsScreen() {
         </Pressable>
       </View>
 
-      <View>
+      <View style={styles.listContainer}>
         {isLoading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={Colors.primary} />
@@ -308,6 +308,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   markAll: { color: Colors.primary },
+  listContainer: { flex: 1 },
   markAllDisabled: { opacity: 0.45 },
   notificationCard: {
     flex: 1,
