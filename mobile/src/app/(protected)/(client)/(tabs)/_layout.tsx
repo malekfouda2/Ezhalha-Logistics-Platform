@@ -37,7 +37,7 @@ function CreateShipmentSheet({ visible, onClose }: CreateShipmentSheetProps) {
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
-      <Text size="medium" weight="bold" style={styles.sheetTitle}>
+      <Text size="large" weight="bold" style={styles.sheetTitle}>
         {t("tabs.createShipmentMenu.title")}
       </Text>
 
