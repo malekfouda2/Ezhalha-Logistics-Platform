@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AppNotification, NOTIFICATIONS_QUERY_KEY, notificationsService } from "../services/notification";
 import { queryClient } from "../queryClient";
@@ -8,13 +8,26 @@ export function useNotifications() {
     const {
         data: notifications = [],
         isLoading,
-        isFetching,
         refetch,
     } = useQuery<AppNotification[]>({
         queryKey: NOTIFICATIONS_QUERY_KEY,
         queryFn: notificationsService.list,
         refetchInterval: 60000,
     });
+
+    // Local state so a pull-to-refresh spinner bound to this only reflects an
+    // actual user pull, not the background refetchInterval tick (which keeps
+    // firing while this screen is mounted-but-frozen underneath another
+    // pushed screen and would otherwise leave a native RefreshControl stuck).
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const refresh = useCallback(async () => {
+        setIsRefreshing(true);
+        try {
+            await refetch();
+        } finally {
+            setIsRefreshing(false);
+        }
+    }, [refetch]);
 
     const unreadCount = useMemo(
         () => notifications.filter((n) => !n.readAt).length,
@@ -115,11 +128,11 @@ export function useNotifications() {
     return {
         notifications,
         isLoading,
-        isFetching,
+        isRefreshing,
         unreadCount,
         markAllAsRead,
         isMarkingAllRead: markAllReadMutation.isPending,
         openNotification,
-        refetch,
+        refetch: refresh,
     };
 }

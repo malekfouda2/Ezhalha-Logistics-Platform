@@ -114,7 +114,7 @@ export default function NotificationsScreen() {
   const {
     notifications,
     isLoading,
-    isFetching,
+    isRefreshing,
     unreadCount,
     markAllAsRead,
     isMarkingAllRead,
@@ -245,7 +245,7 @@ export default function NotificationsScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.notificationCard}>
+      <View>
         {isLoading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={Colors.primary} />
@@ -256,9 +256,10 @@ export default function NotificationsScreen() {
             renderItem={renderNotification}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.notificationCard}
             refreshControl={
               <RefreshControl
-                refreshing={isFetching && !isLoading}
+                refreshing={isRefreshing}
                 onRefresh={refetch}
                 tintColor={Colors.primary}
                 colors={[Colors.primary]}

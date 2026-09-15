@@ -32,7 +32,12 @@ export function useShipmentTracking(
         setError(e instanceof Error ? e.message : "Something went wrong");
       } finally {
         setLoading(false);
-        setRefreshing(false);
+        // Only clear the pull-to-refresh flag for an actual user pull — not
+        // the background poll below, which never sets it in the first
+        // place. Otherwise a poll tick landing while this screen is
+        // off-screen (pushed underneath another screen) can leave the
+        // native RefreshControl stuck until a real touch resyncs it.
+        if (isRefresh) setRefreshing(false);
       }
     },
     [shipmentId]
@@ -40,7 +45,7 @@ export function useShipmentTracking(
 
   useEffect(() => {
     load();
-    const interval = setInterval(() => load(true), POLL_INTERVAL_MS);
+    const interval = setInterval(() => load(false), POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [load]);
 

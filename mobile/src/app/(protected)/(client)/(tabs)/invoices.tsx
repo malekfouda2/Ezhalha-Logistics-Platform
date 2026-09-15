@@ -1,5 +1,5 @@
 // app/(tabs)/invoices.tsx
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { View, FlatList, Pressable, StyleSheet, RefreshControl } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -35,12 +35,25 @@ export default function InvoicesScreen() {
   const {
     data: invoices,
     isLoading,
-    isFetching,
     refetch,
   } = useQuery<Invoice[]>({
     queryKey: ["/api/client/invoices"],
     staleTime: 30_000,
   });
+
+  // Local state so the pull-to-refresh spinner only reflects an actual user
+  // pull, not any background query refetch (see shipments.tsx for the bug
+  // this pattern avoids: a native RefreshControl left stuck once it missed
+  // an unattended isFetching flip while the screen was off-screen).
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refetch]);
 
   const list = invoices ?? [];
 
@@ -149,8 +162,8 @@ export default function InvoicesScreen() {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isFetching && !isLoading}
-            onRefresh={refetch}
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
             tintColor={Colors.primary}
             colors={[Colors.primary]}
           />

@@ -1,5 +1,5 @@
 // app/(tabs)/shipments.tsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   View,
   ScrollView,
@@ -135,7 +135,6 @@ export default function ShipmentsScreen() {
   const {
     data: shipments,
     isLoading,
-    isFetching,
     refetch,
   } = useQuery<Shipment[]>({
     queryKey: ["/api/client/shipments"],
@@ -143,6 +142,20 @@ export default function ShipmentsScreen() {
     refetchOnWindowFocus: true,
     staleTime: 30_000,
   });
+
+  // Local state so the pull-to-refresh spinner only reflects an actual user
+  // pull, not the background refetchInterval tick (which keeps firing while
+  // this screen is pushed underneath shipments/[id] and would otherwise
+  // leave the native RefreshControl stuck once it missed a prop update).
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refetch]);
 
   const activeFilterCount = useMemo(
     () => countActiveFilters(appliedFilters),
@@ -304,8 +317,8 @@ export default function ShipmentsScreen() {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isFetching && !isLoading}
-            onRefresh={refetch}
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
             tintColor={Colors.primary}
             colors={[Colors.primary]}
           />
