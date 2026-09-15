@@ -18,7 +18,7 @@ import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 import { buildIntegrationLogResponse } from "../services/integration-log-payload";
-import { collectFedexPieceLabels, mergePdfLabels } from "../services/label-merge";
+import { collectFedexPieceLabels, collectFedexPieceTrackingNumbers, mergePdfLabels } from "../services/label-merge";
 
 /**
  * FedEx carries dangerous goods per package, not per shipment: `packageSpecialServices` sits
@@ -464,6 +464,15 @@ export interface CreateShipmentResponse {
   carrierTrackingNumber: string;
   labelUrl?: string;
   labelData?: string;
+  /**
+   * One tracking number per piece, in the order the carrier returned them.
+   *
+   * A multi-piece shipment travels as separate barcoded boxes, each with its own number; the
+   * master only aggregates them. Keeping just the master meant no box could be traced on its own,
+   * and when EZH043868517's per-piece labels were lost there was nothing left to reconstruct them
+   * from — the carrier returns these once, in the create response, and never again.
+   */
+  pieceTrackingNumbers?: string[];
   estimatedDelivery?: Date;
   serviceType: string;
 }
@@ -2180,6 +2189,7 @@ export class FedExAdapter implements CarrierAdapter {
           return {
             trackingNumber: shipmentData.masterTrackingNumber,
             carrierTrackingNumber: shipmentData.masterTrackingNumber,
+            pieceTrackingNumbers: collectFedexPieceTrackingNumbers(shipmentData),
             labelData,
             estimatedDelivery: shipmentData.completedShipmentDetail?.operationalDetail?.deliveryDate
               ? new Date(shipmentData.completedShipmentDetail.operationalDetail.deliveryDate)

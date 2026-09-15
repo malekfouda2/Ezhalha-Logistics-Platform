@@ -2176,6 +2176,9 @@ async function finalizePaidShipmentAfterPayment(params: {
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -8317,6 +8320,9 @@ export async function registerRoutes(
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -11185,6 +11191,9 @@ export async function registerRoutes(
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -22395,6 +22404,9 @@ export async function registerRoutes(
           carrierShipmentId: carrierResponse.trackingNumber,
           labelUrl: carrierResponse.labelUrl,
           carrierLabelBase64: carrierResponse.labelData || null,
+          carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+            ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+            : null,
           carrierLabelMimeType: "application/pdf",
           carrierLabelFormat: "PDF",
           estimatedDelivery: carrierResponse.estimatedDelivery,
