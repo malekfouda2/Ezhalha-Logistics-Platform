@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { collectFedexPieceLabels, mergePdfLabels } from "../server/services/label-merge";
+import {
+  collectFedexPieceLabels,
+  collectFedexPieceTrackingNumbers,
+  mergePdfLabels,
+} from "../server/services/label-merge";
 
 /**
  * FedEx returns one label per piece. The adapter kept `pieceResponses[0]` and dropped the rest, so
@@ -85,5 +89,39 @@ describe("reading labels out of a FedEx ship response", () => {
     expect(collectFedexPieceLabels({})).toEqual([]);
     expect(collectFedexPieceLabels({ pieceResponses: null })).toEqual([]);
     expect(collectFedexPieceLabels(undefined)).toEqual([]);
+  });
+});
+
+describe("reading the per-piece tracking numbers", () => {
+  // Every box travels under its own barcode; the master only aggregates them. We kept the master
+  // alone, so no single box could be traced — and when EZH043868517 lost its per-piece labels there
+  // was nothing left to rebuild them from. Carriers return these once and never again.
+  it("takes one number per piece, in carrier order", () => {
+    expect(collectFedexPieceTrackingNumbers({
+      pieceResponses: [
+        { trackingNumber: "794953488101", packageSequenceNumber: 1 },
+        { trackingNumber: "794953488112", packageSequenceNumber: 2 },
+        { trackingNumber: "794953488123", packageSequenceNumber: 3 },
+      ],
+    })).toEqual(["794953488101", "794953488112", "794953488123"]);
+  });
+
+  it("falls back to the piece's master number on a single-piece shipment", () => {
+    // FedEx repeats the master there rather than issuing a distinct child number.
+    expect(collectFedexPieceTrackingNumbers({
+      pieceResponses: [{ masterTrackingNumber: "877206502140" }],
+    })).toEqual(["877206502140"]);
+  });
+
+  it("skips pieces with no number rather than storing a hole", () => {
+    expect(collectFedexPieceTrackingNumbers({
+      pieceResponses: [{ trackingNumber: "111" }, {}, { trackingNumber: "" }, { trackingNumber: "222" }],
+    })).toEqual(["111", "222"]);
+  });
+
+  it("survives a response shaped differently than expected", () => {
+    expect(collectFedexPieceTrackingNumbers({})).toEqual([]);
+    expect(collectFedexPieceTrackingNumbers(undefined)).toEqual([]);
+    expect(collectFedexPieceTrackingNumbers({ pieceResponses: "nope" })).toEqual([]);
   });
 });
