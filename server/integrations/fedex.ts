@@ -1404,7 +1404,23 @@ export class FedExAdapter implements CarrierAdapter {
       "FEDEX_25KG_BOX": "FEDEX_25KG_BOX",
       "FEDEX_EXTRA_LARGE_BOX": "FEDEX_EXTRA_LARGE_BOX",
     };
-    return mapping[packageType || "YOUR_PACKAGING"] || packageType || "YOUR_PACKAGING";
+
+    const requested = (packageType || "").trim();
+    if (!requested) return "YOUR_PACKAGING";
+
+    const mapped = mapping[requested];
+    if (mapped) return mapped;
+
+    // An unrecognised value must never be forwarded. This used to fall back to the raw string,
+    // so "PARCEL" — our own internal word for a local-carrier parcel, hardcoded by the admin
+    // quotation flow — was sent to FedEx as a packaging type and every booking attempt came back
+    // `400 PACKAGINGTYPE.INVALID`. EZH043868517 was retried eleven times against an error that
+    // could never succeed, on a shipment the client had already paid for.
+    //
+    // "The shipper supplies the packaging" is the only safe reading of a value FedEx does not
+    // publish, and it is true of everything except FedEx-branded packaging.
+    logWarn(`FedEx: unknown packaging type "${requested}" — sending YOUR_PACKAGING instead`);
+    return "YOUR_PACKAGING";
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
