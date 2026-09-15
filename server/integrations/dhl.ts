@@ -635,9 +635,17 @@ function extractCreateShipmentResponse(data: any, request: CreateShipmentRequest
   ];
   const { labelData } = extractLabelDocument(documents);
 
+  // DHL numbers each package separately too, under `packages[]`. Same reasoning as FedEx: the
+  // carrier returns these once, and without them a single box cannot be traced or re-labelled.
+  const pieceTrackingNumbers = (Array.isArray(data?.packages) ? data.packages : [])
+    .map((pkg: any) => pkg?.trackingNumber || pkg?.shipmentTrackingNumber)
+    .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value: string) => value.trim());
+
   return {
     trackingNumber,
     carrierTrackingNumber: trackingNumber,
+    pieceTrackingNumbers: pieceTrackingNumbers.length > 0 ? pieceTrackingNumbers : undefined,
     labelData,
     serviceType: request.serviceType,
     estimatedDelivery:

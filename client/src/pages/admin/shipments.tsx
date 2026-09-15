@@ -1424,6 +1424,31 @@ export default function AdminShipments({ abandonedOnly = false }: AdminShipments
                   />
                 </div>
               )}
+              {/* Every box travels under its own barcode; the master only aggregates them. Shown
+                  whenever there is more than one, so a single piece can be traced or chased. */}
+              {(() => {
+                const pieces = (() => {
+                  try {
+                    const parsed = JSON.parse((selectedShipment as any).carrierPieceTrackingNumbers || "[]");
+                    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+                  } catch {
+                    return [];
+                  }
+                })();
+                if (pieces.length < 2) return null;
+                return (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Piece tracking numbers ({pieces.length})</p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {pieces.map((piece: string, index: number) => (
+                        <Badge key={piece} variant="outline" className="font-mono text-xs" title={`Piece ${index + 1} of ${pieces.length}`}>
+                          {index + 1}. {piece}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {(selectedShipment as any).pickupConfirmationNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Pickup Confirmation #</p>

@@ -18,6 +18,7 @@ import { logInfo, logError, logWarn } from "../services/logger";
 import { storage } from "../storage";
 import { getIntegrationEnv, getIntegrationEnvBoolean } from "../services/integration-runtime";
 import { buildIntegrationLogResponse } from "../services/integration-log-payload";
+import { collectFedexPieceLabels, collectFedexPieceTrackingNumbers, mergePdfLabels } from "../services/label-merge";
 
 /**
  * FedEx carries dangerous goods per package, not per shipment: `packageSpecialServices` sits
@@ -463,6 +464,15 @@ export interface CreateShipmentResponse {
   carrierTrackingNumber: string;
   labelUrl?: string;
   labelData?: string;
+  /**
+   * One tracking number per piece, in the order the carrier returned them.
+   *
+   * A multi-piece shipment travels as separate barcoded boxes, each with its own number; the
+   * master only aggregates them. Keeping just the master meant no box could be traced on its own,
+   * and when EZH043868517's per-piece labels were lost there was nothing left to reconstruct them
+   * from — the carrier returns these once, in the create response, and never again.
+   */
+  pieceTrackingNumbers?: string[];
   estimatedDelivery?: Date;
   serviceType: string;
 }
@@ -1404,7 +1414,23 @@ export class FedExAdapter implements CarrierAdapter {
       "FEDEX_25KG_BOX": "FEDEX_25KG_BOX",
       "FEDEX_EXTRA_LARGE_BOX": "FEDEX_EXTRA_LARGE_BOX",
     };
-    return mapping[packageType || "YOUR_PACKAGING"] || packageType || "YOUR_PACKAGING";
+
+    const requested = (packageType || "").trim();
+    if (!requested) return "YOUR_PACKAGING";
+
+    const mapped = mapping[requested];
+    if (mapped) return mapped;
+
+    // An unrecognised value must never be forwarded. This used to fall back to the raw string,
+    // so "PARCEL" — our own internal word for a local-carrier parcel, hardcoded by the admin
+    // quotation flow — was sent to FedEx as a packaging type and every booking attempt came back
+    // `400 PACKAGINGTYPE.INVALID`. EZH043868517 was retried eleven times against an error that
+    // could never succeed, on a shipment the client had already paid for.
+    //
+    // "The shipper supplies the packaging" is the only safe reading of a value FedEx does not
+    // publish, and it is true of everything except FedEx-branded packaging.
+    logWarn(`FedEx: unknown packaging type "${requested}" — sending YOUR_PACKAGING instead`);
+    return "YOUR_PACKAGING";
   }
 
   async getRates(request: RateRequest): Promise<RateResponse[]> {
@@ -2145,10 +2171,26 @@ export class FedExAdapter implements CarrierAdapter {
           const { data } = await this.makeRequest<any>("/ship/v1/shipments", "POST", shipRequest, 1);
           const shipmentData = data.output.transactionShipments[0];
 
+          // Every piece gets its own label. Keeping only `pieceResponses[0]` gave a 25-piece
+          // shipment one page — "## MASTER ## 1 of 25" — and nothing for the other 24 boxes.
+          // PDFs are merged into one document to print; any other format (PNG, ZPL) cannot be
+          // merged, so the first is returned as before rather than silently mangled.
+          const pieceLabels = collectFedexPieceLabels(shipmentData);
+          const labelData = request.labelFormat === "PNG"
+            ? pieceLabels[0]
+            : await mergePdfLabels(pieceLabels);
+
+          if (pieceLabels.length > 1 && request.labelFormat === "PNG") {
+            logWarn(
+              `FedEx returned ${pieceLabels.length} piece labels as PNG; only the first can be kept. Request PDF for multi-piece shipments.`,
+            );
+          }
+
           return {
             trackingNumber: shipmentData.masterTrackingNumber,
             carrierTrackingNumber: shipmentData.masterTrackingNumber,
-            labelData: shipmentData.pieceResponses[0]?.packageDocuments?.[0]?.encodedLabel,
+            pieceTrackingNumbers: collectFedexPieceTrackingNumbers(shipmentData),
+            labelData,
             estimatedDelivery: shipmentData.completedShipmentDetail?.operationalDetail?.deliveryDate
               ? new Date(shipmentData.completedShipmentDetail.operationalDetail.deliveryDate)
               : undefined,

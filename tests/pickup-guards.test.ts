@@ -106,12 +106,36 @@ afterAll(async () => {
   server?.close();
 });
 
+/**
+ * Dates are computed from today, never hardcoded.
+ *
+ * The first version of these tests pinned the real dates from the incident — 2026-09-13 and the
+ * Monday after it. They passed the day they were written and failed two days later, when the
+ * Sunday became the past and the Monday became today, whose collection window had already closed.
+ * A test for "the next working Sunday" has to mean that on every day it runs.
+ *
+ * `weekday` is 0-6 from Sunday. Always at least two days out, so today's cutoff never interferes.
+ */
+function nextFutureWeekday(weekday: number): string {
+  const date = new Date();
+  date.setUTCHours(12, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + 2);
+  while (date.getUTCDay() !== weekday) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+const SUNDAY = 0;
+const TUESDAY = 2;
+
 describe("scheduling a pickup", () => {
   it("refuses a date the origin does not work, and says which origin", async () => {
     const shipment = await createShipment();
 
+    // Sunday: a weekend day in Turkey, which is what DHL refused on EZH861906362.
     const res = await withCookies(
-      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: "2026-09-13" }),
+      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: nextFutureWeekday(SUNDAY) }),
       opsCookies,
     );
 
@@ -126,15 +150,16 @@ describe("scheduling a pickup", () => {
   it("accepts the next working day at that origin", async () => {
     const shipment = await createShipment();
 
-    // 2026-09-14 is the Monday. The booking call itself will fail in tests (no DHL credentials),
-    // which is fine: what matters is that the date passed the guard and was stored.
+    // A Tuesday is a working day in every calendar here. The booking call itself fails in tests
+    // (no DHL credentials), which is fine: what matters is the date passed the guard and stuck.
+    const workingDay = nextFutureWeekday(TUESDAY);
     const res = await withCookies(
-      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: "2026-09-14" }),
+      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: workingDay }),
       opsCookies,
     );
 
     expect(res.status).toBe(200);
-    expect((await storage.getShipment(shipment.id))?.pickupDate).toBe("2026-09-14");
+    expect((await storage.getShipment(shipment.id))?.pickupDate).toBe(workingDay);
   });
 
   it("accepts a Sunday when the origin is Saudi Arabia", async () => {
@@ -146,7 +171,7 @@ describe("scheduling a pickup", () => {
     });
 
     const res = await withCookies(
-      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: "2026-09-13" }),
+      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: nextFutureWeekday(SUNDAY) }),
       opsCookies,
     );
 
@@ -158,7 +183,7 @@ describe("scheduling a pickup", () => {
     const shipment = await createShipment({ status: "in_transit", carrierStatus: "Processed at LEIPZIG-GERMANY" });
 
     const res = await withCookies(
-      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: "2026-09-14" }),
+      request.post(`/api/operations/shipments/${shipment.id}/pickup`).send({ date: nextFutureWeekday(TUESDAY) }),
       opsCookies,
     );
 
