@@ -1,6 +1,13 @@
 // app/(tabs)/invoices.tsx
 import { useCallback, useMemo, useState } from "react";
-import { View, FlatList, Pressable, StyleSheet, RefreshControl } from "react-native";
+import {
+  View,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -11,6 +18,7 @@ import { Input } from "@/components/ui/Input";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DarkSummaryCard } from "@/components/sections/invoices/DarkSummaryCard";
+import { DarkSummaryCardSkeleton } from "@/components/sections/invoices/DarkSummaryCardSkeleton";
 import { InvoiceRow } from "@/components/sections/invoices/InvoiceRow";
 import { ConfirmPaymentSheet } from "@/components/sections/invoices/ConfirmPaymentSheet";
 import { formatMoney, formatShortDate } from "@/utils/invoiceFormat";
@@ -169,30 +177,38 @@ export default function InvoicesScreen() {
           />
         }
         ListHeaderComponent={
-          <DarkSummaryCard
-            label={t("invoices.outstandingBalance")}
-            amount={formatMoney(outstanding).split(".")[0]}
-            decimals={`.${formatMoney(outstanding).split(".")[1]}`}
-            stats={[
-              {
-                label: t("invoices.invoicesOpen"),
-                value: t("invoices.invoicesOpenCount", { count: unpaid.length }),
-              },
-              {
-                label: t("invoices.nextDue"),
-                value: nextDue ? formatShortDate(nextDue) : t("invoices.none"),
-              },
-              {
-                label: t("invoices.overdue"),
-                value: overdueCount > 0 ? String(overdueCount) : t("invoices.none"),
-                valueColor: overdueCount > 0 ? Colors.error : undefined,
-              },
-            ]}
-          />
+          isLoading ? (
+            <DarkSummaryCardSkeleton />
+          ) : (
+            <DarkSummaryCard
+              label={t("invoices.outstandingBalance")}
+              amount={formatMoney(outstanding).split(".")[0]}
+              decimals={`.${formatMoney(outstanding).split(".")[1]}`}
+              stats={[
+                {
+                  label: t("invoices.invoicesOpen"),
+                  value: t("invoices.invoicesOpenCount", { count: unpaid.length }),
+                },
+                {
+                  label: t("invoices.nextDue"),
+                  value: nextDue ? formatShortDate(nextDue) : t("invoices.none"),
+                },
+                {
+                  label: t("invoices.overdue"),
+                  value: overdueCount > 0 ? String(overdueCount) : t("invoices.none"),
+                  valueColor: overdueCount > 0 ? Colors.error : undefined,
+                },
+              ]}
+            />
+          )
         }
         ItemSeparatorComponent={() => <View style={styles.rowDivider} />}
         ListEmptyComponent={
-          !isLoading ? (
+          isLoading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          ) : (
             <View style={styles.emptyState}>
               <Feather name="file-text" size={rs(32)} color={Colors.placeholder} />
               <Text size="medium" weight="bold" style={styles.emptyTitle}>
@@ -202,7 +218,7 @@ export default function InvoicesScreen() {
                 {t("invoices.empty.description")}
               </Text>
             </View>
-          ) : null
+          )
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
@@ -282,6 +298,11 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     height: rvs(10),
+  },
+  loadingState: {
+    paddingTop: rvs(60),
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyState: {
     alignItems: "center",

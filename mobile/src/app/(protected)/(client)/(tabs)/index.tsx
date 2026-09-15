@@ -6,7 +6,6 @@ import {
   Pressable,
   RefreshControl,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 
@@ -138,25 +137,47 @@ export default function ClientDashboard() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
-          <View style={styles.avatar}>
-            <Text size="medium" weight="bold" style={styles.avatarText}>
-              {initials}
-            </Text>
-          </View>
+          {accountLoading && !isGuest ? (
+            <Skeleton width={rs(42)} height={rs(42)} borderRadius={rs(13)} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text size="medium" weight="bold" style={styles.avatarText}>
+                {initials}
+              </Text>
+            </View>
+          )}
 
           <View style={styles.userText}>
-            <Text
-              size="medium"
-              weight="bold"
-              numberOfLines={1}
-              style={styles.companyName}
-            >
-              {accountLoading ? "Loading…" : displayName}
-            </Text>
+            {accountLoading && !isGuest ? (
+              <Skeleton
+                width={rs(120)}
+                height={rvs(15)}
+                borderRadius={rs(4)}
+                style={styles.companyNameSkeleton}
+              />
+            ) : (
+              <Text
+                size="medium"
+                weight="bold"
+                numberOfLines={1}
+                style={styles.companyName}
+              >
+                {displayName}
+              </Text>
+            )}
 
-            <Text size="xs" style={styles.userName} numberOfLines={1}>
-              {isGuest ? t("guest.notSignedIn") : `${account?.name} · ${account?.accountNumber}`}
-            </Text>
+            {accountLoading && !isGuest ? (
+              <Skeleton
+                width={rs(90)}
+                height={rvs(11)}
+                borderRadius={rs(4)}
+                style={styles.userNameSkeleton}
+              />
+            ) : (
+              <Text size="xs" style={styles.userName} numberOfLines={1}>
+                {isGuest ? t("guest.notSignedIn") : `${account?.name} · ${account?.accountNumber}`}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -195,9 +216,18 @@ export default function ClientDashboard() {
             {t("dashboard.pricingTier")}
           </Text>
 
-          <Text size="small" weight="bold" style={styles.vip}>
-            {account?.profile?.toUpperCase() ?? "—"}
-          </Text>
+          {accountLoading && !isGuest ? (
+            <Skeleton
+              width={rs(50)}
+              height={rvs(13)}
+              borderRadius={rs(4)}
+              style={styles.vipSkeleton}
+            />
+          ) : (
+            <Text size="small" weight="bold" style={styles.vip}>
+              {account?.profile?.toUpperCase() ?? "—"}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -395,9 +425,15 @@ const styles = StyleSheet.create({
   companyName: {
     color: Colors.text,
   },
+  companyNameSkeleton: {
+    marginBottom: rvs(2),
+  },
   userName: {
     color: "#65748B",
     marginTop: rvs(1),
+  },
+  userNameSkeleton: {
+    marginTop: rvs(3),
   },
   notificationButton: {
     width: rs(40),
@@ -461,6 +497,9 @@ const styles = StyleSheet.create({
   },
   vip: {
     color: Colors.primary,
+    marginStart: rs(6),
+  },
+  vipSkeleton: {
     marginStart: rs(6),
   },
   statsGrid: {

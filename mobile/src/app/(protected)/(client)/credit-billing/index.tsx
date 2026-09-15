@@ -14,6 +14,7 @@ import InfoBox from "@/components/ui/InfoBox";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { DarkSummaryCard } from "@/components/sections/invoices/DarkSummaryCard";
+import { DarkSummaryCardSkeleton } from "@/components/sections/invoices/DarkSummaryCardSkeleton";
 import { CreditInvoiceRow } from "@/components/sections/invoices/CreditInvoiceRow";
 import { RequestCreditAccessSheet } from "@/components/sections/invoices/RequestCreditAccessSheet";
 import { formatMoney, toNumber } from "@/utils/invoiceFormat";
@@ -166,25 +167,29 @@ export default function CreditBillingScreen() {
           </View>
         ) : (
           <>
-            <DarkSummaryCard
-              label={t("invoices.creditBilling.availableCredit")}
-              amount={formatMoney(available).split(".")[0]}
-              decimals={`.${formatMoney(available).split(".")[1]}`}
-              progress={limit > 0 ? used / limit : 0}
-              stats={[
-                { label: t("invoices.creditBilling.limit"), value: formatMoney(limit) },
-                { label: t("invoices.creditBilling.used"), value: formatMoney(used) },
-                {
-                  label: t("invoices.creditBilling.nextDue"),
-                  value: nextDue
-                    ? new Date(nextDue).toLocaleDateString("en-US", {
-                        day: "numeric",
-                        month: "short",
-                      })
-                    : t("invoices.none"),
-                },
-              ]}
-            />
+            {invoicesLoading ? (
+              <DarkSummaryCardSkeleton showProgress />
+            ) : (
+              <DarkSummaryCard
+                label={t("invoices.creditBilling.availableCredit")}
+                amount={formatMoney(available).split(".")[0]}
+                decimals={`.${formatMoney(available).split(".")[1]}`}
+                progress={limit > 0 ? used / limit : 0}
+                stats={[
+                  { label: t("invoices.creditBilling.limit"), value: formatMoney(limit) },
+                  { label: t("invoices.creditBilling.used"), value: formatMoney(used) },
+                  {
+                    label: t("invoices.creditBilling.nextDue"),
+                    value: nextDue
+                      ? new Date(nextDue).toLocaleDateString("en-US", {
+                          day: "numeric",
+                          month: "short",
+                        })
+                      : t("invoices.none"),
+                  },
+                ]}
+              />
+            )}
 
             <Text
               size="xs"

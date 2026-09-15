@@ -200,43 +200,39 @@ export default function PaymentsScreen() {
           </View>
         )}
 
-        {isLoading ? (
-          <ActivityIndicator color={Colors.primary} style={styles.loading} />
-        ) : (
+        {feesLoading ? null : sortedFees.length > 0 ? (
           <>
-            {feesLoading ? null : sortedFees.length > 0 ? (
-              <>
-                <SectionLabel>{t("invoices.payments.extraFeeNotices")}</SectionLabel>
-                <View style={styles.listCard}>
-                  {sortedFees.map((fee, index) => (
-                    <View key={`${fee.shipmentId}-${fee.extraFeesType}`}>
-                      {index > 0 && <View style={styles.rowDivider} />}
-                      <ExtraFeeNoticeRow notice={fee} />
-                    </View>
-                  ))}
+            <SectionLabel>{t("invoices.payments.extraFeeNotices")}</SectionLabel>
+            <View style={styles.listCard}>
+              {sortedFees.map((fee, index) => (
+                <View key={`${fee.shipmentId}-${fee.extraFeesType}`}>
+                  {index > 0 && <View style={styles.rowDivider} />}
+                  <ExtraFeeNoticeRow notice={fee} />
                 </View>
-              </>
-            ) : null}
-
-            <SectionLabel>{t("invoices.payments.transactions")}</SectionLabel>
-            {sortedPayments.length === 0 ? (
-              <Text size="small" dimRate="60%" style={styles.emptyText}>
-                {t("invoices.payments.empty")}
-              </Text>
-            ) : (
-              <View style={styles.listCard}>
-                {sortedPayments.map((payment, index) => (
-                  <View key={payment.id}>
-                    {index > 0 && <View style={styles.rowDivider} />}
-                    <PaymentTransactionRow
-                      payment={payment}
-                      invoiceNumber={invoiceById.get(payment.invoiceId)?.invoiceNumber}
-                    />
-                  </View>
-                ))}
-              </View>
-            )}
+              ))}
+            </View>
           </>
+        ) : null}
+
+        <SectionLabel>{t("invoices.payments.transactions")}</SectionLabel>
+        {paymentsLoading ? (
+          <ActivityIndicator color={Colors.primary} style={styles.loading} />
+        ) : sortedPayments.length === 0 ? (
+          <Text size="small" dimRate="60%" style={styles.emptyText}>
+            {t("invoices.payments.empty")}
+          </Text>
+        ) : (
+          <View style={styles.listCard}>
+            {sortedPayments.map((payment, index) => (
+              <View key={payment.id}>
+                {index > 0 && <View style={styles.rowDivider} />}
+                <PaymentTransactionRow
+                  payment={payment}
+                  invoiceNumber={invoiceById.get(payment.invoiceId)?.invoiceNumber}
+                />
+              </View>
+            ))}
+          </View>
         )}
 
         <View style={{ height: rvs(20) }} />

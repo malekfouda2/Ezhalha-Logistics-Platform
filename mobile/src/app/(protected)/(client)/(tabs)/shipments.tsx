@@ -7,6 +7,7 @@ import {
   Pressable,
   RefreshControl,
   FlatList,
+  ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -324,7 +325,11 @@ export default function ShipmentsScreen() {
           />
         }
         ListEmptyComponent={
-          !isLoading ? (
+          isLoading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          ) : (
             <View style={styles.emptyState}>
               <Feather
                 name="hexagon"
@@ -346,7 +351,7 @@ export default function ShipmentsScreen() {
                 onPress={() => router.push("createShipment")}
               />
             </View>
-          ) : null
+          )
         }
         renderItem={({ item }) =>
           activeFilter === "attention" ? (
@@ -464,6 +469,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: rs(16),
     paddingTop: rvs(8),
     paddingBottom: rvs(15),
+  },
+
+  loadingState: {
+    paddingTop: rvs(60),
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   emptyState: {

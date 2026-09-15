@@ -13,6 +13,8 @@ export interface SkeletonProps {
   height?: number;
   borderRadius?: number;
   style?: ViewStyle;
+  /** Overrides the default light-gray sweep — e.g. a darker set for a dark-card skeleton. */
+  shimmerColors?: string[];
 }
 
 export function Skeleton({
@@ -20,13 +22,14 @@ export function Skeleton({
   height = 14,
   borderRadius = 8,
   style,
+  shimmerColors = SHIMMER_COLORS,
 }: SkeletonProps) {
   return (
     <ShimmerPlaceholder
       width={width}
       height={height}
       duration={1100}
-      shimmerColors={SHIMMER_COLORS}
+      shimmerColors={shimmerColors}
       style={[{ borderRadius }, style]}
     />
   );
