@@ -104,6 +104,7 @@ Common integration env:
 - Integration accounts can be managed through admin apps and encrypted with `INTEGRATION_CONFIG_SECRET`.
 - Tap is current payment integration. Stripe references are legacy/backwards compatibility if present.
 - Credit/pay-later creates `credit_invoices` with 30-day terms and reminder scheduler; see `docs/credit-pay-later-feature.md`.
+- Schema: `npm run db:migrate` (ledger in `schema_migrations`, `--expect-db=<name>` on servers, `--baseline` to adopt an existing DB, `--repair` to re-apply all) and `npm run db:check` (compares `shared/schema.ts` to the live DB, exits 1 on drift — the deploy gate). Never infer "no migrations needed" from a PR diff: a release carries everything merged since the last deployed tag. Migrations must be idempotent; `tests/schema-drift.test.ts` enforces that.
 - Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, or `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`.
 - Default seed data creates admin/client demo users only when DB has no admin user; do not rely on seeded credentials for production.
 

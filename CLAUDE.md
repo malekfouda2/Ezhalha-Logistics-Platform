@@ -11,7 +11,10 @@ A more detailed agent guide already lives in [AGENTS.md](AGENTS.md) — read it 
 - Type check (excludes `**/*.test.ts`): `npm run check`
 - Production build (Vite client + esbuild server bundle via [script/build.ts](script/build.ts)): `npm run build`
 - Start production bundle (`dist/index.cjs`): `npm start`
-- Push Drizzle schema to DB: `npm run db:push`
+- Apply pending SQL migrations (recorded in `schema_migrations`): `npm run db:migrate` — add `-- --expect-db=<name>` against any server
+- List pending migrations without applying (deploy gate, exits 1 if any): `npm run db:migrate:check`
+- **Verify the database has every table/column the code expects: `npm run db:check`** — this is the gate that must pass before a build goes live
+- Push Drizzle schema to DB (local only, never a server): `npm run db:push`
 - Run all tests: `npx vitest run`
 - Run one test file: `npx vitest run tests/<name>.test.ts`
 
@@ -45,6 +48,21 @@ Start after the HTTP server listens: credit reminders, abandoned shipment recove
 ## Environment
 
 [server/load-env.ts](server/load-env.ts) loads `.env` unless `NODE_ENV=test`. Tests requiring env must set vars explicitly or mock. Required for normal DB-backed work: `DATABASE_URL`; in production also `SESSION_SECRET` and `INTEGRATION_CONFIG_SECRET`. See [AGENTS.md](AGENTS.md#environment) and `.env.example` for the full integration matrix (FedEx/DHL/Aramex/Tap/Zoho/Gemini/SMTP/object-storage).
+
+## Schema and deploys
+
+The database is never assumed to match the code — it is checked. `npm run db:migrate` applies
+anything not yet recorded in `schema_migrations`; `npm run db:check` compares every table and column
+in [shared/schema.ts](shared/schema.ts) against the live database and exits non-zero on drift.
+
+**Never conclude "no migrations in this release" from a pull-request diff.** A release contains
+everything merged since the previously deployed tag, including migrations from work released only to
+staging. Production ran for three days on 2026-09-10 unable to read `client_applications` because
+code selecting `shipment_draft` shipped while that migration existed only on staging — Drizzle names
+every column in its SELECT, so the whole table became unreadable. Ask the database, not the diff.
+
+Migrations must be **idempotent** (`IF NOT EXISTS` / `NOT EXISTS` guards); `tests/schema-drift.test.ts`
+enforces it, and both `--repair` and re-running after a partial failure depend on it.
 
 ## High-risk areas (touch carefully)
 
