@@ -4,7 +4,6 @@ import {
   View,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,9 +11,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 
 import { Text } from "@/components/ui/Text";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
+import { rs, rvs, screenWidth } from "@/utils/responsive";
 import { StatCard } from "@/components/sections/dashboard/StatCard";
+import { StatCardSkeleton } from "@/components/sections/dashboard/StatCardSkeleton";
 import { RecentShipments } from "@/components/sections/dashboard/RecentShipments";
 import { ClientAccount, ClientDashboardStats, Shipment } from "@shared/schema";
 import { router } from "expo-router";
@@ -25,6 +26,10 @@ import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { useCurrentUser } from "@/lib/hooks/useAuth";
 import { useGuestMode } from "@/store/useGuestStore";
+
+// Matches `content`'s and `chartCard`'s own horizontal padding below, so the
+// chart's loading skeleton fills the same width the real chart renders at.
+const CHART_CARD_WIDTH = screenWidth - rs(16) * 2 - rs(10) * 2;
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
@@ -198,8 +203,11 @@ export default function ClientDashboard() {
 
       {/* Stats */}
       {statsLoading ? (
-        <View style={styles.statsLoading}>
-          <ActivityIndicator color={Colors.primary} />
+        <View style={styles.statsGrid}>
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
         </View>
       ) : (
         <View style={styles.statsGrid}>
@@ -249,14 +257,11 @@ export default function ClientDashboard() {
 
         <View style={styles.chartCard}>
           {statsLoading ? (
-            <View
-              style={[
-                styles.chart,
-                { alignItems: "center", justifyContent: "center" },
-              ]}
-            >
-              <ActivityIndicator color={Colors.primary} />
-            </View>
+            <Skeleton
+              width={CHART_CARD_WIDTH}
+              height={rvs(100)}
+              borderRadius={rs(10)}
+            />
           ) : !hasActivityData ? (
             <View style={styles.chartEmpty}>
               <Text size="small" style={styles.chartEmptyText}>
@@ -463,12 +468,6 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     marginTop: rvs(18),
-  },
-  statsLoading: {
-    marginTop: rvs(18),
-    minHeight: rvs(200),
-    alignItems: "center",
-    justifyContent: "center",
   },
   section: {
     marginTop: rvs(12),

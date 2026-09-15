@@ -8,8 +8,9 @@ import { Text } from "@/components/ui/Text";
 import { BackButton } from "@/components/ui/BackButton";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { SectionLabel, InfoCard, InfoRow } from "@/components/ui/InfoCard";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Colors } from "@/constants/colors";
-import { rs, rvs } from "@/utils/responsive";
+import { rs, rvs, screenWidth } from "@/utils/responsive";
 import { BilledPaidChart, BilledPaidPoint } from "@/components/sections/invoices/BilledPaidChart";
 import { ExtraFeeNoticeRow } from "@/components/sections/invoices/ExtraFeeNoticeRow";
 import { PaymentTransactionRow } from "@/components/sections/invoices/PaymentTransactionRow";
@@ -21,6 +22,34 @@ const MONTH_KEYS = [
   "jan", "feb", "mar", "apr", "may", "jun",
   "jul", "aug", "sep", "oct", "nov", "dec",
 ];
+
+// Matches BilledPaidChart's own CHART_HEIGHT + month-label allowance, so the
+// chart's shimmer fills the same footprint the real chart renders at.
+const CHART_SKELETON_HEIGHT = rvs(140) + rvs(22);
+// scrollContent's and chartCard's own horizontal padding (rs(16) each side, twice).
+const CHART_SKELETON_WIDTH = screenWidth - rs(16) * 4;
+
+function AccountSnapshotSkeleton() {
+  return (
+    <InfoCard>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={snapshotStyles.row}>
+          <Skeleton width={rs(80)} height={rvs(12)} borderRadius={rs(4)} />
+          <Skeleton width={rs(60)} height={rvs(16)} borderRadius={rs(4)} />
+        </View>
+      ))}
+    </InfoCard>
+  );
+}
+
+const snapshotStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: rvs(12),
+  },
+});
 
 export default function PaymentsScreen() {
   const { t } = useTranslation();
@@ -117,52 +146,64 @@ export default function PaymentsScreen() {
           </Text>
         </View>
 
+        <SectionLabel>{t("invoices.payments.accountSnapshot")}</SectionLabel>
+        {isLoading ? (
+          <AccountSnapshotSkeleton />
+        ) : (
+          <InfoCard>
+            <InfoRow
+              label={t("invoices.payments.billed")}
+              value={formatMoney(billedTotal)}
+            />
+            <InfoRow label={t("invoices.payments.paid")} value={formatMoney(paidTotal)} />
+            <InfoRow
+              label={t("invoices.payments.outstanding")}
+              value={formatMoney(outstanding)}
+              valueColor={outstanding > 0 ? Colors.primary : undefined}
+            />
+          </InfoCard>
+        )}
+
+        <SectionLabel>{t("invoices.payments.chartTitle")}</SectionLabel>
+        {isLoading ? (
+          <View style={styles.chartCard}>
+            <Skeleton
+              width={CHART_SKELETON_WIDTH}
+              height={CHART_SKELETON_HEIGHT}
+              borderRadius={rs(10)}
+            />
+          </View>
+        ) : hasChartData ? (
+          <View style={styles.chartCard}>
+            <BilledPaidChart data={chartData} />
+
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, styles.legendDotBilled]} />
+                <Text size="xs" dimRate="60%">
+                  {t("invoices.payments.billed")}
+                </Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, styles.legendDotPaid]} />
+                <Text size="xs" dimRate="60%">
+                  {t("invoices.payments.paid")}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.chartCard, styles.chartEmpty]}>
+            <Text size="small" style={styles.chartEmptyText}>
+              No shipments yet
+            </Text>
+          </View>
+        )}
+
         {isLoading ? (
           <ActivityIndicator color={Colors.primary} style={styles.loading} />
         ) : (
           <>
-            <SectionLabel>{t("invoices.payments.accountSnapshot")}</SectionLabel>
-            <InfoCard>
-              <InfoRow
-                label={t("invoices.payments.billed")}
-                value={formatMoney(billedTotal)}
-              />
-              <InfoRow label={t("invoices.payments.paid")} value={formatMoney(paidTotal)} />
-              <InfoRow
-                label={t("invoices.payments.outstanding")}
-                value={formatMoney(outstanding)}
-                valueColor={outstanding > 0 ? Colors.primary : undefined}
-              />
-            </InfoCard>
-
-            <SectionLabel>{t("invoices.payments.chartTitle")}</SectionLabel>
-            {hasChartData ? (
-              <View style={styles.chartCard}>
-                <BilledPaidChart data={chartData} />
-
-                <View style={styles.legendRow}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, styles.legendDotBilled]} />
-                    <Text size="xs" dimRate="60%">
-                      {t("invoices.payments.billed")}
-                    </Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, styles.legendDotPaid]} />
-                    <Text size="xs" dimRate="60%">
-                      {t("invoices.payments.paid")}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ) : (
-              <View style={[styles.chartCard, styles.chartEmpty]}>
-                <Text size="small" style={styles.chartEmptyText}>
-                  No shipments yet
-                </Text>
-              </View>
-            )}
-
             {feesLoading ? null : sortedFees.length > 0 ? (
               <>
                 <SectionLabel>{t("invoices.payments.extraFeeNotices")}</SectionLabel>
