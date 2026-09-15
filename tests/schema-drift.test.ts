@@ -59,11 +59,17 @@ describe("schema drift detection", () => {
 
   it("finds the real tables in shared/schema.ts", () => {
     // If this ever returns nothing, the check would pass against an empty database.
+    //
+    // Asserted against tables that exist in every version of the schema. An earlier draft named
+    // `email_deliveries` here, which passes on main and fails on any release cut before that
+    // feature — a guard that only works on the newest branch is worthless on the older one being
+    // deployed, which is precisely when it is needed.
     const tables = expectedTables();
     expect(tables.length).toBeGreaterThan(50);
+    expect(tables.find((table) => table.name === "shipments")).toBeTruthy();
+    expect(tables.find((table) => table.name === "client_accounts")).toBeTruthy();
     const applications = tables.find((table) => table.name === "client_applications");
     expect(applications?.columns).toContain("shipment_draft");
-    expect(tables.find((table) => table.name === "email_deliveries")).toBeTruthy();
   });
 });
 
