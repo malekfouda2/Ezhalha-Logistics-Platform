@@ -231,245 +231,244 @@ export const AddItemModal = ({
   }));
 
   return (
-    <>
-      <BottomSheet visible={visible} onClose={onClose}>
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text size="xl" weight="bold">
-              {mode === "edit"
-                ? t("createShipment.express.steps.step6.itemModal.editTitle")
-                : t("createShipment.express.steps.step6.itemModal.addTitle")}
-            </Text>
-            <Text size="small" dimRate="70%" style={{ marginTop: rvs(4) }}>
-              {t("createShipment.express.steps.step6.itemModal.subtitle")}
-            </Text>
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Text size="large" weight="bold">
+            {mode === "edit"
+              ? t("createShipment.express.steps.step6.itemModal.editTitle")
+              : t("createShipment.express.steps.step6.itemModal.addTitle")}
+          </Text>
+          <Text size="small" dimRate="70%" style={{ marginTop: rvs(4) }}>
+            {t("createShipment.express.steps.step6.itemModal.subtitle")}
+          </Text>
+        </View>
+
+        <Pressable onPress={onClose} hitSlop={10}>
+          <Ionicons name="close" size={rs(22)} color={Colors.text} />
+        </Pressable>
+      </View>
+
+      <ScrollView
+        style={{ maxHeight: bodyMaxHeight }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Controller
+          control={control}
+          name="itemName"
+          render={({ field }) => (
+            <Input
+              label={t("createShipment.express.steps.step6.itemModal.itemName")}
+              placeholder={t("createShipment.express.steps.step6.itemModal.itemNamePlaceholder")}
+              value={field.value}
+              onChangeText={field.onChange}
+              error={errors.itemName?.message}
+            />
+          )}
+        />
+
+        <Text size="medium" weight="semibold" style={styles.fieldLabel}>
+          {t("createShipment.express.steps.step6.itemModal.category")}
+        </Text>
+        <Controller
+          control={control}
+          name="category"
+          render={({ field }) => (
+            <PackageTypeSelect
+              title={t("createShipment.express.steps.step6.itemModal.category")}
+              options={itemCategoryOptions}
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
+        />
+        {errors.category ? (
+          <Text size="xs" weight="medium" style={styles.errorText}>
+            {errors.category.message}
+          </Text>
+        ) : null}
+
+        <View style={styles.gap} />
+
+        <Text size="medium" weight="semibold" style={styles.fieldLabel}>
+          {t("createShipment.express.steps.step6.itemModal.countryOfOrigin")}
+        </Text>
+        <Controller
+          control={control}
+          name="countryOfOrigin"
+          render={({ field }) => (
+            <CountrySelect
+              value={field.value}
+              onChange={(selected) => field.onChange(selected.code)}
+              title={t("createShipment.express.steps.step6.itemModal.countryOfOrigin")}
+              error={errors.countryOfOrigin?.message}
+            />
+          )}
+        />
+
+        <View style={styles.row}>
+          <View style={styles.half}>
+            <Controller
+              control={control}
+              name="price"
+              render={({ field }) => (
+                <Input
+                  label={t("createShipment.express.steps.step6.itemModal.unitPrice")}
+                  value={String(field.value)}
+                  onChangeText={(text) => field.onChange(Number(text) || 0)}
+                  keyboardType="decimal-pad"
+                  error={errors.price?.message}
+                />
+              )}
+            />
           </View>
 
-          <Pressable onPress={onClose} hitSlop={10}>
-            <Ionicons name="close" size={rs(22)} color={Colors.text} />
+          <View style={styles.half}>
+            <Text size="medium" weight="semibold" style={styles.fieldLabel}>
+              {t("createShipment.express.steps.step6.itemModal.currency")}
+            </Text>
+            <Controller
+              control={control}
+              name="currency"
+              render={({ field }) => (
+                <PackageTypeSelect
+                  title={t("createShipment.express.steps.step6.itemModal.currency")}
+                  options={itemCurrencyOptions}
+                  value={field.value}
+                  onChange={field.onChange}
+                />
+              )}
+            />
+          </View>
+        </View>
+
+        <Controller
+          control={control}
+          name="quantity"
+          render={({ field }) => (
+            <Input
+              label={t("createShipment.express.steps.step6.itemModal.quantity")}
+              value={String(field.value)}
+              onChangeText={(text) => field.onChange(parseInt(text, 10) || 1)}
+              keyboardType="number-pad"
+              error={errors.quantity?.message}
+            />
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="itemDescription"
+          render={({ field }) => (
+            <Input
+              label={t("createShipment.express.steps.step6.itemModal.itemDescription")}
+              placeholder={t(
+                "createShipment.express.steps.step6.itemModal.itemDescriptionPlaceholder",
+              )}
+              value={field.value}
+              onChangeText={field.onChange}
+              multiline
+              numberOfLines={3}
+              style={styles.textarea}
+            />
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="material"
+          render={({ field }) => (
+            <Input
+              label={t("createShipment.express.steps.step6.itemModal.material")}
+              placeholder={t("createShipment.express.steps.step6.itemModal.materialPlaceholder")}
+              value={field.value}
+              onChangeText={field.onChange}
+            />
+          )}
+        />
+
+        <View style={styles.hsSection}>
+          <View style={styles.hsHeaderRow}>
+            <Text size="medium" weight="semibold">
+              {t("createShipment.express.steps.step6.itemModal.hsCode")}
+            </Text>
+
+            <Button
+              title={
+                isLookingUpHsCode
+                  ? t("createShipment.express.steps.step6.itemModal.lookingUp")
+                  : t("createShipment.express.steps.step6.itemModal.lookupHsCode")
+              }
+              variant="outline"
+              loading={isLookingUpHsCode}
+              onPress={handleLookupHsCode}
+              disabled={!itemName.trim() || !category || !countryOfOrigin}
+              style={styles.lookupButton}
+              fontSize="small"
+            />
+          </View>
+
+          {hsManualEntry ? (
+            <Controller
+              control={control}
+              name="hsCode"
+              render={({ field }) => (
+                <Input
+                  placeholder={t(
+                    "createShipment.express.steps.step6.itemModal.hsCodePlaceholder",
+                  )}
+                  value={field.value}
+                  onChangeText={(text) => {
+                    field.onChange(text);
+                    setHsCodeSource("USER");
+                    setHsCodeConfidence(text.length >= 6 ? "HIGH" : "MEDIUM");
+                  }}
+                />
+              )}
+            />
+          ) : hsCodeCandidates.length > 0 ? (
+            <Pressable onPress={() => setHsPickerVisible(true)} style={styles.suggestedRow}>
+              <Text size="small" style={{ flex: 1 }}>
+                {t("createShipment.express.steps.step6.itemModal.suggestedCodes")}: {hsCode || "—"}
+              </Text>
+              <Text size="small" weight="semibold" style={styles.changeText}>
+                {t("createShipment.express.steps.step6.itemModal.change")}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable onPress={() => setHsManualEntry((prev) => !prev)}>
+            <Text size="xs" weight="semibold" style={styles.toggleManualText}>
+              {hsManualEntry
+                ? t("createShipment.express.steps.step6.itemModal.useSuggested")
+                : t("createShipment.express.steps.step6.itemModal.enterManually")}
+            </Text>
           </Pressable>
         </View>
 
-        <ScrollView
-          style={{ maxHeight: bodyMaxHeight }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Controller
-            control={control}
-            name="itemName"
-            render={({ field }) => (
-              <Input
-                label={t("createShipment.express.steps.step6.itemModal.itemName")}
-                placeholder={t("createShipment.express.steps.step6.itemModal.itemNamePlaceholder")}
-                value={field.value}
-                onChangeText={field.onChange}
-                error={errors.itemName?.message}
-              />
-            )}
+        <View style={styles.scrollBottomSpacer} />
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <View style={{ flex: 1 }}>
+          <Button
+            title={t("createShipment.express.steps.step6.itemModal.cancel")}
+            variant="outline"
+            onPress={onClose}
           />
-
-          <Text size="medium" weight="semibold" style={styles.fieldLabel}>
-            {t("createShipment.express.steps.step6.itemModal.category")}
-          </Text>
-          <Controller
-            control={control}
-            name="category"
-            render={({ field }) => (
-              <PackageTypeSelect
-                title={t("createShipment.express.steps.step6.itemModal.category")}
-                options={itemCategoryOptions}
-                value={field.value}
-                onChange={field.onChange}
-              />
-            )}
-          />
-          {errors.category ? (
-            <Text size="xs" weight="medium" style={styles.errorText}>
-              {errors.category.message}
-            </Text>
-          ) : null}
-
-          <View style={styles.gap} />
-
-          <Text size="medium" weight="semibold" style={styles.fieldLabel}>
-            {t("createShipment.express.steps.step6.itemModal.countryOfOrigin")}
-          </Text>
-          <Controller
-            control={control}
-            name="countryOfOrigin"
-            render={({ field }) => (
-              <CountrySelect
-                value={field.value}
-                onChange={(selected) => field.onChange(selected.code)}
-                title={t("createShipment.express.steps.step6.itemModal.countryOfOrigin")}
-                error={errors.countryOfOrigin?.message}
-              />
-            )}
-          />
-
-          <View style={styles.row}>
-            <View style={styles.half}>
-              <Controller
-                control={control}
-                name="price"
-                render={({ field }) => (
-                  <Input
-                    label={t("createShipment.express.steps.step6.itemModal.unitPrice")}
-                    value={String(field.value)}
-                    onChangeText={(text) => field.onChange(Number(text) || 0)}
-                    keyboardType="decimal-pad"
-                    error={errors.price?.message}
-                  />
-                )}
-              />
-            </View>
-
-            <View style={styles.half}>
-              <Text size="medium" weight="semibold" style={styles.fieldLabel}>
-                {t("createShipment.express.steps.step6.itemModal.currency")}
-              </Text>
-              <Controller
-                control={control}
-                name="currency"
-                render={({ field }) => (
-                  <PackageTypeSelect
-                    title={t("createShipment.express.steps.step6.itemModal.currency")}
-                    options={itemCurrencyOptions}
-                    value={field.value}
-                    onChange={field.onChange}
-                  />
-                )}
-              />
-            </View>
-          </View>
-
-          <Controller
-            control={control}
-            name="quantity"
-            render={({ field }) => (
-              <Input
-                label={t("createShipment.express.steps.step6.itemModal.quantity")}
-                value={String(field.value)}
-                onChangeText={(text) => field.onChange(parseInt(text, 10) || 1)}
-                keyboardType="number-pad"
-                error={errors.quantity?.message}
-              />
-            )}
-          />
-
-          <Controller
-            control={control}
-            name="itemDescription"
-            render={({ field }) => (
-              <Input
-                label={t("createShipment.express.steps.step6.itemModal.itemDescription")}
-                placeholder={t(
-                  "createShipment.express.steps.step6.itemModal.itemDescriptionPlaceholder",
-                )}
-                value={field.value}
-                onChangeText={field.onChange}
-                multiline
-                numberOfLines={3}
-                style={styles.textarea}
-              />
-            )}
-          />
-
-          <Controller
-            control={control}
-            name="material"
-            render={({ field }) => (
-              <Input
-                label={t("createShipment.express.steps.step6.itemModal.material")}
-                placeholder={t("createShipment.express.steps.step6.itemModal.materialPlaceholder")}
-                value={field.value}
-                onChangeText={field.onChange}
-              />
-            )}
-          />
-
-          <View style={styles.hsSection}>
-            <View style={styles.hsHeaderRow}>
-              <Text size="medium" weight="semibold">
-                {t("createShipment.express.steps.step6.itemModal.hsCode")}
-              </Text>
-
-              <Button
-                title={
-                  isLookingUpHsCode
-                    ? t("createShipment.express.steps.step6.itemModal.lookingUp")
-                    : t("createShipment.express.steps.step6.itemModal.lookupHsCode")
-                }
-                variant="outline"
-                loading={isLookingUpHsCode}
-                onPress={handleLookupHsCode}
-                disabled={!itemName.trim() || !category || !countryOfOrigin}
-                style={styles.lookupButton}
-              />
-            </View>
-
-            {hsManualEntry ? (
-              <Controller
-                control={control}
-                name="hsCode"
-                render={({ field }) => (
-                  <Input
-                    placeholder={t(
-                      "createShipment.express.steps.step6.itemModal.hsCodePlaceholder",
-                    )}
-                    value={field.value}
-                    onChangeText={(text) => {
-                      field.onChange(text);
-                      setHsCodeSource("USER");
-                      setHsCodeConfidence(text.length >= 6 ? "HIGH" : "MEDIUM");
-                    }}
-                  />
-                )}
-              />
-            ) : hsCodeCandidates.length > 0 ? (
-              <Pressable onPress={() => setHsPickerVisible(true)} style={styles.suggestedRow}>
-                <Text size="small" style={{ flex: 1 }}>
-                  {t("createShipment.express.steps.step6.itemModal.suggestedCodes")}: {hsCode || "—"}
-                </Text>
-                <Text size="small" weight="semibold" style={styles.changeText}>
-                  {t("createShipment.express.steps.step6.itemModal.change")}
-                </Text>
-              </Pressable>
-            ) : null}
-
-            <Pressable onPress={() => setHsManualEntry((prev) => !prev)}>
-              <Text size="xs" weight="semibold" style={styles.toggleManualText}>
-                {hsManualEntry
-                  ? t("createShipment.express.steps.step6.itemModal.useSuggested")
-                  : t("createShipment.express.steps.step6.itemModal.enterManually")}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.scrollBottomSpacer} />
-        </ScrollView>
-
-        <View style={styles.footer}>
-          <View style={{ flex: 1 }}>
-            <Button
-              title={t("createShipment.express.steps.step6.itemModal.cancel")}
-              variant="outline"
-              onPress={onClose}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button
-              title={
-                mode === "edit"
-                  ? t("createShipment.express.steps.step6.itemModal.updateButton")
-                  : t("createShipment.express.steps.step6.itemModal.addButton")
-              }
-              onPress={onSave}
-            />
-          </View>
         </View>
-      </BottomSheet>
+        <View style={{ flex: 1 }}>
+          <Button
+            title={
+              mode === "edit"
+                ? t("createShipment.express.steps.step6.itemModal.updateButton")
+                : t("createShipment.express.steps.step6.itemModal.addButton")
+            }
+            onPress={onSave}
+          />
+        </View>
+      </View>
 
       <HSCodeConfirmModal
         visible={hsPickerVisible}
@@ -479,7 +478,7 @@ export const AddItemModal = ({
         onConfirm={handleConfirmHsCodeCandidate}
         onClose={() => setHsPickerVisible(false)}
       />
-    </>
+    </BottomSheet>
   );
 };
 
@@ -500,7 +499,7 @@ const styles = StyleSheet.create({
   },
 
   gap: {
-    height: rvs(4),
+    height: rvs(15),
   },
 
   row: {
@@ -540,7 +539,7 @@ const styles = StyleSheet.create({
   },
 
   lookupButton: {
-    width: rs(160),
+    width: rs(140),
     height: rvs(40),
   },
 

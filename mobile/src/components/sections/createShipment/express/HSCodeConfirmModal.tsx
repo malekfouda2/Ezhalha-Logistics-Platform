@@ -44,11 +44,11 @@ export const HSCodeConfirmModal = ({
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
-      <Text size="xl" weight="bold" style={styles.title}>
+      <Text size="large" weight="bold" style={styles.title}>
         {t("createShipment.express.customs.confirmHSCode")}
       </Text>
 
-      <Text size="medium" style={styles.subtitle}>
+      <Text size="small" style={styles.subtitle}>
         {t("createShipment.express.customs.hsCodeSubtitle", {
           itemName,
         })}

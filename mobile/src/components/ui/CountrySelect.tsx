@@ -117,7 +117,6 @@ export const CountrySelect = ({
 
       <Modal
         visible={visible}
-        animationType="slide"
         transparent
         onRequestClose={() => setVisible(false)}
       >

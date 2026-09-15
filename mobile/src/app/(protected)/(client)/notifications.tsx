@@ -7,7 +7,6 @@ import {
   View,
   ListRenderItem,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -220,89 +219,86 @@ export default function NotificationsScreen() {
   };
 
   return (
-    // <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text size="medium" weight="bold">
-            {t("notifications.title")}
-          </Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text size="xl" weight="bold">
+          {t("notifications.title")}
+        </Text>
 
-          <Pressable
-            onPress={markAllAsRead}
-            hitSlop={rs(10)}
-            disabled={unreadCount === 0 || isMarkingAllRead}
+        <Pressable
+          onPress={markAllAsRead}
+          hitSlop={rs(10)}
+          disabled={unreadCount === 0 || isMarkingAllRead}
+        >
+          <Text
+            size="small"
+            weight="semibold"
+            style={[
+              styles.markAll,
+              unreadCount === 0 && styles.markAllDisabled,
+            ]}
           >
-            <Text
-              size="small"
-              weight="semibold"
-              style={[
-                styles.markAll,
-                unreadCount === 0 && styles.markAllDisabled,
-              ]}
-            >
-              {isMarkingAllRead
-                ? t("notifications.marking")
-                : t("notifications.markAllRead")}{" "}
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.notificationCard}>
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={Colors.primary} />
-            </View>
-          ) : (
-            <FlatList
-              data={notifications}
-              renderItem={renderNotification}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isFetching && !isLoading}
-                  onRefresh={refetch}
-                  tintColor={Colors.primary}
-                  colors={[Colors.primary]}
-                />
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <View style={styles.emptyIconContainer}>
-                    <Ionicons
-                      name="notifications-off-outline"
-                      size={rs(28)}
-                      color={Colors.textSecondary}
-                    />
-                  </View>
-                  <Text
-                    size="medium"
-                    weight="semibold"
-                    style={styles.emptyTitle}
-                  >
-                    {t("notifications.empty.title")}
-                  </Text>
-                  <Text
-                    size="small"
-                    dimRate="55%"
-                    style={styles.emptyDescription}
-                  >
-                    {t("notifications.empty.description")}
-                  </Text>
-                </View>
-              }
-            />
-          )}
-        </View>
+            {isMarkingAllRead
+              ? t("notifications.marking")
+              : t("notifications.markAllRead")}{" "}
+          </Text>
+        </Pressable>
       </View>
-    // </SafeAreaView>
+
+      <View style={styles.notificationCard}>
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={notifications}
+            renderItem={renderNotification}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={isFetching && !isLoading}
+                onRefresh={refetch}
+                tintColor={Colors.primary}
+                colors={[Colors.primary]}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconContainer}>
+                  <Ionicons
+                    name="notifications-off-outline"
+                    size={rs(28)}
+                    color={Colors.textSecondary}
+                  />
+                </View>
+                <Text size="medium" weight="semibold" style={styles.emptyTitle}>
+                  {t("notifications.empty.title")}
+                </Text>
+                <Text
+                  size="small"
+                  dimRate="55%"
+                  style={styles.emptyDescription}
+                >
+                  {t("notifications.empty.description")}
+                </Text>
+              </View>
+            }
+          />
+        )}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.background },
-  container: { flex: 1, backgroundColor: Colors.background,    paddingTop: rvs(8),
- },
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    paddingTop: rvs(8),
+  },
   header: {
     paddingHorizontal: rs(16),
     paddingBottom: rvs(16),

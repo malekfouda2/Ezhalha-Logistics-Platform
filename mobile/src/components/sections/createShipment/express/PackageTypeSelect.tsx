@@ -33,7 +33,7 @@ export const PackageTypeSelect = ({
         onPress={() => setVisible(true)}
         style={({ pressed }) => [styles.trigger, pressed && styles.pressed]}
       >
-        <Text size="medium" weight="semibold" style={styles.value}>
+        <Text size="small" weight="semibold" style={styles.value}>
           {selectedLabel}
         </Text>
 
@@ -41,7 +41,7 @@ export const PackageTypeSelect = ({
       </Pressable>
 
       <BottomSheet visible={visible} onClose={() => setVisible(false)}>
-        <Text size="xl" weight="bold" style={styles.title}>
+        <Text size="large" weight="bold" style={styles.title}>
           {title}
         </Text>
 
