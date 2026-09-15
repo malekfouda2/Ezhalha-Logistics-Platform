@@ -33,7 +33,7 @@ export function GuestGate({
           <Ionicons name="lock-closed-outline" size={rs(34)} color={Colors.primary} />
         </View>
 
-        <Text size="xl" weight="bold" style={styles.title}>
+        <Text size="medium" weight="bold" style={styles.title}>
           {title}
         </Text>
         <Text size="small" dimRate="60%" style={styles.description}>
@@ -57,12 +57,12 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: "center",
-    paddingHorizontal: rs(24),
+    paddingHorizontal: rs(16),
   },
   iconWrapper: {
     alignSelf: "center",
-    width: rs(76),
-    height: rs(76),
+    width: rs(64),
+    height: rs(64),
     borderRadius: rs(22),
     backgroundColor: "#FFF3EC",
     alignItems: "center",

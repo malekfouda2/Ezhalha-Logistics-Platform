@@ -2,14 +2,15 @@ import React from "react";
 import { View, StyleSheet } from "react-native";
 import { BaseToast, ErrorToast } from "react-native-toast-message";
 import { Colors } from "@/constants/colors";
+import { Typography } from "@/constants/typography";
 import { rs, rvs } from "@/utils/responsive";
 
 const toastStyles = StyleSheet.create({
   container: {
     width: "92%",
-    minHeight: rvs(70),
+    minHeight: rvs(60),
     borderRadius: rs(14),
-    paddingVertical: rvs(14),
+    paddingVertical: rvs(12),
     paddingHorizontal: rs(14),
     alignSelf: "center",
     backgroundColor: Colors.background,
@@ -21,14 +22,15 @@ const toastStyles = StyleSheet.create({
   },
 
   text1: {
-    fontSize: rs(15),
-    fontWeight: "700",
+    fontSize: Typography.size.small,
+    lineHeight: Typography.lineHeight.small,
+    fontFamily: Typography.fontFamily.bold,
     color: Colors.text,
   },
 
   text2: {
-    fontSize: rs(13),
-    lineHeight: rvs(20),
+    fontSize: Typography.size.xs,
+    lineHeight: Typography.lineHeight.xs,
     color: Colors.textSecondary,
     marginTop: rvs(4),
   },

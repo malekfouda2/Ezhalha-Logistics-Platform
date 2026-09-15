@@ -223,7 +223,7 @@ export default function NotificationsScreen() {
     // <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text size="xxl" weight="bold">
+          <Text size="medium" weight="bold">
             {t("notifications.title")}
           </Text>
 
@@ -233,8 +233,8 @@ export default function NotificationsScreen() {
             disabled={unreadCount === 0 || isMarkingAllRead}
           >
             <Text
-              size="large"
-              weight="bold"
+              size="small"
+              weight="semibold"
               style={[
                 styles.markAll,
                 unreadCount === 0 && styles.markAllDisabled,
@@ -304,18 +304,18 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background,    paddingTop: rvs(8),
  },
   header: {
-    paddingHorizontal: rs(25),
+    paddingHorizontal: rs(16),
     paddingBottom: rvs(16),
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  markAll: { color: Colors.primary, fontSize: rs(15), lineHeight: rvs(20) },
+  markAll: { color: Colors.primary },
   markAllDisabled: { opacity: 0.45 },
   notificationCard: {
     flex: 1,
-    marginHorizontal: rs(25),
-    marginBottom: rs(25),
+    marginHorizontal: rs(16),
+    marginBottom: rs(16),
     borderRadius: rs(24),
     overflow: "hidden",
     backgroundColor: Colors.white,
@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
   notification: {
     minHeight: rvs(125),
     paddingHorizontal: rs(15),
-    paddingVertical: rvs(18),
+    paddingVertical: rvs(14),
     flexDirection: "row",
     alignItems: "flex-start",
     backgroundColor: Colors.white,

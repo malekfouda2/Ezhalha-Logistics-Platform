@@ -317,7 +317,7 @@ function RouteField({
 }) {
   return (
     <View style={styles.routeField}>
-      <Text size="medium" style={styles.routeText}>
+      <Text size="small" style={styles.routeText}>
         {countryFlagEmoji(value.code)} {value.name}
         {value.city ? ` · ${value.city}` : ""}
       </Text>
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     height: rvs(40),
     paddingHorizontal: 0,
     textAlign: "center",
-    fontSize: Typography.size.large,
+    fontSize: Typography.size.medium,
     fontFamily: Typography.fontFamily.bold,
     color: Colors.text,
   },

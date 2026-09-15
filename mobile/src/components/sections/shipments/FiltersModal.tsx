@@ -172,7 +172,7 @@ function SelectField({ field, value, onOpen, active }: SelectFieldProps) {
         style={[styles.selectBox, active && styles.selectBoxActive]}
       >
         <Text
-          size="medium"
+          size="small"
           style={{
             color: selectedLabel ? Colors.text : Colors.placeholder,
           }}
@@ -208,7 +208,7 @@ function OptionPickerSheet({
 
   return (
     <BottomSheet visible={true} onClose={onClose}>
-      <Text size="large" weight="bold" style={styles.pickerTitle}>
+      <Text size="medium" weight="bold" style={styles.pickerTitle}>
         {t(config.label)}
       </Text>
 
@@ -220,7 +220,7 @@ function OptionPickerSheet({
             onClose();
           }}
         >
-          <Text size="medium" weight={!currentValue ? "semibold" : "regular"}>
+          <Text size="small" weight={!currentValue ? "semibold" : "regular"}>
             {t(config.placeholder)}
           </Text>
 
@@ -241,7 +241,7 @@ function OptionPickerSheet({
                 onClose();
               }}
             >
-              <Text size="medium" weight={isSelected ? "semibold" : "regular"}>
+              <Text size="small" weight={isSelected ? "semibold" : "regular"}>
                 {t(option.label)}
               </Text>
 
@@ -324,7 +324,7 @@ export function FiltersModal({
           onPress={(e) => e.stopPropagation()}
         >
           <View style={styles.header}>
-            <Text size="large" weight="bold">
+            <Text size="medium" weight="bold">
               {t("shipments.filters.title")}
             </Text>
             <Pressable onPress={onClose} hitSlop={10}>
@@ -477,14 +477,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(18),
-    paddingBottom: rvs(14),
+    paddingHorizontal: rs(16),
+    paddingTop: rvs(16),
+    paddingBottom: rvs(12),
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   body: {
-    paddingHorizontal: rs(20),
+    paddingHorizontal: rs(16),
   },
   bodyContent: {
     paddingTop: rvs(16),
@@ -511,8 +511,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   footer: {
-    paddingHorizontal: rs(20),
-    paddingTop: rvs(14),
+    paddingHorizontal: rs(16),
+    paddingTop: rvs(12),
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     gap: rvs(12),
@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: rs(18),
-    paddingVertical: rvs(14),
+    paddingHorizontal: rs(16),
+    paddingVertical: rvs(12),
   },
 });
