@@ -35,6 +35,7 @@ export default function PaymentOptionsScreen() {
     creditAccess,
     checkoutWebViewUrl,
     handlePayNow,
+    handleNativeCheckoutResult,
     handlePayLater,
     handleBack,
     closeCheckoutWebView,
@@ -61,12 +62,7 @@ export default function PaymentOptionsScreen() {
       handlePayNow(defaultCard.tapCardId);
     } else if (selectedMethod === "new-card") {
       const payResult = await cardEntryRef.current?.pay();
-      if (!payResult || payResult.status === "cancelled") return;
-      if (payResult.status === "fallback") {
-        handlePayNow(undefined, true);
-        return;
-      }
-      handlePayNow(undefined, true, payResult.chargeId);
+      if (payResult) await handleNativeCheckoutResult(payResult);
     }
   };
 
@@ -129,8 +125,6 @@ export default function PaymentOptionsScreen() {
         {selectedMethod === "new-card" ? (
           <TapCheckoutEntry
             ref={cardEntryRef}
-            amount={checkoutData?.amount ?? 0}
-            currency={checkoutData?.currency}
             shipmentId={checkoutData?.shipmentId}
             saveCard
             style={styles.cardEntry}

@@ -21,6 +21,7 @@ interface BottomSheetProps {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  animated?: boolean;
 }
 
 interface SheetHost {
@@ -36,7 +37,7 @@ interface SheetHost {
 // own <Modal> — it renders as a plain overlay inside the same native window.
 const SheetHostContext = createContext<SheetHost | null>(null);
 
-export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
+export function BottomSheet({ visible, onClose, children, animated = true }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const parentHost = useContext(SheetHostContext);
@@ -111,7 +112,7 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={animated ? "fade" : "none"}
       statusBarTranslucent
       onRequestClose={onClose}
     >

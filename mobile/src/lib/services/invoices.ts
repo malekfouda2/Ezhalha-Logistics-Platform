@@ -1,5 +1,11 @@
 import { apiRequest } from "@/api/client";
-import type { CreditInvoice } from "@shared/schema";
+import type { CreditInvoice, Invoice } from "@shared/schema";
+
+export async function getInvoices() {
+    return apiRequest<Invoice[]>("/api/client/invoices", {
+        method: "GET",
+    });
+}
 
 export type CreditInvoiceWithShipment = CreditInvoice & {
     shipment: {
@@ -77,11 +83,6 @@ export interface CreateInvoiceChargeResponse {
 export async function payInvoice(payload: {
     invoiceId: string;
     tapTokenId?: string;
-    /**
-     * Backend TODO (not implemented yet): a charge id already created by checkout-react-native
-     * on the client — see the matching note on payShipment() in lib/services/createShipment.ts.
-     */
-    chargeId?: string;
     saveCardForFuture?: boolean;
 }) {
     return apiRequest<CreateInvoiceChargeResponse>("/api/client/payments/create-charge", {

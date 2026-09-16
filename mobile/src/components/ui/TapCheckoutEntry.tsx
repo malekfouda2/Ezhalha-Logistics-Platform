@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   Platform,
   StyleSheet,
@@ -12,12 +12,11 @@ import { useQuery } from "@tanstack/react-query";
 import Toast from "react-native-toast-message";
 import { startCheckout, type CheckoutCallbacks } from "checkout-react-native";
 
-import { getTapCheckoutConfig } from "@/lib/services/payments";
+import { createTapCheckoutSession } from "@/lib/services/payments";
+import { getShipment } from "@/lib/services/createShipment";
+import { getInvoices } from "@/lib/services/invoices";
 import { Colors, setOpacity } from "@/constants/colors";
 
-// The native SDK's onError payload isn't documented with a fixed shape — try the known fields
-// before falling back to the raw string/JSON, so whatever Tap actually sent is visible instead
-// of a generic toast.
 function extractCheckoutErrorMessage(error: unknown): string {
   if (!error) return "Unknown error";
   if (typeof error === "string") {
@@ -59,25 +58,65 @@ function extractChargeId(successData: string): string | null {
   }
 }
 
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_ATTEMPTS = 20;
+const OPEN_TIMEOUT_MS = 12000;
+
+async function pollShipmentPaid(shipmentId: string, isCancelled: () => boolean) {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    if (isCancelled()) return { outcome: "cancelled" as const };
+    try {
+      const shipment = await getShipment(shipmentId);
+      if (shipment?.paymentStatus === "paid") {
+        return { outcome: "paid" as const, resource: shipment };
+      }
+      if (shipment?.paymentStatus === "failed") {
+        return { outcome: "failed" as const };
+      }
+    } catch {
+      // A single flaky poll shouldn't abort the whole wait — try again next tick.
+    }
+    if (isCancelled()) return { outcome: "cancelled" as const };
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  return { outcome: "timeout" as const };
+}
+
+async function pollInvoicePaid(invoiceId: string, isCancelled: () => boolean) {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    if (isCancelled()) return { outcome: "cancelled" as const };
+    try {
+      const invoices = await getInvoices();
+      const invoice = invoices.find((inv) => inv.id === invoiceId);
+      if (invoice?.status === "paid") {
+        return { outcome: "paid" as const, resource: invoice };
+      }
+    } catch {
+      // Same as above — keep polling rather than failing on one bad response.
+    }
+    if (isCancelled()) return { outcome: "cancelled" as const };
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  return { outcome: "timeout" as const };
+}
+
 export type TapCheckoutPayResult =
-  // Charge succeeded.
-  | { status: "success"; chargeId: string; transactionReference: string }
-  // The backend hasn't added amount/currency-aware hashString support to /tap/config yet
-  // (see the TODOs on TapCheckoutConfig) — the caller should fall back to the existing
-  // TapCheckoutWebView hosted-checkout flow instead of failing the payment outright.
+  | {
+      status: "success";
+      chargeId: string;
+      target: "shipment" | "invoice";
+      shipment?: any;
+      invoice?: any;
+    }
+  | { status: "pending"; chargeId: string }
   | { status: "fallback" }
-  // User closed the sheet, or Tap reported a real error (a toast plus an inline error box
-  // are already shown in that case) — the caller should just stop.
   | { status: "cancelled" };
 
 export type TapCheckoutEntryHandle = {
-  /** Launches Tap's hosted checkout UI. Resolves once it settles — see TapCheckoutPayResult. */
-  pay: () => Promise<TapCheckoutPayResult>;
+  pay: (onOpening?: () => void | Promise<void>) => Promise<TapCheckoutPayResult>;
 };
 
 interface TapCheckoutEntryProps {
-  amount: number;
-  currency?: string;
   shipmentId?: string;
   invoiceId?: string;
   saveCard?: boolean;
@@ -87,175 +126,175 @@ interface TapCheckoutEntryProps {
 export const TapCheckoutEntry = forwardRef<
   TapCheckoutEntryHandle,
   TapCheckoutEntryProps
->(function TapCheckoutEntry(
-  { amount, currency, shipmentId, invoiceId, saveCard, style },
-  ref,
-) {
+>(function TapCheckoutEntry({ shipmentId, invoiceId, saveCard, style }, ref) {
   const { t, i18n } = useTranslation();
   const [sdkError, setSdkError] = useState<string | null>(null);
   const isArabic = i18n.language?.startsWith("ar") ?? false;
+  const language = isArabic ? "ar" : "en";
+  const cancelledRef = useRef(false);
 
-  // Fetched as soon as this component is mounted (i.e. as soon as "new card" is selected in the
-  // parent screen) rather than lazily inside pay(), so the "hosted checkout" notice below shows
-  // up front — before the user even taps Pay — instead of only surfacing after the attempt.
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
+
   const {
-    data: embedConfig,
-    isLoading: isEmbedConfigLoading,
-    isError: isEmbedConfigError,
+    data: session,
+    isLoading: isSessionLoading,
+    isError: isSessionError,
   } = useQuery({
-    // Same endpoint TapCardEntry used to hit (/api/client/payments/tap/config) — this just adds
-    // amount/currency to the query key since getTapCheckoutConfig() passes them as params too.
     queryKey: [
-      "/api/client/payments/tap/config",
-      amount,
-      currency,
+      "/api/client/payments/tap/checkout-session",
       shipmentId,
       invoiceId,
+      language,
+      saveCard,
     ],
     queryFn: () =>
-      getTapCheckoutConfig({
-        amount,
-        currency: currency || "SAR",
+      createTapCheckoutSession({
         shipmentId,
         invoiceId,
+        language,
+        saveCardForFuture: saveCard,
       }),
   });
 
-  // Expected until the backend adds amount/currency-aware hashString support to
-  // /api/client/payments/tap/config — see the TODOs on TapCheckoutConfig.
   const isMisconfigured =
-    !isEmbedConfigLoading &&
-    (isEmbedConfigError ||
-      !embedConfig?.publicKey ||
-      !embedConfig?.hashString ||
-      !embedConfig?.transactionReference);
+    !isSessionLoading && (isSessionError || !session?.configured);
 
   useImperativeHandle(ref, () => ({
-    pay: () =>
-      new Promise((resolve) => {
-        setSdkError(null);
+    pay: async (onOpening) => {
+      setSdkError(null);
+      cancelledRef.current = false;
 
-        // Re-check the three required fields directly (rather than relying on the
-        // `isMisconfigured` boolean) so TS actually narrows them to non-null strings below —
-        // a boolean flag computed elsewhere doesn't narrow embedConfig's fields on its own.
-        const publicKey = embedConfig?.publicKey;
-        const hashString = embedConfig?.hashString;
-        const reference = embedConfig?.transactionReference;
-        if (!embedConfig || !publicKey || !hashString || !reference) {
-          // Fall back to the hosted WebView checkout instead of dead-ending the payment — the
-          // notice explaining this is already shown below, so no toast needed here.
-          resolve({ status: "fallback" });
-          return;
-        }
-
-        const { customer } = embedConfig;
-        const formattedAmount = amount.toFixed(2);
-
-        const configurations = {
-          hashString,
-          language: isArabic ? "ar" : "en",
-          themeMode: "light",
-          supportedPaymentMethods: "ALL",
-          paymentType: "ALL",
-          selectedCurrency: currency || "SAR",
-          supportedCurrencies: "ALL",
-          supportedPaymentTypes: [],
-          supportedRegions: [],
-          supportedSchemes: [],
-          supportedCountries: [],
-          gateway: {
-            publicKey,
-            merchantId: embedConfig.merchantId ?? "",
-          },
-          customer: {
-            firstName: customer.firstName,
-            lastName: customer.lastName,
-            email: customer.email,
-            phone: customer.phone ?? { countryCode: "", number: "" },
-          },
-          transaction: {
-            mode: "charge",
-            charge: {
-              metadata: {},
-              reference: {
-                transaction: reference,
-                order: reference,
-                idempotent: reference,
-              },
-              saveCard: Boolean(saveCard),
-              post: embedConfig.postUrl ?? "",
-              threeDSecure: true,
-            },
-          },
-          amount: formattedAmount,
-          order: {
-            id: "",
-            currency: currency || "SAR",
-            amount: formattedAmount,
-            items: [
-              {
-                amount: formattedAmount,
-                currency: currency || "SAR",
-                name: "Ezhalha",
-                quantity: 1,
-                description: "",
-              },
-            ],
-          },
-          cardOptions: {
-            showBrands: true,
-            showLoadingState: true,
-            collectHolderName: true,
-            preLoadCardName:
-              `${customer.firstName} ${customer.lastName}`.trim(),
-            cardNameEditable: true,
-            cardFundingSource: "all",
-            saveCardOption: "all",
-            forceLtr: false,
-            alternativeCardInputs: { cardScanner: true, cardNFC: true },
-          },
-          isApplePayAvailableOnClient: Platform.OS === "ios",
+      if (!session?.configured) {
+        return Promise.resolve<TapCheckoutPayResult>({ status: "fallback" });
+      }
+      const activeSession = session;
+      await Promise.resolve(onOpening?.());
+      return await new Promise<TapCheckoutPayResult>((resolve) => {
+        console.log("[TapCheckoutEntry] session", JSON.stringify(activeSession, null, 2));
+        const target = activeSession.target;
+        let settled = false;
+        const finish = (outcome_1: TapCheckoutPayResult) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(openTimeout);
+          resolve(outcome_1);
         };
+        const openTimeout = setTimeout(() => {
+          if (settled) return;
+          if (cancelledRef.current) {
+            finish({ status: "cancelled" });
+            return;
+          }
+          const detail = t("payments.cardEntry.errorMessage");
+          setSdkError(detail);
+          Toast.show({
+            type: "error",
+            text1: t("payments.cardEntry.errorTitle"),
+            text2: detail,
+          });
+          finish({ status: "cancelled" });
+        }, OPEN_TIMEOUT_MS);
 
         const callbacks: CheckoutCallbacks = {
-          onSuccess: (data: string) => {
-            const chargeId = extractChargeId(data);
+          onSuccess: async (data_1: string) => {
+            const chargeId = extractChargeId(data_1);
             if (!chargeId) {
-              const detail = extractCheckoutErrorMessage(data);
-              setSdkError(detail);
+              const detail_1 = extractCheckoutErrorMessage(data_1);
+              setSdkError(detail_1);
               Toast.show({
                 type: "error",
                 text1: t("payments.cardEntry.errorTitle"),
-                text2: detail,
+                text2: detail_1,
               });
-              resolve({ status: "cancelled" });
+              finish({ status: "cancelled" });
               return;
             }
-            resolve({
-              status: "success",
-              chargeId,
-              transactionReference: reference,
-            });
+
+            const isCancelled = () => cancelledRef.current;
+            const result_1 = target === "invoice" && invoiceId
+              ? await pollInvoicePaid(invoiceId, isCancelled)
+              : shipmentId
+                ? await pollShipmentPaid(shipmentId, isCancelled)
+                : { outcome: "timeout" as const };
+
+            if (isCancelled()) return;
+
+            if (result_1.outcome === "paid") {
+              finish({
+                status: "success",
+                chargeId,
+                target,
+                ...(target === "invoice"
+                  ? { invoice: result_1.resource }
+                  : { shipment: result_1.resource }),
+              });
+              return;
+            }
+
+            if (result_1.outcome === "failed") {
+              const detail_2 = t("payments.cardEntry.errorMessage");
+              setSdkError(detail_2);
+              Toast.show({
+                type: "error",
+                text1: t("payments.cardEntry.errorTitle"),
+                text2: detail_2,
+              });
+              finish({ status: "cancelled" });
+              return;
+            }
+            finish({ status: "pending", chargeId });
           },
-          onError: (error: string) => {
-            console.error("[TapCheckoutEntry] onError", error);
-            const detail = extractCheckoutErrorMessage(error);
-            setSdkError(detail);
+          onError: (error_2: string) => {
+            console.error("[TapCheckoutEntry] onError", error_2);
+            const detail_3 = extractCheckoutErrorMessage(error_2);
+            setSdkError(detail_3);
             Toast.show({
               type: "error",
               text1: t("payments.cardEntry.errorTitle"),
-              text2: detail,
+              text2: detail_3,
             });
-            resolve({ status: "cancelled" });
+            finish({ status: "cancelled" });
           },
           onClose: () => {
-            resolve({ status: "cancelled" });
+            finish({ status: "cancelled" });
           },
-          onReady: () => {},
+          onReady: () => {
+            clearTimeout(openTimeout);
+          },
         };
+        const configurations = {
+          themeMode: "light",
+          paymentType: "ALL",
+          supportedCurrencies: "ALL",
+          supportedPaymentTypes: [] as string[],
+          supportedRegions: [] as string[],
+          supportedSchemes: [] as string[],
+          supportedCountries: [] as string[],
+          isApplePayAvailableOnClient: Platform.OS === "ios",
+          ...activeSession.configurations,
+          amount: activeSession.configurations.order?.amount,
+        };
+        console.log("[TapCheckoutEntry] configurations", JSON.stringify(configurations, null, 2));
 
-        startCheckout(configurations, callbacks);
-      }),
+        try {
+          startCheckout(configurations, callbacks);
+        } catch (error_3) {
+          console.error("[TapCheckoutEntry] startCheckout threw", error_3);
+          const detail_4 = extractCheckoutErrorMessage(error_3);
+          setSdkError(detail_4);
+          Toast.show({
+            type: "error",
+            text1: t("payments.cardEntry.errorTitle"),
+            text2: detail_4,
+          });
+          finish({ status: "cancelled" });
+        }
+      });
+    },
   }));
 
   if (sdkError) {

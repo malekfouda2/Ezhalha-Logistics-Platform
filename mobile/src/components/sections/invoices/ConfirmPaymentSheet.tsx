@@ -1,6 +1,6 @@
 // components/sections/invoices/ConfirmPaymentSheet.tsx
 import { useEffect, useRef, useState } from "react";
-import { View, StyleSheet } from "react-native";
+import { Platform, View, StyleSheet } from "react-native";
 import { SaudiRiyal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,6 +50,7 @@ export function ConfirmPaymentSheet({
   const [isPaying, setIsPaying] = useState(false);
   const [checkoutWebViewUrl, setCheckoutWebViewUrl] = useState<string | null>(null);
   const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
+  const sheetAnimatedRef = useRef(true);
 
   // The BottomSheet below is itself a <Modal>, and so is TapCheckoutWebView — iOS won't
   // reliably present a second modal on top of one that's still up (Android tolerates it fine,
@@ -84,26 +85,57 @@ export function ConfirmPaymentSheet({
     setIsPaying(true);
     try {
       const selectedCard = savedCards.find((c) => c.id === selectedCardId);
-      let tapTokenId = selectedCard?.tapCardId;
-      let chargeId: string | undefined;
+      const tapTokenId = selectedCard?.tapCardId;
 
       if (selectedCardId === "new") {
-        const payResult = await cardEntryRef.current?.pay();
+        const payResult = await cardEntryRef.current?.pay(
+          () =>
+            new Promise<void>((resolve) => {
+              sheetAnimatedRef.current = false;
+              setSheetVisible(false);
+              if (Platform.OS === "ios") {
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    sheetAnimatedRef.current = true;
+                    resolve();
+                  });
+                });
+              } else {
+                sheetAnimatedRef.current = true;
+                resolve();
+              }
+            }),
+        );
         if (!payResult || payResult.status === "cancelled") {
+          setSheetVisible(true);
           setIsPaying(false);
           return;
         }
-        // "fallback" leaves chargeId/tapTokenId both undefined, so payInvoice below returns a
-        // transactionUrl and we continue through the existing hosted-checkout WebView flow.
         if (payResult.status === "success") {
-          chargeId = payResult.chargeId;
+          Toast.show({
+            type: "success",
+            text1: t("invoices.confirmPayment.successTitle"),
+            text2: t("invoices.confirmPayment.successMessage", { number: invoice.invoiceNumber }),
+          });
+          invalidatePaymentQueries();
+          onPaid();
+          setIsPaying(false);
+          return;
         }
+
+        if (payResult.status === "pending") {
+          setSheetVisible(true);
+          Toast.show({ type: "info", text1: t("invoices.confirmPayment.pendingTitle") });
+          invalidatePaymentQueries();
+          setIsPaying(false);
+          return;
+        }
+        setSheetVisible(true);
       }
 
       const result = await payInvoice({
         invoiceId: invoice.id,
         tapTokenId,
-        chargeId,
       });
 
       if (result.transactionUrl) {
@@ -120,6 +152,7 @@ export function ConfirmPaymentSheet({
       invalidatePaymentQueries();
       onPaid();
     } catch (error) {
+      setSheetVisible(true);
       Toast.show({
         type: "error",
         text1: t("invoices.confirmPayment.errorTitle"),
@@ -168,7 +201,7 @@ export function ConfirmPaymentSheet({
 
   return (
     <>
-      <BottomSheet visible={sheetVisible} onClose={onClose}>
+      <BottomSheet visible={sheetVisible} onClose={onClose} animated={sheetAnimatedRef.current}>
         <Text size="xl" weight="bold" style={styles.title}>
           {t("invoices.confirmPayment.title")}
         </Text>
@@ -236,8 +269,6 @@ export function ConfirmPaymentSheet({
         {selectedCardId === "new" ? (
           <TapCheckoutEntry
             ref={cardEntryRef}
-            amount={Number(invoice.amount)}
-            currency={invoice.currency ?? undefined}
             invoiceId={invoice.id}
             saveCard
             style={styles.cardEntry}

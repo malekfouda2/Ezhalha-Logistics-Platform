@@ -121,18 +121,17 @@ export interface PayShipmentResponse {
 export async function payShipment(payload: {
     shipmentId: string;
     tapTokenId?: string;
-    /**
-     * Backend TODO (not implemented yet): a charge id already created by checkout-react-native
-     * on the client. When present, the server should verify it via TapService.retrieveCharge()
-     * instead of creating a new charge with tapTokenId — see the note on TapCheckoutConfig in
-     * lib/services/payments.ts for the matching /tap/config changes this depends on.
-     */
-    chargeId?: string;
     saveCardForFuture?: boolean;
 }) {
     return apiRequest<PayShipmentResponse>("/api/client/shipments/pay", {
         method: "POST",
         body: payload,
+    });
+}
+
+export async function getShipment(shipmentId: string) {
+    return apiRequest<any>(`/api/client/shipments/${shipmentId}`, {
+        method: "GET",
     });
 }
 

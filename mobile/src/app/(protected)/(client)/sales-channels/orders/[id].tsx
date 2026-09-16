@@ -56,6 +56,7 @@ function OrderFulfillScreenContent() {
     savedCards,
     checkoutWebViewUrl,
     handleFulfill,
+    handleNativeCheckoutResult,
     closeCheckoutWebView,
     handleCheckoutWebViewResult,
   } = useOrderFulfillPayment(id);
@@ -203,8 +204,6 @@ function OrderFulfillScreenContent() {
               {selectedMethod === "new-card" ? (
                 <TapCheckoutEntry
                   ref={cardEntryRef}
-                  amount={total}
-                  currency={selectedRate?.currency}
                   saveCard
                   style={styles.cardEntry}
                 />
@@ -238,12 +237,9 @@ function OrderFulfillScreenContent() {
                 return;
               }
               const payResult = await cardEntryRef.current?.pay();
-              if (!payResult || payResult.status === "cancelled") return;
-              if (payResult.status === "fallback") {
-                handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true);
-                return;
+              if (payResult) {
+                await handleNativeCheckoutResult(payResult, selectedCarrier, effectiveWeight);
               }
-              handleFulfill(selectedCarrier, effectiveWeight, "now", undefined, true, payResult.chargeId);
             }}
             loading={isFulfilling}
             disabled={!selectedCarrier || isFulfilling || isPayingLater}

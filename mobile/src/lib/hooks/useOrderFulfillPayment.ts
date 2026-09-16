@@ -15,6 +15,7 @@ import {
 import { getSavedCards, type SavedCard } from "@/lib/services/payments";
 import type { FulfillOrderResult } from "@/lib/services/orders";
 import type { TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
+import type { TapCheckoutPayResult } from "@/components/ui/TapCheckoutEntry";
 
 export function useOrderFulfillPayment(orderId: string | undefined) {
   const router = useRouter();
@@ -61,11 +62,10 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
     result: FulfillOrderResult,
     tapTokenId?: string,
     saveCardForFuture?: boolean,
-    chargeId?: string,
   ) => {
     setIsPaying(true);
     try {
-      const data = await payShipment({ shipmentId: result.shipmentId, tapTokenId, chargeId, saveCardForFuture });
+      const data = await payShipment({ shipmentId: result.shipmentId, tapTokenId, saveCardForFuture });
       if (data.transactionUrl) {
         setPendingShipmentId(result.shipmentId);
         setCheckoutWebViewUrl(data.transactionUrl);
@@ -100,7 +100,6 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
     method: "now" | "later",
     tapTokenId?: string,
     saveCardForFuture?: boolean,
-    chargeId?: string,
   ) => {
     if (!orderId) return;
     try {
@@ -108,11 +107,32 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
       if (method === "later") {
         await payLaterNow(result);
       } else {
-        await payNow(result, tapTokenId, saveCardForFuture, chargeId);
+        await payNow(result, tapTokenId, saveCardForFuture);
       }
     } catch (error) {
       errorToast(error, t("orderFulfill.toast.fulfillErrorTitle"));
     }
+  };
+
+  const handleNativeCheckoutResult = async (
+    payResult: TapCheckoutPayResult,
+    carrierCode: string,
+    weightKg: number | undefined,
+  ) => {
+    if (payResult.status === "cancelled") return;
+
+    if (payResult.status === "fallback") {
+      await handleFulfill(carrierCode, weightKg, "now", undefined, true);
+      return;
+    }
+
+    if (payResult.status === "pending") {
+      Toast.show({ type: "info", text1: t("orderFulfill.toast.paymentPendingTitle") });
+      invalidate();
+      return;
+    }
+
+    finish();
   };
 
   const closeCheckoutWebView = () => setCheckoutWebViewUrl(null);
@@ -148,6 +168,7 @@ export function useOrderFulfillPayment(orderId: string | undefined) {
     savedCards,
     checkoutWebViewUrl,
     handleFulfill,
+    handleNativeCheckoutResult,
     closeCheckoutWebView,
     handleCheckoutWebViewResult,
   };

@@ -8,6 +8,7 @@ import { useCreateLocalShipmentStore } from "@/store/createLocalShipmentStore";
 import { payShipment, confirmShipment, payLater, getCreditAccess, CreditAccessResponse } from "@/lib/services/createShipment";
 import { getSavedCards, SavedCard } from "@/lib/services/payments";
 import { TapCheckoutResult } from "@/components/ui/TapCheckoutWebView";
+import { TapCheckoutPayResult } from "@/components/ui/TapCheckoutEntry";
 
 export function useLocalPaymentStep() {
   const router = useRouter();
@@ -47,14 +48,13 @@ export function useLocalPaymentStep() {
     queryClient.invalidateQueries({ queryKey: ["/api/client/payments"] });
   };
 
-  const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean, chargeId?: string) => {
+  const handlePayNow = async (tapTokenId?: string, saveCardForFuture?: boolean) => {
     if (!checkoutData) return;
     setIsPaying(true);
     try {
       const data = await payShipment({
         shipmentId: checkoutData.shipmentId,
         tapTokenId,
-        chargeId,
         saveCardForFuture,
       });
 
@@ -91,6 +91,37 @@ export function useLocalPaymentStep() {
       setIsPaying(false);
       setIsConfirming(false);
     }
+  };
+
+  const handleNativeCheckoutResult = async (payResult: TapCheckoutPayResult) => {
+    if (payResult.status === "cancelled") return;
+
+    if (payResult.status === "fallback") {
+      await handlePayNow(undefined, true);
+      return;
+    }
+
+    if (payResult.status === "pending") {
+      Toast.show({
+        type: "info",
+        text1: t("toast.createShipment.local.payment.pendingTitle"),
+        text2: t("toast.createShipment.local.payment.pendingMessage"),
+      });
+      invalidateShipmentQueries();
+      return;
+    }
+
+    setConfirmData({
+      shipment: payResult.shipment,
+      carrierTrackingNumber: payResult.shipment?.carrierTrackingNumber || "",
+      labelUrl: payResult.shipment?.labelUrl ?? undefined,
+      estimatedDelivery: payResult.shipment?.estimatedDelivery ?? undefined,
+    });
+    invalidateShipmentQueries();
+    router.replace({
+      pathname: "/createShipment/confirmation",
+      params: { type: "local", shipmentId: checkoutData?.shipmentId ?? "" },
+    });
   };
 
   const closeCheckoutWebView = () => setCheckoutWebViewUrl(null);
@@ -182,6 +213,7 @@ export function useLocalPaymentStep() {
     creditAccess,
     checkoutWebViewUrl,
     handlePayNow,
+    handleNativeCheckoutResult,
     handlePayLater,
     handleBack: () => router.back(),
     closeCheckoutWebView,
