@@ -23,6 +23,7 @@ export default function LocalPaymentOptionsScreen() {
   const { t } = useTranslation();
 
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId>("pay-later");
+  const [isOpeningCheckout, setIsOpeningCheckout] = useState(false);
   const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
   const {
@@ -66,8 +67,13 @@ export default function LocalPaymentOptionsScreen() {
     } else if (selectedMethod === "saved-card" && defaultCard) {
       handlePayNow(defaultCard.tapCardId);
     } else if (selectedMethod === "new-card") {
-      const payResult = await cardEntryRef.current?.pay();
-      if (payResult) await handleNativeCheckoutResult(payResult);
+      setIsOpeningCheckout(true);
+      try {
+        const payResult = await cardEntryRef.current?.pay();
+        if (payResult) await handleNativeCheckoutResult(payResult);
+      } finally {
+        setIsOpeningCheckout(false);
+      }
     }
   };
 
@@ -80,7 +86,7 @@ export default function LocalPaymentOptionsScreen() {
         subtitle={t("createShipment.local.steps.step5.subtitle")}
         onContinue={handlePay}
         onBack={handleBack}
-        loading={isPayingLater || isPaying || isConfirming}
+        loading={isPayingLater || isPaying || isConfirming || isOpeningCheckout}
         continueLabel={
           <View style={styles.continueTitle}>
             <Text size="medium" weight="semibold" style={styles.continueText}>

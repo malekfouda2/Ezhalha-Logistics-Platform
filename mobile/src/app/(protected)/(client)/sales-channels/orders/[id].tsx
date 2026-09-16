@@ -38,6 +38,7 @@ function OrderFulfillScreenContent() {
   const [weight, setWeight] = useState("");
   const [selectedCarrier, setSelectedCarrier] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodId>("new-card");
+  const [isOpeningCheckout, setIsOpeningCheckout] = useState(false);
   const cardEntryRef = useRef<TapCheckoutEntryHandle>(null);
 
   useEffect(() => {
@@ -216,7 +217,7 @@ function OrderFulfillScreenContent() {
           {creditAccess?.creditEnabled ? (
             <Pressable
               onPress={() => selectedCarrier && handleFulfill(selectedCarrier, effectiveWeight, "later")}
-              disabled={!selectedCarrier || isFulfilling || isPayingLater}
+              disabled={!selectedCarrier || isFulfilling || isPayingLater || isOpeningCheckout}
               style={styles.payLaterLink}
             >
               <Text size="small" weight="bold" style={styles.payLaterLinkText}>
@@ -236,13 +237,18 @@ function OrderFulfillScreenContent() {
                 handleFulfill(selectedCarrier, effectiveWeight, "now", defaultCard.tapCardId);
                 return;
               }
-              const payResult = await cardEntryRef.current?.pay();
-              if (payResult) {
-                await handleNativeCheckoutResult(payResult, selectedCarrier, effectiveWeight);
+              setIsOpeningCheckout(true);
+              try {
+                const payResult = await cardEntryRef.current?.pay();
+                if (payResult) {
+                  await handleNativeCheckoutResult(payResult, selectedCarrier, effectiveWeight);
+                }
+              } finally {
+                setIsOpeningCheckout(false);
               }
             }}
-            loading={isFulfilling}
-            disabled={!selectedCarrier || isFulfilling || isPayingLater}
+            loading={isFulfilling || isOpeningCheckout}
+            disabled={!selectedCarrier || isFulfilling || isPayingLater || isOpeningCheckout}
           />
         </View>
       </View>
