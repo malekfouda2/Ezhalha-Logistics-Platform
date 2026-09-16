@@ -223,6 +223,40 @@ export class TapService {
     return TAP_CARD_SDK_URL;
   }
 
+  /**
+   * Sign a native Checkout SDK session.
+   *
+   * The mobile SDKs invert the web flow: the app creates the charge itself using the *public*
+   * key, so Tap needs proof the amount came from us and not from a patched client. That proof is
+   * this HMAC over the fields that matter — key, amount, currency, reference, webhook URL —
+   * signed with the secret key, which is why it can only be produced here.
+   *
+   * The string is positional and Tap compares it byte for byte; the amount must carry exactly the
+   * decimals its currency uses (3 for KWD/BHD, 2 for SAR/USD), which is what `formatTapAmount`
+   * does. Change the order or the formatting and the SDK rejects the session with no useful
+   * message.
+   */
+  buildCheckoutHashString(params: {
+    amount: number;
+    currency: string;
+    transactionReference: string;
+    postUrl: string;
+  }): string | null {
+    const publicKey = this.publicKey;
+    const secretKey = this.secretKey;
+    if (!publicKey || !secretKey) return null;
+
+    const currency = params.currency.toUpperCase();
+    const message =
+      `x_publickey${publicKey}` +
+      `x_amount${formatTapAmount(params.amount, currency)}` +
+      `x_currency${currency}` +
+      `x_transaction${params.transactionReference}` +
+      `x_post${params.postUrl}`;
+
+    return crypto.createHmac("sha256", secretKey).update(message).digest("hex");
+  }
+
   isSavedCardsEnabled(): boolean {
     return this.savedCardsEnabled;
   }

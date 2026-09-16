@@ -298,7 +298,10 @@ export async function buildFedExShipmentRequestFromShipment(
     },
     packages,
     serviceType: shipment.carrierServiceType || shipment.serviceType || "FEDEX_INTERNATIONAL_PRIORITY",
-    packagingType: shipment.packageType || "FEDEX_BOX",
+    // Defaulting to a FedEx-branded box claims FedEx supplies the packaging, which carries its own
+    // size and weight limits and is wrong for anything the shipper packed themselves — a 25-piece,
+    // 445 kg consignment is not going in a FedEx Box. Absent packaging means "the shipper's own".
+    packagingType: shipment.packageType || "YOUR_PACKAGING",
     labelFormat: "PDF",
     commodityDescription,
     declaredValue,

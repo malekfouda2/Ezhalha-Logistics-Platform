@@ -9,6 +9,9 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "db:migrate": "tsx script/migrate.ts",
+    "db:migrate:check": "tsx script/migrate.ts --check",
+    "db:check": "tsx script/check-schema.ts",
     "openapi": "tsx script/generate-openapi.ts"
   },
   "dependencies": {
@@ -80,6 +83,7 @@
     "openai": "^6.34.0",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.16.3",
     "react": "^18.3.1",

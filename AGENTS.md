@@ -104,6 +104,7 @@ Common integration env:
 - Integration accounts can be managed through admin apps and encrypted with `INTEGRATION_CONFIG_SECRET`.
 - Tap is current payment integration. Stripe references are legacy/backwards compatibility if present.
 - Credit/pay-later creates `credit_invoices` with 30-day terms and reminder scheduler; see `docs/credit-pay-later-feature.md`.
+- Schema: `npm run db:migrate` (ledger in `schema_migrations`, `--expect-db=<name>` on servers, `--baseline` to adopt an existing DB, `--repair` to re-apply all) and `npm run db:check` (compares `shared/schema.ts` to the live DB, exits 1 on drift — the deploy gate). Never infer "no migrations needed" from a PR diff: a release carries everything merged since the last deployed tag. Migrations must be idempotent; `tests/schema-drift.test.ts` enforces that.
 - Background schedulers start after HTTP server listens: credit reminders, abandoned shipment recovery, express tracking refresh, dangerous goods quote expiry, email retries. Disable with `DISABLE_CREDIT_REMINDER_SCHEDULER`, `DISABLE_ABANDONED_RECOVERY_SCHEDULER`, `DISABLE_EXPRESS_TRACKING_REFRESH_SCHEDULER`, `DISABLE_DG_QUOTE_EXPIRY_SCHEDULER`, or `DISABLE_EMAIL_RETRY_SCHEDULER`.
 - Email: every templated send goes through `dispatchTemplatedEmail` (`server/services/email-delivery.ts`) and leaves an `email_deliveries` attempt trail; `/admin/email-settings` configures wording, retries, and the two scheduled emails' intervals and ladders. A new email needs both a `TemplateDefinition` (`email-templates.ts`) and a descriptor (`email-settings.ts`). Comparing these `timestamp` columns against SQL `now()` is wrong — the session timezone makes every row look due; bind a JS `Date` instead.
 - Default seed data creates admin/client demo users only when DB has no admin user; do not rely on seeded credentials for production.
@@ -126,6 +127,10 @@ Common integration env:
 - Return JSON errors consistently, usually `{ error: "..." }` or `{ message: "..." }` depending on existing local pattern.
 - Preserve audit logs for sensitive changes: auth, account/profile changes, pricing, payments, credit invoices, shipment status, refund decisions, and integration changes.
 - Do not log secrets, payment card data, or integration credentials.
+- List endpoints can be returned in a single `{ data, pagination }` envelope when the caller sends
+  `X-Paginate: 1` — see [docs/api-pagination.md](docs/api-pagination.md). It is opt-in: without the
+  header the existing bare-array and resource-keyed shapes are unchanged, which is what keeps the
+  web portal working. New list endpoints need no special handling to participate.
 - Keep carrier-specific details inside integration adapters or shipment builder services.
 - Keep financial calculations in service/shared helpers instead of duplicating formulas in route handlers.
 - When adding database columns/tables, update `shared/schema.ts`, storage/service code, and relevant tests.

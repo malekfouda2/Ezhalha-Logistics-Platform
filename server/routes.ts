@@ -6,6 +6,7 @@ import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { storage } from "./storage";
+import { paginationEnvelope } from "./pagination";
 import type {
   Department,
   ClientAccount,
@@ -94,6 +95,7 @@ import { carrierService, getCarrierAdapter } from "./integrations/carriers";
 import { zohoService } from "./integrations/zoho";
 import type { TapCharge } from "./integrations/tap";
 import { tapService, getTapSettledSarAmount } from "./integrations/tap";
+import { buildTapCheckoutSession } from "./services/tap-checkout";
 import { getSarRate, convertFromSar, normalizeCurrency } from "./services/fx";
 import { getIdempotencyRecord, setIdempotencyRecord } from "./services/idempotency";
 import { lookupHsCode, confirmHsCode, isGenericItemName } from "./services/hsLookup";
@@ -2176,6 +2178,9 @@ async function finalizePaidShipmentAfterPayment(params: {
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -2461,9 +2466,18 @@ async function validateFedExWebhookForBoundAccount(
 
 async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
   const shipmentId = charge.metadata?.shipmentId;
+  // `reference.order` is the third way in, and it is what makes the native Checkout SDK safe to
+  // reconcile: that flow creates the charge on the device, so metadata reaches Tap through the
+  // SDK rather than through our own request, and there is no charge id recorded here beforehand
+  // to match on. Tap always echoes `reference`, so the shipment is still findable if the SDK ever
+  // drops a metadata key.
+  const referencedOrderId = charge.reference?.order;
   const shipment =
     (shipmentId ? await storage.getShipment(shipmentId) : undefined) ||
-    (charge.id ? await storage.getShipmentByPaymentId(charge.id) : undefined);
+    (charge.id ? await storage.getShipmentByPaymentId(charge.id) : undefined) ||
+    (referencedOrderId && charge.metadata?.kind !== "invoice"
+      ? await storage.getShipment(referencedOrderId)
+      : undefined);
 
   if (!shipment) {
     return;
@@ -2556,7 +2570,11 @@ async function processTapShipmentCharge(charge: TapCharge, ipAddress?: string) {
 }
 
 async function processTapInvoiceCharge(charge: TapCharge, ipAddress?: string) {
-  const invoiceId = charge.metadata?.invoiceId;
+  // Same fallback as the shipment path: the native Checkout SDK builds the charge on the device,
+  // so `reference.order` — which Tap always echoes — is the identity we can still rely on.
+  const invoiceId =
+    charge.metadata?.invoiceId ||
+    (charge.metadata?.kind === "invoice" ? charge.reference?.order : undefined);
   if (!invoiceId) {
     return;
   }
@@ -6805,6 +6823,11 @@ export async function registerRoutes(
   await ensureSuperAdminBootstrap();
   await ensureHierarchicalRoleBootstrap();
   
+  // Normalises every list response for callers that send `X-Paginate: 1`. Registered here rather
+  // than in server/index.ts so the contract holds wherever the routes are mounted, tests included,
+  // and ahead of every route below so `req.pagination` is set by the time a handler reads it.
+  app.use(paginationEnvelope());
+
   // Trust proxy for rate limiting behind reverse proxy
   app.set("trust proxy", 1);
 
@@ -7362,7 +7385,12 @@ export async function registerRoutes(
       // Number("abc") is NaN, and Math.max/min propagate it straight into SQL LIMIT — fall back
       // to the default instead of 500ing on a typo'd query string.
       const requestedLimit = Number(req.query.limit);
-      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
+      // `limit` is this route's own result cap, and under the pagination envelope it doubles as the
+      // page size — applying both would cap the queue at one page and report that cap as the total.
+      // When the caller is paging, the cap goes to its ceiling and the envelope does the slicing.
+      const limit = req.pagination?.requested
+        ? 200
+        : Number.isFinite(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 100;
       // Unknown sort keys fall back to the queue default rather than 400ing: a stale bookmark
       // carrying an old key should still show an operator their queue.
       const sort = normalizeOperationSort(typeof req.query.sort === "string" ? req.query.sort : undefined);
@@ -8317,6 +8345,9 @@ export async function registerRoutes(
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -10319,7 +10350,9 @@ export async function registerRoutes(
         typeof req.query.status === "string" && req.query.status.trim()
           ? req.query.status.trim().toUpperCase()
           : ShipmentRefundRequestStatus.PENDING;
-      const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 50));
+      // See the operations queue above: `limit` is a cap here, so the envelope owns the slicing
+      // when the caller is paging.
+      const limit = req.pagination?.requested ? 50 : Math.max(1, Math.min(Number(req.query.limit || 10), 50));
       const scopedClientAccountIds = await getScopedClientAccountIds(adminUser);
       const refundRequests = await storage.getShipmentRefundRequests({
         status: status === "ALL" ? "all" : status,
@@ -11185,6 +11218,9 @@ export async function registerRoutes(
         carrierShipmentId: carrierResponse.trackingNumber,
         labelUrl: carrierResponse.labelUrl,
         carrierLabelBase64: carrierResponse.labelData || null,
+        carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+          ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+          : null,
         carrierLabelMimeType: "application/pdf",
         carrierLabelFormat: "PDF",
         estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -13567,7 +13603,8 @@ export async function registerRoutes(
       const deliveries = await storage.getEmailDeliveries({
         templateSlug: typeof req.query.slug === "string" ? req.query.slug : undefined,
         status: typeof req.query.status === "string" ? req.query.status : undefined,
-        limit: Number(req.query.limit) || 50,
+        // `limit` is a cap, not a page size; the envelope slices when the caller is paging.
+        limit: req.pagination?.requested ? 500 : Number(req.query.limit) || 50,
       });
       res.json(deliveries);
     } catch (error: any) {
@@ -14468,8 +14505,25 @@ export async function registerRoutes(
         if (quoteItems.length === 0) {
           return res.status(400).json({ error: "At least one line item is required for international / Door To Door Freight quotations." });
         }
-        if (!data.tradeDocuments.some((d) => d.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)) {
-          return res.status(400).json({ error: "A commercial invoice document is required for international / Door To Door Freight quotations." });
+        // An uploaded commercial invoice is required for Door To Door Freight only.
+        //
+        // International *express* used to demand one here as well, which made the admin quotation
+        // stricter than the client checkout for the identical shipment: a client can create an
+        // international express shipment from typed line items with no document at all
+        // (`/api/client/shipments/checkout` takes tradeDocuments as optional), while quoting the
+        // same shipment was refused. The wizard defaults to entering customs details manually and
+        // sends no documents in that mode, so every manually-entered international express
+        // quotation failed at the final step — and the client mapped the message to "check your
+        // HS codes", which sent the operator looking in the wrong place entirely.
+        //
+        // The line items above are the customs data; the commercial invoice is generated from
+        // them. Door To Door Freight is different — its own checkout requires the document too,
+        // because a broker needs the original.
+        if (
+          data.type === "ddp" &&
+          !data.tradeDocuments.some((d) => d.documentType === FedExTradeDocumentType.COMMERCIAL_INVOICE)
+        ) {
+          return res.status(400).json({ error: "A commercial invoice document is required for Door To Door Freight quotations." });
         }
         if (data.type === "ddp" && (!data.supplierName?.trim() || !data.supplierPhone?.trim())) {
           return res.status(400).json({ error: "Supplier name and phone are required for Door To Door Freight quotations." });
@@ -14515,7 +14569,12 @@ export async function registerRoutes(
         width: first.width.toString(),
         height: first.height.toString(),
         dimensionUnit: data.dimensionUnit,
-        packageType: "PARCEL",
+        // "PARCEL" is our word for a local-carrier parcel, not a carrier packaging type. Hardcoding
+        // it here put it on express and Door To Door Freight quotations too, and FedEx rejects it
+        // outright — EZH043868517 was quoted, paid for, and then failed eleven booking attempts on
+        // `400 PACKAGINGTYPE.INVALID`. A carrier-booked shipment defaults to the shipper's own
+        // packaging, which is what every one of these quotations actually is.
+        packageType: data.type === "local" ? "PARCEL" : "YOUR_PACKAGING",
         numberOfPackages: data.packages.length,
         packagesData: JSON.stringify(data.packages),
         itemsData: quoteItems.length ? JSON.stringify(quoteItems) : undefined,
@@ -21447,6 +21506,46 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * Why a shipment may not be paid right now, or null when it may.
+   *
+   * Shared by the hosted-redirect flow (`/shipments/pay`) and the native SDK session, because the
+   * mobile app creates its charge itself — if these checks lived only in the endpoint that calls
+   * Tap, opening the in-app sheet would be a way to pay for an expired dangerous-goods quote or
+   * skip the DDP declaration entirely.
+   */
+  function getShipmentPaymentBlockReason(shipment: Shipment): string | null {
+    if (shipment.paymentStatus === "paid") {
+      return "Shipment is already paid";
+    }
+
+    if (shipment.status !== "payment_pending" && shipment.status !== "carrier_error") {
+      return "Shipment is not ready for payment";
+    }
+
+    if (shipment.isQuote && shipment.isDdp && !shipment.ddpTermsAcceptedAt) {
+      return "Please accept the customs, terms and broker-authorization declaration before paying.";
+    }
+
+    // Dangerous goods: the client is the offeror of the goods, so they confirm the
+    // declaration as operations left it before any money moves.
+    if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE && !shipment.dgClientConfirmedAt) {
+      return "Please confirm the dangerous goods declaration before paying.";
+    }
+
+    // An expired quote is not a price. The carrier held it for a period and that period is
+    // over — paying now would commit the client to a figure the carrier no longer offers.
+    if (
+      shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE &&
+      shipment.dgQuoteExpiresAt &&
+      shipment.dgQuoteExpiresAt.getTime() <= Date.now()
+    ) {
+      return "This dangerous goods quotation has expired. Operations will re-confirm the price with the carrier.";
+    }
+
+    return null;
+  }
+
   app.post("/api/client/shipments/pay", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -21464,32 +21563,9 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (shipment.paymentStatus === "paid") {
-        return res.status(400).json({ error: "Shipment is already paid" });
-      }
-
-      if (shipment.status !== "payment_pending" && shipment.status !== "carrier_error") {
-        return res.status(400).json({ error: "Shipment is not ready for payment" });
-      }
-
-      if (shipment.isQuote && shipment.isDdp && !shipment.ddpTermsAcceptedAt) {
-        return res.status(400).json({ error: "Please accept the customs, terms and broker-authorization declaration before paying." });
-      }
-
-      // Dangerous goods: the client is the offeror of the goods, so they confirm the
-      // declaration as operations left it before any money moves.
-      if (shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE && !shipment.dgClientConfirmedAt) {
-        return res.status(400).json({ error: "Please confirm the dangerous goods declaration before paying." });
-      }
-
-      // An expired quote is not a price. The carrier held it for a period and that period is
-      // over — paying now would commit the client to a figure the carrier no longer offers.
-      if (
-        shipment.fulfillmentType === DG_MANUAL_FULFILLMENT_TYPE &&
-        shipment.dgQuoteExpiresAt &&
-        shipment.dgQuoteExpiresAt.getTime() <= Date.now()
-      ) {
-        return res.status(400).json({ error: "This dangerous goods quotation has expired. Operations will re-confirm the price with the carrier." });
+      const blockReason = getShipmentPaymentBlockReason(shipment);
+      if (blockReason) {
+        return res.status(400).json({ error: blockReason });
       }
 
       const account = await storage.getClientAccount(user.clientAccountId);
@@ -22373,6 +22449,9 @@ export async function registerRoutes(
           carrierShipmentId: carrierResponse.trackingNumber,
           labelUrl: carrierResponse.labelUrl,
           carrierLabelBase64: carrierResponse.labelData || null,
+          carrierPieceTrackingNumbers: carrierResponse.pieceTrackingNumbers?.length
+            ? JSON.stringify(carrierResponse.pieceTrackingNumbers)
+            : null,
           carrierLabelMimeType: "application/pdf",
           carrierLabelFormat: "PDF",
           estimatedDelivery: carrierResponse.estimatedDelivery,
@@ -22777,6 +22856,200 @@ export async function registerRoutes(
     } catch (error) {
       logError("Failed to fetch Tap payment config", error);
       res.status(500).json({ error: "Failed to fetch payment config" });
+    }
+  });
+
+  /**
+   * A signed session for Tap's native Checkout SDK, so the app can take payment in-app instead of
+   * bouncing the customer out to a hosted page.
+   *
+   * The native SDK creates the charge itself from the public key, so unlike `/shipments/pay` and
+   * `/payments/create-charge` this endpoint calls Tap not at all. What it does instead is decide
+   * everything the app is not allowed to decide — which shipment or invoice, what it costs, in
+   * what currency, under which Tap account, and where the webhook goes — and sign that into
+   * `hashString`. The request body carries an id and nothing else that touches money.
+   *
+   * Payment still lands through the same webhook as every other flow: the session sets
+   * `metadata.shipmentId` / `metadata.invoiceId`, which is exactly what `processTapChargeUpdate`
+   * already reconciles on. There is no second settlement path to keep in step.
+   */
+  const tapCheckoutSessionSchema = z
+    .object({
+      shipmentId: z.string().uuid("Invalid shipment ID").optional(),
+      invoiceId: z.string().min(1).optional(),
+      language: z.string().optional(),
+      saveCardForFuture: z.boolean().optional(),
+      returnPath: z.string().optional(),
+    })
+    .refine((value) => Boolean(value.shipmentId) !== Boolean(value.invoiceId), {
+      message: "Provide exactly one of shipmentId or invoiceId",
+    });
+
+  app.post("/api/client/payments/tap/checkout-session", requireClient, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || !user.clientAccountId) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const { shipmentId, invoiceId, language, saveCardForFuture, returnPath } =
+        tapCheckoutSessionSchema.parse(req.body);
+
+      const account = await storage.getClientAccount(user.clientAccountId);
+      if (!account) {
+        return res.status(404).json({ error: "Client account not found" });
+      }
+
+      const appBaseUrl = buildAppBaseUrl(req);
+      const postUrl = `${appBaseUrl}/api/webhooks/tap`;
+      const redirectUrl = `${appBaseUrl}/api/payments/tap/redirect`;
+
+      if (shipmentId) {
+        const shipment = await storage.getShipment(shipmentId);
+        if (!shipment) {
+          return res.status(404).json({ error: "Shipment not found" });
+        }
+        if (shipment.clientAccountId !== user.clientAccountId) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+
+        // The same gate the hosted flow applies. Opening the in-app sheet must not be a way
+        // around a declaration the client has not signed.
+        const blockReason = getShipmentPaymentBlockReason(shipment);
+        if (blockReason) {
+          return res.status(400).json({ error: blockReason });
+        }
+
+        const activeOffer = await getActiveAbandonedRecoveryOffer(shipment);
+        const payableAmountSar =
+          activeOffer?.payableAmount ?? parseMoneyValue(shipment.clientTotalAmountSar ?? shipment.finalPrice);
+        const chargeCurrency = normalizeCurrency(account.preferredCurrency);
+        const fxRate = chargeCurrency === "SAR" ? 1 : await getSarRate(chargeCurrency);
+        const payableAmount = convertFromSar(payableAmountSar, chargeCurrency, fxRate);
+
+        let tapIntegrationAccountId = shipment.tapIntegrationAccountId;
+        const session = await withBoundIntegrationAccount(
+          "tap",
+          tapIntegrationAccountId,
+          getClientIntegrationRoutingOptions(account, shipment.senderCountry),
+          async () => {
+            tapIntegrationAccountId = getCurrentIntegrationAccountId() || tapIntegrationAccountId || "env:tap";
+            return buildTapCheckoutSession({
+              amount: payableAmount,
+              currency: chargeCurrency,
+              description: `Shipment ${shipment.trackingNumber}`,
+              customer: buildTapCustomer(account, tapIntegrationAccountId),
+              reference: { transaction: shipment.trackingNumber, order: shipment.id },
+              metadata: {
+                kind: "shipment",
+                shipmentId: shipment.id,
+                clientAccountId: user.clientAccountId!,
+                trackingNumber: shipment.trackingNumber,
+                tapIntegrationAccountId,
+                ...(activeOffer
+                  ? {
+                      abandonedRecoveryId: activeOffer.recovery.id,
+                      abandonedDiscountAmount: activeOffer.discountAmount.toFixed(2),
+                      abandonedOriginalAmount: activeOffer.originalAmount.toFixed(2),
+                    }
+                  : {}),
+                payableAmount: payableAmount.toFixed(2),
+                payableAmountSar: payableAmountSar.toFixed(2),
+                chargeCurrency,
+                fxRate: fxRate.toString(),
+                ...(returnPath ? { returnPath } : {}),
+              },
+              postUrl,
+              redirectUrl,
+              language,
+              saveCard: saveCardForFuture,
+            });
+          },
+        );
+
+        // Recorded before the app opens the sheet, not after: the webhook can arrive while the
+        // response is still in flight, and it needs to resolve the same Tap account and read back
+        // the currency the customer was actually shown.
+        await storage.updateShipment(shipment.id, {
+          tapIntegrationAccountId,
+          currency: chargeCurrency,
+          fxRate: fxRate.toString(),
+        });
+
+        return res.json({
+          ...session,
+          target: "shipment",
+          shipmentId: shipment.id,
+          trackingNumber: shipment.trackingNumber,
+          amount: payableAmount,
+          currency: chargeCurrency,
+          amountSar: payableAmountSar,
+          fxRate,
+          tapIntegrationAccountId,
+          activeOffer: serializeAbandonedRecoveryOffer(activeOffer),
+        });
+      }
+
+      const invoice = await storage.getInvoice(invoiceId!);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      if (invoice.clientAccountId !== user.clientAccountId) {
+        return res.status(403).json({ error: "Access denied to this invoice" });
+      }
+      if (invoice.status === "paid") {
+        return res.status(400).json({ error: "Invoice already paid" });
+      }
+
+      let invoiceTapIntegrationAccountId = invoice.tapIntegrationAccountId;
+      const session = await withBoundIntegrationAccount(
+        "tap",
+        invoiceTapIntegrationAccountId,
+        getClientIntegrationRoutingOptions(account),
+        async () => {
+          invoiceTapIntegrationAccountId =
+            getCurrentIntegrationAccountId() || invoiceTapIntegrationAccountId || "env:tap";
+          return buildTapCheckoutSession({
+            amount: Number(invoice.amount),
+            currency: "SAR",
+            description: `Invoice ${invoice.invoiceNumber}`,
+            customer: buildTapCustomer(account, invoiceTapIntegrationAccountId),
+            reference: { transaction: invoice.invoiceNumber, order: invoice.id },
+            metadata: {
+              kind: "invoice",
+              invoiceId: invoice.id,
+              invoiceNumber: invoice.invoiceNumber,
+              clientAccountId: user.clientAccountId!,
+              tapIntegrationAccountId: invoiceTapIntegrationAccountId,
+              ...(returnPath ? { returnPath } : {}),
+            },
+            postUrl,
+            redirectUrl,
+            language,
+            saveCard: saveCardForFuture,
+          });
+        },
+      );
+
+      if (invoice.tapIntegrationAccountId !== invoiceTapIntegrationAccountId) {
+        await storage.updateInvoice(invoice.id, { tapIntegrationAccountId: invoiceTapIntegrationAccountId });
+      }
+
+      return res.json({
+        ...session,
+        target: "invoice",
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: Number(invoice.amount),
+        currency: "SAR",
+        tapIntegrationAccountId: invoiceTapIntegrationAccountId,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to build Tap checkout session", error);
+      res.status(500).json({ error: "Failed to build payment session" });
     }
   });
 

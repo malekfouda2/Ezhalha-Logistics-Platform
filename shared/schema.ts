@@ -475,6 +475,15 @@ export const shipments = pgTable("shipments", {
   carrierBookingClaimedAt: timestamp("carrier_booking_claimed_at"),
   carrierLabelBase64: text("carrier_label_base64"),
   carrierLabelMimeType: text("carrier_label_mime_type").default("application/pdf"),
+  /**
+   * JSON array of one tracking number per piece, in carrier order.
+   *
+   * A multi-piece shipment travels as separate barcoded boxes, each with its own number; the
+   * master only aggregates them. Storing just the master meant no individual box could be traced,
+   * and when EZH043868517 lost its per-piece labels there was nothing to rebuild them from —
+   * carriers return these once, in the create response, and never again.
+   */
+  carrierPieceTrackingNumbers: text("carrier_piece_tracking_numbers"),
   carrierLabelFormat: text("carrier_label_format"),
   labelUrl: text("label_url"),
   shipDate: text("ship_date"),
