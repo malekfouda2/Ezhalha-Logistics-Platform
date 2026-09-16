@@ -174,7 +174,7 @@ export const TapCheckoutEntry = forwardRef<
       const activeSession = session;
       await Promise.resolve(onOpening?.());
       return await new Promise<TapCheckoutPayResult>((resolve) => {
-        console.log("[TapCheckoutEntry] session", JSON.stringify(activeSession, null, 2));
+        // console.log("[TapCheckoutEntry] session", JSON.stringify(activeSession, null, 2));
         const target = activeSession.target;
         let settled = false;
         const finish = (outcome_1: TapCheckoutPayResult) => {
@@ -249,7 +249,7 @@ export const TapCheckoutEntry = forwardRef<
             finish({ status: "pending", chargeId });
           },
           onError: (error_2: string) => {
-            console.error("[TapCheckoutEntry] onError", error_2);
+            // console.error("[TapCheckoutEntry] onError", error_2);
             const detail_3 = extractCheckoutErrorMessage(error_2);
             setSdkError(detail_3);
             Toast.show({
@@ -278,12 +278,12 @@ export const TapCheckoutEntry = forwardRef<
           ...activeSession.configurations,
           amount: activeSession.configurations.order?.amount,
         };
-        console.log("[TapCheckoutEntry] configurations", JSON.stringify(configurations, null, 2));
+            // console.log("[TapCheckoutEntry] configurations", JSON.stringify(configurations, null, 2));
 
         try {
           startCheckout(configurations, callbacks);
         } catch (error_3) {
-          console.error("[TapCheckoutEntry] startCheckout threw", error_3);
+          // console.error("[TapCheckoutEntry] startCheckout threw", error_3);
           const detail_4 = extractCheckoutErrorMessage(error_3);
           setSdkError(detail_4);
           Toast.show({
