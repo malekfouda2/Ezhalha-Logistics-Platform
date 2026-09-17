@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCreateShipmentStore, isInternationalShipment } from "@/store/createExpressShipmentStore";
 import { CheckoutPayload, submitCheckout } from "@/lib/services/createShipment";
 import { isGuestActive } from "@/store/useGuestStore";
@@ -30,6 +31,7 @@ export function computeDefaultPickup(now: Date = new Date()): { date: string; sa
 export function usePickupStep() {
   const router = useRouter();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const store = useCreateShipmentStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastCheckoutSignature, setLastCheckoutSignature] = useState<string | null>(null);
@@ -98,6 +100,11 @@ export function usePickupStep() {
       const data = await submitCheckout(payload);
       setLastCheckoutSignature(signature);
       store.setCheckoutData(data);
+      // The shipment already exists (payment-pending) from this point on, so the list/recent
+      // views need to know about it even before the client pays.
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       router.push("/createShipment/express/step-8");
     } catch (error) {
       Toast.show({

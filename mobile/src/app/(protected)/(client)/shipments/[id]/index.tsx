@@ -420,15 +420,22 @@ export default function ShipmentDetailScreen() {
         <View style={{ height: rvs(90) }} />
       </ScrollView>
 
-      {/* Track live button */}
-      <View style={styles.footer}>
-        <Button
-          title={t("shipments.details.trackLive")}
-          // onPress={() => {
-          //   router.push(`/shipments/${id}/tracking`);
-          // }}
-        />
-      </View>
+      {/* Continue to payment / track live button */}
+      {shipment.status === "payment_pending" ? (
+        <View style={styles.footer}>
+          <Button
+            title={t("shipments.quotation.accepted.continueToPayment")}
+            onPress={() => router.replace(`/shipments/${id}/payment`)}
+          />
+        </View>
+      ) : shipment.status !== "delivered" && shipment.status !== "cancelled" ? (
+        <View style={styles.footer}>
+          <Button
+            title={t("shipments.details.trackLive")}
+            onPress={() => router.push(`/shipments/${id}/tracking`)}
+          />
+        </View>
+      ) : null}
       <CancelShipmentModal
         visible={cancelModalVisible}
         shipment={shipment}

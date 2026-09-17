@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
   listContainer: { flex: 1 },
   markAllDisabled: { opacity: 0.45 },
   notificationCard: {
-    flex: 1,
+    flexGrow: 1,
     marginHorizontal: rs(16),
     marginBottom: rs(16),
     borderRadius: rs(24),

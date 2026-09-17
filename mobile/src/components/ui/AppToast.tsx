@@ -8,6 +8,10 @@ import { rs, rvs } from "@/utils/responsive";
 const toastStyles = StyleSheet.create({
   container: {
     width: "92%",
+    // react-native-toast-message's BaseToast hardcodes `height: 60` in its base style; without
+    // an explicit override here that wins the merge, longer text2 messages get clipped to that
+    // height regardless of minHeight or numberOfLines.
+    height: "auto",
     minHeight: rvs(60),
     borderRadius: rs(14),
     paddingVertical: rvs(12),

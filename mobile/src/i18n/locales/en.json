@@ -301,6 +301,7 @@
         "title": "Quotation {{number}}",
         "preparedBy": "Prepared by your account manager",
         "shipmentDetails": "Shipment Details",
+        "status": "Status",
         "route": "Route",
         "service": "Service",
         "packages": "Packages",
@@ -321,9 +322,17 @@
         "vat": "VAT ({{rate}}%)",
         "total": "Total",
         "acceptQuotation": "Accept quotation",
+        "needSomethingChanged": "Not going ahead?",
+        "cancelQuotation": "Cancel quotation",
+        "cancelQuotationSubtitle": "Nothing will be charged",
+        "cancel": {
+          "successTitle": "Quotation cancelled",
+          "success": "Your quotation has been cancelled. Nothing was charged."
+        },
         "errors": {
           "loadFailed": "Failed to load quotation details.",
-          "acceptFailedTitle": "Couldn't accept quotation"
+          "acceptFailedTitle": "Couldn't accept quotation",
+          "cancelFailedTitle": "Couldn't cancel quotation"
         }
       },
       "accept": {
@@ -338,6 +347,18 @@
         "subtitle": "Your shipment is being created from this quotation.",
         "quotation": "Quotation",
         "continueToPayment": "Continue to payment"
+      },
+      "payment": {
+        "title": "Payment options",
+        "total": "Total",
+        "payWith": "PAY WITH",
+        "pay": "Pay",
+        "toast": {
+          "successTitle": "Payment successful",
+          "errorTitle": "Payment failed",
+          "payLaterErrorTitle": "Pay Later failed",
+          "pendingTitle": "Payment initiated"
+        }
       }
     },
     "title": "Shipments",

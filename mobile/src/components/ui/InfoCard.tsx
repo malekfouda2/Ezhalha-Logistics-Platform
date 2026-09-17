@@ -62,6 +62,7 @@ export function InfoCard({
 export function InfoRow({
   label,
   value,
+  valueNode,
   valueSize = "small",
   valueWeight = "bold",
   valueColor,
@@ -69,7 +70,9 @@ export function InfoRow({
   icon,
 }: {
   label: string;
-  value: string;
+  value?: string;
+  /** Renders instead of `value`/`icon` — for a badge or other non-text value. */
+  valueNode?: React.ReactNode;
   valueSize?: "small" | "medium" | "large" | "xl" | "xxl";
   valueWeight?: "regular" | "medium" | "semibold" | "bold";
   valueColor?: string;
@@ -82,14 +85,18 @@ export function InfoRow({
         {label}
       </Text>
       <View style={styles.valueWrap}>
-        {icon}
-        <Text
-          size={valueSize}
-          weight={valueWeight}
-          style={valueColor ? { color: valueColor } : undefined}
-        >
-          {value}
-        </Text>
+        {valueNode ?? (
+          <>
+            {icon}
+            <Text
+              size={valueSize}
+              weight={valueWeight}
+              style={valueColor ? { color: valueColor } : undefined}
+            >
+              {value}
+            </Text>
+          </>
+        )}
       </View>
     </View>
   );

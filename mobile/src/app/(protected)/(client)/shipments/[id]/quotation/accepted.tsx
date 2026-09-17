@@ -56,8 +56,7 @@ export default function QuotationAcceptedScreen() {
       <View style={styles.footer}>
         <Button
           title={t("shipments.quotation.accepted.continueToPayment")}
-          // onPress={() => router.push(`/shipments/${id}/payment`)}
-          onPress={() => router.push(`/shipments`)}
+          onPress={() => router.replace(`/shipments/${id}/payment`)}
         />
       </View>
     </View>

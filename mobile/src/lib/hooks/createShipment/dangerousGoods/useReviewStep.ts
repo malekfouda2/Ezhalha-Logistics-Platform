@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useDangerousGoodsStore, DgDraftPackage } from "@/store/createDangerousGoodsStore";
 import {
@@ -13,6 +14,7 @@ import {
 export function useReviewStep() {
   const router = useRouter();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const store = useDangerousGoodsStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -82,6 +84,11 @@ export function useReviewStep() {
       };
 
       const result = await submitDangerousGoodsShipment(payload, generateIdempotencyKey());
+      // The shipment already exists (awaiting review) from this point on, so the list/recent
+      // views need to know about it even before it's quoted and paid.
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       // Navigating out of createShipment/dangerousGoods unmounts that stack, which resets
       // the store — same pattern every other shipment type uses to reach this shared screen.
       router.replace({

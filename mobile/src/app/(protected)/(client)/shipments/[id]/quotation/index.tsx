@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { SaudiRiyal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import Toast from "react-native-toast-message";
@@ -19,7 +19,9 @@ import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { BackButton } from "@/components/ui/BackButton";
 import { SectionLabel, InfoCard, InfoRow } from "@/components/ui/InfoCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { AcceptTermsSheet } from "@/components/sections/shipments/quotation/AcceptTermsModal";
+import { CancelShipmentModal } from "@/components/sections/shipments/details/CancelShipmentModal";
 import { Colors, setOpacity } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { apiRequest } from "@/api/client";
@@ -76,10 +78,12 @@ function parseItemsData(itemsData?: string | null): {
 
 export default function QuotationDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isRTL = i18n.dir() === "rtl";
   const router = useRouter();
   const queryClient = useQueryClient();
   const [acceptSheetVisible, setAcceptSheetVisible] = useState(false);
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
 
   const {
     data: quotation,
@@ -113,6 +117,10 @@ export default function QuotationDetailScreen() {
 
     onSuccess: () => {
       queryClient.invalidateQueries({
+        queryKey: [`/api/client/shipments/${id}`],
+      });
+
+      queryClient.invalidateQueries({
         queryKey: ["/api/client/shipments"],
       });
 
@@ -121,13 +129,50 @@ export default function QuotationDetailScreen() {
       });
 
       setAcceptSheetVisible(false);
-      router.push(`/shipments/${id}/quotation/accepted`);
+      router.replace(`/shipments/${id}/quotation/accepted`);
     },
 
     onError: (error: Error) => {
       Toast.show({
         type: "error",
         text1: t("shipments.quotation.details.errors.acceptFailedTitle"),
+        text2: error.message,
+      });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async (shipmentId: string) => {
+      return apiRequest<Shipment>(`/api/client/quotations/${shipmentId}/decline`, {
+        method: "POST",
+      });
+    },
+
+    onSuccess: (declined) => {
+      if (declined) {
+        queryClient.setQueryData([`/api/client/shipments/${id}`], declined);
+      }
+      queryClient.invalidateQueries({
+        queryKey: [`/api/client/shipments/${id}`],
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/client/shipments/recent"],
+      });
+
+      setCancelModalVisible(false);
+      Toast.show({
+        type: "success",
+        text1: t("shipments.quotation.details.cancel.successTitle"),
+        text2: t("shipments.quotation.details.cancel.success"),
+      });
+      router.replace("/shipments");
+    },
+
+    onError: (error: Error) => {
+      Toast.show({
+        type: "error",
+        text1: t("shipments.quotation.details.errors.cancelFailedTitle"),
         text2: error.message,
       });
     },
@@ -169,6 +214,15 @@ export default function QuotationDetailScreen() {
   const totalAmount =
     toNumber(quotation.clientTotalAmountSar) || toNumber(quotation.finalPrice);
 
+  const isAccepted = !!quotation.ddpTermsAcceptedAt;
+  const isPaid = quotation.paymentStatus === "paid";
+  const isDelivered = quotation.status === "delivered";
+  const isCancelled = quotation.status === "cancelled";
+  const canCancelQuotation =
+    isAccepted &&
+    quotation.paymentStatus !== "paid" &&
+    ["payment_pending", "carrier_error"].includes(quotation.status);
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -196,6 +250,10 @@ export default function QuotationDetailScreen() {
           {t("shipments.quotation.details.shipmentDetails")}
         </SectionLabel>
         <InfoCard>
+          <InfoRow
+            label={t("shipments.quotation.details.status")}
+            valueNode={<StatusBadge status={quotation.status} />}
+          />
           <InfoRow
             label={t("shipments.quotation.details.route")}
             value={`${quotation.senderCity} → ${quotation.recipientCity}`}
@@ -378,15 +436,64 @@ export default function QuotationDetailScreen() {
           </View>
         </InfoCard>
 
+        {/* Not going ahead? */}
+        {canCancelQuotation ? (
+          <>
+            <SectionLabel>
+              {t("shipments.quotation.details.needSomethingChanged")}
+            </SectionLabel>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.cancelCard,
+                pressed && { opacity: 0.9 },
+              ]}
+              onPress={() => setCancelModalVisible(true)}
+            >
+              <View style={styles.cancelIconWrap}>
+                <Ionicons name="close" size={rs(18)} color={Colors.error} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text size="small" weight="bold">
+                  {t("shipments.quotation.details.cancelQuotation")}
+                </Text>
+
+                <Text size="xs" dimRate="55%">
+                  {t("shipments.quotation.details.cancelQuotationSubtitle")}
+                </Text>
+              </View>
+
+              <Ionicons
+                name={isRTL ? "chevron-back" : "chevron-forward"}
+                size={rs(18)}
+                color={Colors.placeholder}
+              />
+            </Pressable>
+          </>
+        ) : null}
+
         <View style={{ height: rvs(90) }} />
       </ScrollView>
 
-      {/* Accept quotation button */}
+      {/* Accept / pay / track button, depending on where the quotation stands */}
       <View style={styles.footer}>
-        <Button
-          title={t("shipments.quotation.details.acceptQuotation")}
-          onPress={() => setAcceptSheetVisible(true)}
-        />
+        {!isAccepted ? (
+          <Button
+            title={t("shipments.quotation.details.acceptQuotation")}
+            onPress={() => setAcceptSheetVisible(true)}
+          />
+        ) : isCancelled ? null : !isPaid ? (
+          <Button
+            title={t("shipments.quotation.accepted.continueToPayment")}
+            onPress={() => router.replace(`/shipments/${id}/payment`)}
+          />
+        ) : !isDelivered ? (
+          <Button
+            title={t("shipments.details.trackLive")}
+            onPress={() => router.push(`/shipments/${id}/tracking`)}
+          />
+        ) : null}
       </View>
 
       <AcceptTermsSheet
@@ -400,6 +507,14 @@ export default function QuotationDetailScreen() {
           })
         }
         onClose={() => setAcceptSheetVisible(false)}
+      />
+
+      <CancelShipmentModal
+        visible={cancelModalVisible}
+        shipment={quotation}
+        isPending={cancelMutation.isPending}
+        onConfirm={() => cancelMutation.mutate(quotation.id)}
+        onClose={() => setCancelModalVisible(false)}
       />
     </View>
   );
@@ -439,6 +554,24 @@ const styles = StyleSheet.create({
     borderRadius: rs(14),
     paddingHorizontal: rs(14),
     marginBottom: rvs(20),
+  },
+
+  cancelCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.white,
+    borderRadius: rs(14),
+    padding: rs(14),
+    gap: rs(10),
+  },
+
+  cancelIconWrap: {
+    width: rs(36),
+    height: rs(36),
+    borderRadius: rs(10),
+    backgroundColor: Colors.background,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   docRow: {

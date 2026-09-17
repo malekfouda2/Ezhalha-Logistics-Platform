@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useCreateLocalShipmentStore } from "@/store/createLocalShipmentStore";
 import { submitLocalCheckout } from "@/lib/services/localShipment";
@@ -10,6 +11,7 @@ import { isGuestActive } from "@/store/useGuestStore";
 export function useLocalRatesStep() {
   const router = useRouter();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const store = useCreateLocalShipmentStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -45,6 +47,11 @@ export function useLocalRatesStep() {
       const data = await submitLocalCheckout({ quoteId: selectedQuoteId });
       store.setCheckoutData(data);
       store.setLastCheckoutSignature(selectedQuoteId);
+      // The shipment already exists (payment-pending) from this point on, so the list/recent
+      // views need to know about it even before the client pays.
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       router.push("/createShipment/local/step-5");
     } catch (error) {
       Toast.show({

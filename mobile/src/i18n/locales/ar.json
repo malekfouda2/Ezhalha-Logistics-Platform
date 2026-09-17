@@ -301,6 +301,7 @@
         "title": "عرض السعر {{number}}",
         "preparedBy": "تم إعداده من قبل مدير حسابك",
         "shipmentDetails": "تفاصيل الشحنة",
+        "status": "الحالة",
         "route": "المسار",
         "service": "الخدمة",
         "packages": "الطرود",
@@ -321,9 +322,17 @@
         "vat": "ضريبة القيمة المضافة ({{rate}}%)",
         "total": "الإجمالي",
         "acceptQuotation": "قبول عرض السعر",
+        "needSomethingChanged": "لا ترغب في المتابعة؟",
+        "cancelQuotation": "إلغاء عرض السعر",
+        "cancelQuotationSubtitle": "لن يتم خصم أي مبلغ",
+        "cancel": {
+          "successTitle": "تم إلغاء عرض السعر",
+          "success": "تم إلغاء عرض السعر الخاص بك. لم يتم خصم أي مبلغ."
+        },
         "errors": {
           "loadFailed": "تعذر تحميل تفاصيل عرض السعر.",
-          "acceptFailedTitle": "تعذر قبول عرض السعر"
+          "acceptFailedTitle": "تعذر قبول عرض السعر",
+          "cancelFailedTitle": "تعذر إلغاء عرض السعر"
         }
       },
       "accept": {
@@ -338,6 +347,18 @@
         "subtitle": "جاري إنشاء شحنتك من عرض السعر هذا.",
         "quotation": "عرض السعر",
         "continueToPayment": "متابعة إلى الدفع"
+      },
+      "payment": {
+        "title": "خيارات الدفع",
+        "total": "الإجمالي",
+        "payWith": "الدفع باستخدام",
+        "pay": "ادفع",
+        "toast": {
+          "successTitle": "تم الدفع بنجاح",
+          "errorTitle": "فشل الدفع",
+          "payLaterErrorTitle": "فشل الدفع لاحقًا",
+          "pendingTitle": "تم بدء عملية الدفع"
+        }
       }
     },
     "title": "الشحنات",

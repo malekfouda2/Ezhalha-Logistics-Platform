@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRouter } from "expo-router";
 import Toast from "react-native-toast-message";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useDoorToDoorStore } from "@/store/createDoorToDoorStore";
 import { submitDdpCheckout, DdpCheckoutItem } from "@/lib/services/ddp";
@@ -12,6 +13,7 @@ const HS_CONFIDENCE = ["HIGH", "MEDIUM", "LOW", "MISSING"] as const;
 export function useNotesStep() {
   const router = useRouter();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const store = useDoorToDoorStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -97,6 +99,11 @@ export function useNotesStep() {
         currency: checkout.currency,
       });
       store.setLastCheckoutSignature(signature);
+      // The shipment already exists (payment-pending) from this point on, so the list/recent
+      // views need to know about it even before the client pays.
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/shipments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client/stats"] });
       router.push("/createShipment/doorToDoor/step-9");
     } catch (error) {
       Toast.show({
