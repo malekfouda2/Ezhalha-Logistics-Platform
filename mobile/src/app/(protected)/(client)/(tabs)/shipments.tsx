@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Ionicons, Feather } from "@expo/vector-icons";
 
 import { Text } from "@/components/ui/Text";
@@ -19,6 +19,7 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 import { ShipmentCard } from "@/components/sections/shipments/ShipmentCard";
 import { Shipment } from "@shared/schema";
+import { fetchPaginated } from "@/api/pagination";
 import { AttentionShipmentCard } from "@/components/sections/shipments/AttentionShipmentCard";
 import { Button } from "@/components/ui/Button";
 import {
@@ -110,6 +111,8 @@ function matchesOrigin(shipment: Shipment, origin: string) {
   }
 }
 
+const PAGE_SIZE = 25;
+
 function matchesDestination(shipment: Shipment, destination: string) {
   const country = shipment.recipientCountry?.toLowerCase() ?? "";
   switch (destination) {
@@ -134,15 +137,34 @@ export default function ShipmentsScreen() {
   const { t } = useTranslation();
 
   const {
-    data: shipments,
+    data,
     isLoading,
     refetch,
-  } = useQuery<Shipment[]>({
-    queryKey: ["/api/client/shipments"],
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["/api/client/shipments", "paginated"],
+    queryFn: ({ pageParam }) =>
+      fetchPaginated<Shipment>("/api/client/shipments", pageParam, PAGE_SIZE),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination.hasNextPage ? lastPage.pagination.page + 1 : undefined,
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     staleTime: 30_000,
-  });
+  });  
+
+  const shipments = useMemo(
+    () => data?.pages.flatMap((page) => page.data) ?? [],
+    [data],
+  );
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Local state so the pull-to-refresh spinner only reflects an actual user
   // pull, not the background refetchInterval tick (which keeps firing while
@@ -316,6 +338,8 @@ export default function ShipmentsScreen() {
         data={filtered}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -323,6 +347,13 @@ export default function ShipmentsScreen() {
             tintColor={Colors.primary}
             colors={[Colors.primary]}
           />
+        }
+        ListFooterComponent={
+          isFetchingNextPage ? (
+            <View style={styles.footerLoading}>
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          ) : null
         }
         ListEmptyComponent={
           isLoading ? (
@@ -473,6 +504,12 @@ const styles = StyleSheet.create({
 
   loadingState: {
     paddingTop: rvs(60),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  footerLoading: {
+    paddingVertical: rvs(16),
     alignItems: "center",
     justifyContent: "center",
   },
