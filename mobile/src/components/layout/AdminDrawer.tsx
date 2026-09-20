@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  I18nManager,
   Modal,
   Pressable,
   ScrollView,
@@ -34,8 +35,11 @@ export function AdminDrawer({ visible, onClose }: AdminDrawerProps) {
   const { displayName, initials, roleLabel, permissionsLabel } = useAdminIdentity();
   const navAction = useAdminNavAction();
   const { logout } = useLogout();
+  const isRTL = I18nManager.isRTL;
+  // RTL opens/closes from the right edge, so the offscreen resting position flips sign.
+  const hiddenX = isRTL ? DRAWER_WIDTH : -DRAWER_WIDTH;
 
-  const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const translateX = useRef(new Animated.Value(hiddenX)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   // The native <Modal> unmounts the instant `visible` goes false, which would cut off
   // the slide-out short — so it stays mounted until the close animation finishes.
@@ -48,7 +52,7 @@ export function AdminDrawer({ visible, onClose }: AdminDrawerProps) {
 
     Animated.parallel([
       Animated.timing(translateX, {
-        toValue: visible ? 0 : -DRAWER_WIDTH,
+        toValue: visible ? 0 : hiddenX,
         duration: 240,
         useNativeDriver: true,
       }),
@@ -62,7 +66,7 @@ export function AdminDrawer({ visible, onClose }: AdminDrawerProps) {
         setMounted(false);
       }
     });
-  }, [visible, translateX, backdropOpacity]);
+  }, [visible, translateX, backdropOpacity,hiddenX]);
 
   const handleItemPress = (item: AdminNavItem, allowed: boolean) => {
     if (!allowed) return;
