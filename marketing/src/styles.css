@@ -118,7 +118,7 @@ a { color: inherit; }
 .btn-block { width: 100%; }
 
 /* ── hero ────────────────────────────────────────────────────────────────── */
-.hero { position: relative; isolation: isolate; overflow: hidden; padding-bottom: 96px; }
+.hero { position: relative; isolation: isolate; overflow: hidden; padding-bottom: 96px; padding-top: 84px; }
 .hero-bg { position: absolute; inset: 0; z-index: -4; background: linear-gradient(140deg, #ff6a1f 0%, #fe5200 40%, #b83900 72%, #5f1e08 100%); }
 html[dir="rtl"] .hero-bg { background: linear-gradient(220deg, #ff6a1f 0%, #fe5200 40%, #b83900 72%, #5f1e08 100%); }
 #heroCanvas { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; }
@@ -132,15 +132,52 @@ html[dir="rtl"] .hero-bg { background: linear-gradient(220deg, #ff6a1f 0%, #fe52
   -webkit-mask-image: radial-gradient(ellipse at 32% 18%, black, transparent 74%);
   mask-image: radial-gradient(ellipse at 32% 18%, black, transparent 74%); }
 
-.nav { position: relative; z-index: 6; }
-.nav .wrap { display: flex; align-items: center; gap: 30px; min-height: 80px; }
-.brandmark { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.brandmark img { height: 34px; width: auto; display: block; filter: brightness(0) invert(1); }
-.brandmark span { font-size: 21px; font-weight: 700; letter-spacing: -.035em; color: #fff; }
+/* ── fixed header ────────────────────────────────────────────────────────── */
+.site-header {
+  position: fixed; inset-inline: 0; top: 0; z-index: 50;
+  border-bottom: 1px solid transparent;
+  transition: background .35s ease, backdrop-filter .35s ease, border-color .35s ease, box-shadow .35s ease;
+}
+.site-header .wrap { display: flex; align-items: center; gap: 30px; min-height: 84px; transition: min-height .35s var(--ease); }
+/* Transparent over the hero; a readable surface once it is over the page. A bar that is always
+   solid wastes the hero, and one that is always transparent is unreadable further down. */
+.site-header.is-condensed {
+  background: rgba(12,10,9,.72);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom-color: rgba(255,255,255,.09);
+  box-shadow: 0 10px 30px -18px rgba(0,0,0,.6);
+}
+.site-header.is-condensed .wrap { min-height: 66px; }
+
+.scroll-progress {
+  position: absolute; inset-inline: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  transform-origin: left center; transform: scaleX(0);
+}
+html[dir="rtl"] .scroll-progress { transform-origin: right center; }
+
+.brandmark { display: flex; align-items: center; text-decoration: none; flex: none; }
+/* The mark already contains the wordmark, so it stands alone — and being the only brand asset on
+   the page is reason enough to give it room. */
+.brandmark img {
+  height: 56px; width: auto; display: block;
+  filter: brightness(0) invert(1);
+  transition: height .35s var(--ease), opacity .2s ease;
+}
+.site-header.is-condensed .brandmark img { height: 44px; }
+.brandmark:hover img { opacity: .82; }
 .navlinks { display: flex; gap: 27px; margin-inline-start: 14px; }
-.navlinks a { color: rgba(255,255,255,.8); text-decoration: none; font-size: 14.5px; font-weight: 500; transition: color .16s; }
+.navlinks a { position: relative; color: rgba(255,255,255,.8); text-decoration: none; font-size: 14.5px; font-weight: 500; transition: color .16s; }
 .navlinks a:hover { color: #fff; }
-.navcta { margin-inline-start: auto; }
+.navlinks a::after {
+  content: ""; position: absolute; inset-inline: 0; bottom: -7px; height: 2px;
+  background: var(--brand); border-radius: 2px;
+  transform: scaleX(0); transform-origin: center; transition: transform .32s var(--ease);
+}
+.navlinks a:hover::after { transform: scaleX(1); }
+.navcta { margin-inline-start: auto; display: flex; align-items: center; gap: 9px; }
+.btn-sm { font-size: 14px; padding: 9px 17px; }
 
 .hero-copy { text-align: center; padding-top: 48px; max-width: 800px; margin-inline: auto; position: relative; z-index: 2; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.12); backdrop-filter: blur(8px); color: #fff; padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 500; }
@@ -223,8 +260,8 @@ html[dir="rtl"] .dims-toggle[aria-expanded="true"] .chev { transform: rotate(-90
   position: relative; transition: color .18s, background .18s; display: inline-flex; align-items: center; gap: 8px; }
 .qtab:hover { color: var(--ink); background: var(--paper-2); }
 .qtab[aria-selected="true"] { color: var(--brand); }
-.qtab[aria-selected="true"]::after { content: ""; position: absolute; inset-inline: 10px; bottom: -1px;
-  height: 2px; background: var(--brand); border-radius: 2px 2px 0 0; }
+.qtab-indicator { position: absolute; inset-inline: 10px; bottom: -1px; height: 2px;
+  background: var(--brand); border-radius: 2px 2px 0 0; }
 .qtab svg { height: 16px; width: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .panel[hidden] { display: none; }
 .panel { animation: rise .35s var(--ease); }
@@ -296,7 +333,7 @@ html[dir="rtl"] .marquee-track { animation-direction: reverse; }
 html[dir="rtl"] .marquee-label { letter-spacing: 0; }
 
 /* ── sections ────────────────────────────────────────────────────────────── */
-section { padding: 96px 0; position: relative; }
+section { padding: 96px 0; position: relative; scroll-margin-top: 84px; }
 .sec-alt { background: var(--paper-2); border-block: 1px solid var(--rule-2); }
 .sec-void { background: var(--void); color: var(--void-ink); overflow: hidden; }
 .sec-void h2 { color: var(--void-ink); }
@@ -426,7 +463,7 @@ html[dir="rtl"] .closing-bg { background: linear-gradient(220deg, #ff6a1f 0%, #f
 
 footer { background: var(--void); border-top: 1px solid var(--void-rule); padding: 46px 0; color: var(--void-ink-3); }
 footer .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13.5px; }
-footer .fbrand { font-weight: 700; color: var(--void-ink); font-size: 17px; letter-spacing: -.035em; }
+footer .fbrand { display: block; height: 46px; width: auto; filter: brightness(0) invert(1); opacity: .92; }
 footer .sep { height: 3px; width: 3px; border-radius: 50%; background: currentColor; opacity: .5; }
 footer .flinks { margin-inline-start: auto; display: flex; gap: 22px; }
 footer a { text-decoration: none; transition: color .16s; }
@@ -473,3 +510,31 @@ footer a:hover { color: var(--brand); }
    or anything it fails to observe would stay invisible. */
 .rv { opacity: 1; transform: none; }
 @media (max-width: 620px) { .quote-actions { padding-inline: 18px; } }
+
+/* ── polish ──────────────────────────────────────────────────────────────── */
+/* The marquee should read as continuous, not as a strip that starts and stops. */
+.marquee-track {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+/* Tiles lift toward the light rather than just moving up. */
+.tile { will-change: transform; }
+.tile::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(254,82,0,.07), transparent 60%);
+  opacity: 0; transition: opacity .35s var(--ease);
+}
+.tile:hover::before { opacity: 1; }
+/* Buttons settle rather than snap. */
+.btn { will-change: transform; }
+.btn-primary:hover { transform: translateY(-1px) scale(1.004); }
+.btn-white:hover { transform: translateY(-1px) scale(1.004); }
+/* Stat figures share the heading's optical weight. */
+.stat-n { font-variant-numeric: tabular-nums; }
+/* A blurred reveal on a subpixel boundary can shimmer; promote the layer once. */
+.hero-copy, .quote { will-change: transform, opacity; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile:hover::before { opacity: 0; }
+  .btn-primary:hover, .btn-white:hover { transform: none; }
+}

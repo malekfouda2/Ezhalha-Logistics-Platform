@@ -1,7 +1,8 @@
 import { useLocale } from "@marketing/i18n";
 import { APP_ORIGIN, signupHref } from "@marketing/api";
 import { CarrierMark } from "@marketing/components/carrier-mark";
-import { CountUp, Reveal } from "@marketing/components/reveal";
+import { CountUp, Reveal, Rise, Stagger } from "@marketing/components/motion";
+import { scrollToId } from "@marketing/lib/scroll";
 
 /** The ten carriers a client can actually book. Aggregators and credentials-only entries excluded. */
 const BOOKABLE_CARRIERS = [
@@ -99,21 +100,21 @@ export function Flows() {
   return (
     <section id="flows">
       <div className="wrap">
-        <Reveal className="sec-head">
-          <div className="kicker">{t("fl.kicker")}</div>
-          <h2>{t("fl.title")}</h2>
-          <p>{t("fl.sub")}</p>
-        </Reveal>
-        <div className="bento">
+        <Stagger className="sec-head" gap={0.09}>
+          <Rise className="kicker">{t("fl.kicker")}</Rise>
+          <Rise as="div"><h2>{t("fl.title")}</h2></Rise>
+          <Rise as="div"><p>{t("fl.sub")}</p></Rise>
+        </Stagger>
+        <Stagger className="bento" gap={0.1}>
           {content.flows.map((flow, i) => (
-            <Reveal key={flow.title} className={`tile ${i < 2 ? "tile-lg" : "tile-md"}`} delay={i * 0.07}>
+            <Rise key={flow.title} className={`tile ${i < 2 ? "tile-lg" : "tile-md"}`} distance={34}>
               <div className="art">{FLOW_ART[flow.art]}</div>
               <h3>{flow.title}</h3>
               <p>{flow.body}</p>
               <span className="tag">{flow.tag}</span>
-            </Reveal>
+            </Rise>
           ))}
-        </div>
+        </Stagger>
       </div>
     </section>
   );
@@ -124,20 +125,20 @@ export function HowItWorks() {
   return (
     <section id="how" className="sec-alt">
       <div className="wrap">
-        <Reveal className="sec-head center">
-          <div className="kicker">{t("how.kicker")}</div>
-          <h2>{t("how.title")}</h2>
-        </Reveal>
+        <Stagger className="sec-head center" gap={0.09}>
+          <Rise className="kicker">{t("how.kicker")}</Rise>
+          <Rise as="div"><h2>{t("how.title")}</h2></Rise>
+        </Stagger>
         <Reveal className="pipe">
-          <div className="pipe-steps">
+          <Stagger className="pipe-steps" gap={0.13} delay={0.15}>
             {content.steps.map((step, i) => (
-              <div className="pipe-step" key={step.title}>
+              <Rise className="pipe-step" key={step.title} distance={18}>
                 <span className="pipe-n num">{i + 1}</span>
                 <h3>{step.title}</h3>
                 <p>{step.body}</p>
-              </div>
+              </Rise>
             ))}
-          </div>
+          </Stagger>
         </Reveal>
         <Reveal className="pipe-note" delay={0.1}>{t("how.note")}</Reveal>
       </div>
@@ -150,23 +151,21 @@ export function TrackingPreview() {
   return (
     <section id="track">
       <div className="wrap">
-        <Reveal className="sec-head">
-          <div className="kicker">{t("tr.kicker")}</div>
-          <h2>{t("tr.title")}</h2>
-          <p>{t("tr.sub")}</p>
-        </Reveal>
+        <Stagger className="sec-head" gap={0.09}>
+          <Rise className="kicker">{t("tr.kicker")}</Rise>
+          <Rise as="div"><h2>{t("tr.title")}</h2></Rise>
+          <Rise as="div"><p>{t("tr.sub")}</p></Rise>
+        </Stagger>
         <div className="track-wrap">
-          <Reveal>
-            <div className="timeline">
-              {content.timeline.map((item) => (
-                <div className="tl-item on" key={item.title}>
-                  <div className="tl-t">{item.title}</div>
-                  <div className="tl-m">{item.meta}</div>
-                  <div className="tl-c"><bdi>{item.time}</bdi></div>
-                </div>
-              ))}
-            </div>
-          </Reveal>
+          <Stagger className="timeline" gap={0.12}>
+            {content.timeline.map((item) => (
+              <Rise className="tl-item on" key={item.title} distance={16}>
+                <div className="tl-t">{item.title}</div>
+                <div className="tl-m">{item.meta}</div>
+                <div className="tl-c"><bdi>{item.time}</bdi></div>
+              </Rise>
+            ))}
+          </Stagger>
           <Reveal className="docs" delay={0.12}>
             <div className="doc doc-label">
               <div className="doc-hd"><b>AIR WAYBILL</b><span>1 / 25</span></div>
@@ -199,23 +198,23 @@ export function ForBusiness() {
   return (
     <section id="business" className="sec-alt">
       <div className="wrap">
-        <Reveal className="sec-head">
-          <div className="kicker">{t("bz.kicker")}</div>
-          <h2>{t("bz.title")}</h2>
-          <p>{t("bz.sub")}</p>
-        </Reveal>
-        <div className="bento">
-          {content.biz.map((item, i) => (
-            <Reveal key={item.title} className="tile tile-sm" delay={i * 0.06}>
+        <Stagger className="sec-head" gap={0.09}>
+          <Rise className="kicker">{t("bz.kicker")}</Rise>
+          <Rise as="div"><h2>{t("bz.title")}</h2></Rise>
+          <Rise as="div"><p>{t("bz.sub")}</p></Rise>
+        </Stagger>
+        <Stagger className="bento" gap={0.07}>
+          {content.biz.map((item) => (
+            <Rise key={item.title} className="tile tile-sm" distance={30}>
               <div className="icon">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d={BIZ_ICONS[item.icon]} /></svg>
               </div>
               <h3>{item.title}</h3>
               <p>{item.body}</p>
               <span className="tag"><b>{item.tag}</b></span>
-            </Reveal>
+            </Rise>
           ))}
-        </div>
+        </Stagger>
       </div>
     </section>
   );
@@ -226,18 +225,18 @@ export function Reach() {
   return (
     <section className="sec-void on-void">
       <div className="wrap">
-        <Reveal className="sec-head center">
-          <div className="kicker">{t("st.kicker")}</div>
-          <h2>{t("st.title")}</h2>
-        </Reveal>
-        <Reveal className="stats">
+        <Stagger className="sec-head center" gap={0.09}>
+          <Rise className="kicker">{t("st.kicker")}</Rise>
+          <Rise as="div"><h2>{t("st.title")}</h2></Rise>
+        </Stagger>
+        <Stagger className="stats" gap={0.09}>
           {content.stats.map((stat) => (
-            <div className="stat" key={stat.label}>
+            <Rise className="stat" key={stat.label} distance={20}>
               <div className="stat-n num"><CountUp to={stat.value} /></div>
               <div className="stat-l">{stat.label}</div>
-            </div>
+            </Rise>
           ))}
-        </Reveal>
+        </Stagger>
       </div>
     </section>
   );
@@ -249,15 +248,21 @@ export function Closing() {
     <section className="closing">
       <div className="closing-bg" />
       <div className="glow glow-a" /><div className="glow glow-b" />
-      <div className="wrap">
-        <h2>{t("cta.title")}</h2>
-        <p>{t("cta.sub")}</p>
-        <div className="cta-row">
+      <Stagger className="wrap" gap={0.1}>
+        <Rise as="div"><h2>{t("cta.title")}</h2></Rise>
+        <Rise as="div"><p>{t("cta.sub")}</p></Rise>
+        <Rise className="cta-row">
           <a className="btn btn-white btn-lg" href={signupHref()}>{t("cta.primary")}</a>
-          <a className="btn btn-glass btn-lg" href="#top">{t("cta.secondary")}</a>
-        </div>
-        <p className="fine">{t("cta.fine")}</p>
-      </div>
+          <a
+            className="btn btn-glass btn-lg"
+            href="#top"
+            onClick={(e) => { e.preventDefault(); scrollToId("top"); }}
+          >
+            {t("cta.secondary")}
+          </a>
+        </Rise>
+        <Rise className="fine" as="p">{t("cta.fine")}</Rise>
+      </Stagger>
     </section>
   );
 }
@@ -267,7 +272,8 @@ export function Footer() {
   return (
     <footer>
       <div className="wrap">
-        <span className="fbrand">ezhalha</span>
+        {/* The mark already carries the wordmark, so the text beside it was a duplicate. */}
+        <img className="fbrand" src="/brand/logo.png" alt="ezhalha" width={52} height={46} />
         <span className="sep" />
         <span>{t("copyright")}</span>
         <span className="flinks">

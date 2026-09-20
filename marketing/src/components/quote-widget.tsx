@@ -3,6 +3,7 @@ import { useLocale } from "@marketing/i18n";
 import { COUNTRIES } from "@marketing/data/countries";
 import { ApiError, fetchQuote, signupHref, type QuoteRate, type QuoteRequest, type QuoteResponse } from "@marketing/api";
 import { CarrierMark } from "./carrier-mark";
+import { CountUp } from "./motion";
 
 /**
  * The Quick Quote widget — the reason this page exists.
@@ -43,7 +44,7 @@ function RateRow({ rate, best, index }: { rate: QuoteRate; best: boolean; index:
         <div className="rate-eta">{[note, eta].filter(Boolean).join(" · ")}</div>
       </div>
       <div className="rate-price">
-        <div className="rate-amt num">SAR {money(rate.clientTotal)}</div>
+        <div className="rate-amt num">SAR <CountUp to={rate.clientTotal} decimals={2} duration={900} /></div>
         <div className="rate-vat">{t("r.vat")}</div>
       </div>
     </div>

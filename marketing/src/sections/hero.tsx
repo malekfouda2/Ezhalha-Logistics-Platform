@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocale, localeHref } from "@marketing/i18n";
-import { APP_ORIGIN, signupHref } from "@marketing/api";
+import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
+import { useLocale } from "@marketing/i18n";
+import { EASE, SplitWords, useMotionEnabled } from "@marketing/components/motion";
 import { QuoteWidget } from "@marketing/components/quote-widget";
 import { TrackWidget } from "@marketing/components/track-widget";
 
@@ -110,78 +111,110 @@ function HeroArcs() {
 }
 
 export function Hero() {
-  const { t, alternate } = useLocale();
+  const { t } = useLocale();
   const [tab, setTab] = useState<"quote" | "track">("quote");
+  const enabled = useMotionEnabled();
+  const heroRef = useRef<HTMLElement | null>(null);
+
+  // The copy drifts up and dims as the hero leaves, so the gradient hands off to the next section
+  // instead of simply scrolling away. Small numbers on purpose — parallax that announces itself
+  // reads as a template.
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const copyY = useTransform(scrollYProgress, [0, 1], [0, -70]);
+  const copyOpacity = useTransform(scrollYProgress, [0, 0.75], [1, 0]);
 
   return (
-    <header className="hero" id="top">
+    <header className="hero" id="top" ref={heroRef}>
       <div className="hero-bg" />
       <HeroArcs />
       <div className="glow glow-a" /><div className="glow glow-b" /><div className="glow glow-c" />
       <div className="hero-grid" />
 
-      <nav className="nav">
-        <div className="wrap">
-          <a className="brandmark" href="#top">
-            <img src="/brand/logo.png" alt="" width={34} height={30} />
-            <span>ezhalha</span>
-          </a>
-          <div className="navlinks">
-            <a href="#network">{t("nav.network")}</a>
-            <a href="#flows">{t("nav.flows")}</a>
-            <a href="#weight">{t("nav.weight")}</a>
-            <a href="#business">{t("nav.business")}</a>
-          </div>
-          <div className="navcta">
-            {/* A real link to the other language's URL, not a runtime toggle — so it is
-                crawlable, shareable and correct before any JavaScript runs. */}
-            <a className="btn btn-glass" href={alternate.href} lang={alternate.locale} hrefLang={alternate.locale}>
-              {alternate.label}
-            </a>
-            <a className="btn btn-glass" href={`${APP_ORIGIN}/`}>{t("nav.signin")}</a>
-          </div>
-        </div>
-      </nav>
-
       <div className="wrap">
-        <div className="hero-copy">
-          <span className="eyebrow"><span className="dot" />{t("hero.eyebrow")}</span>
-          <h1>{t("hero.t1")} {t("hero.t2")}</h1>
-          <p className="hero-sub">{t("hero.sub")}</p>
-        </div>
+        <motion.div
+          className="hero-copy"
+          style={enabled ? { y: copyY, opacity: copyOpacity } : undefined}
+        >
+          <motion.span
+            className="eyebrow"
+            initial={enabled ? { opacity: 0, y: 14 } : false}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, ease: EASE }}
+          >
+            <span className="dot" />{t("hero.eyebrow")}
+          </motion.span>
 
-        <div className="quote">
+          <h1>
+            <SplitWords text={t("hero.t1")} delay={0.12} />{" "}
+            <SplitWords text={t("hero.t2")} delay={0.28} />
+          </h1>
+
+          <motion.p
+            className="hero-sub"
+            initial={enabled ? { opacity: 0, y: 18, filter: "blur(6px)" } : false}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ duration: 0.9, delay: 0.5, ease: EASE }}
+          >
+            {t("hero.sub")}
+          </motion.p>
+        </motion.div>
+
+        <motion.div
+          className="quote"
+          initial={enabled ? { opacity: 0, y: 46, scale: 0.975 } : false}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 1, delay: 0.42, ease: EASE }}
+        >
           <div className="qtabs" role="tablist">
-            <button
-              className="qtab" type="button" role="tab"
-              aria-selected={tab === "quote"} aria-controls="panel-quote" id="tab-quote"
-              onClick={() => setTab("quote")}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6" /></svg>
-              <span>{t("tab.price")}</span>
-            </button>
-            <button
-              className="qtab" type="button" role="tab"
-              aria-selected={tab === "track"} aria-controls="panel-track" id="tab-track"
-              onClick={() => setTab("track")}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z" /><circle cx="12" cy="10" r="2.6" /></svg>
-              <span>{t("tab.track")}</span>
-            </button>
+            {(["quote", "track"] as const).map((key) => (
+              <button
+                key={key}
+                className="qtab" type="button" role="tab"
+                aria-selected={tab === key}
+                aria-controls={`panel-${key}`}
+                id={`tab-${key}`}
+                onClick={() => setTab(key)}
+              >
+                {key === "quote" ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6" /></svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.7 7-11a7 7 0 1 0-14 0c0 5.3 7 11 7 11Z" /><circle cx="12" cy="10" r="2.6" /></svg>
+                )}
+                <span>{t(key === "quote" ? "tab.price" : "tab.track")}</span>
+                {/* One indicator shared by both tabs, so it slides between them rather than
+                    fading out here and in over there. */}
+                {tab === key && enabled && (
+                  <motion.span className="qtab-indicator" layoutId="qtab-indicator" transition={{ duration: 0.4, ease: EASE }} />
+                )}
+                {tab === key && !enabled && <span className="qtab-indicator" />}
+              </button>
+            ))}
           </div>
 
-          <div className="panel" id="panel-quote" role="tabpanel" aria-labelledby="tab-quote" hidden={tab !== "quote"}>
-            <div className="quote-head">
-              <h2>{t("q.title")}</h2>
-              <span className="hint">{t("q.hint")}</span>
-            </div>
-            <QuoteWidget />
-          </div>
-
-          <div className="panel" id="panel-track" role="tabpanel" aria-labelledby="tab-track" hidden={tab !== "track"}>
-            <TrackWidget />
-          </div>
-        </div>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={tab}
+              initial={enabled ? { opacity: 0, y: 10 } : false}
+              animate={{ opacity: 1, y: 0 }}
+              exit={enabled ? { opacity: 0, y: -8 } : undefined}
+              transition={{ duration: 0.28, ease: EASE }}
+            >
+              {tab === "quote" ? (
+                <div className="panel" id="panel-quote" role="tabpanel" aria-labelledby="tab-quote">
+                  <div className="quote-head">
+                    <h2>{t("q.title")}</h2>
+                    <span className="hint">{t("q.hint")}</span>
+                  </div>
+                  <QuoteWidget />
+                </div>
+              ) : (
+                <div className="panel" id="panel-track" role="tabpanel" aria-labelledby="tab-track">
+                  <TrackWidget />
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
       </div>
     </header>
   );

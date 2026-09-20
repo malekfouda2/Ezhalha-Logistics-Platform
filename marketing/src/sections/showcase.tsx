@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useInView, useReducedMotion } from "framer-motion";
 import { useLocale } from "@marketing/i18n";
 import { CarrierMark } from "@marketing/components/carrier-mark";
-import { Reveal } from "@marketing/components/reveal";
+import { Reveal, Rise, Stagger } from "@marketing/components/motion";
 
 /**
  * The carrier fan-out.
@@ -64,14 +64,14 @@ export function FanOut() {
             <div className="kicker">{t("fan.kicker")}</div>
             <h2>{t("fan.title")}</h2>
             <p className="lead">{t("fan.lead")}</p>
-            <div className="fan-facts">
+            <Stagger className="fan-facts" gap={0.1} delay={0.2}>
               {content.fanFacts.map((fact) => (
-                <div className="fan-fact" key={fact.title}>
+                <Rise className="fan-fact" key={fact.title} distance={14}>
                   <span className="n num">{fact.n}</span>
                   <span className="t">{fact.title}<span>{fact.body}</span></span>
-                </div>
+                </Rise>
               ))}
-            </div>
+            </Stagger>
           </Reveal>
 
           <Reveal className="fan-stage" delay={0.12}>
@@ -178,11 +178,11 @@ export function WeightLab() {
   return (
     <section id="weight" className="sec-void on-void">
       <div className="wrap">
-        <Reveal className="sec-head center">
-          <div className="kicker">{t("lab.kicker")}</div>
-          <h2>{t("lab.title")}</h2>
-          <p>{t("lab.sub")}</p>
-        </Reveal>
+        <Stagger className="sec-head center" gap={0.09}>
+          <Rise className="kicker">{t("lab.kicker")}</Rise>
+          <Rise as="div"><h2>{t("lab.title")}</h2></Rise>
+          <Rise as="div"><p>{t("lab.sub")}</p></Rise>
+        </Stagger>
 
         <Reveal className="lab">
           <div className="lab-box">
