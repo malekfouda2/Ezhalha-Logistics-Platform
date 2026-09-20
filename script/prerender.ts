@@ -24,6 +24,16 @@ const SSR_DIST = path.resolve(MARKETING, ".ssr");
 
 const SITE = process.env.MARKETING_ORIGIN || "https://ezhalha.co";
 
+/**
+ * The social card.
+ *
+ * Points at the logo today, which is honest rather than good: that file is a 530x470 PNG derived
+ * from a WhatsApp screenshot, and it will letterbox badly in a 1200x630 card. Drop a real
+ * `og.png` into marketing/public/brand/ and change this one line — the reference is deliberately
+ * a variable so that is a one-word edit rather than a hunt through the head.
+ */
+const OG_IMAGE = process.env.MARKETING_OG_IMAGE || "logo.png";
+
 /** Where each locale is served from. English is the root so the bare domain is the English page. */
 const localePath = (locale: Locale) => (locale === "en" ? "/" : `/${locale}/`);
 
@@ -73,11 +83,11 @@ function head(locale: Locale): string {
     <meta property="og:title" content="${title}" />
     <meta property="og:description" content="${description}" />
     <meta property="og:url" content="${canonical}" />
-    <meta property="og:image" content="${SITE}/brand/og.png" />
+    <meta property="og:image" content="${SITE}/brand/${OG_IMAGE}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${title}" />
     <meta name="twitter:description" content="${description}" />
-    <meta name="twitter:image" content="${SITE}/brand/og.png" />
+    <meta name="twitter:image" content="${SITE}/brand/${OG_IMAGE}" />
     <meta name="theme-color" content="#fe5200" />
     <link rel="icon" type="image/png" href="/brand/logo.png" />
     <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`;

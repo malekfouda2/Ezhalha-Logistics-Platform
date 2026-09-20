@@ -117,6 +117,9 @@ Common integration env:
 - Use existing shadcn/ui primitives from `client/src/components/ui`.
 - Use `lucide-react` icons where available.
 - Keep UI dense and operational. This is a logistics/workflow product, not a marketing site.
+  This applies to `client/` — the portal. The one exception is `marketing/`, the public site at
+  ezhalha.co, which is deliberately editorial, prerendered and bilingual; see
+  [docs/marketing-site.md](docs/marketing-site.md). Do not "fix" it to match the portal.
 - Respect brand orange `#fe5200` and CSS custom properties in `client/src/index.css`.
 - For admin navigation, update `ADMIN_ROUTE_PERMISSIONS` and `ADMIN_NAV_ITEMS` together when adding/removing admin pages.
 - For new protected pages, ensure route-level permission checks match server-side permission checks.
