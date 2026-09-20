@@ -1086,7 +1086,7 @@ function renderVirtualCarrierNote(vc: { name: string; noteTemplate?: string | nu
 // carrier rate APIs zone on postal/city + country, so a representative pair gives a real
 // (zone-accurate) carrier quote without collecting a full address — the same idea as the
 // public FedEx/DHL quote tools. Countries absent here are simply not live-rated for express.
-const QUICK_QUOTE_RATE_LOCATIONS: Record<string, { city: string; postalCode: string }> = {
+export const QUICK_QUOTE_RATE_LOCATIONS: Record<string, { city: string; postalCode: string }> = {
   SA: { city: "Riyadh", postalCode: "12211" },
   AE: { city: "Dubai", postalCode: "00000" },
   KW: { city: "Kuwait City", postalCode: "13001" },
@@ -19934,11 +19934,17 @@ export async function registerRoutes(
         return rest;
       };
 
+      // Carriers publish a lot of service levels — a sandbox lane can come back with hundreds,
+      // and even a real one returns more than anybody reads. The authenticated Quick Quote page
+      // shows them all because an operator is comparing; a visitor wants a price. Both arrays are
+      // already sorted cheapest-first, so taking the head keeps the cheapest and the badge on it.
+      const TOP_N = 5;
+
       res.json({
         chargeable: quote.chargeable,
-        local: quote.local.map(publicRate),
+        local: quote.local.slice(0, TOP_N).map(publicRate),
         ddp: quote.ddp.map(publicRate),
-        express: quote.express.map(publicRate),
+        express: quote.express.slice(0, TOP_N).map(publicRate),
         available: quote.available,
         currency: quote.currency,
         indicative: true,

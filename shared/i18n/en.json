@@ -1,0 +1,298 @@
+{
+  "nav": {
+    "network": "Network",
+    "flows": "Shipping",
+    "weight": "Pricing",
+    "business": "For business",
+    "signin": "Sign in",
+    "track": "Track"
+  },
+  "hero": {
+    "eyebrow": "Logistics, streamlined",
+    "t1": "Ship smarter.",
+    "t2": "Move faster.",
+    "sub": "Ten carriers rated at once, in about a second. Price a shipment right now — no account, no sales call."
+  },
+  "q": {
+    "title": "What does it cost to ship?",
+    "hint": "Country and weight is all we need",
+    "from": "Shipping from",
+    "to": "Shipping to",
+    "weight": "Weight",
+    "kg": "kg",
+    "dims": "Add box dimensions",
+    "length": "Length (cm)",
+    "width": "Width (cm)",
+    "height": "Height (cm)",
+    "pieces": "Pieces",
+    "cta": "Sign up to book this shipment",
+    "disclaimer": "Indicative pricing at our standard rate. Your account is priced on your own agreed margin — we re-quote before you pay.",
+    "getPrices": "Get prices",
+    "pricing": "Asking carriers…",
+    "idle": "Pick a lane and a weight, then get live prices from every carrier we hold.",
+    "none": "No instant rates on that lane",
+    "failed": "Could not reach our pricing service",
+    "retry": "Try again in a moment, or create an account and our team will quote it.",
+    "book": "Sign up to book this shipment"
+  },
+  "mq": {
+    "label": "Rated and booked through"
+  },
+  "fan": {
+    "kicker": "One request, every carrier",
+    "title": "We ask all of them at once, then keep the cheapest",
+    "lead": "Most aggregators hold one account per carrier. We hold several — different countries, different entities, different negotiated rates — and fan the request across every one of them that serves your lane.",
+    "stage": "Rate request · SA → AE · 5 kg",
+    "replay": "Replay",
+    "waiting": "waiting",
+    "won": "cheapest",
+    "acct": "account"
+  },
+  "fl": {
+    "kicker": "Four ways to ship",
+    "title": "Whatever is in the box, there's a lane for it",
+    "sub": "From a next-day parcel across Riyadh to a pallet of regulated goods that needs a declaration someone has to sign."
+  },
+  "lab": {
+    "kicker": "Chargeable weight",
+    "title": "The quote you see is the amount the carrier invoices",
+    "sub": "Carriers bill on whichever is greater — what it weighs, or how much space it takes. Get the divisor wrong and every quote you give is a guess. Drag the box and watch.",
+    "actual": "Actual weight",
+    "volumetric": "Volumetric",
+    "len": "Length",
+    "wid": "Width",
+    "hei": "Height",
+    "billed": "You are billed on",
+    "by": "by volume",
+    "byw": "by weight"
+  },
+  "how": {
+    "kicker": "How it works",
+    "title": "Four steps, and you control all of them",
+    "note": "Nothing reaches the carrier until your payment clears. No surprise waybills, no charge for a shipment you changed your mind about."
+  },
+  "tr": {
+    "kicker": "After you book",
+    "title": "Every piece tracked, every document generated",
+    "sub": "A 25-box shipment gets 25 tracking numbers and 25 labels, not one master and a shrug. The commercial invoice is built from your items and travels with the goods."
+  },
+  "bz": {
+    "kicker": "For the business",
+    "title": "Built for whoever reconciles it at month end",
+    "sub": "Terms, team control, store connections and paperwork — the parts that decide whether shipping is a line item or a mess."
+  },
+  "st": {
+    "kicker": "The reach",
+    "title": "One account is the whole network",
+    "in_transit": "In transit",
+    "out_for_delivery": "Out for delivery",
+    "delivered": "Delivered",
+    "customs_clearance": "In customs",
+    "picked_up": "Picked up",
+    "on_hold": "On hold",
+    "booked": "Booked",
+    "processing": "Processing",
+    "cancelled": "Cancelled",
+    "returned": "Returned"
+  },
+  "cta": {
+    "title": "Get a price in the next ten seconds",
+    "sub": "Individuals are approved on the spot. Companies are reviewed in one to two business days — and your shipment is waiting when you get in.",
+    "primary": "Create an account",
+    "secondary": "Price a shipment first",
+    "fine": "No card required for a quote."
+  },
+  "ft": {
+    "privacy": "Privacy",
+    "terms": "Shipping & Return",
+    "contact": "Contact"
+  },
+  "r": {
+    "express": "Express",
+    "local": "Local delivery in Saudi Arabia",
+    "ddp": "Door to Door Freight",
+    "live": "Rating",
+    "days": "business days",
+    "day": "business day",
+    "vat": "incl. VAT",
+    "best": "Best value",
+    "air": "Air freight",
+    "sea": "Sea freight",
+    "customs": "Customs and duties included"
+  },
+  "c": {
+    "total": "Total weight",
+    "charge": "Chargeable",
+    "pieces": "Pieces",
+    "vol": "volumetric"
+  },
+  "empty": "Enter a weight to see prices.",
+  "copyright": "© 2026 ezhalha",
+  "tab": {
+    "price": "Get a price",
+    "track": "Track a shipment"
+  },
+  "trk": {
+    "label": "Tracking number",
+    "cta": "Track",
+    "try": "Try one:",
+    "empty": "Enter an ezhalha tracking number or a carrier waybill number.",
+    "short": "That does not look like a tracking number",
+    "shortMsg": "ezhalha numbers look like EZH100200300. Carrier waybills are 10 to 14 digits.",
+    "none": "No shipment found for that number",
+    "noneMsg": "Check the number and try again. A shipment can take a few minutes to appear after it is booked.",
+    "route": "Route",
+    "carrier": "Carrier",
+    "pieces": "Pieces",
+    "eta": "Estimated delivery",
+    "delivered": "Delivered",
+    "privacy": "Public tracking shows movement only. Addresses, contact details and prices stay inside your ezhalha account.",
+    "searching": "Searching…"
+  },
+  "sections": {
+    "fanFacts": [
+      {
+        "n": "01",
+        "title": "Every carrier on your lane",
+        "body": "FedEx, DHL, Aramex and six domestic couriers, asked in parallel."
+      },
+      {
+        "n": "02",
+        "title": "Every account under each carrier",
+        "body": "Scoped by origin and destination country, then the cheapest one wins."
+      },
+      {
+        "n": "03",
+        "title": "A carrier that stalls is dropped",
+        "body": "Eight-second ceiling each. One slow API never holds up your quote."
+      }
+    ],
+    "flows": [
+      {
+        "art": "express",
+        "title": "Express Shipment",
+        "body": "International courier delivery, import and export, through FedEx, DHL and Aramex. Live rates, full customs paperwork, door to door.",
+        "tag": "66 countries · live rates"
+      },
+      {
+        "art": "local",
+        "title": "Local Delivery",
+        "body": "Last-mile inside Saudi Arabia across six domestic couriers on fixed rate cards, so the price never moves on you.",
+        "tag": "6 couriers · next day in major cities"
+      },
+      {
+        "art": "freight",
+        "title": "Door To Door Freight",
+        "body": "Import with all duties and taxes prepaid, on fixed lane pricing by air or by sea. Our team clears it and hands it over.",
+        "tag": "Air & sea · inbound to KSA"
+      },
+      {
+        "art": "dg",
+        "title": "Dangerous Goods",
+        "body": "Batteries, chemicals, aerosols. Declared under IATA rules and priced by a person who signs for it, not an API that guesses.",
+        "tag": "Approval required · ops-quoted"
+      }
+    ],
+    "steps": [
+      {
+        "title": "Get rates",
+        "body": "Every carrier on your lane priced at once, with transit times and your all-in total."
+      },
+      {
+        "title": "Check out",
+        "body": "Pick a rate. We hold it and build the shipment — nothing has reached the carrier yet."
+      },
+      {
+        "title": "Pay",
+        "body": "Card through Tap, or on your credit terms. Saved cards and in-app payment supported."
+      },
+      {
+        "title": "We book it",
+        "body": "Waybill, a label per piece, commercial invoice and a pickup — all generated for you."
+      }
+    ],
+    "timeline": [
+      {
+        "title": "Picked up",
+        "meta": "Riyadh, SA",
+        "time": "09:14"
+      },
+      {
+        "title": "In transit",
+        "meta": "Departed origin facility",
+        "time": "13:02"
+      },
+      {
+        "title": "Customs clearance",
+        "meta": "Dubai, AE",
+        "time": "06:41"
+      },
+      {
+        "title": "Out for delivery",
+        "meta": "With courier",
+        "time": "08:20"
+      },
+      {
+        "title": "Delivered",
+        "meta": "Signed for",
+        "time": "11:55"
+      }
+    ],
+    "biz": [
+      {
+        "icon": "card",
+        "title": "Ship now, settle later",
+        "body": "Approved accounts get a credit limit and 30-day terms. Invoices, statements and reminders run themselves — no chasing, no month-end surprises.",
+        "tag": "30-day terms"
+      },
+      {
+        "icon": "users",
+        "title": "Your team, your rules",
+        "body": "Six separate permissions: who creates shipments, who sees invoices, who is allowed to pay. The primary contact keeps control.",
+        "tag": "6 permissions"
+      },
+      {
+        "icon": "store",
+        "title": "Orders straight from your store",
+        "body": "Connect Zid or WooCommerce and orders arrive ready to ship. Pick the carrier, or set a rule — cheapest, fastest, or always the same one.",
+        "tag": "Zid · WooCommerce"
+      },
+      {
+        "icon": "doc",
+        "title": "Paperwork that fills itself",
+        "body": "Upload a supplier invoice and we read the items, HS codes, origins and values off it. The commercial invoice is generated and travels with the goods.",
+        "tag": "AI extraction"
+      },
+      {
+        "icon": "vat",
+        "title": "VAT that is actually right",
+        "body": "Four separate tax treatments — domestic, import, export and freight. The margin is taxed correctly on each, so the books reconcile.",
+        "tag": "15% · handled"
+      },
+      {
+        "icon": "ops",
+        "title": "People where people are needed",
+        "body": "Freight and dangerous goods are quoted by our operations desk, not a robot. You get a named price from someone accountable for it.",
+        "tag": "Human in the loop"
+      }
+    ],
+    "stats": [
+      {
+        "value": 10,
+        "label": "Carriers you can book"
+      },
+      {
+        "value": 66,
+        "label": "Countries served"
+      },
+      {
+        "value": 4,
+        "label": "Ways to ship"
+      },
+      {
+        "value": 0,
+        "label": "Carrier accounts you open"
+      }
+    ]
+  }
+}

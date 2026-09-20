@@ -173,6 +173,34 @@ describe("POST /api/public/quote", () => {
     }
   });
 
+  it("returns a shortlist, not a rate table", async () => {
+    // A sandbox lane can come back with hundreds of service levels. The page has room for a
+    // price, not a spreadsheet, and the payload should not carry what nobody reads.
+    const res = await request.post("/api/public/quote").send({
+      origin: { countryCode: "SA" },
+      destination: { countryCode: "SA" },
+      weightKg: 5,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.express.length).toBeLessThanOrEqual(5);
+    expect(res.body.local.length).toBeLessThanOrEqual(5);
+  });
+
+  it("keeps the cheapest rate first, so the badge lands on the right row", async () => {
+    const res = await request.post("/api/public/quote").send({
+      origin: { countryCode: "SA" },
+      destination: { countryCode: "SA" },
+      weightKg: 5,
+    });
+
+    expect(res.status).toBe(200);
+    for (const group of [res.body.local, res.body.express]) {
+      const totals = group.map((r: { clientTotal: number }) => r.clientTotal);
+      expect(totals).toEqual([...totals].sort((a: number, b: number) => a - b));
+    }
+  });
+
   it("rejects a missing weight", async () => {
     const res = await request.post("/api/public/quote").send({
       origin: { countryCode: "SA" },
