@@ -23,6 +23,7 @@ import { BackButton } from "@/components/ui/BackButton";
 import { useRequestLoginCode, useSignInWithCode } from "@/lib/hooks/useAuth";
 import Toast from "react-native-toast-message";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
+import { getHomeRouteForUserType } from "@/utils/postLoginRoute";
 
 const CODE_LENGTH = 6;
 const EXPIRY_SECONDS = 10 * 60;
@@ -102,12 +103,12 @@ export default function OtpVerifyScreen() {
     try {
       setVerifying(true);
 
-      await signInWithCodeMutation.mutateAsync({
+      const user = await signInWithCodeMutation.mutateAsync({
         email,
         code: data.code,
       });
 
-      router.replace("/(protected)/(client)/(tabs)/");
+      router.replace(getHomeRouteForUserType(user.userType) as any);
     } catch (error) {
       Toast.show({
         type: "error",

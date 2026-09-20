@@ -16,6 +16,11 @@ export default function ClientLayout() {
     return <Redirect href="/(auth)/login" />;
   }
 
+  // An admin account belongs on the admin shell, not the client tabs.
+  if (user?.userType === "admin") {
+    return <Redirect href="/(protected)/(admin)/(tabs)/" />;
+  }
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />

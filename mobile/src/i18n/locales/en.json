@@ -205,7 +205,7 @@
     "shipmentActivity": "Shipment Activity (Last 6 Months)",
     "recentShipments": {
       "title": "Recent Shipments",
-      "seeAll": "See all",
+      "seeAll": "View all",
       "empty": "No shipments yet"
     },
     "shipmentStatus": {
@@ -1951,6 +1951,152 @@
       "unavailableTitle": "Card payment unavailable",
       "unavailableMessage": "Card entry isn't set up for this account yet. Please try again later or contact support.",
       "fallbackMessage": "The secure card form is unavailable right now. We will continue with Tap's hosted card checkout."
+    }
+  },
+  "admin": {
+    "roles": {
+      "administrator": "Administrator",
+      "accountManager": "Account Manager"
+    },
+    "tabs": {
+      "home": "Home",
+      "ops": "Ops",
+      "shipments": "Shipments",
+      "finance": "Finance",
+      "more": "More"
+    },
+    "permissionsCount_one": "{{count}} permission",
+    "permissionsCount_other": "{{count}} permissions",
+    "noAccess": "no access",
+    "noAccessTitle": "No access",
+    "comingSoonTitle": "Coming soon on mobile",
+    "comingSoonMessage": "This admin section isn't built into the app yet.",
+    "signOut": "Sign out",
+    "nav": {
+      "sections": {
+        "overview": "Overview",
+        "clients": "Clients",
+        "movement": "Movement",
+        "money": "Money",
+        "system": "System",
+        "staff": "Staff"
+      },
+      "items": {
+        "dashboard": "Dashboard",
+        "tasks": "Tasks",
+        "clients": "Clients",
+        "applications": "Applications",
+        "accountManagers": "Account Managers",
+        "operations": "Operations Hub",
+        "shipments": "Shipments",
+        "quotations": "New Quotation",
+        "abandonedShipments": "Abandoned Shipments",
+        "invoices": "Invoices",
+        "payments": "Financial Statements",
+        "refundRequests": "Refund Requests",
+        "creditRequests": "Credit Requests",
+        "salesFeatureRequests": "Feature Requests",
+        "dangerousGoodsRequests": "Dangerous Goods",
+        "creditInvoices": "Credit Invoices",
+        "pricing": "Pricing",
+        "systemLogs": "Bugs & Errors",
+        "auditLogs": "Audit Logs",
+        "integrations": "Integrations",
+        "integrationHealth": "Integration Health",
+        "apps": "Apps",
+        "webhooks": "Webhooks",
+        "emailSettings": "Email Settings",
+        "accessControl": "Access Control",
+        "policies": "Policies",
+        "users": "Users"
+      }
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "stats": {
+        "totalClients": "Total Clients",
+        "activeShipments": "Active Shipments",
+        "pendingApplications": "Pending Applications",
+        "monthlyRevenue": "Monthly Revenue"
+      },
+      "shipmentsChart": "Shipments (Last 6 Months)",
+      "noShipmentData": "No shipment data yet",
+      "recentShipments": {
+        "title": "Recent Shipments",
+        "empty": "No recent shipments",
+        "seeAll": "View all"
+      }
+    },
+    "search": {
+      "title": "Search",
+      "placeholder": "Search clients, shipments, invoices...",
+      "hintMinLength": "Type at least 2 characters to search.",
+      "noResults": "No results for \"{{query}}\".",
+      "sections": {
+        "clients": "Clients",
+        "shipments": "Shipments",
+        "invoices": "Invoices"
+      },
+      "clientMeta": "{{accountNumber}} · {{profile}} profile · {{status}}",
+      "active": "active",
+      "inactive": "inactive",
+      "dueDate": "due {{date}}",
+      "info": "Search spans clients, shipments and invoices — each result is hidden unless your role can read that resource."
+    },
+    "ops": {
+      "title": "Operations Hub",
+      "noAccessDescription": "Your role doesn't include Operations Hub.",
+      "comingSoonDescription": "Door-to-door, express and local queues are still web-only — this tab will bring them here next."
+    },
+    "shipmentsTab": {
+      "title": "Shipments",
+      "noAccessDescription": "Your role doesn't include Shipments.",
+      "empty": {
+        "title": "No shipments",
+        "description": "Nothing to show yet."
+      },
+      "loadMore": "Load more"
+    },
+    "finance": {
+      "title": "Finance",
+      "noAccessDescription": "Your role doesn't include financial reporting.",
+      "totalRevenue": "Total Revenue",
+      "monthlyRevenue": "Monthly Revenue",
+      "revenueChart": "Revenue (Last 6 Months)",
+      "noRevenueData": "No revenue data yet",
+      "info": "Invoices, financial statements and refund/credit requests are still web-only — this tab currently mirrors the dashboard's revenue summary."
+    },
+    "more": {
+      "title": "More",
+      "allPermissions_one": "all {{count}} permission",
+      "allPermissions_other": "all {{count}} permissions",
+      "sections": {
+        "staff": "Staff"
+      },
+      "clients": {
+        "subtitle": "{{count}} accounts"
+      },
+      "applications": {
+        "subtitle": "{{count}} pending"
+      },
+      "accountManagers": {
+        "subtitle": "{{count}} scoped admins"
+      },
+      "users": {
+        "subtitle": "{{staff}} staff · {{invites}} invites"
+      },
+      "accessControl": {
+        "subtitle": "{{roles}} roles · {{permissions}} permissions"
+      },
+      "tasks": {
+        "subtitle": "{{count}} assigned to you"
+      }
+    },
+    "noAccessScreen": {
+      "title": "You don't have access to this",
+      "needsPrefix": "{{screen}} needs ",
+      "middle": ". Your role is ",
+      "suffix": ". Ask a super admin to add the permission."
     }
   }
 }

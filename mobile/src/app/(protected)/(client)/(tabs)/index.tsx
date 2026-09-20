@@ -12,10 +12,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "@/components/ui/Text";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Colors } from "@/constants/colors";
-import { rs, rvs, screenWidth } from "@/utils/responsive";
+import { rs, rvs } from "@/utils/responsive";
 import { StatCard } from "@/components/sections/dashboard/StatCard";
 import { StatCardSkeleton } from "@/components/sections/dashboard/StatCardSkeleton";
 import { RecentShipments } from "@/components/sections/dashboard/RecentShipments";
+import { ShipmentActivityChart } from "@/components/sections/dashboard/ShipmentActivityChart";
 import { ClientAccount, ClientDashboardStats, Shipment } from "@shared/schema";
 import { router } from "expo-router";
 import { LanguageSwitch } from "@/components/ui/LanguageSwitch";
@@ -25,10 +26,6 @@ import { useGlobalRefresh } from "@/lib/hooks/useRefreshOnFocus";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { useCurrentUser } from "@/lib/hooks/useAuth";
 import { useGuestMode } from "@/store/useGuestStore";
-
-// Matches `content`'s and `chartCard`'s own horizontal padding below, so the
-// chart's loading skeleton fills the same width the real chart renders at.
-const CHART_CARD_WIDTH = screenWidth - rs(16) * 2 - rs(10) * 2;
 
 export default function ClientDashboard() {
   const { t } = useTranslation();
@@ -60,55 +57,10 @@ export default function ClientDashboard() {
       .map((w) => w[0]?.toUpperCase())
       .join("") || "?";
 
-  const translateMonth = (label: string) => {
-    const monthMap: Record<string, string> = {
-      jan: t("months.jan"),
-      january: t("months.jan"),
-
-      feb: t("months.feb"),
-      february: t("months.feb"),
-
-      mar: t("months.mar"),
-      march: t("months.mar"),
-
-      apr: t("months.apr"),
-      april: t("months.apr"),
-
-      may: t("months.may"),
-
-      jun: t("months.jun"),
-      june: t("months.jun"),
-
-      jul: t("months.jul"),
-      july: t("months.jul"),
-
-      aug: t("months.aug"),
-      august: t("months.aug"),
-
-      sep: t("months.sep"),
-      september: t("months.sep"),
-
-      oct: t("months.oct"),
-      october: t("months.oct"),
-
-      nov: t("months.nov"),
-      november: t("months.nov"),
-
-      dec: t("months.dec"),
-      december: t("months.dec"),
-    };
-
-    return monthMap[label.trim().toLowerCase()] ?? label;
-  };
-
   const handleExitGuest = () => {
     endGuest();
     router.replace("/(auth)/login");
   };
-
-  // No point drawing a chart that's all zeros — a brand-new account (or a guest) has nothing
-  // to plot yet.
-  const hasActivityData = (stats?.shipmentsByMonth ?? []).some((m) => m.value > 0);
 
   return (
     <RefreshableScreen contentContainerStyle={styles.content}>
@@ -280,77 +232,7 @@ export default function ClientDashboard() {
       )}
 
       {/* Shipment Activity */}
-      <View style={styles.section}>
-        <Text size="large" weight="bold" style={styles.sectionTitle}>
-          {t("dashboard.shipmentActivity")}
-        </Text>
-
-        <View style={styles.chartCard}>
-          {statsLoading ? (
-            <Skeleton
-              width={CHART_CARD_WIDTH}
-              height={rvs(100)}
-              borderRadius={rs(10)}
-            />
-          ) : !hasActivityData ? (
-            <View style={styles.chartEmpty}>
-              <Text size="small" style={styles.chartEmptyText}>
-                No shipments yet
-              </Text>
-            </View>
-          ) : (
-            (() => {
-              const rawMax = Math.max(
-                ...(stats?.shipmentsByMonth?.map((m) => m.value) ?? [0]),
-                0,
-              );
-              const axisMax = Math.max(rawMax, 4);
-              const step = Math.ceil(axisMax / 4);
-              const niceMax = step * 4;
-              const yLabels = [4, 3, 2, 1, 0].map((i) => i * step);
-
-              return (
-                <View style={styles.chartRow}>
-                  <View style={styles.yAxis}>
-                    {yLabels.map((label) => (
-                      <Text key={label} size="xs" style={styles.yAxisLabel}>
-                        {label}
-                      </Text>
-                    ))}
-                  </View>
-
-                  <View style={styles.chart}>
-                    {(stats?.shipmentsByMonth ?? []).map((item, index, arr) => (
-                      <View key={item.label} style={styles.chartColumn}>
-                        <View style={styles.barTrack}>
-                          {item.value > 0 && (
-                            <View
-                              style={[
-                                styles.bar,
-                                {
-                                  height: `${(item.value / niceMax) * 100}%`,
-                                  backgroundColor:
-                                    index === arr.length - 1
-                                      ? Colors.primary
-                                      : "#FFD5C3",
-                                },
-                              ]}
-                            />
-                          )}
-                        </View>
-
-                        <Text size="xs" weight="semibold" style={styles.month}>
-                          {translateMonth(item.label)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              );
-            })()
-          )}
-        </View>
-      </View>
+      <ShipmentActivityChart data={stats?.shipmentsByMonth} isLoading={statsLoading} />
 
       {/* Recent Shipments */}
       <RecentShipments
@@ -507,70 +389,5 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     marginTop: rvs(18),
-  },
-  section: {
-    marginTop: rvs(12),
-  },
-  sectionTitle: {
-    color: Colors.text,
-  },
-  chartCard: {
-    backgroundColor: Colors.white,
-    borderRadius: rs(18),
-    paddingHorizontal: rs(10),
-    paddingTop: rvs(15),
-    paddingBottom: rvs(10),
-    marginTop: rvs(10),
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.035,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  chartRow: {
-    flexDirection: "row",
-  },
-  yAxis: {
-    height: rvs(100),
-    justifyContent: "space-between",
-    marginRight: rs(8),
-  },
-  yAxisLabel: {
-    color: "#9AA5B4",
-    textAlign: "right",
-    minWidth: rs(16),
-  },
-  chart: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  chartEmpty: {
-    minHeight: rvs(100),
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chartEmptyText: {
-    color: "#65748B",
-  },
-  chartColumn: {
-    flex: 1,
-    alignItems: "center",
-  },
-  barTrack: {
-    height: rvs(90),
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  bar: {
-    width: "60%",
-    borderTopLeftRadius: rs(8),
-    borderTopRightRadius: rs(8),
-  },
-  month: {
-    color: "#65748B",
-    marginTop: rvs(6),
   },
 });

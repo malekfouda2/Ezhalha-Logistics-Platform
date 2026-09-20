@@ -7,7 +7,10 @@ import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
 
 interface SettingsRowProps {
-  icon: keyof typeof Ionicons.glyphMap;
+  /** Ignored when `iconNode` is given — kept required-by-convention for the common case. */
+  icon?: keyof typeof Ionicons.glyphMap;
+  /** Overrides `icon` — for callers whose icon set isn't Ionicons (e.g. Feather). */
+  iconNode?: React.ReactNode;
   iconColor?: string;
   iconBackground?: string;
   title: string;
@@ -20,6 +23,7 @@ interface SettingsRowProps {
 
 export function SettingsRow({
   icon,
+  iconNode,
   iconColor = Colors.primary,
   iconBackground = "#FFF1E8",
   title,
@@ -41,11 +45,11 @@ export function SettingsRow({
           { backgroundColor: danger ? "#FDE8E8" : iconBackground },
         ]}
       >
-        <Ionicons
-          name={icon}
-          size={rs(19)}
-          color={danger ? Colors.error : iconColor}
-        />
+        {iconNode ?? (
+          icon ? (
+            <Ionicons name={icon} size={rs(19)} color={danger ? Colors.error : iconColor} />
+          ) : null
+        )}
       </View>
 
       <View style={styles.textBlock}>

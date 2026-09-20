@@ -25,12 +25,7 @@ export const StatCard = ({
   return (
     <View style={styles.statCard}>
       <View style={styles.statHeader}>
-        <Text
-          size="small"
-          weight="medium"
-          style={styles.statTitle}
-          numberOfLines={1}
-        >
+        <Text size="small" weight="medium" style={styles.statTitle}>
           {title}
         </Text>
 
@@ -84,7 +79,7 @@ const styles = StyleSheet.create({
   statHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   statTitle: {
     color: "#667994",

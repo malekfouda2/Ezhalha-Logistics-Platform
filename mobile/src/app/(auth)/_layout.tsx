@@ -1,6 +1,7 @@
 import { Redirect, Stack } from "expo-router";
 
 import { useCurrentUser } from "@/lib/hooks/useAuth";
+import { getHomeRouteForUserType } from "@/utils/postLoginRoute";
 
 export default function AuthLayout() {
   const { data: user, isLoading } = useCurrentUser();
@@ -11,7 +12,7 @@ export default function AuthLayout() {
 
   // Already logged in → don't allow access to auth screens
   if (user) {
-    return <Redirect href="/(protected)/(client)/(tabs)/" />;
+    return <Redirect href={getHomeRouteForUserType(user.userType) as any} />;
   }
 
   return (

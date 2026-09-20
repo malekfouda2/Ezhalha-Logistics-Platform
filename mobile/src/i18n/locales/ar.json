@@ -1960,5 +1960,159 @@
       "unavailableMessage": "لم يتم تفعيل إدخال البطاقة لهذا الحساب بعد. يرجى المحاولة لاحقًا أو التواصل مع الدعم.",
       "fallbackMessage": "نموذج البطاقة الآمن غير متاح حاليًا. سنتابع باستخدام صفحة الدفع المستضافة من Tap."
     }
+  },
+  "admin": {
+    "roles": {
+      "administrator": "مسؤول",
+      "accountManager": "مدير حساب"
+    },
+    "tabs": {
+      "home": "الرئيسية",
+      "ops": "العمليات",
+      "shipments": "الشحنات",
+      "finance": "المالية",
+      "more": "المزيد"
+    },
+    "permissionsCount_zero": "لا صلاحيات",
+    "permissionsCount_one": "صلاحية واحدة",
+    "permissionsCount_two": "صلاحيتان",
+    "permissionsCount_few": "{{count}} صلاحيات",
+    "permissionsCount_many": "{{count}} صلاحية",
+    "permissionsCount_other": "{{count}} صلاحية",
+    "noAccess": "لا صلاحية",
+    "noAccessTitle": "لا توجد صلاحية",
+    "comingSoonTitle": "قريبًا على الجوال",
+    "comingSoonMessage": "هذا القسم الإداري غير متاح بعد داخل التطبيق.",
+    "signOut": "تسجيل الخروج",
+    "nav": {
+      "sections": {
+        "overview": "نظرة عامة",
+        "clients": "العملاء",
+        "movement": "الحركة",
+        "money": "المالية",
+        "system": "النظام",
+        "staff": "الموظفون"
+      },
+      "items": {
+        "dashboard": "لوحة التحكم",
+        "tasks": "المهام",
+        "clients": "العملاء",
+        "applications": "الطلبات",
+        "accountManagers": "مديرو الحسابات",
+        "operations": "مركز العمليات",
+        "shipments": "الشحنات",
+        "quotations": "عرض سعر جديد",
+        "abandonedShipments": "الشحنات المتروكة",
+        "invoices": "الفواتير",
+        "payments": "الكشوف المالية",
+        "refundRequests": "طلبات الاسترداد",
+        "creditRequests": "طلبات الائتمان",
+        "salesFeatureRequests": "طلبات الميزات",
+        "dangerousGoodsRequests": "المواد الخطرة",
+        "creditInvoices": "فواتير الائتمان",
+        "pricing": "التسعير",
+        "systemLogs": "الأخطاء والمشاكل",
+        "auditLogs": "سجلات التدقيق",
+        "integrations": "التكاملات",
+        "integrationHealth": "حالة التكاملات",
+        "apps": "التطبيقات",
+        "webhooks": "الويب هوك",
+        "emailSettings": "إعدادات البريد الإلكتروني",
+        "accessControl": "التحكم بالصلاحيات",
+        "policies": "السياسات",
+        "users": "المستخدمون"
+      }
+    },
+    "dashboard": {
+      "title": "لوحة التحكم",
+      "stats": {
+        "totalClients": "إجمالي العملاء",
+        "activeShipments": "الشحنات النشطة",
+        "pendingApplications": "الطلبات المعلقة",
+        "monthlyRevenue": "الإيرادات الشهرية"
+      },
+      "shipmentsChart": "الشحنات (آخر 6 أشهر)",
+      "noShipmentData": "لا توجد بيانات شحنات بعد",
+      "recentShipments": {
+        "title": "الشحنات الأخيرة",
+        "empty": "لا توجد شحنات حديثة",
+        "seeAll": "عرض الكل"
+      }
+    },
+    "search": {
+      "title": "البحث",
+      "placeholder": "ابحث في العملاء والشحنات والفواتير...",
+      "hintMinLength": "اكتب حرفين على الأقل للبحث.",
+      "noResults": "لا توجد نتائج لـ \"{{query}}\".",
+      "sections": {
+        "clients": "العملاء",
+        "shipments": "الشحنات",
+        "invoices": "الفواتير"
+      },
+      "clientMeta": "{{accountNumber}} · ملف {{profile}} · {{status}}",
+      "active": "نشط",
+      "inactive": "غير نشط",
+      "dueDate": "الاستحقاق {{date}}",
+      "info": "يشمل البحث العملاء والشحنات والفواتير — تُخفى كل نتيجة إن لم يسمح دورك بالاطلاع عليها."
+    },
+    "ops": {
+      "title": "مركز العمليات",
+      "noAccessDescription": "دورك لا يشمل مركز العمليات.",
+      "comingSoonDescription": "قوائم الشحن من الباب للباب والسريع والمحلي ما زالت متاحة على الويب فقط — سيجلبها هذا القسم قريبًا."
+    },
+    "shipmentsTab": {
+      "title": "الشحنات",
+      "noAccessDescription": "دورك لا يشمل الشحنات.",
+      "empty": {
+        "title": "لا توجد شحنات",
+        "description": "لا يوجد شيء لعرضه بعد."
+      },
+      "loadMore": "تحميل المزيد"
+    },
+    "finance": {
+      "title": "المالية",
+      "noAccessDescription": "دورك لا يشمل التقارير المالية.",
+      "totalRevenue": "إجمالي الإيرادات",
+      "monthlyRevenue": "الإيرادات الشهرية",
+      "revenueChart": "الإيرادات (آخر 6 أشهر)",
+      "noRevenueData": "لا توجد بيانات إيرادات بعد",
+      "info": "الفواتير والكشوف المالية وطلبات الاسترداد والائتمان ما زالت متاحة على الويب فقط — يعرض هذا القسم حاليًا ملخص الإيرادات من لوحة التحكم."
+    },
+    "more": {
+      "title": "المزيد",
+      "allPermissions_zero": "لا صلاحيات",
+      "allPermissions_one": "كل الصلاحيات (صلاحية واحدة)",
+      "allPermissions_two": "كل الصلاحيات (صلاحيتان)",
+      "allPermissions_few": "كل الصلاحيات ({{count}})",
+      "allPermissions_many": "كل الصلاحيات ({{count}})",
+      "allPermissions_other": "كل الصلاحيات ({{count}})",
+      "sections": {
+        "staff": "الموظفون"
+      },
+      "clients": {
+        "subtitle": "{{count}} حساب"
+      },
+      "applications": {
+        "subtitle": "{{count}} قيد الانتظار"
+      },
+      "accountManagers": {
+        "subtitle": "{{count}} مدير مخصص"
+      },
+      "users": {
+        "subtitle": "{{staff}} موظف · {{invites}} دعوات"
+      },
+      "accessControl": {
+        "subtitle": "{{roles}} أدوار · {{permissions}} صلاحية"
+      },
+      "tasks": {
+        "subtitle": "{{count}} مسندة إليك"
+      }
+    },
+    "noAccessScreen": {
+      "title": "لا تملك صلاحية الوصول إلى هذا",
+      "needsPrefix": "تحتاج صفحة {{screen}} إلى ",
+      "middle": ". دورك هو ",
+      "suffix": ". اطلب من مسؤول عام إضافة هذه الصلاحية."
+    }
   }
 }

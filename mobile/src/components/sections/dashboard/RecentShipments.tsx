@@ -21,12 +21,16 @@ type RecentShipmentsProps = {
   shipments?: Shipment[];
   isLoading?: boolean;
   seeAllHref?: string;
+  /** Overrides the default navigate-to-client-detail tap — for callers (e.g. admin) with no
+   * shipment detail route of their own to push to. */
+  onShipmentPress?: (shipment: Shipment) => void;
 };
 
 export const RecentShipments = ({
   shipments,
   isLoading,
   seeAllHref = "/shipments",
+  onShipmentPress,
 }: RecentShipmentsProps) => {
   const { t } = useTranslation();
 
@@ -60,9 +64,11 @@ export const RecentShipments = ({
             <Pressable
               key={shipment.id}
               onPress={() =>
-                shipment.isQuote
-                  ? router.push(`/shipments/${shipment.id}/quotation`)
-                  : router.push(`/shipments/${shipment.id}`)
+                onShipmentPress
+                  ? onShipmentPress(shipment)
+                  : shipment.isQuote
+                    ? router.push(`/shipments/${shipment.id}/quotation`)
+                    : router.push(`/shipments/${shipment.id}`)
               }
               style={[
                 styles.shipmentRow,

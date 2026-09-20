@@ -5229,6 +5229,40 @@ function getPrimaryRoleForUser(
   return fallbackRolesByDepartmentSlug.get(InternalDepartmentSlug.PLATFORM) || null;
 }
 
+// Same fallback-role resolution as `listInternalStaffUserRows`, for a single user resolving
+// their own role — used by `/api/admin/me/access`, which (unlike the staff list) is reachable
+// with no `users:read`/`roles:read` permission at all, so it can't just reuse that endpoint.
+async function getPrimaryRoleRefForUser(user: User): Promise<InternalRoleRef | null> {
+  const [departments, roles] = await Promise.all([storage.getDepartments(), storage.getRoles()]);
+  const departmentsById = new Map(departments.map((department) => [department.id, department]));
+  const fallbackRolesByDepartmentSlug = new Map<string, Role>();
+  const platformRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.PLATFORM,
+    RoleHierarchyLevel.PLATFORM_ADMIN,
+    departmentsById,
+  );
+  const operationsRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.OPERATIONS,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+  const accountManagementRole = getFallbackRoleByDepartmentSlug(
+    roles,
+    InternalDepartmentSlug.ACCOUNT_MANAGEMENT,
+    RoleHierarchyLevel.AGENT,
+    departmentsById,
+  );
+  if (platformRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.PLATFORM, platformRole);
+  if (operationsRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.OPERATIONS, operationsRole);
+  if (accountManagementRole) fallbackRolesByDepartmentSlug.set(InternalDepartmentSlug.ACCOUNT_MANAGEMENT, accountManagementRole);
+
+  const assignedRoles = await getAssignedRolesForUser(user, roles);
+  const primaryRole = getPrimaryRoleForUser(user, assignedRoles, fallbackRolesByDepartmentSlug, departmentsById);
+  return getRoleRef(primaryRole);
+}
+
 async function buildInternalStaffUserRow(
   user: User,
   assignedRoles: Role[],
@@ -10037,14 +10071,16 @@ export async function registerRoutes(
       return;
     }
 
-    const [permissions, managedClientIds] = await Promise.all([
+    const [permissions, managedClientIds, role] = await Promise.all([
       getEffectiveAdminPermissionNames(user),
       user.isAccountManager ? storage.getClientIdsForAccountManager(user.id) : Promise.resolve([]),
+      getPrimaryRoleRefForUser(user),
     ]);
     res.json({
       permissions,
       isAccountManager: user.isAccountManager,
       managedClientIds,
+      role,
     });
   });
 
