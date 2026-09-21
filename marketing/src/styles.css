@@ -118,7 +118,7 @@ a { color: inherit; }
 .btn-block { width: 100%; }
 
 /* ── hero ────────────────────────────────────────────────────────────────── */
-.hero { position: relative; isolation: isolate; overflow: hidden; padding-bottom: 96px; padding-top: 84px; }
+.hero { position: relative; isolation: isolate; overflow: hidden; padding-bottom: 96px; padding-top: 92px; }
 .hero-bg { position: absolute; inset: 0; z-index: -4; background: linear-gradient(140deg, #ff6a1f 0%, #fe5200 40%, #b83900 72%, #5f1e08 100%); }
 html[dir="rtl"] .hero-bg { background: linear-gradient(220deg, #ff6a1f 0%, #fe5200 40%, #b83900 72%, #5f1e08 100%); }
 #heroCanvas { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; }
@@ -138,7 +138,11 @@ html[dir="rtl"] .hero-bg { background: linear-gradient(220deg, #ff6a1f 0%, #fe52
   border-bottom: 1px solid transparent;
   transition: background .35s ease, backdrop-filter .35s ease, border-color .35s ease, box-shadow .35s ease;
 }
-.site-header .wrap { display: flex; align-items: center; gap: 30px; min-height: 84px; transition: min-height .35s var(--ease); }
+/* The bar spans the viewport, so its contents get a wider container than the reading measure
+   and more room inside it — at 1160px the logo and the buttons pinch toward the middle of a
+   wide screen and the bar reads as cramped. */
+.site-header .wrap { display: flex; align-items: center; gap: 40px; max-width: 1400px;
+  padding-inline: 44px; min-height: 92px; transition: min-height .35s var(--ease); }
 /* Transparent over the hero; a readable surface once it is over the page. A bar that is always
    solid wastes the hero, and one that is always transparent is unreadable further down. */
 .site-header.is-condensed {
@@ -148,7 +152,7 @@ html[dir="rtl"] .hero-bg { background: linear-gradient(220deg, #ff6a1f 0%, #fe52
   border-bottom-color: rgba(255,255,255,.09);
   box-shadow: 0 10px 30px -18px rgba(0,0,0,.6);
 }
-.site-header.is-condensed .wrap { min-height: 66px; }
+.site-header.is-condensed .wrap { min-height: 74px; }
 
 .scroll-progress {
   position: absolute; inset-inline: 0; bottom: -1px; height: 2px;
@@ -167,7 +171,7 @@ html[dir="rtl"] .scroll-progress { transform-origin: right center; }
 }
 .site-header.is-condensed .brandmark img { height: 44px; }
 .brandmark:hover img { opacity: .82; }
-.navlinks { display: flex; gap: 27px; margin-inline-start: 14px; }
+.navlinks { display: flex; gap: 34px; margin-inline-start: 22px; }
 .navlinks a { position: relative; color: rgba(255,255,255,.8); text-decoration: none; font-size: 14.5px; font-weight: 500; transition: color .16s; }
 .navlinks a:hover { color: #fff; }
 .navlinks a::after {
@@ -176,8 +180,8 @@ html[dir="rtl"] .scroll-progress { transform-origin: right center; }
   transform: scaleX(0); transform-origin: center; transition: transform .32s var(--ease);
 }
 .navlinks a:hover::after { transform: scaleX(1); }
-.navcta { margin-inline-start: auto; display: flex; align-items: center; gap: 9px; }
-.btn-sm { font-size: 14px; padding: 9px 17px; }
+.navcta { margin-inline-start: auto; display: flex; align-items: center; gap: 12px; }
+.btn-sm { font-size: 14px; padding: 10px 19px; }
 
 .hero-copy { text-align: center; padding-top: 48px; max-width: 800px; margin-inline: auto; position: relative; z-index: 2; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.12); backdrop-filter: blur(8px); color: #fff; padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 500; }
@@ -238,6 +242,27 @@ html[dir="rtl"] .res-title { letter-spacing: 0; }
 .mark-dhl { background: #FFCC00; color: #D40511; font-size: 15px; font-style: italic; }
 .mark-aramex { background: #D71920; color: #fff; font-size: 12.5px; }
 .mark-neutral { background: var(--paper-3); color: var(--ink-2); font-size: 11.5px; font-weight: 700; box-shadow: inset 0 0 0 1px var(--rule); }
+
+/* Domestic carriers: a monogram tile plus the wordmark, so the row reads as a set of logos
+   rather than a list of names. The tile colours are ours, not the carriers' — see
+   components/carrier-mark.tsx. */
+.mark-lockup { gap: 7px; padding-inline: 0; font-weight: 700; letter-spacing: -.01em; }
+.mark-lockup .tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; min-width: 30px; padding-inline: 7px; border-radius: 8px;
+  color: #fff; font-size: 13px; font-weight: 800; letter-spacing: -.03em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22);
+}
+.mark-lockup .wm { font-size: 14.5px; color: var(--ink); }
+.on-void .mark-lockup .wm { color: var(--void-ink); }
+.mark-smsa   .tile { background: linear-gradient(150deg, #1d5fbf, #10367a); }
+.mark-naqel  .tile { background: linear-gradient(150deg, #17a06b, #0a6a45); }
+.mark-jt     .tile { background: linear-gradient(150deg, #e8433c, #b01f1a); font-size: 12px; }
+.mark-redbox .tile { background: linear-gradient(150deg, #ef3a4a, #a3121f); }
+.mark-zajil  .tile { background: linear-gradient(150deg, #7b55e0, #4a2ea6); }
+.mark-imile  .tile { background: linear-gradient(150deg, #2aa8c4, #12617a); }
+.mark-fizzpa .tile { background: linear-gradient(150deg, #f0872f, #c25409); }
+.mark-shipox .tile { background: linear-gradient(150deg, #64748b, #374151); }
 .on-void .mark-neutral { background: var(--void-3); color: var(--void-ink-2); box-shadow: inset 0 0 0 1px var(--void-rule); }
 .on-void .mark-fedex .a { color: #b98ae8; }
 
@@ -323,17 +348,17 @@ html[dir="rtl"] .trk-route .arrow { transform: scaleX(-1); }
 
 /* ── marquee ─────────────────────────────────────────────────────────────── */
 .marquee { background: var(--void); padding: 26px 0; overflow: hidden; border-block: 1px solid var(--void-rule); }
-.marquee-track { display: flex; gap: 46px; width: max-content; animation: slide 34s linear infinite; align-items: center; }
+.marquee-track { display: flex; gap: 52px; width: max-content; animation: slide 48s linear infinite; align-items: center; }
 html[dir="rtl"] .marquee-track { animation-direction: reverse; }
 @keyframes slide { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .marquee:hover .marquee-track { animation-play-state: paused; }
-.marquee .mark { height: 34px; opacity: .82; transition: opacity .2s; }
+.marquee .mark { height: 34px; opacity: .86; transition: opacity .2s; }
 .marquee .mark:hover { opacity: 1; }
 .marquee-label { text-align: center; color: var(--void-ink-3); font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 20px; }
 html[dir="rtl"] .marquee-label { letter-spacing: 0; }
 
 /* ── sections ────────────────────────────────────────────────────────────── */
-section { padding: 96px 0; position: relative; scroll-margin-top: 84px; }
+section { padding: 96px 0; position: relative; scroll-margin-top: 92px; }
 .sec-alt { background: var(--paper-2); border-block: 1px solid var(--rule-2); }
 .sec-void { background: var(--void); color: var(--void-ink); overflow: hidden; }
 .sec-void h2 { color: var(--void-ink); }
@@ -353,14 +378,63 @@ html[dir="rtl"] .kicker { letter-spacing: 0; }
 .fan-fact .n { color: var(--brand); font-weight: 700; font-size: 13px; flex: none; padding-top: 1px; }
 .fan-fact .t { font-size: 14.5px; color: var(--void-ink); }
 .fan-fact .t span { display: block; color: var(--void-ink-3); font-size: 13px; margin-top: 3px; }
-.fan-stage { background: var(--void-2); border: 1px solid var(--void-rule); border-radius: var(--r-xl); padding: 26px; position: relative; min-height: 430px; }
-.fan-stage-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.fan-stage { background: var(--void-2); border: 1px solid var(--void-rule); border-radius: var(--r-xl); padding: 22px; position: relative; overflow: hidden; }
+.fan-stage-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .fan-stage-top .lbl { font-size: 11px; font-weight: 700; color: var(--void-ink-3); text-transform: uppercase; letter-spacing: .1em; }
 html[dir="rtl"] .fan-stage-top .lbl { letter-spacing: 0; }
 .replay { appearance: none; background: var(--void-3); border: 1px solid var(--void-rule); color: var(--void-ink-2); font: inherit; font-size: 12px; padding: 5px 13px; border-radius: 999px; cursor: pointer; transition: background .16s, color .16s; display: inline-flex; gap: 6px; align-items: center; }
 .replay:hover { background: var(--brand); color: #fff; border-color: var(--brand); }
-#fanSvg { width: 100%; height: auto; display: block; overflow: visible; }
-.fan-node { font-size: 12.5px; }
+
+/* Hub · wires · rows. Three real columns, so nothing is positioned by hand and nothing can
+   spill past the card the way an SVG sized in fixed units did. */
+.fan-grid { display: grid; grid-template-columns: 104px 46px minmax(0, 1fr); align-items: stretch; position: relative; }
+
+.fan-hub {
+  grid-column: 1; align-self: center; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 16px 10px; border-radius: var(--r-lg);
+  background: var(--void-3); border: 1px solid var(--void-rule);
+}
+.fan-hub svg { width: 20px; height: 20px; fill: none; stroke: var(--brand); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fan-hub b { font-size: 12.5px; font-weight: 650; color: var(--void-ink); text-align: center; line-height: 1.3; }
+.fan-hub .num { font-size: 11px; color: var(--void-ink-3); }
+.fan-hub .pulse { position: absolute; inset: -1px; border-radius: inherit; border: 1px solid var(--brand); opacity: 0; animation: hubpulse 2.6s var(--ease) infinite; }
+@keyframes hubpulse { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(1.06); } }
+
+.fan-wires { grid-column: 2; width: 100%; height: 100%; display: block; }
+html[dir="rtl"] .fan-wires { transform: scaleX(-1); }
+.fan-wires .wire { fill: none; stroke: var(--brand); stroke-opacity: .28; stroke-width: 1.5; transition: stroke-opacity .45s ease, stroke-width .45s ease; }
+.fan-wires .wire.is-won { stroke-opacity: 1; stroke-width: 2.4; }
+.fan-wires .wire.is-dropped { stroke-opacity: .08; }
+
+.fan-rows { grid-column: 3; list-style: none; margin: 0; padding: 0; border: 1px solid var(--void-rule); border-radius: var(--r-lg); overflow: hidden; background: var(--void-2); }
+.fan-row {
+  display: flex; align-items: center; gap: 10px; padding: 0 13px;
+  height: 58px; border-top: 1px solid var(--void-rule); position: relative;
+  transition: background .35s ease;
+}
+.fan-row:first-child { border-top: 0; }
+.fan-row .mark { flex: none; }
+.fan-row .acct { font-size: 12px; color: var(--void-ink-2); display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.fan-row .acct em { font-style: normal; font-size: 10px; color: var(--void-ink-3); text-transform: uppercase; letter-spacing: .08em; }
+html[dir="rtl"] .fan-row .acct em { letter-spacing: 0; }
+.fan-row .val { margin-inline-start: auto; direction: ltr; font-size: 13.5px; color: var(--void-ink); white-space: nowrap; }
+.fan-row .val .wait { color: var(--void-ink-3); font-size: 12px; }
+/* The waiting row is the only thing moving before an answer lands — it is what makes the
+   fan-out read as concurrent rather than as a list that was always there. */
+.fan-row .val .wait::after { content: "…"; animation: dots 1.4s steps(4, end) infinite; }
+@keyframes dots { 0% { opacity: .25; } 50% { opacity: 1; } 100% { opacity: .25; } }
+.fan-row .val .drop { color: var(--void-ink-3); font-size: 11.5px; text-decoration: line-through; }
+.fan-row .won {
+  flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: #fff; background: var(--brand); padding: 3px 8px; border-radius: 999px;
+}
+html[dir="rtl"] .fan-row .won { letter-spacing: 0; }
+.fan-row.is-won { background: linear-gradient(90deg, rgba(254,82,0,.14), transparent 70%); }
+.fan-row.is-won .val { color: var(--brand); font-weight: 650; }
+html[dir="rtl"] .fan-row.is-won { background: linear-gradient(270deg, rgba(254,82,0,.14), transparent 70%); }
+.fan-row.is-dropped { opacity: .45; }
+.fan-row.is-dropped .mark { filter: grayscale(1); }
 
 /* ── bento ───────────────────────────────────────────────────────────────── */
 .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; }
@@ -479,6 +553,15 @@ footer a:hover { color: var(--brand); }
 }
 @media (max-width: 860px) {
   .navlinks { display: none; }
+  /* The header carries its own padding, so it needs its own narrow-screen value — the generic
+     .wrap rule below is less specific and would never win. */
+  .site-header .wrap { padding-inline: 24px; gap: 18px; min-height: 76px; }
+  .site-header.is-condensed .wrap { min-height: 66px; }
+  /* Hub above the rows; the wires have nothing to span once the columns collapse. */
+  .fan-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .fan-hub { flex-direction: row; justify-content: center; gap: 9px; padding: 12px; }
+  .fan-wires { display: none; }
+  .fan-row { height: auto; padding-block: 13px; }
   .fields { grid-template-columns: 1fr 1fr; }
   .field-weight { grid-column: 1 / -1; }
   .dims { grid-template-columns: repeat(2, 1fr); }
@@ -490,6 +573,7 @@ footer a:hover { color: var(--brand); }
   .pipe-steps { grid-template-columns: 1fr; }
   .pipe-step { border-inline-end: 0 !important; border-bottom: 1px solid var(--rule); }
   .wrap { padding-inline: 18px; }
+  .site-header .wrap { padding-inline: 18px; }
   .quote-head, .fields, .dims, .results, .quote-foot { padding-inline: 18px; }
   .calc-strip, .dims-toggle { margin-inline: 18px; }
   .docs { height: 430px; } .doc-label, .doc-inv { position: relative; inset: auto; width: 100%; transform: none; margin-bottom: 14px; }

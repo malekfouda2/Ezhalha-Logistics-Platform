@@ -13,43 +13,33 @@ const LINKS = [
 ];
 
 /**
- * The header, fixed for the life of the page.
+ * The header. Fixed, and it stays put.
  *
- * Three states rather than two, because a bar that is always solid wastes the hero and a bar that
- * is always transparent becomes unreadable over the light sections:
+ * Two states, not three: transparent over the hero, and a condensed blurred bar once it is over
+ * content. An earlier version also slid the bar out of view on downward scroll and brought it
+ * back on upward scroll — that reads as lag, because the bar is always reacting to a gesture the
+ * reader has already made. A header that never moves is the faster-feeling one.
  *
- *   over the hero   — transparent, no border
- *   scrolled        — condensed, blurred, bordered
- *   scrolling down  — out of the way entirely
- *
- * Hiding on downward scroll and returning on upward scroll is the part that makes a long page
- * feel unobstructed: reading is downward, and wanting the nav is almost always an upward motion.
+ * The only scroll-driven work left is a class toggle and a transform on the progress bar, neither
+ * of which costs a layout pass.
  */
 export function SiteHeader() {
   const { t, alternate } = useLocale();
   const enabled = useMotionEnabled();
   const { scrollY, scrollYProgress } = useScroll();
   const [condensed, setCondensed] = useState(false);
-  const [hidden, setHidden] = useState(false);
 
-  // Spring the progress bar so it glides rather than tracking every wheel tick.
-  const progress = useSpring(scrollYProgress, { stiffness: 180, damping: 30, restDelta: 0.001 });
+  // Lightly sprung so the bar glides rather than tracking every wheel tick — stiff enough that it
+  // never visibly trails the scroll position.
+  const progress = useSpring(scrollYProgress, { stiffness: 320, damping: 44, restDelta: 0.001 });
 
-  useMotionValueEvent(scrollY, "change", (y) => {
-    const previous = scrollY.getPrevious() ?? 0;
-    setCondensed(y > 40);
-    // Never hide near the top, and ignore sub-pixel jitter that would otherwise flicker the bar.
-    setHidden(y > 380 && y > previous && y - previous > 4);
-  });
+  // React bails out on an unchanged value, so this is one re-render per crossing of the
+  // threshold, not one per scroll event.
+  useMotionValueEvent(scrollY, "change", (y) => setCondensed(y > 40));
 
   return (
     <>
-      <motion.header
-        className={`site-header${condensed ? " is-condensed" : ""}`}
-        initial={false}
-        animate={{ y: enabled && hidden ? "-110%" : "0%" }}
-        transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-      >
+      <header className={`site-header${condensed ? " is-condensed" : ""}`}>
         <div className="wrap">
           <a
             className="brandmark"
@@ -77,7 +67,7 @@ export function SiteHeader() {
         </div>
 
         <motion.div className="scroll-progress" style={{ scaleX: enabled ? progress : 0 }} aria-hidden="true" />
-      </motion.header>
+      </header>
     </>
   );
 }

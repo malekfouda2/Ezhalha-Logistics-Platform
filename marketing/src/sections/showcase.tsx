@@ -24,8 +24,40 @@ const FAN = [
 
 const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/**
+ * The wires between the hub and the result rows.
+ *
+ * Drawn in a stretched 100×100 box rather than at real pixel sizes, so a curve always lands on
+ * the centre of its row whatever the card is sized to — the rows are equal-height and separated
+ * by rules rather than gaps, which makes each centre exactly (i + 0.5) / n of the height.
+ * `vector-effect` keeps the stroke an honest 1px through that non-uniform scale.
+ */
+function Wires({ count, settled, cheapest }: {
+  count: number;
+  settled: Record<number, boolean>;
+  cheapest: number;
+}) {
+  return (
+    <svg className="fan-wires" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => {
+        const y = ((i + 0.5) / count) * 100;
+        const timedOut = FAN[i].timeout && settled[i];
+        const won = settled[i] && i === cheapest;
+        return (
+          <path
+            key={i}
+            d={`M0 50 C55 50 45 ${y} 100 ${y}`}
+            className={`wire${won ? " is-won" : ""}${timedOut ? " is-dropped" : ""}`}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 export function FanOut() {
-  const { t, content, dir } = useLocale();
+  const { t, content } = useLocale();
   const reduced = useReducedMotion();
   const stageRef = useRef<HTMLDivElement | null>(null);
   const inView = useInView(stageRef, { once: true, margin: "0px 0px -80px 0px" });
@@ -50,11 +82,7 @@ export function FanOut() {
     return () => timers.forEach(clearTimeout);
   }, [inView, reduced, run]);
 
-  const rtl = dir === "rtl";
-  const W = 520, H = 380;
-  const ox = rtl ? W - 70 : 70;
-  const oy = H / 2;
-  const tx = rtl ? 176 : W - 176;
+  const answered = FAN.filter((_, i) => settled[i]).length;
 
   return (
     <section id="network" className="sec-void on-void">
@@ -75,62 +103,54 @@ export function FanOut() {
           </Reveal>
 
           <Reveal className="fan-stage" delay={0.12}>
-            <div ref={stageRef}>
-              <div className="fan-stage-top">
-                <span className="lbl">{t("fan.stage")}</span>
-                <button className="replay" type="button" onClick={() => setRun((n) => n + 1)}>
-                  ↻ <span>{t("fan.replay")}</span>
-                </button>
+            <div className="fan-stage-top">
+              <span className="lbl">{t("fan.stage")}</span>
+              <button className="replay" type="button" onClick={() => setRun((n) => n + 1)}>
+                ↻ <span>{t("fan.replay")}</span>
+              </button>
+            </div>
+
+            <div className="fan-grid" ref={stageRef}>
+              <div className="fan-hub">
+                <span className="pulse" aria-hidden="true" />
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v18M5 8l7-5 7 5" />
+                </svg>
+                <b>{t("fan.hub")}</b>
+                <span className="num">{answered}/{FAN.length}</span>
               </div>
 
-              <svg viewBox={`0 0 ${W} ${H}`} id="fanSvg" role="img" aria-label={t("fan.title")}>
-                <circle cx={ox} cy={oy} r="26" fill="#fe5200" opacity=".14" />
-                <circle cx={ox} cy={oy} r="15" fill="#fe5200" />
-                <path
-                  d={`M${ox - 5} ${oy - 1} l3.6 3.6 L${ox + 6} ${oy - 4}`}
-                  stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"
-                />
+              <Wires count={FAN.length} settled={settled} cheapest={cheapestIndex} />
+
+              <ul className="fan-rows">
                 {FAN.map((carrier, i) => {
-                  const y = 34 + i * ((H - 68) / (FAN.length - 1));
-                  const mx = (ox + tx) / 2;
                   const done = settled[i];
                   const won = done && i === cheapestIndex;
+                  const dropped = carrier.timeout && done;
                   return (
-                    <g key={`${carrier.code}-${carrier.account}`}>
-                      <path
-                        d={`M${ox} ${oy} C${mx} ${oy} ${mx} ${y} ${tx} ${y}`}
-                        stroke="#fe5200"
-                        strokeOpacity={carrier.timeout && done ? 0.08 : won ? 1 : 0.3}
-                        strokeWidth={won ? 2.4 : 1.5}
-                        fill="none"
-                        style={{ transition: "stroke-opacity .4s ease, stroke-width .4s ease" }}
-                      />
-                      <g transform={`translate(${tx} ${y})`} opacity={carrier.timeout && done ? 0.38 : 1} style={{ transition: "opacity .4s ease" }}>
-                        <circle r="4.5" fill={won ? "#fe5200" : "var(--void-2)"} stroke="#fe5200" strokeWidth="1.6" />
-                        <foreignObject x={rtl ? -236 : 12} y="-19" width="224" height="38">
-                          <div className="fan-node" style={{ display: "flex", alignItems: "center", gap: 8, height: 38, flexDirection: rtl ? "row-reverse" : "row" }}>
-                            <CarrierMark code={carrier.code} name={carrier.name} />
-                            <span style={{ color: "var(--void-ink-3)", fontSize: 11, whiteSpace: "nowrap" }}>{carrier.account}</span>
-                            <span
-                              style={{
-                                marginInlineStart: "auto",
-                                fontSize: 12.5,
-                                fontVariantNumeric: "tabular-nums",
-                                whiteSpace: "nowrap",
-                                direction: "ltr",
-                                fontWeight: won ? 700 : 400,
-                                color: won ? "#fe5200" : done ? "var(--void-ink)" : "var(--void-ink-3)",
-                              }}
-                            >
-                              {!done ? "…" : carrier.timeout ? "—" : `SAR ${money(carrier.price)}`}
-                            </span>
-                          </div>
-                        </foreignObject>
-                      </g>
-                    </g>
+                    <li
+                      key={`${carrier.code}-${carrier.account}`}
+                      className={`fan-row${won ? " is-won" : ""}${dropped ? " is-dropped" : ""}${done ? " is-done" : ""}`}
+                    >
+                      <CarrierMark code={carrier.code} name={carrier.name} />
+                      <span className="acct">
+                        {carrier.account}
+                        <em>{t("fan.acct")}</em>
+                      </span>
+                      <span className="val num">
+                        {!done ? (
+                          <span className="wait">{t("fan.waiting")}</span>
+                        ) : dropped ? (
+                          <span className="drop">{t("fan.timeout")}</span>
+                        ) : (
+                          <>SAR {money(carrier.price)}</>
+                        )}
+                      </span>
+                      {won && <span className="won">{t("fan.won")}</span>}
+                    </li>
                   );
                 })}
-              </svg>
+              </ul>
             </div>
           </Reveal>
         </div>

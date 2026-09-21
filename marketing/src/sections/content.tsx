@@ -1,13 +1,21 @@
+import { CARRIER_BRAND_NAMES } from "@shared/carriers";
 import { useLocale } from "@marketing/i18n";
 import { APP_ORIGIN, signupHref } from "@marketing/api";
 import { CarrierMark } from "@marketing/components/carrier-mark";
 import { CountUp, Reveal, Rise, Stagger } from "@marketing/components/motion";
 import { scrollToId } from "@marketing/lib/scroll";
 
-/** The ten carriers a client can actually book. Aggregators and credentials-only entries excluded. */
+/**
+ * The ten carriers a client can actually book, by carrier code — the same codes
+ * `shared/carriers.ts` maps to brand names, so this list cannot drift into service levels
+ * ("FedEx International Priority") the way `shipments.carrier_name` does.
+ *
+ * Shipox is deliberately absent: it is the platform behind Fizzpa's capacity, not a brand a
+ * shipper picks. Door to Door is absent for the same reason — it is a service, not a carrier.
+ */
 const BOOKABLE_CARRIERS = [
   "FEDEX", "DHL", "ARAMEX",
-  "SMSA Express", "Naqel Express", "J&T Express", "RedBox", "Zajil Express", "iMile",
+  "SMSA", "NAQEL", "JT", "REDBOX", "ZAJIL", "IMILE", "FIZZPA",
 ];
 
 const FLOW_ART: Record<string, JSX.Element> = {
@@ -88,7 +96,7 @@ export function CarrierMarquee() {
       {/* Doubled so the -50% slide loops seamlessly. */}
       <div className="marquee-track">
         {[...BOOKABLE_CARRIERS, ...BOOKABLE_CARRIERS].map((code, i) => (
-          <CarrierMark key={`${code}-${i}`} code={code} name={code} />
+          <CarrierMark key={`${code}-${i}`} code={code} name={CARRIER_BRAND_NAMES[code]} />
         ))}
       </div>
     </div>

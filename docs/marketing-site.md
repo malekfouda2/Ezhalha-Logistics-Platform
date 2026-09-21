@@ -34,6 +34,9 @@ you will usually need it: `MARKETING_API_TARGET=http://127.0.0.1:5099`).
 `MARKETING_ORIGIN` overrides the canonical origin baked into the prerendered tags. Set it on
 staging, or every canonical and `hreflang` will claim to be the production URL.
 
+`VITE_APP_ORIGIN` overrides where "Sign in", "Get started" and the footer policy links go
+(default `https://app.ezhalha.co`). Set it on staging too, or reviewers are handed to production.
+
 ## Prerendering
 
 `script/prerender.ts` builds twice — once for the browser, once for SSR — then renders the tree

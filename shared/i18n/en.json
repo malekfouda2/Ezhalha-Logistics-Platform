@@ -46,7 +46,9 @@
     "replay": "Replay",
     "waiting": "waiting",
     "won": "cheapest",
-    "acct": "account"
+    "acct": "account",
+    "hub": "Your request",
+    "timeout": "dropped at 8s"
   },
   "fl": {
     "kicker": "Four ways to ship",

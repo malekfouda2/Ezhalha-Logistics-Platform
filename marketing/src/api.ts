@@ -94,8 +94,11 @@ export async function fetchTracking(trackingNumber: string, signal?: AbortSignal
   return response.json();
 }
 
-/** Where a visitor goes to actually book. The portal lives on its own subdomain. */
-export const APP_ORIGIN = "https://app.ezhalha.co";
+/**
+ * Where a visitor goes to actually book. The portal lives on its own subdomain. `VITE_APP_ORIGIN`
+ * points a staging build at the staging portal, so reviewing it never hands off to production.
+ */
+export const APP_ORIGIN = import.meta.env.VITE_APP_ORIGIN || "https://app.ezhalha.co";
 
 /**
  * Carry the priced lane into the application form, so someone who just saw a number does not have

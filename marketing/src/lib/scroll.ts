@@ -10,7 +10,8 @@
  * section lands with its heading tucked under the bar.
  */
 
-const HEADER_OFFSET = 78;
+/** Clears the condensed bar (74px) with a little air. Matches `scroll-margin-top` in the CSS. */
+const HEADER_OFFSET = 88;
 
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
