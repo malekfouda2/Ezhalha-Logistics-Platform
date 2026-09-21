@@ -3,7 +3,7 @@
 // The "Shipment Activity" bar chart — the client dashboard is the reference
 // implementation this was extracted from verbatim; the admin dashboard uses
 // the same component rather than its own copy.
-import { View, StyleSheet } from "react-native";
+import { Pressable, View, StyleSheet } from "react-native";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
@@ -20,9 +20,21 @@ const CHART_CARD_WIDTH = screenWidth - rs(16) * 2 - rs(10) * 2;
 interface ShipmentActivityChartProps {
   data?: ChartDataPoint[];
   isLoading?: boolean;
+  /** Overrides the default "Shipment Activity (Last 6 Months)" title — the admin dashboard
+   * labels this section "Shipments (Last 6 Months)" instead. */
+  title?: string;
+  /** e.g. "Performance" — shown next to the title and only rendered when both are given. */
+  actionLabel?: string;
+  onActionPress?: () => void;
 }
 
-export function ShipmentActivityChart({ data, isLoading }: ShipmentActivityChartProps) {
+export function ShipmentActivityChart({
+  data,
+  isLoading,
+  title,
+  actionLabel,
+  onActionPress,
+}: ShipmentActivityChartProps) {
   const { t } = useTranslation();
 
   // No point drawing a chart that's all zeros — a brand-new account (or a guest) has nothing
@@ -31,9 +43,19 @@ export function ShipmentActivityChart({ data, isLoading }: ShipmentActivityChart
 
   return (
     <View style={styles.section}>
-      <Text size="large" weight="bold" style={styles.sectionTitle}>
-        {t("dashboard.shipmentActivity")}
-      </Text>
+      <View style={styles.sectionHeader}>
+        <Text size="large" weight="bold" style={styles.sectionTitle}>
+          {title ?? t("dashboard.shipmentActivity")}
+        </Text>
+
+        {actionLabel && onActionPress ? (
+          <Pressable onPress={onActionPress} hitSlop={rs(8)}>
+            <Text size="small" weight="bold" style={styles.action}>
+              {actionLabel}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.chartCard}>
         {isLoading ? (
@@ -99,8 +121,16 @@ const styles = StyleSheet.create({
   section: {
     marginTop: rvs(12),
   },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   sectionTitle: {
     color: Colors.text,
+  },
+  action: {
+    color: Colors.primary,
   },
   chartCard: {
     backgroundColor: Colors.white,

@@ -2033,10 +2033,33 @@
       },
       "shipmentsChart": "الشحنات (آخر 6 أشهر)",
       "noShipmentData": "لا توجد بيانات شحنات بعد",
+      "performanceLink": "الأداء",
       "recentShipments": {
         "title": "الشحنات الأخيرة",
         "empty": "لا توجد شحنات حديثة",
         "seeAll": "عرض الكل"
+      }
+    },
+    "performance": {
+      "title": "نظرة عامة على الأداء",
+      "revenueTitle": "الإيرادات (آخر 6 أشهر)",
+      "shipmentStatusTitle": "حالة الشحنات",
+      "shipmentStatusActive": "نشطة",
+      "performanceOverviewTitle": "نظرة عامة على الأداء",
+      "noData": "لا توجد بيانات بعد",
+      "stats": {
+        "totalShipments": "إجمالي الشحنات",
+        "delivered": "تم التسليم",
+        "inTransit": "في الطريق",
+        "totalRevenue": "إجمالي الإيرادات"
+      },
+      "statusLabels": {
+        "created": "تم الإنشاء",
+        "awaitingReview": "بانتظار المراجعة",
+        "inTransit": "في الطريق",
+        "delivered": "تم التسليم",
+        "onHold": "معلّقة",
+        "returned": "مرتجعة"
       }
     },
     "search": {

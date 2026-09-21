@@ -19,6 +19,7 @@ export default function AdminLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="performance" options={{ title: "Performance" }} />
       <Stack.Screen name="search" options={{ title: "Search" }} />
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
       <Stack.Screen name="change-password" options={{ title: "Change Password" }} />

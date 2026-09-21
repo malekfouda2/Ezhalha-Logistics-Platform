@@ -2021,10 +2021,33 @@
       },
       "shipmentsChart": "Shipments (Last 6 Months)",
       "noShipmentData": "No shipment data yet",
+      "performanceLink": "Performance",
       "recentShipments": {
         "title": "Recent Shipments",
         "empty": "No recent shipments",
         "seeAll": "View all"
+      }
+    },
+    "performance": {
+      "title": "Performance Overview",
+      "revenueTitle": "Revenue (Last 6 Months)",
+      "shipmentStatusTitle": "Shipment Status",
+      "shipmentStatusActive": "ACTIVE",
+      "performanceOverviewTitle": "Performance Overview",
+      "noData": "No data yet",
+      "stats": {
+        "totalShipments": "Total Shipments",
+        "delivered": "Delivered",
+        "inTransit": "In Transit",
+        "totalRevenue": "Total Revenue"
+      },
+      "statusLabels": {
+        "created": "Created",
+        "awaitingReview": "Awaiting Review",
+        "inTransit": "In transit",
+        "delivered": "Delivered",
+        "onHold": "On hold",
+        "returned": "Returned"
       }
     },
     "search": {

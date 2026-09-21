@@ -1,6 +1,7 @@
 // app/(protected)/(admin)/index.tsx
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
+import { router } from "expo-router";
 import { useTranslation } from "react-i18next";
 import Toast from "react-native-toast-message";
 
@@ -66,7 +67,8 @@ export default function AdminDashboardScreen() {
             <StatCard
               title={t("admin.dashboard.stats.monthlyRevenue")}
               value={(stats?.monthlyRevenue ?? 0).toLocaleString(undefined, {
-                maximumFractionDigits: 0,
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1,
               })}
               valuePrefix
               icon="trending-up"
@@ -76,7 +78,13 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        <ShipmentActivityChart data={stats?.shipmentsByMonth} isLoading={isStatsLoading} />
+        <ShipmentActivityChart
+          data={stats?.shipmentsByMonth}
+          isLoading={isStatsLoading}
+          title={t("admin.dashboard.shipmentsChart")}
+          actionLabel={t("admin.dashboard.performanceLink")}
+          onActionPress={() => router.push("/(protected)/(admin)/performance")}
+        />
 
         {canReadShipments && (
           <RecentShipments
