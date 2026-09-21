@@ -1659,6 +1659,232 @@
     "successTitle": "تم تحديث الصلاحيات",
     "errorTitle": "تعذّر تحديث الصلاحيات"
   },
+  "adminClientsScreen": {
+    "title": "حسابات العملاء",
+    "subtitle_one": "{{count}} عميل",
+    "subtitle_other": "{{count}} عملاء",
+    "searchPlaceholder": "ابحث بالاسم أو البريد أو رقم الحساب...",
+    "status": {
+      "active": "نشط",
+      "inactive": "غير نشط"
+    },
+    "profiles": {
+      "regular": "عادي"
+    },
+    "accountType": {
+      "company": "شركة",
+      "individual": "فرد"
+    },
+    "card": {
+      "manager": "مدير الحساب {{name}}",
+      "unassigned": "غير معيّن",
+      "joined": "انضم في {{date}}"
+    },
+    "empty": {
+      "title": "لا يوجد عملاء",
+      "description": "جرّب بحثًا مختلفًا أو امسح عوامل التصفية."
+    },
+    "filters": {
+      "title": "تصفية العملاء",
+      "status": "الحالة",
+      "all": "الكل",
+      "pricingProfile": "فئة التسعير",
+      "allProfiles": "كل الفئات",
+      "accountManager": "مدير الحساب",
+      "anyManager": "أي مدير حساب",
+      "unassigned": "غير معيّن",
+      "salesChannelFeature": "ميزة قنوات البيع",
+      "any": "أي",
+      "enabled": "مفعّلة",
+      "clear": "مسح",
+      "apply": "تطبيق التصفية",
+      "showClients_one": "عرض {{count}} عميل",
+      "showClients_other": "عرض {{count}} عملاء"
+    },
+    "create": {
+      "title": "إنشاء عميل جديد",
+      "subtitle": "ينشئ الحساب ويرسل بيانات الدخول عبر البريد. يتخطّى مراجعة الطلب.",
+      "companyName": "اسم الشركة",
+      "companyNamePlaceholder": "اسم الشركة",
+      "primaryContact": "جهة الاتصال الرئيسية",
+      "fullNamePlaceholder": "الاسم الكامل",
+      "workEmailPlaceholder": "البريد الإلكتروني للعمل",
+      "phone": "رقم الهاتف",
+      "pricingProfile": "فئة التسعير",
+      "accountManager": "مدير الحساب",
+      "assignLater": "تعيين لاحقًا",
+      "submit": "إنشاء العميل",
+      "submitting": "جارٍ الإنشاء...",
+      "successTitle": "تم إنشاء العميل",
+      "successMessage": "تم إنشاء {{name}} بنجاح.",
+      "errorTitle": "تعذّر إنشاء العميل"
+    },
+    "form": {
+      "errors": {
+        "companyNameRequired": "اسم الشركة مطلوب",
+        "contactNameRequired": "اسم جهة الاتصال مطلوب",
+        "emailInvalid": "أدخل بريدًا إلكترونيًا صحيحًا",
+        "phoneRequired": "رقم الهاتف مطلوب"
+      }
+    },
+    "detail": {
+      "tabs": {
+        "overview": "نظرة عامة",
+        "shipments": "الشحنات",
+        "invoices": "الفواتير",
+        "documents": "المستندات"
+      },
+      "stats": {
+        "shipments": "الشحنات",
+        "thisMonth_one": "+{{count}} هذا الشهر",
+        "thisMonth_other": "+{{count}} هذا الشهر",
+        "billedLifetime": "إجمالي الفواتير",
+        "margin": "هامش {{pct}}%",
+        "outstanding": "المستحق",
+        "invoicesDue_one": "{{count}} فاتورة مستحقة",
+        "invoicesDue_other": "{{count}} فواتير مستحقة",
+        "creditUsed": "الائتمان المستخدم",
+        "ofLimit": "{{pct}}% من حد {{limit}} ر.س"
+      },
+      "relationship": "العلاقة",
+      "accountManager": "مدير الحساب",
+      "pricingProfile": "فئة التسعير",
+      "accountType": "نوع الحساب",
+      "primaryContact": "جهة الاتصال الرئيسية",
+      "clientSince": "عميل منذ",
+      "shipmentMix": "توزيع الشحنات",
+      "mix": {
+        "express_one": "سريع {{count}}",
+        "express_other": "سريع {{count}}",
+        "freight_one": "شحن بري/بحري {{count}}",
+        "freight_other": "شحن بري/بحري {{count}}",
+        "local_one": "محلي {{count}}",
+        "local_other": "محلي {{count}}"
+      },
+      "noShipments": "لا توجد شحنات بعد.",
+      "whereTheyShip": "وجهات الشحن",
+      "shipmentsCount_one": "{{count}} شحنة",
+      "shipmentsCount_other": "{{count}} شحنات",
+      "totalShipments": "إجمالي الشحنات",
+      "webOnlyShipments": "تصفح الشحنات الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب الإجمالي حاليًا.",
+      "totalInvoices": "إجمالي الفواتير",
+      "webOnlyInvoices": "تصفح الفواتير الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب الإجمالي حاليًا."
+    },
+    "edit": {
+      "title": "تعديل العميل",
+      "tabs": {
+        "account": "الحساب",
+        "contact": "التواصل",
+        "pricing": "التسعير",
+        "features": "الميزات"
+      },
+      "save": "حفظ التغييرات",
+      "saving": "جارٍ الحفظ...",
+      "submitForApproval": "إرسال للموافقة",
+      "successTitle": "تم تحديث العميل",
+      "approvalRequestedTitle": "تم طلب الموافقة",
+      "approvalRequestedMessage": "تم إرسال تغييرات العميل إلى الإدارة للموافقة عليها.",
+      "errorTitle": "تعذّر تحديث العميل",
+      "account": {
+        "companyNameEn": "اسم الشركة (إنجليزي)",
+        "companyNameAr": "اسم الشركة (عربي)",
+        "arabicHint": "الاسم العربي يُستخدم في Zoho Books وعلى الفاتورة العربية.",
+        "crNumber": "السجل التجاري",
+        "taxNumber": "الرقم الضريبي",
+        "pricingProfile": "فئة التسعير",
+        "accountManager": "مدير الحساب",
+        "accountActive": "الحساب نشط",
+        "accountActiveHint": "لا يمكن للعملاء غير النشطين تسجيل الدخول أو الحجز"
+      },
+      "contact": {
+        "contactName": "اسم جهة الاتصال",
+        "phone": "رقم الهاتف",
+        "shippingAddress": "عنوان الشحن الافتراضي",
+        "shippingContactName": "اسم جهة اتصال الشحن",
+        "shippingContactPhone": "هاتف جهة اتصال الشحن",
+        "city": "المدينة",
+        "addressLine1": "العنوان - السطر الأول",
+        "addressLine2": "العنوان - السطر الثاني",
+        "shortAddress": "العنوان المختصر (السعودية)"
+      },
+      "pricing": {
+        "billingCurrency": "عملة الفوترة",
+        "credit": "الائتمان",
+        "creditLimit": "حد الائتمان",
+        "outstanding": "المستحق",
+        "available": "المتاح",
+        "setCreditLimit": "تحديد حد الائتمان (ر.س)",
+        "saving": "جارٍ الحفظ...",
+        "saveLimit": "حفظ الحد",
+        "creditSavedTitle": "تم تحديث حد الائتمان",
+        "creditSaveErrorTitle": "تعذّر تحديث حد الائتمان"
+      },
+      "features": {
+        "salesChannels": "ميزة قنوات البيع",
+        "salesChannelsHint": "الطلبات وقنوات البيع وقواعد التوزيع — دون الحاجة لطلب.",
+        "dangerousGoods": "صلاحية البضائع الخطرة",
+        "dangerousGoodsHint": "يسمح لهذا العميل بحجز شحنات البضائع الخطرة."
+      }
+    },
+    "documents": {
+      "title": "مستندات العميل",
+      "empty": "لا توجد مستندات متاحة",
+      "fallbackName": "مستند {{index}}",
+      "upload": "رفع مستند",
+      "notice": "تأتي المستندات من طلب العميل ومن بوابة العميل. حذف أي منها يُسجَّل في سجل التدقيق.",
+      "uploadUnavailableTitle": "غير متاح بعد",
+      "uploadUnavailableMessage": "إضافة مستندات لعميل حالي غير مدعومة على الجوال بعد.",
+      "openErrorTitle": "تعذّر فتح المستند"
+    }
+  },
+  "adminAccountManagersScreen": {
+    "title": "مديرو الحسابات",
+    "subtitle_one": "{{count}} مسؤول مُخصَّص",
+    "subtitle_other": "{{count}} مسؤولين مُخصَّصين",
+    "scopedAdmins": "المسؤولون المُخصَّصون",
+    "noManagers": "لا يوجد مديرو حسابات بعد.",
+    "assignedCount_one": "{{count}} عميل معيّن",
+    "assignedCount_other": "{{count}} عملاء معيّنون",
+    "assignClients": "تعيين",
+    "pendingChanges": "تغييرات العملاء المعلّقة",
+    "noRequests": "لا توجد طلبات تغيير معلّقة.",
+    "info": "يمكن لمدير الحساب رؤية وتعديل العملاء المعيّنين له فقط. هذه الطلبات هي وسيلته لتغيير أي شيء خارج ذلك.",
+    "time": {
+      "justNow": "الآن",
+      "minutesAgo_one": "منذ {{count}} دقيقة",
+      "minutesAgo_other": "منذ {{count}} دقيقة",
+      "hoursAgo_one": "منذ {{count}} ساعة",
+      "hoursAgo_other": "منذ {{count}} ساعة",
+      "daysAgo_one": "منذ يوم",
+      "daysAgo_other": "منذ {{count}} أيام"
+    },
+    "requests": {
+      "unknownClient": "عميل غير معروف",
+      "requestedBy": "طلبه {{name}} · {{time}}",
+      "status": {
+        "pending": "قيد الانتظار",
+        "approved": "مقبول",
+        "rejected": "مرفوض"
+      },
+      "reject": "رفض",
+      "apply": "تطبيق التغييرات",
+      "approvedTitle": "تمت الموافقة على الطلب",
+      "rejectedTitle": "تم رفض الطلب",
+      "errorTitle": "تعذّرت مراجعة الطلب"
+    },
+    "assign": {
+      "title": "تعيين العملاء",
+      "subtitle_one": "{{name}} · {{count}} معيّن",
+      "subtitle_other": "{{name}} · {{count}} معيّنين",
+      "searchPlaceholder": "ابحث عن عملاء...",
+      "empty": "لا يوجد عملاء.",
+      "assignedTo": "معيّن إلى {{name}}",
+      "save": "حفظ التعيينات",
+      "saving": "جارٍ الحفظ...",
+      "successTitle": "تم تحديث التعيينات",
+      "errorTitle": "تعذّر تحديث التعيينات"
+    }
+  },
   "signedInDevices": {
     "title": "الأجهزة المسجّلة",
     "subtitle": "سجّل الخروج من أي جهاز لا تتعرّف عليه",

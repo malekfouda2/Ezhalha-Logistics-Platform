@@ -1654,6 +1654,232 @@
     "successTitle": "Permissions updated",
     "errorTitle": "Couldn't update permissions"
   },
+  "adminClientsScreen": {
+    "title": "Client Accounts",
+    "subtitle_one": "{{count}} client",
+    "subtitle_other": "{{count}} clients",
+    "searchPlaceholder": "Search name, email, account ID...",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "profiles": {
+      "regular": "Regular"
+    },
+    "accountType": {
+      "company": "Company",
+      "individual": "Individual"
+    },
+    "card": {
+      "manager": "AM {{name}}",
+      "unassigned": "Unassigned",
+      "joined": "joined {{date}}"
+    },
+    "empty": {
+      "title": "No clients found",
+      "description": "Try a different search or clear your filters."
+    },
+    "filters": {
+      "title": "Filter clients",
+      "status": "Status",
+      "all": "All",
+      "pricingProfile": "Pricing Profile",
+      "allProfiles": "All profiles",
+      "accountManager": "Account Manager",
+      "anyManager": "Any manager",
+      "unassigned": "Unassigned",
+      "salesChannelFeature": "Sales Channel Feature",
+      "any": "Any",
+      "enabled": "Enabled",
+      "clear": "Clear",
+      "apply": "Apply filters",
+      "showClients_one": "Show {{count}} client",
+      "showClients_other": "Show {{count}} clients"
+    },
+    "create": {
+      "title": "Create New Client",
+      "subtitle": "Creates the account and emails credentials. Skips the application review.",
+      "companyName": "Company Name",
+      "companyNamePlaceholder": "Company name",
+      "primaryContact": "Primary Contact",
+      "fullNamePlaceholder": "Full name",
+      "workEmailPlaceholder": "Work email",
+      "phone": "Phone",
+      "pricingProfile": "Pricing Profile",
+      "accountManager": "Account Manager",
+      "assignLater": "Assign later",
+      "submit": "Create client",
+      "submitting": "Creating...",
+      "successTitle": "Client created",
+      "successMessage": "{{name}} has been created successfully.",
+      "errorTitle": "Couldn't create client"
+    },
+    "form": {
+      "errors": {
+        "companyNameRequired": "Company name is required",
+        "contactNameRequired": "Contact name is required",
+        "emailInvalid": "Enter a valid email address",
+        "phoneRequired": "Phone number is required"
+      }
+    },
+    "detail": {
+      "tabs": {
+        "overview": "Overview",
+        "shipments": "Shipments",
+        "invoices": "Invoices",
+        "documents": "Documents"
+      },
+      "stats": {
+        "shipments": "Shipments",
+        "thisMonth_one": "+{{count}} this month",
+        "thisMonth_other": "+{{count}} this month",
+        "billedLifetime": "Billed Lifetime",
+        "margin": "{{pct}}% margin",
+        "outstanding": "Outstanding",
+        "invoicesDue_one": "{{count}} invoice due",
+        "invoicesDue_other": "{{count}} invoices due",
+        "creditUsed": "Credit Used",
+        "ofLimit": "{{pct}}% of a SAR {{limit}} limit"
+      },
+      "relationship": "Relationship",
+      "accountManager": "Account manager",
+      "pricingProfile": "Pricing profile",
+      "accountType": "Account type",
+      "primaryContact": "Primary contact",
+      "clientSince": "Client since",
+      "shipmentMix": "Shipment mix",
+      "mix": {
+        "express_one": "Express {{count}}",
+        "express_other": "Express {{count}}",
+        "freight_one": "Freight {{count}}",
+        "freight_other": "Freight {{count}}",
+        "local_one": "Local {{count}}",
+        "local_other": "Local {{count}}"
+      },
+      "noShipments": "No shipments yet.",
+      "whereTheyShip": "Where they ship",
+      "shipmentsCount_one": "{{count}} shipment",
+      "shipmentsCount_other": "{{count}} shipments",
+      "totalShipments": "Total shipments",
+      "webOnlyShipments": "Browsing individual shipments is still web-only — this tab currently shows the total.",
+      "totalInvoices": "Total invoices",
+      "webOnlyInvoices": "Browsing individual invoices is still web-only — this tab currently shows the total."
+    },
+    "edit": {
+      "title": "Edit Client",
+      "tabs": {
+        "account": "Account",
+        "contact": "Contact",
+        "pricing": "Pricing",
+        "features": "Features"
+      },
+      "save": "Save changes",
+      "saving": "Saving...",
+      "submitForApproval": "Submit For Approval",
+      "successTitle": "Client updated",
+      "approvalRequestedTitle": "Approval requested",
+      "approvalRequestedMessage": "The client changes were sent to admin for approval.",
+      "errorTitle": "Couldn't update client",
+      "account": {
+        "companyNameEn": "Company Name (English)",
+        "companyNameAr": "اسم الشركة (Arabic)",
+        "arabicHint": "Arabic name goes to Zoho Books and onto the Arabic invoice.",
+        "crNumber": "Commercial Registration",
+        "taxNumber": "VAT Number",
+        "pricingProfile": "Pricing Profile",
+        "accountManager": "Account Manager",
+        "accountActive": "Account active",
+        "accountActiveHint": "Inactive clients cannot sign in or book"
+      },
+      "contact": {
+        "contactName": "Contact Name",
+        "phone": "Phone",
+        "shippingAddress": "Default Shipping Address",
+        "shippingContactName": "Shipping contact name",
+        "shippingContactPhone": "Shipping contact phone",
+        "city": "City",
+        "addressLine1": "Address line 1",
+        "addressLine2": "Address line 2",
+        "shortAddress": "Short address (KSA)"
+      },
+      "pricing": {
+        "billingCurrency": "Billing Currency",
+        "credit": "Credit",
+        "creditLimit": "Credit limit",
+        "outstanding": "Outstanding",
+        "available": "Available",
+        "setCreditLimit": "Set credit limit (SAR)",
+        "saving": "Saving...",
+        "saveLimit": "Save limit",
+        "creditSavedTitle": "Credit limit updated",
+        "creditSaveErrorTitle": "Couldn't update credit limit"
+      },
+      "features": {
+        "salesChannels": "Sales Channels Feature",
+        "salesChannelsHint": "Orders, Sales Channels & Assignment Rules — no request needed.",
+        "dangerousGoods": "Dangerous Goods Access",
+        "dangerousGoodsHint": "Allows this client to book dangerous goods shipments."
+      }
+    },
+    "documents": {
+      "title": "Client Documents",
+      "empty": "No documents available",
+      "fallbackName": "Document {{index}}",
+      "upload": "Upload a document",
+      "notice": "Documents come from the client's application and from the client portal. Deleting one is audit-logged.",
+      "uploadUnavailableTitle": "Not available yet",
+      "uploadUnavailableMessage": "Adding documents to an existing client isn't supported on mobile yet.",
+      "openErrorTitle": "Couldn't open document"
+    }
+  },
+  "adminAccountManagersScreen": {
+    "title": "Account Managers",
+    "subtitle_one": "{{count}} scoped admin",
+    "subtitle_other": "{{count}} scoped admins",
+    "scopedAdmins": "Scoped Admin Users",
+    "noManagers": "No account managers created yet.",
+    "assignedCount_one": "{{count}} assigned client",
+    "assignedCount_other": "{{count}} assigned clients",
+    "assignClients": "Assign",
+    "pendingChanges": "Pending Client Changes",
+    "noRequests": "No pending change requests.",
+    "info": "An account manager can only see and edit the clients assigned to them. These requests are how they change anything outside that.",
+    "time": {
+      "justNow": "just now",
+      "minutesAgo_one": "{{count}} min ago",
+      "minutesAgo_other": "{{count}} min ago",
+      "hoursAgo_one": "{{count}} h ago",
+      "hoursAgo_other": "{{count}} h ago",
+      "daysAgo_one": "{{count}} day ago",
+      "daysAgo_other": "{{count}} days ago"
+    },
+    "requests": {
+      "unknownClient": "Unknown client",
+      "requestedBy": "Requested by {{name}} · {{time}}",
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "reject": "Reject",
+      "apply": "Apply changes",
+      "approvedTitle": "Request approved",
+      "rejectedTitle": "Request rejected",
+      "errorTitle": "Couldn't review request"
+    },
+    "assign": {
+      "title": "Assign Clients",
+      "subtitle_one": "{{name}} · {{count}} assigned",
+      "subtitle_other": "{{name}} · {{count}} assigned",
+      "searchPlaceholder": "Search clients...",
+      "empty": "No clients found.",
+      "assignedTo": "assigned to {{name}}",
+      "save": "Save assignments",
+      "saving": "Saving...",
+      "successTitle": "Assignments updated",
+      "errorTitle": "Couldn't update assignments"
+    }
+  },
   "signedInDevices": {
     "title": "Signed-in devices",
     "subtitle": "Sign out anywhere you don't recognise",
