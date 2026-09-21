@@ -72,7 +72,10 @@ Payments (Tap charges, saved cards, webhooks), shipment creation (rates → chec
 
 ## Frontend conventions
 
-Dense, operational UI — not a marketing site. Brand orange `#fe5200`; theme via CSS custom properties in [client/src/index.css](client/src/index.css). Use existing shadcn/ui primitives in `client/src/components/ui/`, `lucide-react` for icons, and the request helpers in [client/src/lib/queryClient.ts](client/src/lib/queryClient.ts) (must include credentials for session auth). Arabic/English bilingual data is supported with RTL inputs in admin client editing.
+Dense, operational UI — not a marketing site. (That describes `client/`. `marketing/` is the
+public site at ezhalha.co and is deliberately the opposite — editorial, prerendered, bilingual
+EN/AR with real RTL. See [docs/marketing-site.md](docs/marketing-site.md).) Brand orange `#fe5200`; theme via CSS custom properties in [client/src/index.css](client/src/index.css). Use existing shadcn/ui primitives in `client/src/components/ui/`, `lucide-react` for icons, and the request helpers in [client/src/lib/queryClient.ts](client/src/lib/queryClient.ts) (must include credentials for session auth). Arabic/English bilingual data is supported with RTL inputs in admin client editing; full UI
+translation exists only on the marketing site, whose catalogues live in `shared/i18n/`.
 
 ## Workspace notes
 

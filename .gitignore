@@ -9,3 +9,7 @@ vite.config.ts.*
 
 uploads/
 logs/
+
+# Marketing site build output (prerendered HTML + hydration bundle)
+marketing/dist/
+marketing/.ssr/

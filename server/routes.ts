@@ -120,7 +120,7 @@ import { extractInvoiceItemsFromDocument } from "./services/invoice-extraction";
 import { extractPackageDetailsFromDocument } from "./services/package-extraction";
 import { extractCompanyDetailsFromDocuments, isGeminiCompanyExtractionConfigured } from "./services/gemini-company-extraction";
 import { applyCarrierTrackingToShipment } from "./services/express-tracking-refresh";
-import { clearCarrierTrackingEvents } from "./services/carrier-tracking-events";
+import { clearCarrierTrackingEvents, getCarrierTrackingEvents } from "./services/carrier-tracking-events";
 import {
   hasCommercialInvoiceData,
   renderCommercialInvoiceHtml,
@@ -1086,7 +1086,7 @@ function renderVirtualCarrierNote(vc: { name: string; noteTemplate?: string | nu
 // carrier rate APIs zone on postal/city + country, so a representative pair gives a real
 // (zone-accurate) carrier quote without collecting a full address — the same idea as the
 // public FedEx/DHL quote tools. Countries absent here are simply not live-rated for express.
-const QUICK_QUOTE_RATE_LOCATIONS: Record<string, { city: string; postalCode: string }> = {
+export const QUICK_QUOTE_RATE_LOCATIONS: Record<string, { city: string; postalCode: string }> = {
   SA: { city: "Riyadh", postalCode: "12211" },
   AE: { city: "Dubai", postalCode: "00000" },
   KW: { city: "Kuwait City", postalCode: "13001" },
@@ -3732,6 +3732,31 @@ const companyExtractionLimiter = rateLimit({
 // call to FedEx/DHL/Aramex or a local carrier with no account behind it, so this is deliberately
 // tighter than the authenticated client path: enough to walk the wizard and re-rate a few times,
 // not enough to scrape a rate card.
+// The marketing site at ezhalha.co. Both of these are hit by anonymous visitors, so they get
+// their own budgets rather than sharing the guest wizard's — a landing page sees far more
+// one-off traffic than a wizard does, and the two abuse profiles are different.
+//
+// Note express-rate-limit runs BEFORE the handler, so a Quick Quote served from its 3-minute
+// response cache still spends budget. The quote widget is therefore button-driven, not
+// debounced-on-keystroke: one request per intent instead of one per character.
+const publicQuoteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 40,
+  message: { error: "Too many quote requests. Please wait a few minutes, or create an account." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Tracking is served entirely from our own tables — no carrier call — so it is cheap. The limit
+// is here to blunt enumeration of the EZH number space rather than to protect a supplier.
+const publicTrackLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  message: { error: "Too many tracking requests. Please wait a few minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const guestRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 20,
@@ -18719,6 +18744,261 @@ export async function registerRoutes(
     pieces: z.number().int().positive().default(1),
   });
 
+  /**
+   * The Quick Quote engine, shared by the authenticated route and its public twin.
+   *
+   * Everything that varies per caller arrives in `ctx`; nothing inside reads the session. That is
+   * what lets `/api/public/quote` reuse this untouched — it passes the same guest constants the
+   * guest rating endpoints already use, rather than re-implementing the pricing.
+   *
+   * Reads only. Writes no `shipment_rate_quotes` rows, no audit entry, nothing.
+   */
+  type QuickQuoteContext = {
+    clientProfile: string | null;
+    accountType: PricingAccountTypeValue;
+    /** Omitted for public callers — carrier routing falls back to the shipping country. */
+    clientAccountId?: string;
+  };
+
+  type QuickQuotePayload = {
+    chargeable: { totalWeightKg: number; totalCbm: number; chargeableAirKg: number; pieces: number };
+    local: Array<Record<string, unknown>>;
+    ddp: Array<Record<string, unknown>>;
+    express: Array<Record<string, unknown>>;
+    available: { local: boolean; ddp: boolean; express: boolean };
+    currency: string;
+  };
+
+  async function buildQuickQuote(
+    data: z.infer<typeof quickQuoteSchema>,
+    ctx: QuickQuoteContext,
+  ): Promise<QuickQuotePayload> {
+    const { clientProfile, accountType, clientAccountId } = ctx;
+    const pricingRule = clientProfile ? await storage.getPricingRuleByProfile(clientProfile) : undefined;
+
+    const originCountry = data.origin.countryCode.toUpperCase();
+    const destinationCountry = data.destination.countryCode.toUpperCase();
+    const pieces = data.pieces || 1;
+    const L = data.length || 0;
+    const W = data.width || 0;
+    const H = data.height || 0;
+    const totalWeightKg = data.weightKg * pieces;
+    const totalCbm = (L * W * H) / 1_000_000 * pieces;
+    const chargeableAirKg = Math.max(totalWeightKg, totalCbm * 167);
+
+    // Serve an identical recent quote from cache (fast + shields carriers from debounce spam).
+    const cacheKey = JSON.stringify([originCountry, destinationCountry, data.weightKg, L, W, H, pieces, clientProfile, accountType, clientAccountId ?? "public"]);
+    const cached = getQuickQuoteCache(cacheKey) as QuickQuotePayload | null;
+    if (cached) return cached;
+
+    // ── Local (domestic KSA) — rate cards for real + virtual carriers ──
+    const localQuotes: Array<Record<string, unknown>> = [];
+    if (originCountry === "SA" && destinationCountry === "SA") {
+      const localCarriers = [
+        ...carrierService.getLocalCarriers("SA").map((a) => ({ code: a.carrierCode, name: a.name })),
+        ...(await storage.listVirtualCarriers(true)).map((vc) => ({ code: vc.code, name: vc.name })),
+      ];
+      for (const carrier of localCarriers) {
+        const local = await resolveLocalRate({
+          carrierCode: carrier.code,
+          weightKg: totalWeightKg,
+          clientProfile,
+          liveBaseRateSar: null,
+        });
+        if (!local) continue;
+        const snapshot = calculateShipmentAccounting({
+          shipmentType: "domestic",
+          isDdp: false,
+          recipientCountryCode: "SA",
+          baseRate: local.baseRate,
+          marginAmount: local.marginAmount,
+        });
+        localQuotes.push({
+          carrierCode: carrier.code,
+          carrierName: carrier.name,
+          baseRate: local.baseRate,
+          markup: local.marginAmount,
+          vat: snapshot.sellTaxAmountSar,
+          clientTotal: snapshot.clientTotalAmountSar,
+          transitDays: 2,
+        });
+      }
+      localQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
+    }
+
+    // ── DDP door-to-door — country-level lane, per available transport method ──
+    const ddpQuotes: Array<Record<string, unknown>> = [];
+    const lane = await storage.findDdpPricingLane({
+      originCountryCode: originCountry,
+      destinationCountryCode: destinationCountry,
+      destinationCity: data.destination.city,
+    });
+    if (lane && lane.isActive) {
+      const methods: DdpTransportMethodValue[] = [];
+      if (lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0) methods.push(DdpTransportMethod.AIR);
+      if (Number(lane.seaBaseRatePerCbm) > 0) methods.push(DdpTransportMethod.SEA);
+      if (Number(lane.domesticRatePerKg) > 0) methods.push(DdpTransportMethod.DOMESTIC);
+
+      for (const transportMethod of methods) {
+        const isKgBilled = transportMethod !== DdpTransportMethod.SEA;
+        const packages = isKgBilled
+          ? Array.from({ length: pieces }, () => ({ weight: data.weightKg, length: L, width: W, height: H }))
+          : [];
+        try {
+          const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
+          const markupPercentage = pricingRule
+            ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, accountType)
+            : 0;
+          const pricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
+          const snapshot = calculateShipmentAccounting({
+            shipmentType: "inbound",
+            isDdp: true,
+            recipientCountryCode: lane.destinationCountryCode || "SA",
+            baseRate: pricing.baseRateSar,
+            marginAmount: pricing.markupAmountSar,
+          });
+          ddpQuotes.push({
+            transportMethod,
+            billingUnit: pricing.billingUnit,
+            billableQuantity: pricing.billableQuantity,
+            ratePerUnit: pricing.ratePerUnitSar,
+            baseRate: pricing.baseRateSar,
+            markup: pricing.markupAmountSar,
+            vat: snapshot.sellTaxAmountSar,
+            clientTotal: snapshot.clientTotalAmountSar,
+            transitDays: pricing.transitDaysMax,
+            laneId: lane.id,
+          });
+        } catch {
+          // A method that can't be priced (e.g. sea with no dimensions) is skipped, not fatal.
+        }
+      }
+    }
+
+    // ── Express — LIVE carrier rates (FedEx/DHL/Aramex) via representative postal codes ──
+    // Same rate engines + account binding as /api/client/shipments/rates, but keyed off a
+    // representative { city, postal } per country so no full address is needed. Returns every
+    // service level the carriers quote. Carriers with no working account / rate are skipped.
+    const expressQuotes: Array<Record<string, unknown>> = [];
+    const expressShipper = buildQuickQuoteRateAddress(originCountry);
+    const expressRecipient = buildQuickQuoteRateAddress(destinationCountry);
+    if (expressShipper && expressRecipient) {
+      const expressShipmentType = originCountry === destinationCountry
+        ? "domestic"
+        : destinationCountry === "SA" ? "inbound" : "outbound";
+      const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
+      const rateRequest = {
+        shipper: expressShipper,
+        recipient: expressRecipient,
+        packages: Array.from({ length: pieces }, () => ({
+          weight: data.weightKg,
+          weightUnit: "KG" as const,
+          // Only send dimensions when the client provided them (all positive) — otherwise
+          // omit so carriers rate on weight (DHL rejects zero dimensions).
+          ...(L > 0 && W > 0 && H > 0
+            ? { dimensions: { length: L, width: W, height: H, unit: "CM" as const } }
+            : {}),
+          packageType: "YOUR_PACKAGING",
+        })),
+        serviceType: "",
+        packagingType: "YOUR_PACKAGING",
+        currency: "SAR",
+      };
+      // International carriers only (exclude local + aggregator provider adapters).
+      const intlCarriers = carrierService.getSupportedCarriers().filter(
+        (a) => !a.capabilities || a.capabilities.type !== "local",
+      );
+      const routingOptions = {
+        shipperCountryCode: originCountry,
+        recipientCountryCode: destinationCountry,
+        ...(clientAccountId ? { clientAccountId } : {}),
+      };
+      // Cap each carrier so one slow API (FedEx availability + service-type loop) can't
+      // stall the whole quote — a carrier that overruns is simply dropped from this quote.
+      const CARRIER_TIMEOUT_MS = 8000;
+      await Promise.all(intlCarriers.map((carrierAdapter) => {
+        const work = (async () => {
+        try {
+          const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
+          const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
+          const accountRateResults = await Promise.all(
+            managedAccounts.map(async (integrationAccount) => {
+              try {
+                return {
+                  integrationAccountId: integrationAccount.id,
+                  carrierRates: await withIntegrationAccount(integrationAccount, () => carrierAdapter.getRates(rateRequest)),
+                };
+              } catch {
+                return { integrationAccountId: integrationAccount.id, carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>> };
+              }
+            }),
+          );
+          if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
+            try {
+              accountRateResults.push({ integrationAccountId: `env:${appKey}`, carrierRates: await carrierAdapter.getRates(rateRequest) });
+            } catch { /* carrier not configured / no rate — skip */ }
+          }
+          const winning = selectCheapestCarrierAccountPortfolio(accountRateResults);
+          for (const rate of winning?.carrierRates || []) {
+            // Skip products the carrier returns with no real price (e.g. DHL ECONOMY
+            // SELECT / FREIGHT WORLDWIDE come back at 0 on unsupported lanes).
+            if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
+            const marginPercentage = pricingRule
+              ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, accountType)
+              : defaultMarginPercentage;
+            const marginAmount = rate.baseRate * (marginPercentage / 100);
+            const snapshot = calculateShipmentAccounting({
+              shipmentType: expressShipmentType,
+              isDdp: false,
+              recipientCountryCode: destinationCountry,
+              baseRate: rate.baseRate,
+              marginAmount,
+            });
+            expressQuotes.push({
+              carrierCode: carrierAdapter.carrierCode,
+              carrierName: carrierAdapter.name,
+              serviceType: rate.serviceType,
+              serviceName: rate.serviceName,
+              clientTotal: snapshot.clientTotalAmountSar,
+              transitDays: rate.transitDays ?? null,
+            });
+          }
+        } catch (err) {
+          logError(`Quick quote express rate failed for ${carrierAdapter.carrierCode}`, err);
+        }
+        })();
+        const timeout = new Promise<void>((resolve) => setTimeout(resolve, CARRIER_TIMEOUT_MS));
+        return Promise.race([work, timeout]);
+      }));
+      // Dedupe identical service levels (same carrier + service), keeping the cheapest.
+      const seen = new Map<string, Record<string, unknown>>();
+      for (const q of expressQuotes) {
+        const key = `${q.carrierCode}|${q.serviceType || q.serviceName}`;
+        const prev = seen.get(key);
+        if (!prev || Number(q.clientTotal) < Number(prev.clientTotal)) seen.set(key, q);
+      }
+      expressQuotes.length = 0;
+      expressQuotes.push(...seen.values());
+      expressQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
+    }
+
+    const payload = {
+      chargeable: {
+        totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
+        totalCbm: Math.round(totalCbm * 10000) / 10000,
+        chargeableAirKg: Math.round(chargeableAirKg * 1000) / 1000,
+        pieces,
+      },
+      local: localQuotes,
+      ddp: ddpQuotes,
+      express: expressQuotes,
+      available: { local: localQuotes.length > 0, ddp: ddpQuotes.length > 0, express: expressQuotes.length > 0 },
+      currency: "SAR",
+    };
+    setQuickQuoteCache(cacheKey, payload);
+    return payload;
+  }
+
   app.post("/api/client/quick-quote", requireClient, requireClientPermission(ClientPermission.CREATE_SHIPMENTS), async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -18727,230 +19007,11 @@ export async function registerRoutes(
       }
       const data = quickQuoteSchema.parse(req.body);
       const account = await storage.getClientAccount(user.clientAccountId);
-      const clientProfile = account?.profile || null;
-      const pricingRule = clientProfile ? await storage.getPricingRuleByProfile(clientProfile) : undefined;
-
-      const originCountry = data.origin.countryCode.toUpperCase();
-      const destinationCountry = data.destination.countryCode.toUpperCase();
-      const pieces = data.pieces || 1;
-      const L = data.length || 0;
-      const W = data.width || 0;
-      const H = data.height || 0;
-      const totalWeightKg = data.weightKg * pieces;
-      const totalCbm = (L * W * H) / 1_000_000 * pieces;
-      const chargeableAirKg = Math.max(totalWeightKg, totalCbm * 167);
-
-      // Serve an identical recent quote from cache (fast + shields carriers from debounce spam).
-      const cacheKey = JSON.stringify([originCountry, destinationCountry, data.weightKg, L, W, H, pieces, clientProfile]);
-      const cached = getQuickQuoteCache(cacheKey);
-      if (cached) return res.json(cached);
-
-      // ── Local (domestic KSA) — rate cards for real + virtual carriers ──
-      const localQuotes: Array<Record<string, unknown>> = [];
-      if (originCountry === "SA" && destinationCountry === "SA") {
-        const localCarriers = [
-          ...carrierService.getLocalCarriers("SA").map((a) => ({ code: a.carrierCode, name: a.name })),
-          ...(await storage.listVirtualCarriers(true)).map((vc) => ({ code: vc.code, name: vc.name })),
-        ];
-        for (const carrier of localCarriers) {
-          const local = await resolveLocalRate({
-            carrierCode: carrier.code,
-            weightKg: totalWeightKg,
-            clientProfile,
-            liveBaseRateSar: null,
-          });
-          if (!local) continue;
-          const snapshot = calculateShipmentAccounting({
-            shipmentType: "domestic",
-            isDdp: false,
-            recipientCountryCode: "SA",
-            baseRate: local.baseRate,
-            marginAmount: local.marginAmount,
-          });
-          localQuotes.push({
-            carrierCode: carrier.code,
-            carrierName: carrier.name,
-            baseRate: local.baseRate,
-            markup: local.marginAmount,
-            vat: snapshot.sellTaxAmountSar,
-            clientTotal: snapshot.clientTotalAmountSar,
-            transitDays: 2,
-          });
-        }
-        localQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
-      }
-
-      // ── DDP door-to-door — country-level lane, per available transport method ──
-      const ddpQuotes: Array<Record<string, unknown>> = [];
-      const lane = await storage.findDdpPricingLane({
-        originCountryCode: originCountry,
-        destinationCountryCode: destinationCountry,
-        destinationCity: data.destination.city,
-      });
-      if (lane && lane.isActive) {
-        const methods: DdpTransportMethodValue[] = [];
-        if (lane.airEnabled !== false && Number(lane.airBaseRatePerKg) > 0) methods.push(DdpTransportMethod.AIR);
-        if (Number(lane.seaBaseRatePerCbm) > 0) methods.push(DdpTransportMethod.SEA);
-        if (Number(lane.domesticRatePerKg) > 0) methods.push(DdpTransportMethod.DOMESTIC);
-
-        for (const transportMethod of methods) {
-          const isKgBilled = transportMethod !== DdpTransportMethod.SEA;
-          const packages = isKgBilled
-            ? Array.from({ length: pieces }, () => ({ weight: data.weightKg, length: L, width: W, height: H }))
-            : [];
-          try {
-            const basePricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage: 0 });
-            const markupPercentage = pricingRule
-              ? await storage.getDdpMarginForQuantity(pricingRule.id, basePricing.billingUnit, basePricing.billableQuantity, normalizePricingAccountType(account?.accountType))
-              : 0;
-            const pricing = calculateDdpPrice({ lane, transportMethod, packages, totalCbm, markupPercentage });
-            const snapshot = calculateShipmentAccounting({
-              shipmentType: "inbound",
-              isDdp: true,
-              recipientCountryCode: lane.destinationCountryCode || "SA",
-              baseRate: pricing.baseRateSar,
-              marginAmount: pricing.markupAmountSar,
-            });
-            ddpQuotes.push({
-              transportMethod,
-              billingUnit: pricing.billingUnit,
-              billableQuantity: pricing.billableQuantity,
-              ratePerUnit: pricing.ratePerUnitSar,
-              baseRate: pricing.baseRateSar,
-              markup: pricing.markupAmountSar,
-              vat: snapshot.sellTaxAmountSar,
-              clientTotal: snapshot.clientTotalAmountSar,
-              transitDays: pricing.transitDaysMax,
-              laneId: lane.id,
-            });
-          } catch {
-            // A method that can't be priced (e.g. sea with no dimensions) is skipped, not fatal.
-          }
-        }
-      }
-
-      // ── Express — LIVE carrier rates (FedEx/DHL/Aramex) via representative postal codes ──
-      // Same rate engines + account binding as /api/client/shipments/rates, but keyed off a
-      // representative { city, postal } per country so no full address is needed. Returns every
-      // service level the carriers quote. Carriers with no working account / rate are skipped.
-      const expressQuotes: Array<Record<string, unknown>> = [];
-      const expressShipper = buildQuickQuoteRateAddress(originCountry);
-      const expressRecipient = buildQuickQuoteRateAddress(destinationCountry);
-      if (expressShipper && expressRecipient) {
-        const expressShipmentType = originCountry === destinationCountry
-          ? "domestic"
-          : destinationCountry === "SA" ? "inbound" : "outbound";
-        const defaultMarginPercentage = pricingRule ? Number(pricingRule.marginPercentage) : 20;
-        const rateRequest = {
-          shipper: expressShipper,
-          recipient: expressRecipient,
-          packages: Array.from({ length: pieces }, () => ({
-            weight: data.weightKg,
-            weightUnit: "KG" as const,
-            // Only send dimensions when the client provided them (all positive) — otherwise
-            // omit so carriers rate on weight (DHL rejects zero dimensions).
-            ...(L > 0 && W > 0 && H > 0
-              ? { dimensions: { length: L, width: W, height: H, unit: "CM" as const } }
-              : {}),
-            packageType: "YOUR_PACKAGING",
-          })),
-          serviceType: "",
-          packagingType: "YOUR_PACKAGING",
-          currency: "SAR",
-        };
-        // International carriers only (exclude local + aggregator provider adapters).
-        const intlCarriers = carrierService.getSupportedCarriers().filter(
-          (a) => !a.capabilities || a.capabilities.type !== "local",
-        );
-        const routingOptions = {
-          shipperCountryCode: originCountry,
-          recipientCountryCode: destinationCountry,
-          clientAccountId: user.clientAccountId,
-        };
-        // Cap each carrier so one slow API (FedEx availability + service-type loop) can't
-        // stall the whole quote — a carrier that overruns is simply dropped from this quote.
-        const CARRIER_TIMEOUT_MS = 8000;
-        await Promise.all(intlCarriers.map((carrierAdapter) => {
-          const work = (async () => {
-          try {
-            const appKey = getIntegrationAppKeyForCarrier(carrierAdapter.carrierCode);
-            const managedAccounts = await getEligibleIntegrationAccountsForShipment(appKey, routingOptions);
-            const accountRateResults = await Promise.all(
-              managedAccounts.map(async (integrationAccount) => {
-                try {
-                  return {
-                    integrationAccountId: integrationAccount.id,
-                    carrierRates: await withIntegrationAccount(integrationAccount, () => carrierAdapter.getRates(rateRequest)),
-                  };
-                } catch {
-                  return { integrationAccountId: integrationAccount.id, carrierRates: [] as Awaited<ReturnType<CarrierAdapter["getRates"]>> };
-                }
-              }),
-            );
-            if (managedAccounts.length === 0 && (process.env.NODE_ENV !== "production" || carrierAdapter.isConfigured())) {
-              try {
-                accountRateResults.push({ integrationAccountId: `env:${appKey}`, carrierRates: await carrierAdapter.getRates(rateRequest) });
-              } catch { /* carrier not configured / no rate — skip */ }
-            }
-            const winning = selectCheapestCarrierAccountPortfolio(accountRateResults);
-            for (const rate of winning?.carrierRates || []) {
-              // Skip products the carrier returns with no real price (e.g. DHL ECONOMY
-              // SELECT / FREIGHT WORLDWIDE come back at 0 on unsupported lanes).
-              if (!Number.isFinite(rate.baseRate) || rate.baseRate <= 0) continue;
-              const marginPercentage = pricingRule
-                ? await storage.getMarginForAmount(pricingRule.id, rate.baseRate, normalizePricingAccountType(account?.accountType))
-                : defaultMarginPercentage;
-              const marginAmount = rate.baseRate * (marginPercentage / 100);
-              const snapshot = calculateShipmentAccounting({
-                shipmentType: expressShipmentType,
-                isDdp: false,
-                recipientCountryCode: destinationCountry,
-                baseRate: rate.baseRate,
-                marginAmount,
-              });
-              expressQuotes.push({
-                carrierCode: carrierAdapter.carrierCode,
-                carrierName: carrierAdapter.name,
-                serviceType: rate.serviceType,
-                serviceName: rate.serviceName,
-                clientTotal: snapshot.clientTotalAmountSar,
-                transitDays: rate.transitDays ?? null,
-              });
-            }
-          } catch (err) {
-            logError(`Quick quote express rate failed for ${carrierAdapter.carrierCode}`, err);
-          }
-          })();
-          const timeout = new Promise<void>((resolve) => setTimeout(resolve, CARRIER_TIMEOUT_MS));
-          return Promise.race([work, timeout]);
-        }));
-        // Dedupe identical service levels (same carrier + service), keeping the cheapest.
-        const seen = new Map<string, Record<string, unknown>>();
-        for (const q of expressQuotes) {
-          const key = `${q.carrierCode}|${q.serviceType || q.serviceName}`;
-          const prev = seen.get(key);
-          if (!prev || Number(q.clientTotal) < Number(prev.clientTotal)) seen.set(key, q);
-        }
-        expressQuotes.length = 0;
-        expressQuotes.push(...seen.values());
-        expressQuotes.sort((a, b) => Number(a.clientTotal) - Number(b.clientTotal));
-      }
-
-      const payload = {
-        chargeable: {
-          totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
-          totalCbm: Math.round(totalCbm * 10000) / 10000,
-          chargeableAirKg: Math.round(chargeableAirKg * 1000) / 1000,
-          pieces,
-        },
-        local: localQuotes,
-        ddp: ddpQuotes,
-        express: expressQuotes,
-        available: { local: localQuotes.length > 0, ddp: ddpQuotes.length > 0, express: expressQuotes.length > 0 },
-        currency: "SAR",
-      };
-      setQuickQuoteCache(cacheKey, payload);
-      res.json(payload);
+      res.json(await buildQuickQuote(data, {
+        clientProfile: account?.profile || null,
+        accountType: normalizePricingAccountType(account?.accountType),
+        clientAccountId: user.clientAccountId,
+      }));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
@@ -19839,6 +19900,149 @@ export async function registerRoutes(
       }
       logError("Failed to get guest local rates", error);
       res.status(500).json({ error: "Failed to get local rates" });
+    }
+  });
+
+  // ── PUBLIC MARKETING API (ezhalha.co) ────────────────────────────────────────
+  // Two endpoints the marketing site calls. Like the guest rating block above, they persist
+  // nothing and carry no session. Unlike it, their responses are explicitly REDACTED: this is
+  // the open internet, not a wizard a visitor is already walking.
+
+  /**
+   * Public Quick Quote.
+   *
+   * The same engine the authenticated route uses (`buildQuickQuote`), called with the guest
+   * constants already proven by the guest rating endpoints. The only thing this adds is the
+   * redaction below.
+   */
+  app.post("/api/public/quote", publicQuoteLimiter, async (req, res) => {
+    try {
+      const data = quickQuoteSchema.parse(req.body);
+      const quote = await buildQuickQuote(data, {
+        clientProfile: GUEST_PRICING_PROFILE,
+        accountType: GUEST_ACCOUNT_TYPE,
+        // No clientAccountId: carrier routing falls back to the shipping country, which is what
+        // a real client on this lane would reach anyway.
+      });
+
+      // `local[]` and `ddp[]` carry `baseRate` (our carrier cost) and `markup` (our margin), and
+      // `ddp[]` carries an internal pricing-lane id. Those are commercially sensitive and have no
+      // business on a public page — `express[]` already returns only the client-facing total, and
+      // this makes the other two match it.
+      const publicRate = (q: Record<string, unknown>) => {
+        const { baseRate, markup, laneId, ...rest } = q as Record<string, unknown>;
+        return rest;
+      };
+
+      // Carriers publish a lot of service levels — a sandbox lane can come back with hundreds,
+      // and even a real one returns more than anybody reads. The authenticated Quick Quote page
+      // shows them all because an operator is comparing; a visitor wants a price. Both arrays are
+      // already sorted cheapest-first, so taking the head keeps the cheapest and the badge on it.
+      const TOP_N = 5;
+
+      res.json({
+        chargeable: quote.chargeable,
+        local: quote.local.slice(0, TOP_N).map(publicRate),
+        ddp: quote.ddp.map(publicRate),
+        express: quote.express.slice(0, TOP_N).map(publicRate),
+        available: quote.available,
+        currency: quote.currency,
+        indicative: true,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      logError("Failed to build public quote", error);
+      res.status(500).json({ error: "Failed to build quote" });
+    }
+  });
+
+  /**
+   * Public tracking.
+   *
+   * Served entirely from our own tables — `shipment_carrier_tracking_events`, which the express
+   * tracking scheduler refreshes every 10 minutes. No carrier API call, so an anonymous visitor
+   * cannot spend carrier quota, and no write, unlike the authenticated
+   * `/api/client/shipments/:id/track` which syncs the shipment as a side effect of a GET.
+   *
+   * Everything about the response is an allow-list. `storage.getShipmentByTrackingNumber` returns
+   * `SELECT *` — names, addresses, phones, item values, every price column, dangerous-goods flags
+   * — so a delete-list would leak the next column somebody adds.
+   */
+  const PUBLIC_TRACKING_NUMBER = /^EZH\d{9}$/;
+
+  // Internal status → what a stranger holding the number is allowed to be told. Anything absent
+  // is not publicly trackable. `carrier_error` maps to "processing" deliberately: the shipment is
+  // paid and operations will retry it, and our booking failures are not the public's business.
+  const PUBLIC_TRACK_STATUS: Record<string, string> = {
+    created: "booked",
+    awaiting_review: "processing",
+    processing: "processing",
+    carrier_error: "processing",
+    booked: "booked",
+    supplier_pickup: "in_transit",
+    in_transit: "in_transit",
+    customs_clearance: "customs_clearance",
+    out_for_delivery: "out_for_delivery",
+    delivered: "delivered",
+    on_hold: "on_hold",
+    returned: "returned",
+    cancelled: "cancelled",
+  };
+
+  app.get("/api/public/track/:trackingNumber", publicTrackLimiter, async (req, res) => {
+    try {
+      const raw = String(req.params.trackingNumber || "").trim().toUpperCase().replace(/[\s-]/g, "");
+      if (!PUBLIC_TRACKING_NUMBER.test(raw)) {
+        return res.status(400).json({
+          error: "That does not look like an ezhalha tracking number.",
+          code: "invalid_tracking_number",
+        });
+      }
+
+      const shipment = await storage.getShipmentByTrackingNumber(raw);
+      const publicStatus = shipment ? PUBLIC_TRACK_STATUS[String(shipment.status || "")] : undefined;
+
+      // An unpaid or unknown shipment reads the same to the caller. Distinguishing them would
+      // confirm that a given number exists, which is exactly what an enumerator wants.
+      if (!shipment || !publicStatus) {
+        return res.status(404).json({ error: "No shipment found for that number.", code: "not_found" });
+      }
+
+      const stored = await getCarrierTrackingEvents(shipment.id);
+      const events = stored.slice(0, 50).map((event) => ({
+        description: event.description,
+        occurredAt: event.occurredAt,
+        location: event.location || null,
+      }));
+
+      // Local and door-to-door shipments are not polled for carrier scans, so they have no event
+      // rows. Derive a single milestone from the shipment itself rather than showing an empty
+      // timeline — the same fallback the DDP-manual branch of the client track endpoint uses.
+      if (events.length === 0) {
+        events.push({
+          description: shipment.carrierStatus || publicStatus.replace(/_/g, " "),
+          occurredAt: shipment.updatedAt,
+          location: null,
+        });
+      }
+
+      res.json({
+        trackingNumber: shipment.trackingNumber,
+        status: publicStatus,
+        // City and country only. Street, postal code, name, company, phone and email never leave.
+        origin: { city: shipment.senderCity || null, country: shipment.senderCountry || null },
+        destination: { city: shipment.recipientCity || null, country: shipment.recipientCountry || null },
+        carrier: shipment.carrierName || shipment.carrierCode || null,
+        pieces: shipment.numberOfPackages ?? 1,
+        estimatedDelivery: shipment.estimatedDelivery ?? null,
+        actualDelivery: shipment.actualDelivery ?? null,
+        events,
+      });
+    } catch (error) {
+      logError("Failed to serve public tracking", error);
+      res.status(500).json({ error: "Failed to load tracking" });
     }
   });
 

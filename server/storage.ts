@@ -285,6 +285,7 @@ export interface IStorage {
   updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment | undefined>;
   recordShipmentCarrierPoll(id: string, repeatCount: number): Promise<void>;
   getShipmentByCarrierTrackingNumber(carrierTrackingNumber: string): Promise<Shipment | undefined>;
+  getShipmentByTrackingNumber(trackingNumber: string): Promise<Shipment | undefined>;
   claimCarrierBooking(id: string): Promise<boolean>;
   releaseCarrierBookingClaim(id: string): Promise<void>;
 
@@ -1291,6 +1292,27 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(shipments)
       .where(and(eq(shipments.carrierTrackingNumber, trimmed), isNull(shipments.deletedAt)))
+      .limit(1);
+    return shipment || undefined;
+  }
+
+  /**
+   * Find a shipment by its ezhalha tracking number (`EZH` + 9 digits).
+   *
+   * Unlike the carrier waybill above, `shipments.trackingNumber` is NOT NULL and UNIQUE, so this
+   * is an unambiguous indexed point lookup. That difference is why public tracking accepts our
+   * own number and not a carrier's: a waybill lookup could match more than one row.
+   *
+   * Soft-deleted shipments are excluded — a cancelled-and-purged shipment should read as unknown
+   * rather than surface its history to whoever holds the number.
+   */
+  async getShipmentByTrackingNumber(trackingNumber: string): Promise<Shipment | undefined> {
+    const trimmed = trackingNumber.trim().toUpperCase();
+    if (!trimmed) return undefined;
+    const [shipment] = await db
+      .select()
+      .from(shipments)
+      .where(and(eq(shipments.trackingNumber, trimmed), isNull(shipments.deletedAt)))
       .limit(1);
     return shipment || undefined;
   }

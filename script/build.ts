@@ -1,6 +1,7 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile, copyFile, mkdir } from "fs/promises";
+import { buildMarketing } from "./prerender";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -37,6 +38,11 @@ async function buildAll() {
 
   console.log("building client...");
   await viteBuild();
+
+  // The marketing site at ezhalha.co. Separate output, separate bundle, separate origin — it
+  // shares this build only so one command produces everything a deploy needs.
+  console.log("building marketing site...");
+  await buildMarketing();
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
