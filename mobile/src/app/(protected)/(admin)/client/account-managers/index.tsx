@@ -7,9 +7,9 @@ import Toast from "react-native-toast-message";
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
-import { InfoCard, SectionLabel } from "@/components/ui/InfoCard";
+import { InfoCard } from "@/components/ui/InfoCard";
 import InfoBox from "@/components/ui/InfoBox";
-import { AdminScreenHeader } from "@/components/layout/AdminScreenHeader";
+import { AdminTabHeader } from "@/components/layout/AdminTabHeader";
 import { AdminNoAccess } from "@/components/layout/AdminNoAccess";
 import { AdminDrawer } from "@/components/layout/AdminDrawer";
 import { Colors } from "@/constants/colors";
@@ -21,6 +21,14 @@ import type { AccountManagerChangeRequest, AccountManagerSummary } from "@/lib/s
 import { AssignClientsSheet } from "@/components/sections/clients/AssignClientsSheet";
 
 const REQUIRED_PERMISSION = "account-managers:read";
+
+function SectionTitle({ children }: { children: string }) {
+  return (
+    <Text size="medium" weight="bold" style={styles.sectionTitle}>
+      {children}
+    </Text>
+  );
+}
 
 function initialsFor(name: string) {
   return name.trim().slice(0, 2).toUpperCase() || "?";
@@ -151,11 +159,12 @@ export default function AdminAccountManagersScreen() {
 
   const { data: accountManagers, isLoading: managersLoading } = useAdminAccountManagerOptions();
   const { data: changeRequests, isLoading: requestsLoading } = useAdminChangeRequests("pending");
+  const subtitle = t("adminAccountManagersScreen.subtitle", { count: accountManagers?.length ?? 0 });
 
   if (!canRead) {
     return (
       <View style={styles.container}>
-        <AdminScreenHeader title={title} subtitle={REQUIRED_PERMISSION} onMenuPress={() => setDrawerVisible(true)} />
+        <AdminTabHeader title={title} onMenuPress={() => setDrawerVisible(true)} />
         <AdminNoAccess screenTitle={title} permission={REQUIRED_PERMISSION} roleName={roleLabel} />
         <AdminDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
       </View>
@@ -165,13 +174,9 @@ export default function AdminAccountManagersScreen() {
   return (
     <View style={styles.container}>
       <RefreshableScreen contentContainerStyle={styles.content}>
-        <AdminScreenHeader
-          title={title}
-          subtitle={t("adminAccountManagersScreen.subtitle", { count: accountManagers?.length ?? 0 })}
-          onMenuPress={() => setDrawerVisible(true)}
-        />
+        <AdminTabHeader title={title} subtitle={subtitle} onMenuPress={() => setDrawerVisible(true)} />
 
-        <SectionLabel>{t("adminAccountManagersScreen.scopedAdmins")}</SectionLabel>
+        <SectionTitle>{t("adminAccountManagersScreen.scopedAdmins")}</SectionTitle>
         {managersLoading ? (
           <ActivityIndicator color={Colors.primary} style={styles.loading} />
         ) : (accountManagers ?? []).length === 0 ? (
@@ -215,7 +220,7 @@ export default function AdminAccountManagersScreen() {
         {canReadRequests && (
           <>
             <View style={styles.pendingHeaderRow}>
-              <SectionLabel style={styles.noMarginBottom}>{t("adminAccountManagersScreen.pendingChanges")}</SectionLabel>
+              <SectionTitle>{t("adminAccountManagersScreen.pendingChanges")}</SectionTitle>
               {(changeRequests?.length ?? 0) > 0 && (
                 <View style={styles.pendingCountBadge}>
                   <Text size="xs" weight="bold" style={styles.pendingCountText}>
@@ -294,13 +299,13 @@ const styles = StyleSheet.create({
   assignLink: {
     color: Colors.primary,
   },
+  sectionTitle: {
+    marginBottom: rvs(10),
+  },
   pendingHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: rs(8),
-  },
-  noMarginBottom: {
-    marginBottom: 0,
   },
   pendingCountBadge: {
     minWidth: rs(20),
@@ -310,7 +315,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: rs(6),
-    marginBottom: rvs(8),
   },
   pendingCountText: {
     color: Colors.white,

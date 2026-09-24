@@ -16,11 +16,13 @@ import { useNotifications } from "@/lib/hooks/useNotifications";
 
 interface AdminTabHeaderProps {
   title: string;
+  /** Overrides the default "{displayName} · {roleLabel}" line, e.g. a scoped count. */
+  subtitle?: string;
   onMenuPress?: () => void;
   onBackPress?: () => void;
 }
 
-export function AdminTabHeader({ title, onMenuPress, onBackPress }: AdminTabHeaderProps) {
+export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress }: AdminTabHeaderProps) {
   const { displayName, roleLabel } = useAdminIdentity();
   const { unreadCount } = useNotifications();
   const isBack = !!onBackPress;
@@ -44,7 +46,7 @@ export function AdminTabHeader({ title, onMenuPress, onBackPress }: AdminTabHead
           {title}
         </Text>
         <Text size="xs" dimRate="55%" numberOfLines={1}>
-          {displayName} · {roleLabel}
+          {subtitle ?? `${displayName} · ${roleLabel}`}
         </Text>
       </View>
 

@@ -24,7 +24,7 @@ export function AssignClientsSheet({ manager, onClose }: AssignClientsSheetProps
   const { t } = useTranslation();
   const { height: screenHeight } = useWindowDimensions();
   const keyboardHeight = useKeyboardHeight();
-  const listMaxHeight = Math.min(screenHeight * 0.6, screenHeight - keyboardHeight - rvs(220));
+  const listMaxHeight = Math.min(screenHeight * 0.4, screenHeight - keyboardHeight - rvs(280));
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -114,7 +114,7 @@ export function AssignClientsSheet({ manager, onClose }: AssignClientsSheetProps
               <Pressable style={styles.row} onPress={() => toggle(item.id)}>
                 <View style={styles.rowInfo}>
                   <Text size="medium" weight="bold" numberOfLines={1}>
-                    {item.accountNumber} · {item.companyName || item.name}
+                    {item.accountNumber} · {item.name || item.companyName}
                   </Text>
                   <Text size="xs" dimRate="55%" numberOfLines={1}>
                     {heldByOther
