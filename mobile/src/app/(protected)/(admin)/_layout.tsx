@@ -24,6 +24,8 @@ export default function AdminLayout() {
       <Stack.Screen name="client/[id]/edit" options={{ title: "Edit Client" }} />
       <Stack.Screen name="client/[id]/documents" options={{ title: "Client Documents" }} />
       <Stack.Screen name="client/account-managers" options={{ title: "Account Managers" }} />
+      <Stack.Screen name="applications/index" options={{ title: "Client Applications" }} />
+      <Stack.Screen name="applications/[id]" options={{ title: "Application Details" }} />
       <Stack.Screen name="performance" options={{ title: "Performance" }} />
       <Stack.Screen name="search" options={{ title: "Search" }} />
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />

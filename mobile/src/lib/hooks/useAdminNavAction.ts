@@ -8,6 +8,7 @@ import { AdminNavItem } from "@/constants/adminNavigation";
 // web admin panel only, so a tap on those surfaces a toast rather than a dead route.
 const ROUTES: Record<string, string> = {
   clients: "/(protected)/(admin)/client",
+  applications: "/(protected)/(admin)/applications",
   "account-managers": "/(protected)/(admin)/client/account-managers",
 };
 

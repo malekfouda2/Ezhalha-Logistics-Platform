@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 
@@ -9,7 +10,7 @@ import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
 import { Colors } from "@/constants/colors";
 import { rs, rvs } from "@/utils/responsive";
-import { AdminScreenHeader } from "@/components/layout/AdminScreenHeader";
+import { AdminTabHeader } from "@/components/layout/AdminTabHeader";
 import { AdminNoAccess } from "@/components/layout/AdminNoAccess";
 import { AdminDrawer } from "@/components/layout/AdminDrawer";
 import { useAdminAccess } from "@/lib/hooks/useAdminAccess";
@@ -29,6 +30,7 @@ const REQUIRED_PERMISSION = "clients:read";
 
 export default function AdminClientsScreen() {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [filtersModalVisible, setFiltersModalVisible] = useState(false);
@@ -101,7 +103,9 @@ export default function AdminClientsScreen() {
   if (!canRead) {
     return (
       <View style={styles.container}>
-        <AdminScreenHeader title={title} subtitle={REQUIRED_PERMISSION} onMenuPress={() => setDrawerVisible(true)} />
+        <View style={styles.headerArea}>
+          <AdminTabHeader title={title} subtitle={REQUIRED_PERMISSION} onMenuPress={() => setDrawerVisible(true)} />
+        </View>
         <AdminNoAccess screenTitle={title} permission={REQUIRED_PERMISSION} roleName={roleLabel} />
         <AdminDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
       </View>
@@ -110,20 +114,13 @@ export default function AdminClientsScreen() {
 
   return (
     <View style={styles.container}>
-      <AdminScreenHeader
-        title={title}
-        subtitle={t("adminClientsScreen.subtitle", { count: total })}
-        onMenuPress={() => setDrawerVisible(true)}
-        right={
-          <View style={styles.headerActions}>
-            {canCreate && (
-              <Pressable style={styles.iconButton} onPress={() => setCreateVisible(true)} hitSlop={rs(8)}>
-                <Ionicons name="add" size={rs(20)} color={Colors.text} />
-              </Pressable>
-            )}
-          </View>
-        }
-      />
+      <View style={styles.headerArea}>
+        <AdminTabHeader
+          title={title}
+          subtitle={t("adminClientsScreen.subtitle", { count: total })}
+          onMenuPress={() => setDrawerVisible(true)}
+        />
+      </View>
 
       <View style={styles.searchArea}>
         <View style={styles.searchRow}>
@@ -210,6 +207,17 @@ export default function AdminClientsScreen() {
         )}
       />
 
+      {canCreate && (
+        <Pressable
+          style={({ pressed }) => [styles.fab, { bottom: insets.bottom + rvs(20) }, pressed && styles.fabPressed]}
+          onPress={() => setCreateVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel={t("adminClientsScreen.create.title")}
+        >
+          <Ionicons name="add" size={rs(28)} color={Colors.white} />
+        </Pressable>
+      )}
+
       <ClientFiltersModal
         visible={filtersModalVisible}
         initialFilters={filters}
@@ -230,16 +238,26 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerActions: {
-    flexDirection: "row",
+  headerArea: {
+    paddingHorizontal: rs(16),
   },
-  iconButton: {
-    width: rs(38),
-    height: rs(38),
-    borderRadius: rs(12),
-    backgroundColor: Colors.white,
+  fab: {
+    position: "absolute",
+    end: rs(20),
+    width: rs(56),
+    height: rs(56),
+    borderRadius: rs(28),
+    backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: rvs(6) },
+    shadowOpacity: 0.35,
+    shadowRadius: rs(10),
+    elevation: 6,
+  },
+  fabPressed: {
+    opacity: 0.85,
   },
   searchArea: {
     paddingHorizontal: rs(16),
@@ -309,7 +327,8 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: rs(16),
     paddingTop: rvs(4),
-    paddingBottom: rvs(24),
+    // Room for the floating create button over the last card.
+    paddingBottom: rvs(120),
   },
   loadingState: {
     paddingTop: rvs(60),

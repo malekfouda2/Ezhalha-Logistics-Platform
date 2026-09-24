@@ -2398,5 +2398,84 @@
       "middle": ". Your role is ",
       "suffix": ". Ask a super admin to add the permission."
     }
+  },
+  "adminApplicationsScreen": {
+    "title": "Client Applications",
+    "subtitle": "{{pending}} pending · {{total}} total",
+    "searchPlaceholder": "Search applicant, email, company...",
+    "tabs": {
+      "all": "All"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "accountType": {
+      "company": "company",
+      "individual": "individual"
+    },
+    "accountTypeTitle": {
+      "company": "Company",
+      "individual": "Individual"
+    },
+    "card": {
+      "applied": "applied {{time}}"
+    },
+    "empty": {
+      "title": "No applications",
+      "description": "Applications that match this filter will show up here."
+    },
+    "detail": {
+      "notFound": "Application not found",
+      "back": "Go back",
+      "applicant": "Applicant",
+      "accountType": "Account type",
+      "companyName": "Company name",
+      "crNumber": "Commercial registration",
+      "vatNumber": "VAT number",
+      "contact": "Contact",
+      "fullName": "Full name",
+      "email": "Work email",
+      "phone": "Phone",
+      "location": "Location",
+      "nationalAddress": "National address",
+      "shippingAddress": "Default shipping address",
+      "documents": "Documents",
+      "documentsUploaded": "{{count}} uploaded",
+      "noDocuments": "No documents uploaded",
+      "review": "Review",
+      "status": "Status",
+      "reviewNotes": "Review notes",
+      "approve": "Approve",
+      "reject": "Reject",
+      "appliedAgo": "Applied {{time}}"
+    },
+    "approve": {
+      "title": "Approve application",
+      "subtitle": "{{name}} · creates the client account and emails a link to set their password.",
+      "profile": "Select client profile",
+      "accountManager": "Account manager",
+      "unassigned": "Unassigned",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Internal only — not sent to the applicant",
+      "notice": "Approving sends the Password Setup email from the email templates, with a link the client uses to set their own password (valid for 7 days).",
+      "submit": "Approve and create account",
+      "successTitle": "Application approved",
+      "successMessage": "{{name}} now has a client account.",
+      "errorTitle": "Couldn't approve application",
+      "assignErrorTitle": "Account created, but the account manager couldn't be assigned"
+    },
+    "reject": {
+      "title": "Reject application",
+      "reason": "Reason (sent to the applicant)",
+      "reasonPlaceholder": "Explain why the application was rejected",
+      "reasonRequired": "Enter a reason — it's included in the rejection email.",
+      "notice": "The applicant receives the Application Rejected email with this reason verbatim.",
+      "submit": "Reject application",
+      "successTitle": "Application rejected",
+      "successMessage": "{{name}} has been notified.",
+      "errorTitle": "Couldn't reject application"
+    }
   }
 }

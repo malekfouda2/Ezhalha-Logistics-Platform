@@ -2414,5 +2414,84 @@
       "middle": ". دورك هو ",
       "suffix": ". اطلب من مسؤول عام إضافة هذه الصلاحية."
     }
+  },
+  "adminApplicationsScreen": {
+    "title": "طلبات العملاء",
+    "subtitle": "{{pending}} قيد المراجعة · {{total}} إجمالي",
+    "searchPlaceholder": "ابحث بالاسم أو البريد أو الشركة...",
+    "tabs": {
+      "all": "الكل"
+    },
+    "status": {
+      "pending": "قيد المراجعة",
+      "approved": "مقبول",
+      "rejected": "مرفوض"
+    },
+    "accountType": {
+      "company": "شركة",
+      "individual": "فرد"
+    },
+    "accountTypeTitle": {
+      "company": "شركة",
+      "individual": "فرد"
+    },
+    "card": {
+      "applied": "قدّم {{time}}"
+    },
+    "empty": {
+      "title": "لا توجد طلبات",
+      "description": "ستظهر هنا الطلبات المطابقة لهذا التصنيف."
+    },
+    "detail": {
+      "notFound": "الطلب غير موجود",
+      "back": "رجوع",
+      "applicant": "مقدّم الطلب",
+      "accountType": "نوع الحساب",
+      "companyName": "اسم الشركة",
+      "crNumber": "السجل التجاري",
+      "vatNumber": "الرقم الضريبي",
+      "contact": "جهة الاتصال",
+      "fullName": "الاسم الكامل",
+      "email": "البريد الإلكتروني للعمل",
+      "phone": "الهاتف",
+      "location": "الموقع",
+      "nationalAddress": "العنوان الوطني",
+      "shippingAddress": "عنوان الشحن الافتراضي",
+      "documents": "المستندات",
+      "documentsUploaded": "{{count}} مرفوعة",
+      "noDocuments": "لا توجد مستندات مرفوعة",
+      "review": "المراجعة",
+      "status": "الحالة",
+      "reviewNotes": "ملاحظات المراجعة",
+      "approve": "قبول",
+      "reject": "رفض",
+      "appliedAgo": "قدّم {{time}}"
+    },
+    "approve": {
+      "title": "قبول الطلب",
+      "subtitle": "{{name}} · ينشئ حساب العميل ويرسل رابطًا لتعيين كلمة المرور.",
+      "profile": "اختر فئة العميل",
+      "accountManager": "مدير الحساب",
+      "unassigned": "غير معيّن",
+      "notes": "ملاحظات (اختياري)",
+      "notesPlaceholder": "داخلية فقط — لا تُرسل إلى مقدّم الطلب",
+      "notice": "عند القبول يُرسل بريد إعداد كلمة المرور من قوالب البريد، مع رابط يستخدمه العميل لتعيين كلمة المرور (صالح لمدة 7 أيام).",
+      "submit": "قبول وإنشاء الحساب",
+      "successTitle": "تم قبول الطلب",
+      "successMessage": "أصبح لدى {{name}} حساب عميل.",
+      "errorTitle": "تعذّر قبول الطلب",
+      "assignErrorTitle": "تم إنشاء الحساب، لكن تعذّر تعيين مدير الحساب"
+    },
+    "reject": {
+      "title": "رفض الطلب",
+      "reason": "السبب (يُرسل إلى مقدّم الطلب)",
+      "reasonPlaceholder": "وضّح سبب رفض الطلب",
+      "reasonRequired": "أدخل السبب — سيُضمَّن في بريد الرفض.",
+      "notice": "سيتلقى مقدّم الطلب بريد رفض الطلب متضمنًا هذا السبب كما هو.",
+      "submit": "رفض الطلب",
+      "successTitle": "تم رفض الطلب",
+      "successMessage": "تم إشعار {{name}}.",
+      "errorTitle": "تعذّر رفض الطلب"
+    }
   }
 }

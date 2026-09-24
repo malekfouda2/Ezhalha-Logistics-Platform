@@ -4,6 +4,7 @@
 // hamburger into the AdminDrawer, title + signed-in admin's name/role, and
 // the search/notifications shortcuts. Pass `onBackPress` instead of
 // `onMenuPress` to swap the hamburger for a back chevron on pushed screens.
+import { ReactNode } from "react";
 import { I18nManager, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -20,9 +21,11 @@ interface AdminTabHeaderProps {
   subtitle?: string;
   onMenuPress?: () => void;
   onBackPress?: () => void;
+  /** Extra screen-specific buttons (e.g. "create"), rendered before search/notifications. */
+  actions?: ReactNode;
 }
 
-export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress }: AdminTabHeaderProps) {
+export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress, actions }: AdminTabHeaderProps) {
   const { displayName, roleLabel } = useAdminIdentity();
   const { unreadCount } = useNotifications();
   const isBack = !!onBackPress;
@@ -49,6 +52,8 @@ export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress }: Ad
           {subtitle ?? `${displayName} · ${roleLabel}`}
         </Text>
       </View>
+
+      {actions}
 
       <Pressable
         style={styles.iconButton}

@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
 import { ChipSelect } from "@/components/ui/ChipSelect";
-import { ScreenHeader } from "@/components/sections/profile/ScreenHeader";
+import { AdminTabHeader } from "@/components/layout/AdminTabHeader";
 import { PermissionSwitchRow } from "@/components/sections/profile/PermissionSwitchRow";
 import { InfoCard, InfoRow, SectionLabel } from "@/components/ui/InfoCard";
 import { Colors } from "@/constants/colors";
@@ -322,9 +322,10 @@ export default function AdminEditClientScreen() {
           </View>
         }
       >
-        <ScreenHeader
+        <AdminTabHeader
           title={t("adminClientsScreen.edit.title")}
           subtitle={`${client.accountNumber} · ${client.name}`}
+          onBackPress={() => router.back()}
         />
 
         <ScrollView

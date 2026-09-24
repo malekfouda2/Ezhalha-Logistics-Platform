@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    padding: rs(16),
+    paddingHorizontal: rs(16),
     paddingBottom: rvs(32),
   },
   statsGrid: {
