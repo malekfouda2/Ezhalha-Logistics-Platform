@@ -55,7 +55,7 @@ export function ClientCard({ client, onPress, profileLabel }: ClientCardProps) {
         <View style={styles.info}>
           <View style={styles.nameRow}>
             <Text size="medium" weight="bold" numberOfLines={1} style={styles.nameText}>
-              {client.companyName || client.name}
+              {client.name || client.companyName}
             </Text>
             <View style={styles.accountBadge}>
               <Text size="xs" weight="bold" style={styles.accountBadgeText}>

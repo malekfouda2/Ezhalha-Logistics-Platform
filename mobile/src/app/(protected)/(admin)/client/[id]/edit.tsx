@@ -1,6 +1,13 @@
 // app/(protected)/(admin)/client/[id]/edit.tsx
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
@@ -8,6 +15,7 @@ import Toast from "react-native-toast-message";
 
 import { Text } from "@/components/ui/Text";
 import { Input } from "@/components/ui/Input";
+import { PhoneInput } from "@/components/ui/PhoneInput";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { KeyboardAwareScreen } from "@/components/ui/KeyboardAwareScreen";
@@ -24,6 +32,7 @@ import {
   useAdminClientCredit,
   useAdminClientDetails,
   useAdminClientProfileOptions,
+  useDeleteAdminClient,
   useSetAdminClientCreditLimit,
   useSetAdminClientDangerousGoods,
   useSetAdminClientSalesFeatures,
@@ -41,6 +50,7 @@ interface FormState {
   isActive: boolean;
   assignedAccountManagerUserId: string;
   name: string;
+  nameAr: string;
   phone: string;
   shippingContactName: string;
   shippingContactPhone: string;
@@ -48,6 +58,12 @@ interface FormState {
   shippingAddressLine1: string;
   shippingAddressLine2: string;
   shippingShortAddress: string;
+  shippingContactNameAr: string;
+  shippingContactPhoneAr: string;
+  shippingCityAr: string;
+  shippingAddressLine1Ar: string;
+  shippingAddressLine2Ar: string;
+  shippingShortAddressAr: string;
   preferredCurrency: "SAR" | "USD";
 }
 
@@ -61,6 +77,7 @@ function emptyForm(): FormState {
     isActive: true,
     assignedAccountManagerUserId: "unassigned",
     name: "",
+    nameAr: "",
     phone: "",
     shippingContactName: "",
     shippingContactPhone: "",
@@ -68,6 +85,12 @@ function emptyForm(): FormState {
     shippingAddressLine1: "",
     shippingAddressLine2: "",
     shippingShortAddress: "",
+    shippingContactNameAr: "",
+    shippingContactPhoneAr: "",
+    shippingCityAr: "",
+    shippingAddressLine1Ar: "",
+    shippingAddressLine2Ar: "",
+    shippingShortAddressAr: "",
     preferredCurrency: "SAR",
   };
 }
@@ -82,6 +105,7 @@ export default function AdminEditClientScreen() {
   const { hasPermission, isAccountManager } = useAdminAccess();
   const canReadAccountManagers = hasPermission("account-managers", "read");
   const canAssignAccountManagers = hasPermission("account-managers", "assign");
+  const canDeleteClients = hasPermission("clients", "delete");
 
   const { data: client, isLoading } = useAdminClientDetails(id);
   const { data: profileOptions } = useAdminClientProfileOptions();
@@ -99,8 +123,10 @@ export default function AdminEditClientScreen() {
       taxNumber: client.taxNumber ?? "",
       profile: client.profile ?? "",
       isActive: client.isActive,
-      assignedAccountManagerUserId: client.assignedAccountManager?.id ?? "unassigned",
+      assignedAccountManagerUserId:
+        client.assignedAccountManager?.id ?? "unassigned",
       name: client.name ?? "",
+      nameAr: client.nameAr ?? "",
       phone: client.phone ?? "",
       shippingContactName: client.shippingContactName ?? "",
       shippingContactPhone: client.shippingContactPhone ?? "",
@@ -108,6 +134,12 @@ export default function AdminEditClientScreen() {
       shippingAddressLine1: client.shippingAddressLine1 ?? "",
       shippingAddressLine2: client.shippingAddressLine2 ?? "",
       shippingShortAddress: client.shippingShortAddress ?? "",
+      shippingContactNameAr: client.shippingContactNameAr ?? "",
+      shippingContactPhoneAr: client.shippingContactPhoneAr ?? "",
+      shippingCityAr: client.shippingCityAr ?? "",
+      shippingAddressLine1Ar: client.shippingAddressLine1Ar ?? "",
+      shippingAddressLine2Ar: client.shippingAddressLine2Ar ?? "",
+      shippingShortAddressAr: client.shippingShortAddressAr ?? "",
       preferredCurrency: (client.preferredCurrency as "SAR" | "USD") ?? "SAR",
     });
   }, [client?.id]);
@@ -120,18 +152,26 @@ export default function AdminEditClientScreen() {
   const creditMutation = useSetAdminClientCreditLimit();
   const dgMutation = useSetAdminClientDangerousGoods();
   const salesFeaturesMutation = useSetAdminClientSalesFeatures();
+  const deleteMutation = useDeleteAdminClient();
 
   const profileChipOptions = useMemo(
-    () => (profileOptions ?? []).map((option) => ({ value: option.profile, label: option.displayName })),
+    () =>
+      (profileOptions ?? []).map((option) => ({
+        value: option.profile,
+        label: option.displayName,
+      })),
     [profileOptions],
   );
 
   const selectedManagerLabel =
     form.assignedAccountManagerUserId === "unassigned"
       ? t("adminClientsScreen.card.unassigned")
-      : accountManagers?.find((m) => m.id === form.assignedAccountManagerUserId)?.username ?? t("adminClientsScreen.card.unassigned");
+      : (accountManagers?.find(
+          (m) => m.id === form.assignedAccountManagerUserId,
+        )?.username ?? t("adminClientsScreen.card.unassigned"));
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((prev) => ({ ...prev, [key]: value }));
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const handleSave = async () => {
     try {
@@ -139,6 +179,7 @@ export default function AdminEditClientScreen() {
         id: id as string,
         data: {
           name: form.name,
+          nameAr: form.nameAr || undefined,
           phone: form.phone,
           companyName: form.companyName,
           companyNameAr: form.companyNameAr || undefined,
@@ -148,7 +189,9 @@ export default function AdminEditClientScreen() {
           isActive: isAccountManager ? undefined : form.isActive,
           preferredCurrency: form.preferredCurrency,
           assignedAccountManagerUserId:
-            canReadAccountManagers && canAssignAccountManagers && !isAccountManager
+            canReadAccountManagers &&
+            canAssignAccountManagers &&
+            !isAccountManager
               ? form.assignedAccountManagerUserId === "unassigned"
                 ? null
                 : form.assignedAccountManagerUserId
@@ -159,6 +202,12 @@ export default function AdminEditClientScreen() {
           shippingAddressLine1: form.shippingAddressLine1 || undefined,
           shippingAddressLine2: form.shippingAddressLine2 || undefined,
           shippingShortAddress: form.shippingShortAddress || undefined,
+          shippingContactNameAr: form.shippingContactNameAr || undefined,
+          shippingContactPhoneAr: form.shippingContactPhoneAr || undefined,
+          shippingCityAr: form.shippingCityAr || undefined,
+          shippingAddressLine1Ar: form.shippingAddressLine1Ar || undefined,
+          shippingAddressLine2Ar: form.shippingAddressLine2Ar || undefined,
+          shippingShortAddressAr: form.shippingShortAddressAr || undefined,
         },
       });
 
@@ -167,7 +216,9 @@ export default function AdminEditClientScreen() {
         text1: result.requiresApproval
           ? t("adminClientsScreen.edit.approvalRequestedTitle")
           : t("adminClientsScreen.edit.successTitle"),
-        text2: result.requiresApproval ? t("adminClientsScreen.edit.approvalRequestedMessage") : undefined,
+        text2: result.requiresApproval
+          ? t("adminClientsScreen.edit.approvalRequestedMessage")
+          : undefined,
       });
       router.back();
     } catch (error) {
@@ -183,8 +234,14 @@ export default function AdminEditClientScreen() {
     const value = Number(creditLimitInput);
     if (Number.isNaN(value) || value < 0) return;
     try {
-      await creditMutation.mutateAsync({ id: id as string, creditLimitSar: value });
-      Toast.show({ type: "success", text1: t("adminClientsScreen.edit.pricing.creditSavedTitle") });
+      await creditMutation.mutateAsync({
+        id: id as string,
+        creditLimitSar: value,
+      });
+      Toast.show({
+        type: "success",
+        text1: t("adminClientsScreen.edit.pricing.creditSavedTitle"),
+      });
     } catch (error) {
       Toast.show({
         type: "error",
@@ -192,6 +249,41 @@ export default function AdminEditClientScreen() {
         text2: error instanceof Error ? error.message : undefined,
       });
     }
+  };
+
+  const handleDeleteClient = () => {
+    Alert.alert(
+      t("adminClientsScreen.edit.account.deleteConfirm.title"),
+      t("adminClientsScreen.edit.account.deleteConfirm.message", {
+        name: client?.name ?? "",
+      }),
+      [
+        {
+          text: t("adminClientsScreen.edit.account.deleteConfirm.cancel"),
+          style: "cancel",
+        },
+        {
+          text: t("adminClientsScreen.edit.account.deleteConfirm.confirm"),
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteMutation.mutateAsync(id as string);
+              Toast.show({
+                type: "success",
+                text1: t("adminClientsScreen.edit.account.deleteSuccessTitle"),
+              });
+              router.replace("/(protected)/(admin)/client");
+            } catch (error) {
+              Toast.show({
+                type: "error",
+                text1: t("adminClientsScreen.edit.account.deleteErrorTitle"),
+                text2: error instanceof Error ? error.message : undefined,
+              });
+            }
+          },
+        },
+      ],
+    );
   };
 
   if (isLoading || !client) {
@@ -230,14 +322,30 @@ export default function AdminEditClientScreen() {
           </View>
         }
       >
-        <ScreenHeader title={t("adminClientsScreen.edit.title")} subtitle={`${client.accountNumber} · ${client.name}`} />
+        <ScreenHeader
+          title={t("adminClientsScreen.edit.title")}
+          subtitle={`${client.accountNumber} · ${client.name}`}
+        />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabsScrollView}
+          contentContainerStyle={styles.tabsRow}
+        >
           {tabs.map((tab) => {
             const active = tab.key === activeTab;
             return (
-              <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={[styles.tabChip, active && styles.tabChipActive]}>
-                <Text size="small" weight="bold" style={{ color: active ? Colors.white : Colors.text }}>
+              <Pressable
+                key={tab.key}
+                onPress={() => setActiveTab(tab.key)}
+                style={[styles.tabChip, active && styles.tabChipActive]}
+              >
+                <Text
+                  size="small"
+                  weight="bold"
+                  style={{ color: active ? Colors.white : Colors.text }}
+                >
                   {tab.label}
                 </Text>
               </Pressable>
@@ -247,28 +355,71 @@ export default function AdminEditClientScreen() {
 
         {activeTab === "account" && (
           <>
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.account.companyNameEn")}
             </Text>
-            <Input value={form.companyName} onChangeText={(v) => set("companyName", v)} placeholder={t("adminClientsScreen.edit.account.companyNameEn")} />
+            <Input
+              value={form.companyName}
+              onChangeText={(v) => set("companyName", v)}
+              placeholder={t("adminClientsScreen.edit.account.companyNameEn")}
+            />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.account.companyNameAr")}
             </Text>
-            <Input value={form.companyNameAr} onChangeText={(v) => set("companyNameAr", v)} placeholder={t("adminClientsScreen.edit.account.companyNameAr")} style={styles.rtlInput} />
+            <Input
+              value={form.companyNameAr}
+              onChangeText={(v) => set("companyNameAr", v)}
+              placeholder={t("adminClientsScreen.edit.account.companyNameAr")}
+              style={styles.rtlInput}
+            />
             <Text size="xs" dimRate="55%" style={styles.hint}>
               {t("adminClientsScreen.edit.account.arabicHint")}
             </Text>
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.account.crNumber")}
             </Text>
-            <Input value={form.crNumber} onChangeText={(v) => set("crNumber", v)} placeholder={t("adminClientsScreen.edit.account.crNumber")} keyboardType="number-pad" />
+            <Input
+              value={form.crNumber}
+              onChangeText={(v) => set("crNumber", v)}
+              placeholder={t("adminClientsScreen.edit.account.crNumber")}
+              keyboardType="number-pad"
+            />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.account.taxNumber")}
             </Text>
-            <Input value={form.taxNumber} onChangeText={(v) => set("taxNumber", v)} placeholder={t("adminClientsScreen.edit.account.taxNumber")} keyboardType="number-pad" />
+            <Input
+              value={form.taxNumber}
+              onChangeText={(v) => set("taxNumber", v)}
+              placeholder={t("adminClientsScreen.edit.account.taxNumber")}
+              keyboardType="number-pad"
+            />
 
             {profileChipOptions.length > 0 && (
               <ChipSelect
@@ -279,17 +430,32 @@ export default function AdminEditClientScreen() {
               />
             )}
 
-            {canReadAccountManagers && canAssignAccountManagers && !isAccountManager && (
-              <View style={styles.fieldWrapper}>
-                <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-                  {t("adminClientsScreen.edit.account.accountManager")}
-                </Text>
-                <Pressable style={styles.selectBox} onPress={() => setManagerPickerOpen(true)}>
-                  <Text size="small">{selectedManagerLabel}</Text>
-                  <Ionicons name="chevron-down" size={rs(18)} color={Colors.placeholder} />
-                </Pressable>
-              </View>
-            )}
+            {canReadAccountManagers &&
+              canAssignAccountManagers &&
+              !isAccountManager && (
+                <View style={styles.fieldWrapper}>
+                  <Text
+                    size="xs"
+                    weight="semibold"
+                    dimRate="55%"
+                    textTransform="uppercase"
+                    style={styles.fieldLabel}
+                  >
+                    {t("adminClientsScreen.edit.account.accountManager")}
+                  </Text>
+                  <Pressable
+                    style={styles.selectBox}
+                    onPress={() => setManagerPickerOpen(true)}
+                  >
+                    <Text size="small">{selectedManagerLabel}</Text>
+                    <Ionicons
+                      name="chevron-down"
+                      size={rs(18)}
+                      color={Colors.placeholder}
+                    />
+                  </Pressable>
+                </View>
+              )}
 
             {!isAccountManager && (
               <View style={styles.toggleCard}>
@@ -303,51 +469,272 @@ export default function AdminEditClientScreen() {
                 </Text>
               </View>
             )}
+
+            {canDeleteClients && !isAccountManager && (
+              <Pressable
+                style={styles.deleteButton}
+                onPress={handleDeleteClient}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? (
+                  <ActivityIndicator color={Colors.error} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="trash-outline"
+                      size={rs(18)}
+                      color={Colors.error}
+                    />
+                    <Text
+                      size="small"
+                      weight="bold"
+                      style={styles.deleteButtonText}
+                    >
+                      {t("adminClientsScreen.edit.account.deleteAccount")}
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            )}
           </>
         )}
 
         {activeTab === "contact" && (
           <>
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.contact.contactName")}
             </Text>
-            <Input value={form.name} onChangeText={(v) => set("name", v)} placeholder={t("adminClientsScreen.edit.contact.contactName")} />
+            <Input
+              value={form.name}
+              onChangeText={(v) => set("name", v)}
+              placeholder={t("adminClientsScreen.edit.contact.contactName")}
+            />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
+              {t("adminClientsScreen.edit.contact.contactNameAr")}
+            </Text>
+            <Input
+              value={form.nameAr}
+              onChangeText={(v) => set("nameAr", v)}
+              placeholder={t("adminClientsScreen.edit.contact.contactNameAr")}
+              style={styles.rtlInput}
+            />
+            <Text size="xs" dimRate="55%" style={styles.hint}>
+              {t("adminClientsScreen.edit.account.arabicHint")}
+            </Text>
+
+            <Text
+              size="xs"
+              weight="semibold"
+              dimRate="55%"
+              textTransform="uppercase"
+              style={styles.fieldLabel}
+            >
               {t("adminClientsScreen.edit.contact.phone")}
             </Text>
-            <Input value={form.phone} onChangeText={(v) => set("phone", v)} placeholder={t("adminClientsScreen.edit.contact.phone")} keyboardType="phone-pad" />
+            <PhoneInput
+              value={form.phone}
+              onChangeValue={(v) => set("phone", v)}
+            />
 
-            <SectionLabel style={styles.sectionSpacing}>{t("adminClientsScreen.edit.contact.shippingAddress")}</SectionLabel>
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.shippingContactName")}
-            </Text>
-            <Input value={form.shippingContactName} onChangeText={(v) => set("shippingContactName", v)} />
+            <SectionLabel style={styles.sectionSpacing}>
+              {t("adminClientsScreen.edit.contact.shippingAddress")}
+            </SectionLabel>
+            <View style={styles.shippingCard}>
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shippingContactName")}
+              </Text>
+              <Input
+                value={form.shippingContactName}
+                onChangeText={(v) => set("shippingContactName", v)}
+              />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.shippingContactPhone")}
-            </Text>
-            <Input value={form.shippingContactPhone} onChangeText={(v) => set("shippingContactPhone", v)} keyboardType="phone-pad" />
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shippingContactPhone")}
+              </Text>
+              <Input
+                value={form.shippingContactPhone}
+                onChangeText={(v) => set("shippingContactPhone", v)}
+                keyboardType="phone-pad"
+              />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.city")}
-            </Text>
-            <Input value={form.shippingCity} onChangeText={(v) => set("shippingCity", v)} />
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.city")}
+              </Text>
+              <Input
+                value={form.shippingCity}
+                onChangeText={(v) => set("shippingCity", v)}
+              />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.addressLine1")}
-            </Text>
-            <Input value={form.shippingAddressLine1} onChangeText={(v) => set("shippingAddressLine1", v)} />
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.addressLine1")}
+              </Text>
+              <Input
+                value={form.shippingAddressLine1}
+                onChangeText={(v) => set("shippingAddressLine1", v)}
+              />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.addressLine2")}
-            </Text>
-            <Input value={form.shippingAddressLine2} onChangeText={(v) => set("shippingAddressLine2", v)} />
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.addressLine2")}
+              </Text>
+              <Input
+                value={form.shippingAddressLine2}
+                onChangeText={(v) => set("shippingAddressLine2", v)}
+              />
 
-            <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
-              {t("adminClientsScreen.edit.contact.shortAddress")}
-            </Text>
-            <Input value={form.shippingShortAddress} onChangeText={(v) => set("shippingShortAddress", v)} autoCapitalize="characters" />
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shortAddress")}
+              </Text>
+              <Input
+                value={form.shippingShortAddress}
+                onChangeText={(v) => set("shippingShortAddress", v)}
+                autoCapitalize="characters"
+              />
+            </View>
+
+            <SectionLabel style={styles.sectionSpacing}>
+              {t("adminClientsScreen.edit.contact.shippingAddressAr")}
+            </SectionLabel>
+            <View style={styles.shippingCardAr}>
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shippingContactNameAr")}
+              </Text>
+              <Input
+                value={form.shippingContactNameAr}
+                onChangeText={(v) => set("shippingContactNameAr", v)}
+                style={styles.rtlInput}
+              />
+
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shippingContactPhoneAr")}
+              </Text>
+              <Input
+                value={form.shippingContactPhoneAr}
+                onChangeText={(v) => set("shippingContactPhoneAr", v)}
+                keyboardType="phone-pad"
+                style={styles.rtlInput}
+              />
+
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.cityAr")}
+              </Text>
+              <Input
+                value={form.shippingCityAr}
+                onChangeText={(v) => set("shippingCityAr", v)}
+                style={styles.rtlInput}
+              />
+
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.addressLine1Ar")}
+              </Text>
+              <Input
+                value={form.shippingAddressLine1Ar}
+                onChangeText={(v) => set("shippingAddressLine1Ar", v)}
+                style={styles.rtlInput}
+              />
+
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.addressLine2Ar")}
+              </Text>
+              <Input
+                value={form.shippingAddressLine2Ar}
+                onChangeText={(v) => set("shippingAddressLine2Ar", v)}
+                style={styles.rtlInput}
+              />
+
+              <Text
+                size="xs"
+                weight="semibold"
+                dimRate="55%"
+                textTransform="uppercase"
+                style={styles.fieldLabel}
+              >
+                {t("adminClientsScreen.edit.contact.shortAddressAr")}
+              </Text>
+              <Input
+                value={form.shippingShortAddressAr}
+                onChangeText={(v) => set("shippingShortAddressAr", v)}
+                style={styles.rtlInput}
+              />
+            </View>
           </>
         )}
 
@@ -363,24 +750,51 @@ export default function AdminEditClientScreen() {
               ]}
             />
 
-            <SectionLabel style={styles.sectionSpacing}>{t("adminClientsScreen.edit.pricing.credit")}</SectionLabel>
+            <SectionLabel style={styles.sectionSpacing}>
+              {t("adminClientsScreen.edit.pricing.credit")}
+            </SectionLabel>
             <InfoCard>
-              <InfoRow label={t("adminClientsScreen.edit.pricing.creditLimit")} value={`SAR ${formatMoney(credit?.limit)}`} />
-              <InfoRow label={t("adminClientsScreen.edit.pricing.outstanding")} value={`SAR ${formatMoney(credit?.outstanding)}`} />
-              <InfoRow label={t("adminClientsScreen.edit.pricing.available")} value={`SAR ${formatMoney(credit?.available)}`} valueColor="#1E9E4B" />
+              <InfoRow
+                label={t("adminClientsScreen.edit.pricing.creditLimit")}
+                value={`SAR ${formatMoney(credit?.limit)}`}
+              />
+              <InfoRow
+                label={t("adminClientsScreen.edit.pricing.outstanding")}
+                value={`SAR ${formatMoney(credit?.outstanding)}`}
+              />
+              <InfoRow
+                label={t("adminClientsScreen.edit.pricing.available")}
+                value={`SAR ${formatMoney(credit?.available)}`}
+                valueColor="#1E9E4B"
+              />
             </InfoCard>
 
             {!isAccountManager && (
               <>
-                <Text size="xs" weight="semibold" dimRate="55%" textTransform="uppercase" style={styles.fieldLabel}>
+                <Text
+                  size="xs"
+                  weight="semibold"
+                  dimRate="55%"
+                  textTransform="uppercase"
+                  style={styles.fieldLabel}
+                >
                   {t("adminClientsScreen.edit.pricing.setCreditLimit")}
                 </Text>
                 <View style={styles.inlineRow}>
                   <View style={styles.inlineInput}>
-                    <Input value={creditLimitInput} onChangeText={setCreditLimitInput} keyboardType="decimal-pad" placeholder="0.00" />
+                    <Input
+                      value={creditLimitInput}
+                      onChangeText={setCreditLimitInput}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                    />
                   </View>
                   <Button
-                    title={creditMutation.isPending ? t("adminClientsScreen.edit.pricing.saving") : t("adminClientsScreen.edit.pricing.saveLimit")}
+                    title={
+                      creditMutation.isPending
+                        ? t("adminClientsScreen.edit.pricing.saving")
+                        : t("adminClientsScreen.edit.pricing.saveLimit")
+                    }
                     onPress={handleSaveCreditLimit}
                     loading={creditMutation.isPending}
                     disabled={creditMutation.isPending}
@@ -397,7 +811,9 @@ export default function AdminEditClientScreen() {
             <PermissionSwitchRow
               label={t("adminClientsScreen.edit.features.salesChannels")}
               value={!!client.salesFeaturesEnabled}
-              onValueChange={(v) => salesFeaturesMutation.mutate({ id: id as string, enabled: v })}
+              onValueChange={(v) =>
+                salesFeaturesMutation.mutate({ id: id as string, enabled: v })
+              }
               disabled={isAccountManager || salesFeaturesMutation.isPending}
             />
             <Text size="xs" dimRate="55%" style={styles.hint}>
@@ -409,7 +825,9 @@ export default function AdminEditClientScreen() {
             <PermissionSwitchRow
               label={t("adminClientsScreen.edit.features.dangerousGoods")}
               value={!!client.dangerousGoodsEnabled}
-              onValueChange={(v) => dgMutation.mutate({ id: id as string, enabled: v })}
+              onValueChange={(v) =>
+                dgMutation.mutate({ id: id as string, enabled: v })
+              }
               disabled={isAccountManager || dgMutation.isPending}
             />
             <Text size="xs" dimRate="55%" style={styles.hint}>
@@ -432,13 +850,27 @@ export default function AdminEditClientScreen() {
                 setManagerPickerOpen(false);
               }}
             >
-              <Text size="small" weight={form.assignedAccountManagerUserId === "unassigned" ? "semibold" : "regular"}>
+              <Text
+                size="small"
+                weight={
+                  form.assignedAccountManagerUserId === "unassigned"
+                    ? "semibold"
+                    : "regular"
+                }
+              >
                 {t("adminClientsScreen.card.unassigned")}
               </Text>
-              {form.assignedAccountManagerUserId === "unassigned" && <Ionicons name="checkmark" size={rs(18)} color={Colors.primary} />}
+              {form.assignedAccountManagerUserId === "unassigned" && (
+                <Ionicons
+                  name="checkmark"
+                  size={rs(18)}
+                  color={Colors.primary}
+                />
+              )}
             </Pressable>
             {(accountManagers ?? []).map((manager) => {
-              const isSelected = form.assignedAccountManagerUserId === manager.id;
+              const isSelected =
+                form.assignedAccountManagerUserId === manager.id;
               return (
                 <Pressable
                   key={manager.id}
@@ -448,10 +880,19 @@ export default function AdminEditClientScreen() {
                     setManagerPickerOpen(false);
                   }}
                 >
-                  <Text size="small" weight={isSelected ? "semibold" : "regular"}>
+                  <Text
+                    size="small"
+                    weight={isSelected ? "semibold" : "regular"}
+                  >
                     {manager.username}
                   </Text>
-                  {isSelected && <Ionicons name="checkmark" size={rs(18)} color={Colors.primary} />}
+                  {isSelected && (
+                    <Ionicons
+                      name="checkmark"
+                      size={rs(18)}
+                      color={Colors.primary}
+                    />
+                  )}
                 </Pressable>
               );
             })}
@@ -484,7 +925,13 @@ const styles = StyleSheet.create({
     paddingTop: rvs(8),
     backgroundColor: Colors.background,
   },
+  tabsScrollView: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   tabsRow: {
+    flexGrow: 0,
+    alignItems: "flex-start",
     gap: rs(8),
     marginBottom: rvs(16),
   },
@@ -536,8 +983,39 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
     marginVertical: rvs(4),
   },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: rs(8),
+    marginTop: rvs(14),
+    paddingVertical: rvs(14),
+    borderRadius: rs(14),
+    borderWidth: 1.5,
+    borderColor: Colors.error,
+    backgroundColor: Colors.white,
+  },
+  deleteButtonText: {
+    color: Colors.error,
+  },
   sectionSpacing: {
     marginTop: rvs(6),
+  },
+  shippingCard: {
+    backgroundColor: Colors.border,
+    borderRadius: rs(14),
+    padding: rs(14),
+    marginBottom: rvs(4),
+    borderStartWidth: rs(3),
+    borderStartColor: Colors.primary,
+  },
+  shippingCardAr: {
+    backgroundColor: Colors.border,
+    borderRadius: rs(14),
+    padding: rs(14),
+    marginBottom: rvs(4),
+    borderStartWidth: rs(3),
+    borderStartColor: Colors.primary,
   },
   inlineRow: {
     flexDirection: "row",

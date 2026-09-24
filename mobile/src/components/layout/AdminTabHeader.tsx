@@ -2,8 +2,9 @@
 //
 // The rich header shared by admin tab screens that want it (Home, More):
 // hamburger into the AdminDrawer, title + signed-in admin's name/role, and
-// the search/notifications shortcuts.
-import { Pressable, StyleSheet, View } from "react-native";
+// the search/notifications shortcuts. Pass `onBackPress` instead of
+// `onMenuPress` to swap the hamburger for a back chevron on pushed screens.
+import { I18nManager, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
@@ -15,21 +16,27 @@ import { useNotifications } from "@/lib/hooks/useNotifications";
 
 interface AdminTabHeaderProps {
   title: string;
-  onMenuPress: () => void;
+  onMenuPress?: () => void;
+  onBackPress?: () => void;
 }
 
-export function AdminTabHeader({ title, onMenuPress }: AdminTabHeaderProps) {
+export function AdminTabHeader({ title, onMenuPress, onBackPress }: AdminTabHeaderProps) {
   const { displayName, roleLabel } = useAdminIdentity();
   const { unreadCount } = useNotifications();
+  const isBack = !!onBackPress;
 
   return (
     <View style={styles.header}>
       <Pressable
         style={[styles.iconButton, { marginStart: 0 }]}
-        onPress={onMenuPress}
+        onPress={isBack ? onBackPress : onMenuPress}
         hitSlop={rs(8)}
       >
-        <Ionicons name="menu" size={rs(20)} color={Colors.text} />
+        <Ionicons
+          name={isBack ? (I18nManager.isRTL ? "chevron-forward" : "chevron-back") : "menu"}
+          size={rs(20)}
+          color={Colors.text}
+        />
       </Pressable>
 
       <View style={styles.headerText}>

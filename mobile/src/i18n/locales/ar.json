@@ -1704,15 +1704,27 @@
     "create": {
       "title": "إنشاء عميل جديد",
       "subtitle": "ينشئ الحساب ويرسل بيانات الدخول عبر البريد. يتخطّى مراجعة الطلب.",
+      "fullName": "الاسم الكامل *",
+      "fullNamePlaceholder": "محمد الأحمد",
+      "email": "البريد الإلكتروني *",
+      "emailPlaceholder": "john@example.com",
+      "phone": "رقم الهاتف *",
+      "country": "الدولة *",
+      "countryPlaceholder": "اختر الدولة",
+      "countrySearchPlaceholder": "ابحث عن دولة...",
       "companyName": "اسم الشركة",
       "companyNamePlaceholder": "اسم الشركة",
       "primaryContact": "جهة الاتصال الرئيسية",
-      "fullNamePlaceholder": "الاسم الكامل",
       "workEmailPlaceholder": "البريد الإلكتروني للعمل",
-      "phone": "رقم الهاتف",
       "pricingProfile": "فئة التسعير",
       "accountManager": "مدير الحساب",
       "assignLater": "تعيين لاحقًا",
+      "documents": "المستندات",
+      "documentsHint": "PDF, DOC, DOCX, JPG, PNG",
+      "documentsAttachedCount_one": "تم إرفاق ملف واحد",
+      "documentsAttachedCount_other": "تم إرفاق {{count}} ملفات",
+      "uploadDocuments": "رفع مستندات",
+      "uploading": "جارٍ الرفع...",
       "submit": "إنشاء العميل",
       "submitting": "جارٍ الإنشاء...",
       "successTitle": "تم إنشاء العميل",
@@ -1724,7 +1736,8 @@
         "companyNameRequired": "اسم الشركة مطلوب",
         "contactNameRequired": "اسم جهة الاتصال مطلوب",
         "emailInvalid": "أدخل بريدًا إلكترونيًا صحيحًا",
-        "phoneRequired": "رقم الهاتف مطلوب"
+        "phoneRequired": "رقم الهاتف مطلوب",
+        "countryRequired": "الدولة مطلوبة"
       }
     },
     "detail": {
@@ -1732,6 +1745,7 @@
         "overview": "نظرة عامة",
         "shipments": "الشحنات",
         "invoices": "الفواتير",
+        "credit": "الائتمان",
         "documents": "المستندات"
       },
       "stats": {
@@ -1762,13 +1776,33 @@
         "local_other": "محلي {{count}}"
       },
       "noShipments": "لا توجد شحنات بعد.",
+      "carriers": {
+        "title": "الناقلون المستخدَمون",
+        "carrier": "الناقل",
+        "shipments": "الشحنات",
+        "billed": "المفوتَر",
+        "notAssigned": "غير محدد"
+      },
       "whereTheyShip": "وجهات الشحن",
+      "topOrigins": "أهم بلدان المنشأ",
+      "topDestinations": "أهم الوجهات",
       "shipmentsCount_one": "{{count}} شحنة",
       "shipmentsCount_other": "{{count}} شحنات",
+      "fulfillment": {
+        "express": "سريع",
+        "local": "محلي",
+        "doorToDoor": "من الباب إلى الباب"
+      },
+      "invoicesBreakdown": {
+        "paid": "مدفوعة",
+        "open": "مفتوحة",
+        "overdue": "متأخرة"
+      },
+      "creditNotEnabled": "الائتمان غير مفعّل لهذا العميل.",
       "totalShipments": "إجمالي الشحنات",
-      "webOnlyShipments": "تصفح الشحنات الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب الإجمالي حاليًا.",
+      "webOnlyShipments": "تصفح الشحنات الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب إحصاءات الشحنات فقط.",
       "totalInvoices": "إجمالي الفواتير",
-      "webOnlyInvoices": "تصفح الفواتير الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب الإجمالي حاليًا."
+      "webOnlyInvoices": "تصفح الفواتير الفردية لا يزال متاحًا عبر الويب فقط — يعرض هذا التبويب إحصاءات الفواتير فقط."
     },
     "edit": {
       "title": "تعديل العميل",
@@ -1794,10 +1828,20 @@
         "pricingProfile": "فئة التسعير",
         "accountManager": "مدير الحساب",
         "accountActive": "الحساب نشط",
-        "accountActiveHint": "لا يمكن للعملاء غير النشطين تسجيل الدخول أو الحجز"
+        "accountActiveHint": "لا يمكن للعملاء غير النشطين تسجيل الدخول أو الحجز",
+        "deleteAccount": "حذف الحساب",
+        "deleteConfirm": {
+          "title": "حذف العميل",
+          "message": "هل أنت متأكد من حذف {{name}}؟ لا يمكن التراجع عن هذا الإجراء.",
+          "cancel": "إلغاء",
+          "confirm": "حذف"
+        },
+        "deleteSuccessTitle": "تم حذف العميل",
+        "deleteErrorTitle": "تعذّر حذف العميل"
       },
       "contact": {
         "contactName": "اسم جهة الاتصال",
+        "contactNameAr": "اسم جهة الاتصال (عربي)",
         "phone": "رقم الهاتف",
         "shippingAddress": "عنوان الشحن الافتراضي",
         "shippingContactName": "اسم جهة اتصال الشحن",
@@ -1805,7 +1849,14 @@
         "city": "المدينة",
         "addressLine1": "العنوان - السطر الأول",
         "addressLine2": "العنوان - السطر الثاني",
-        "shortAddress": "العنوان المختصر (السعودية)"
+        "shortAddress": "العنوان المختصر (السعودية)",
+        "shippingAddressAr": "عنوان الشحن الافتراضي (عربي)",
+        "shippingContactNameAr": "اسم جهة اتصال الشحن (عربي)",
+        "shippingContactPhoneAr": "هاتف جهة اتصال الشحن (عربي)",
+        "cityAr": "المدينة (عربي)",
+        "addressLine1Ar": "العنوان - السطر الأول (عربي)",
+        "addressLine2Ar": "العنوان - السطر الثاني (عربي)",
+        "shortAddressAr": "العنوان المختصر (عربي)"
       },
       "pricing": {
         "billingCurrency": "عملة الفوترة",

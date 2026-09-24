@@ -174,6 +174,12 @@ export interface UpdateClientInput {
   shippingAddressLine1?: string;
   shippingAddressLine2?: string;
   shippingShortAddress?: string;
+  shippingContactNameAr?: string;
+  shippingContactPhoneAr?: string;
+  shippingCityAr?: string;
+  shippingAddressLine1Ar?: string;
+  shippingAddressLine2Ar?: string;
+  shippingShortAddressAr?: string;
 }
 
 function buildListPath(params: Omit<AdminClientListParams, "page" | "pageSize">): string {

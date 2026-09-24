@@ -1699,15 +1699,27 @@
     "create": {
       "title": "Create New Client",
       "subtitle": "Creates the account and emails credentials. Skips the application review.",
+      "fullName": "Full Name *",
+      "fullNamePlaceholder": "John Doe",
+      "email": "Email *",
+      "emailPlaceholder": "john@example.com",
+      "phone": "Phone *",
+      "country": "Country *",
+      "countryPlaceholder": "Select country",
+      "countrySearchPlaceholder": "Search countries...",
       "companyName": "Company Name",
-      "companyNamePlaceholder": "Company name",
+      "companyNamePlaceholder": "ACME Corp",
       "primaryContact": "Primary Contact",
-      "fullNamePlaceholder": "Full name",
       "workEmailPlaceholder": "Work email",
-      "phone": "Phone",
       "pricingProfile": "Pricing Profile",
       "accountManager": "Account Manager",
       "assignLater": "Assign later",
+      "documents": "Documents",
+      "documentsHint": "PDF, DOC, DOCX, JPG, PNG",
+      "documentsAttachedCount_one": "{{count}} file attached",
+      "documentsAttachedCount_other": "{{count}} files attached",
+      "uploadDocuments": "Upload documents",
+      "uploading": "Uploading...",
       "submit": "Create client",
       "submitting": "Creating...",
       "successTitle": "Client created",
@@ -1719,7 +1731,8 @@
         "companyNameRequired": "Company name is required",
         "contactNameRequired": "Contact name is required",
         "emailInvalid": "Enter a valid email address",
-        "phoneRequired": "Phone number is required"
+        "phoneRequired": "Phone number is required",
+        "countryRequired": "Country is required"
       }
     },
     "detail": {
@@ -1727,6 +1740,7 @@
         "overview": "Overview",
         "shipments": "Shipments",
         "invoices": "Invoices",
+        "credit": "Credit",
         "documents": "Documents"
       },
       "stats": {
@@ -1757,13 +1771,33 @@
         "local_other": "Local {{count}}"
       },
       "noShipments": "No shipments yet.",
+      "carriers": {
+        "title": "Carriers used",
+        "carrier": "Carrier",
+        "shipments": "Shipments",
+        "billed": "Billed",
+        "notAssigned": "Not assigned"
+      },
       "whereTheyShip": "Where they ship",
+      "topOrigins": "Top origins",
+      "topDestinations": "Top destinations",
       "shipmentsCount_one": "{{count}} shipment",
       "shipmentsCount_other": "{{count}} shipments",
+      "fulfillment": {
+        "express": "Express",
+        "local": "Local",
+        "doorToDoor": "Door to Door"
+      },
+      "invoicesBreakdown": {
+        "paid": "Paid",
+        "open": "Open",
+        "overdue": "Overdue"
+      },
+      "creditNotEnabled": "Credit is not enabled for this client.",
       "totalShipments": "Total shipments",
-      "webOnlyShipments": "Browsing individual shipments is still web-only — this tab currently shows the total.",
+      "webOnlyShipments": "Browsing individual shipments is still web-only — this tab shows shipment stats only.",
       "totalInvoices": "Total invoices",
-      "webOnlyInvoices": "Browsing individual invoices is still web-only — this tab currently shows the total."
+      "webOnlyInvoices": "Browsing individual invoices is still web-only — this tab shows invoice stats only."
     },
     "edit": {
       "title": "Edit Client",
@@ -1789,10 +1823,20 @@
         "pricingProfile": "Pricing Profile",
         "accountManager": "Account Manager",
         "accountActive": "Account active",
-        "accountActiveHint": "Inactive clients cannot sign in or book"
+        "accountActiveHint": "Inactive clients cannot sign in or book",
+        "deleteAccount": "Delete Account",
+        "deleteConfirm": {
+          "title": "Delete Client",
+          "message": "Are you sure you want to delete {{name}}? This action cannot be undone.",
+          "cancel": "Cancel",
+          "confirm": "Delete"
+        },
+        "deleteSuccessTitle": "Client deleted",
+        "deleteErrorTitle": "Couldn't delete client"
       },
       "contact": {
         "contactName": "Contact Name",
+        "contactNameAr": "Contact Name (Arabic)",
         "phone": "Phone",
         "shippingAddress": "Default Shipping Address",
         "shippingContactName": "Shipping contact name",
@@ -1800,7 +1844,14 @@
         "city": "City",
         "addressLine1": "Address line 1",
         "addressLine2": "Address line 2",
-        "shortAddress": "Short address (KSA)"
+        "shortAddress": "Short address (KSA)",
+        "shippingAddressAr": "Default Shipping Address (Arabic)",
+        "shippingContactNameAr": "Shipping contact name (Arabic)",
+        "shippingContactPhoneAr": "Shipping contact phone (Arabic)",
+        "cityAr": "City (Arabic)",
+        "addressLine1Ar": "Address line 1 (Arabic)",
+        "addressLine2Ar": "Address line 2 (Arabic)",
+        "shortAddressAr": "Short address (Arabic)"
       },
       "pricing": {
         "billingCurrency": "Billing Currency",
