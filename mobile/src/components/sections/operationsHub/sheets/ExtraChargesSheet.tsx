@@ -23,7 +23,8 @@ function parseAmount(value: string): number {
 
 /**
  * Door-to-door (ddp_manual) only — the charge routes 400 for every other fulfilment type.
- * Extra weight re-bills the measured quantity at the lane rate (server-priced, previewed live);
+ * A lane priced by weight or volume (`ddpChargeConfig`) offers all three types; any other
+ * door-to-door shipment can still take an extra cost, which the server allows. Extra weight re-bills the measured quantity at the lane rate (server-priced, previewed live);
  * extra cost raises a custom DDP adjustment invoice. An optional carrier cost is recorded as a
  * shipment expense so the margin side is captured too.
  */
@@ -32,7 +33,9 @@ export function ExtraChargesSheet({ shipment, onDone }: { shipment: OperationShi
   const config = shipment.ddpChargeConfig;
   const unit = config?.billingUnit ?? "KG";
 
-  const [type, setType] = useState<ChargeType>("weight");
+  // Extra weight needs a KG/CBM lane rate to re-bill against; without one only a cost can be added.
+  const weightAvailable = !!config;
+  const [type, setType] = useState<ChargeType>(weightAvailable ? "weight" : "cost");
   const [measured, setMeasured] = useState(config?.currentMeasuredQuantity ? String(Number(config.currentMeasuredQuantity)) : "");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -109,7 +112,7 @@ export function ExtraChargesSheet({ shipment, onDone }: { shipment: OperationShi
     }
   };
 
-  if (!config) {
+  if (shipment.shipmentKind !== "DDP") {
     return (
       <SheetScaffold title={t("adminOperations.chargesSheet.title")}>
         <Text size="small" dimRate="60%" style={styles.unavailable}>
@@ -127,17 +130,21 @@ export function ExtraChargesSheet({ shipment, onDone }: { shipment: OperationShi
       onSubmit={handleSubmit}
       submitting={mutation.isPending}
     >
-      <FieldLabel>{t("adminOperations.chargesSheet.type")}</FieldLabel>
-      <OptionGrid
-        columns={3}
-        options={[
-          { value: "weight" as const, label: t("adminOperations.chargesSheet.types.weight") },
-          { value: "cost" as const, label: t("adminOperations.chargesSheet.types.cost") },
-          { value: "combined" as const, label: t("adminOperations.chargesSheet.types.combined") },
-        ]}
-        value={type}
-        onChange={setType}
-      />
+      {weightAvailable && (
+        <>
+          <FieldLabel>{t("adminOperations.chargesSheet.type")}</FieldLabel>
+          <OptionGrid
+            columns={3}
+            options={[
+              { value: "weight" as const, label: t("adminOperations.chargesSheet.types.weight") },
+              { value: "cost" as const, label: t("adminOperations.chargesSheet.types.cost") },
+              { value: "combined" as const, label: t("adminOperations.chargesSheet.types.combined") },
+            ]}
+            value={type}
+            onChange={setType}
+          />
+        </>
+      )}
 
       <FieldLabel>{t("adminOperations.chargesSheet.description")}</FieldLabel>
       <Input
@@ -146,7 +153,7 @@ export function ExtraChargesSheet({ shipment, onDone }: { shipment: OperationShi
         onChangeText={setDescription}
       />
 
-      {withWeight && (
+      {withWeight && config && (
         <>
           <FieldLabel>{t("adminOperations.chargesSheet.measured", { unit })}</FieldLabel>
           <Input value={measured} onChangeText={setMeasured} keyboardType="decimal-pad" placeholder="0.00" />

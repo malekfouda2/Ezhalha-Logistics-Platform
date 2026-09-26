@@ -30,7 +30,7 @@ const TEMPLATES: { key: TemplateKey; icon: keyof typeof Feather.glyphMap }[] = [
 
 export function ContactClientSheet({
   shipment,
-  initialTemplate = "delay",
+  initialTemplate = "update",
   onDone,
 }: {
   shipment: OperationShipmentDetail;
@@ -59,7 +59,7 @@ export function ContactClientSheet({
   const handleSend = async () => {
     try {
       const result = await mutation.mutateAsync(undefined);
-      // WhatsApp isn't wired server-side yet — the message is still logged on the shipment and
+      // WhatsApp and SMS aren't wired server-side yet — the message is still logged on the shipment and
       // the client gets it in-app, so say that rather than claiming it was delivered.
       Toast.show({
         type: result.deliveryStatus === "sent" ? "success" : "info",
@@ -93,7 +93,9 @@ export function ContactClientSheet({
         options={[
           { value: "email" as const, label: t("adminOperations.contactSheet.channels.email") },
           { value: "whatsapp" as const, label: t("adminOperations.contactSheet.channels.whatsapp") },
+          { value: "sms" as const, label: t("adminOperations.contactSheet.channels.sms") },
         ]}
+        columns={3}
         value={channel}
         onChange={setChannel}
       />

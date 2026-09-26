@@ -54,6 +54,12 @@ export function hoursSince(date: string | null | undefined): number {
   return Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 3_600_000));
 }
 
+/** Whole hours since `date`, rounded — the web hub's "Hours since update" figure. */
+export function hoursStale(date: string | null | undefined): number {
+  if (!date) return 0;
+  return Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 3_600_000));
+}
+
 export function ageLabel(date: string | null | undefined, t: Translate): string {
   const hours = hoursSince(date);
   if (hours < 1) return t("adminOperations.time.justNow");

@@ -16,7 +16,7 @@ import { formatDateTime } from "@/utils/invoiceFormat";
 import { MONO_FONT, Money, Pill, SectionTitle } from "@/components/sections/operationsHub/OpsPrimitives";
 import {
   DDP_STAGES,
-  hoursSince,
+  hoursStale,
   humanize,
   issueLabel,
   kindLabel,
@@ -202,7 +202,7 @@ export default function AdminOperationShipmentScreen() {
           />
           <InfoRow
             label={t("adminOperations.detail.hoursSinceUpdate")}
-            value={t("adminOperations.time.hours", { count: hoursSince(shipment.updatedAt) })}
+            value={t("adminOperations.time.hours", { count: hoursStale(shipment.updatedAt) })}
           />
           <InfoRow
             label={t("adminOperations.detail.carrierAwb")}
@@ -330,7 +330,7 @@ export default function AdminOperationShipmentScreen() {
         )}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, rvs(12)) }]}>
+      <View style={[styles.footer, { paddingBottom: rvs(12)}]}>
         <Button title={t("adminOperations.actions.title")} onPress={() => setSheet("actions")} />
       </View>
 

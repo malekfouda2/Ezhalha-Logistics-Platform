@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { useTranslation } from "react-i18next";
 
 import { Text } from "@/components/ui/Text";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { RefreshableScreen } from "@/components/ui/RefreshableScreen";
 import { AdminTabHeader } from "@/components/layout/AdminTabHeader";
 import { AdminNoAccess } from "@/components/layout/AdminNoAccess";
@@ -44,6 +45,10 @@ const BADGE_COLORS = {
   gray: { background: "#E8ECF1", text: "#475569" },
 };
 
+// The first stat card sits on the pale-orange active fill; the default gray sweep reads as a
+// hole in it, so that card shimmers in its own tint.
+const ACTIVE_SHIMMER_COLORS = ["#FCDCCB", "#FFEDE3", "#FCDCCB"];
+
 export function openQueue(queue: OperationQueue) {
   router.push(`/(protected)/(admin)/operations-hub/queue/${queue}`);
 }
@@ -55,7 +60,7 @@ export function OperationsHubView({ mode }: { mode: "tab" | "stack" }) {
   const { roleLabel } = useAdminIdentity();
   const canRead = hasPermission("operations", "read");
   const title = t("adminOperations.hub.title");
-  const { data: summary } = useOperationsSummary();
+  const { data: summary, isLoading: summaryLoading } = useOperationsSummary();
 
   const headerNav =
     mode === "tab" ? { onMenuPress: () => setDrawerVisible(true) } : { onBackPress: () => router.back() };
@@ -100,9 +105,19 @@ export function OperationsHubView({ mode }: { mode: "tab" | "stack" }) {
               onPress={() => openQueue(stat.queue)}
               style={({ pressed }) => [styles.statCard, index === 0 && styles.statCardActive, pressed && styles.pressed]}
             >
-              <Text size="xxl" weight="bold" style={index === 0 ? { color: Colors.primary } : undefined}>
-                {stat.value ?? "—"}
-              </Text>
+              {summaryLoading ? (
+                <Skeleton
+                  width={rs(40)}
+                  height={rvs(24)}
+                  borderRadius={rs(6)}
+                  style={styles.statValueSkeleton}
+                  shimmerColors={index === 0 ? ACTIVE_SHIMMER_COLORS : undefined}
+                />
+              ) : (
+                <Text size="xxl" weight="bold" style={index === 0 ? { color: Colors.primary } : undefined}>
+                  {stat.value ?? "—"}
+                </Text>
+              )}
               <Text size="xs" weight="semibold" dimRate="60%" textTransform="uppercase" style={styles.statLabel}>
                 {stat.label}
               </Text>
@@ -194,6 +209,9 @@ const styles = StyleSheet.create({
   statCardActive: {
     backgroundColor: "#FFF3EC",
     borderColor: Colors.primary,
+  },
+  statValueSkeleton: {
+    marginVertical: rvs(4),
   },
   statLabel: {
     marginTop: rvs(4),

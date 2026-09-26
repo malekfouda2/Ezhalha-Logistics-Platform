@@ -192,7 +192,7 @@ export interface DangerousGoodsQuoteResult {
   };
 }
 
-export type ClientMessageChannel = "email" | "whatsapp";
+export type ClientMessageChannel = "email" | "whatsapp" | "sms";
 
 type WithDetail<T = object> = T & { detail: OperationShipmentDetail };
 

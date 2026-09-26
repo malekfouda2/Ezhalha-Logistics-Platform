@@ -1,6 +1,12 @@
 // app/(protected)/(admin)/applications/[id].tsx
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,7 +35,13 @@ import { parseApplicationDocumentReference } from "@shared/application-documents
 
 const DANGER = "#B91C1C";
 
-function SectionTitle({ children, right }: { children: string; right?: string }) {
+function SectionTitle({
+  children,
+  right,
+}: {
+  children: string;
+  right?: string;
+}) {
   return (
     <View style={styles.sectionTitleRow}>
       <Text size="medium" weight="bold">
@@ -53,7 +65,12 @@ export default function AdminApplicationDetailScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data: application, isLoading, isError, isFetchedAfterMount } = useAdminApplication(id);
+  const {
+    data: application,
+    isLoading,
+    isError,
+    isFetchedAfterMount,
+  } = useAdminApplication(id);
   const { hasPermission } = useAdminAccess();
   const canApprove = hasPermission("applications", "approve");
   const canReject = hasPermission("applications", "reject");
@@ -72,7 +89,12 @@ export default function AdminApplicationDetailScreen() {
             <Text size="medium" weight="bold">
               {t("adminApplicationsScreen.detail.notFound")}
             </Text>
-            <Button title={t("adminApplicationsScreen.detail.back")} variant="outline" onPress={() => router.back()} style={styles.notFoundButton} />
+            <Button
+              title={t("adminApplicationsScreen.detail.back")}
+              variant="outline"
+              onPress={() => router.back()}
+              style={styles.notFoundButton}
+            />
           </>
         )}
       </View>
@@ -82,9 +104,14 @@ export default function AdminApplicationDetailScreen() {
   const name = applicationDisplayName(application);
   const isCompany = application.accountType === "company";
   const isPending = application.status === "pending";
-  const statusLabel = t(`adminApplicationsScreen.status.${application.status}`, { defaultValue: application.status });
+  const statusLabel = t(
+    `adminApplicationsScreen.status.${application.status}`,
+    { defaultValue: application.status },
+  );
   const statusColors = applicationStatusColors(application.status);
-  const documents = (application.documents ?? []).map((raw) => parseApplicationDocumentReference(raw));
+  const documents = (application.documents ?? []).map((raw) =>
+    parseApplicationDocumentReference(raw),
+  );
 
   const nationalAddress = [
     application.nationalAddressBuilding,
@@ -103,7 +130,11 @@ export default function AdminApplicationDetailScreen() {
     application.shippingCountryCode,
   ].filter(Boolean);
 
-  const handleOpenDocument = async (path: string, fileName: string, index: number) => {
+  const handleOpenDocument = async (
+    path: string,
+    fileName: string,
+    index: number,
+  ) => {
     setOpeningIndex(index);
     try {
       const uri = await downloadFile(path, fileName);
@@ -122,12 +153,16 @@ export default function AdminApplicationDetailScreen() {
   };
 
   // Only once the server has confirmed the status — the first paint comes from the cached list row.
-  const showActions = isFetchedAfterMount && isPending && (canApprove || canReject);
+  const showActions =
+    isFetchedAfterMount && isPending && (canApprove || canReject);
 
   return (
     <View style={styles.screen}>
       <ScrollView
-        contentContainerStyle={[styles.content, showActions && { paddingBottom: rvs(110) + insets.bottom }]}
+        contentContainerStyle={[
+          styles.content,
+          showActions && { paddingBottom: rvs(110) + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <AdminTabHeader
@@ -136,36 +171,66 @@ export default function AdminApplicationDetailScreen() {
           onBackPress={() => router.back()}
         />
 
-        <SectionTitle>{t("adminApplicationsScreen.detail.applicant")}</SectionTitle>
+        <SectionTitle>
+          {t("adminApplicationsScreen.detail.applicant")}
+        </SectionTitle>
         <InfoCard>
           <InfoRow
             label={t("adminApplicationsScreen.detail.accountType")}
-            value={t(`adminApplicationsScreen.accountTypeTitle.${application.accountType}`, {
-              defaultValue: application.accountType,
-            })}
+            value={t(
+              `adminApplicationsScreen.accountTypeTitle.${application.accountType}`,
+              {
+                defaultValue: application.accountType,
+              },
+            )}
           />
           {isCompany && application.companyName ? (
-            <InfoRow label={t("adminApplicationsScreen.detail.companyName")} value={application.companyName} />
+            <InfoRow
+              label={t("adminApplicationsScreen.detail.companyName")}
+              value={application.companyName}
+            />
           ) : null}
           {application.crNumber ? (
-            <InfoRow label={t("adminApplicationsScreen.detail.crNumber")} value={application.crNumber} />
+            <InfoRow
+              label={t("adminApplicationsScreen.detail.crNumber")}
+              value={application.crNumber}
+            />
           ) : null}
           {application.taxNumber ? (
-            <InfoRow label={t("adminApplicationsScreen.detail.vatNumber")} value={application.taxNumber} />
+            <InfoRow
+              label={t("adminApplicationsScreen.detail.vatNumber")}
+              value={application.taxNumber}
+            />
           ) : null}
         </InfoCard>
 
-        <SectionTitle>{t("adminApplicationsScreen.detail.contact")}</SectionTitle>
+        <SectionTitle>
+          {t("adminApplicationsScreen.detail.contact")}
+        </SectionTitle>
         <InfoCard>
-          <InfoRow label={t("adminApplicationsScreen.detail.fullName")} value={application.name} />
-          <InfoRow label={t("adminApplicationsScreen.detail.email")} value={application.email} />
-          <InfoRow label={t("adminApplicationsScreen.detail.phone")} value={application.phone} />
-          <InfoRow label={t("adminApplicationsScreen.detail.location")} value={applicationLocation(application) || "—"} />
+          <InfoRow
+            label={t("adminApplicationsScreen.detail.fullName")}
+            value={application.name}
+          />
+          <InfoRow
+            label={t("adminApplicationsScreen.detail.email")}
+            value={application.email}
+          />
+          <InfoRow
+            label={t("adminApplicationsScreen.detail.phone")}
+            value={application.phone}
+          />
+          <InfoRow
+            label={t("adminApplicationsScreen.detail.location")}
+            value={applicationLocation(application) || "—"}
+          />
         </InfoCard>
 
         {nationalAddress.length > 0 && (
           <>
-            <SectionTitle>{t("adminApplicationsScreen.detail.nationalAddress")}</SectionTitle>
+            <SectionTitle>
+              {t("adminApplicationsScreen.detail.nationalAddress")}
+            </SectionTitle>
             <View style={styles.textCard}>
               <Text size="small" weight="semibold" style={styles.addressText}>
                 {nationalAddress.join(", ")}
@@ -176,13 +241,21 @@ export default function AdminApplicationDetailScreen() {
 
         {shippingAddress.length > 0 && (
           <>
-            <SectionTitle>{t("adminApplicationsScreen.detail.shippingAddress")}</SectionTitle>
+            <SectionTitle>
+              {t("adminApplicationsScreen.detail.shippingAddress")}
+            </SectionTitle>
             <InfoCard>
               {application.shippingContactName ? (
-                <InfoRow label={t("adminApplicationsScreen.detail.fullName")} value={application.shippingContactName} />
+                <InfoRow
+                  label={t("adminApplicationsScreen.detail.fullName")}
+                  value={application.shippingContactName}
+                />
               ) : null}
               {application.shippingContactPhone ? (
-                <InfoRow label={t("adminApplicationsScreen.detail.phone")} value={application.shippingContactPhone} />
+                <InfoRow
+                  label={t("adminApplicationsScreen.detail.phone")}
+                  value={application.shippingContactPhone}
+                />
               ) : null}
               <View style={styles.addressRow}>
                 <Text size="small" weight="semibold" style={styles.addressText}>
@@ -196,7 +269,9 @@ export default function AdminApplicationDetailScreen() {
         <SectionTitle
           right={
             documents.length > 0
-              ? t("adminApplicationsScreen.detail.documentsUploaded", { count: documents.length })
+              ? t("adminApplicationsScreen.detail.documentsUploaded", {
+                  count: documents.length,
+                })
               : undefined
           }
         >
@@ -218,14 +293,24 @@ export default function AdminApplicationDetailScreen() {
                   <Pressable
                     style={styles.documentRow}
                     disabled={openingIndex !== null}
-                    onPress={() => handleOpenDocument(document.path, fileName, index)}
+                    onPress={() =>
+                      handleOpenDocument(document.path, fileName, index)
+                    }
                   >
                     <View style={styles.documentIcon}>
-                      <Ionicons name="document-text-outline" size={rs(20)} color={Colors.primary} />
+                      <Ionicons
+                        name="document-text-outline"
+                        size={rs(20)}
+                        color={Colors.primary}
+                      />
                     </View>
                     <View style={styles.documentInfo}>
                       <Text size="small" weight="bold" numberOfLines={1}>
-                        {document.label || document.name || t("adminClientsScreen.documents.fallbackName", { index: index + 1 })}
+                        {document.label ||
+                          document.name ||
+                          t("adminClientsScreen.documents.fallbackName", {
+                            index: index + 1,
+                          })}
                       </Text>
                       <Text size="xs" dimRate="55%" numberOfLines={1}>
                         {fileExtension(document.name) ?? document.name}
@@ -234,7 +319,11 @@ export default function AdminApplicationDetailScreen() {
                     {openingIndex === index ? (
                       <ActivityIndicator color={Colors.primary} />
                     ) : (
-                      <Ionicons name="eye-outline" size={rs(20)} color={Colors.text} />
+                      <Ionicons
+                        name="eye-outline"
+                        size={rs(20)}
+                        color={Colors.text}
+                      />
                     )}
                   </Pressable>
                 </View>
@@ -245,13 +334,24 @@ export default function AdminApplicationDetailScreen() {
 
         {!isPending && (
           <>
-            <SectionTitle>{t("adminApplicationsScreen.detail.review")}</SectionTitle>
+            <SectionTitle>
+              {t("adminApplicationsScreen.detail.review")}
+            </SectionTitle>
             <InfoCard>
               <InfoRow
                 label={t("adminApplicationsScreen.detail.status")}
                 valueNode={
-                  <View style={[styles.badge, { backgroundColor: statusColors.background }]}>
-                    <Text size="xs" weight="bold" style={{ color: statusColors.text }}>
+                  <View
+                    style={[
+                      styles.badge,
+                      { backgroundColor: statusColors.background },
+                    ]}
+                  >
+                    <Text
+                      size="xs"
+                      weight="bold"
+                      style={{ color: statusColors.text }}
+                    >
                       {statusLabel}
                     </Text>
                   </View>
@@ -262,7 +362,11 @@ export default function AdminApplicationDetailScreen() {
                   <Text size="xs" dimRate="60%">
                     {t("adminApplicationsScreen.detail.reviewNotes")}
                   </Text>
-                  <Text size="small" weight="semibold" style={styles.addressText}>
+                  <Text
+                    size="small"
+                    weight="semibold"
+                    style={styles.addressText}
+                  >
                     {application.reviewNotes}
                   </Text>
                 </View>
@@ -273,7 +377,7 @@ export default function AdminApplicationDetailScreen() {
       </ScrollView>
 
       {showActions && (
-        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, rvs(12)) }]}>
+        <View style={[styles.actionBar, { paddingBottom: rvs(12) }]}>
           {canReject && (
             <Button
               title={

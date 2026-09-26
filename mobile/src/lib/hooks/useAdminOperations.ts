@@ -34,6 +34,9 @@ export function useOperationsQueue(params: { queue?: OperationQueue; search?: st
     queryKey: adminOperationsKeys.list(params),
     queryFn: () => adminOperationsService.list(params),
     enabled,
+    // The app-wide `staleTime: Infinity` would keep the first answer forever; ops data moves
+    // under us (carriers, schedulers, the web hub), so re-read on every visit like the web does.
+    refetchOnMount: "always",
   });
 }
 
@@ -58,6 +61,10 @@ export function useOperationShipment(id: string | undefined) {
     queryKey: adminOperationsKeys.detail(id ?? ""),
     queryFn: () => adminOperationsService.detail(id!),
     enabled,
+    // Same freshness as the web hub's open shipment panel: re-read on open and poll every minute,
+    // so "Hours since update" and the stage never show a snapshot from an earlier visit.
+    refetchOnMount: "always",
+    refetchInterval: 60_000,
   });
 }
 

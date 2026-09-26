@@ -2672,7 +2672,8 @@
       "scan": "Scan waybill",
       "addNote": "Add note",
       "assign": "Assign to…",
-      "cancel": "Cancel shipment"
+      "cancel": "Cancel shipment",
+      "markResolved": "Mark issue resolved"
     },
     "cancel": {
       "title": "Cancel shipment?",
@@ -2733,7 +2734,8 @@
       "channel": "Channel",
       "channels": {
         "email": "Email",
-        "whatsapp": "WhatsApp"
+        "whatsapp": "WhatsApp",
+        "sms": "SMS"
       },
       "message": "Message",
       "templates": {

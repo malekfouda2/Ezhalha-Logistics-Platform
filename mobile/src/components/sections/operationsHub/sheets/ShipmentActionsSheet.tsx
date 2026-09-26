@@ -128,7 +128,7 @@ export function ShipmentActionsSheet({
     },
     hasPermission("operations", "special-handling") &&
       (specialOpen
-        ? { key: "resolveSpecial", icon: "flag", label: t("adminOperations.actions.resolveSpecial"), onPress: () => onChange("resolveSpecial") }
+        ? { key: "resolveSpecial", icon: "check-circle", label: t("adminOperations.actions.markResolved"), onPress: () => onChange("resolveSpecial") }
         : { key: "escalate", icon: "flag", label: t("adminOperations.actions.escalate"), onPress: () => onChange("escalate") }),
     {
       key: "scan",
