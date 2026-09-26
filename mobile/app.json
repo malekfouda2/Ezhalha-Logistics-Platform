@@ -14,7 +14,9 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "co.ezhalha.app",
-      "associatedDomains": ["applinks:app.ezhalha.co"],
+      "associatedDomains": [
+        "applinks:app.ezhalha.co"
+      ],
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true
       }
@@ -37,7 +39,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
             {
               "scheme": "https",
@@ -67,8 +72,6 @@
           ]
         }
       ],
-      "expo-secure-store",
-      "expo-router",
       "expo-sharing",
       [
         "expo-splash-screen",
@@ -78,7 +81,16 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ezhalha to use the camera to scan shipment waybills and barcodes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      "./plugins/withMlkitDependencies"
     ]
   }
 }

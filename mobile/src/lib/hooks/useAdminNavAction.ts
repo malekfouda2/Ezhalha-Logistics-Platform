@@ -10,6 +10,7 @@ const ROUTES: Record<string, string> = {
   clients: "/(protected)/(admin)/client",
   applications: "/(protected)/(admin)/applications",
   "account-managers": "/(protected)/(admin)/client/account-managers",
+  operations: "/(protected)/(admin)/operations-hub",
 };
 
 /**

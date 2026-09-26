@@ -2477,5 +2477,468 @@
       "successMessage": "{{name}} has been notified.",
       "errorTitle": "Couldn't reject application"
     }
+  },
+  "adminOperations": {
+    "hub": {
+      "title": "Operations Hub",
+      "subtitle": "{{open}} open · {{attention}} need attention",
+      "queues": "Queues"
+    },
+    "queues": {
+      "express": {
+        "title": "Express Shipments",
+        "short": "Express",
+        "subtitle": "Received, in transit, customs, last mile"
+      },
+      "ddp": {
+        "title": "Door to Door",
+        "short": "Door to Door",
+        "subtitle": "Planning, warehouse, billing, shipping"
+      },
+      "local": {
+        "title": "Local Shipments",
+        "short": "Local",
+        "subtitle": "SMSA, NAQEL, J&T, RedBox, Zajil"
+      },
+      "attention": {
+        "title": "Needs Attention",
+        "subtitle": "On hold, returned, carrier error"
+      },
+      "special": {
+        "title": "Special Handling",
+        "subtitle": "Escalated by ops"
+      },
+      "dangerous_goods": {
+        "title": "Dangerous Goods",
+        "subtitle": "Review, carrier quote, booking"
+      },
+      "delivered": {
+        "title": "Delivered",
+        "subtitle": "Completed shipments"
+      },
+      "returned": {
+        "title": "Returned",
+        "subtitle": "Coming back to origin"
+      }
+    },
+    "queue": {
+      "subtitle_one": "{{count}} in the queue",
+      "subtitle_other": "{{count}} in the queue",
+      "searchPlaceholder": "EZH number, AWB, sender or recipient",
+      "emptyTitle": "Nothing here",
+      "emptyDescription": "No shipments match this queue and filter right now."
+    },
+    "sort": {
+      "title": "Sort queue",
+      "queue": "Queue order (oldest first)",
+      "newest": "Newest first",
+      "updated": "Recently updated",
+      "stale": "Longest without update",
+      "amount_desc": "Highest amount",
+      "amount_asc": "Lowest amount"
+    },
+    "tabs": {
+      "all": "All",
+      "received": "Received",
+      "transit": "In Transit",
+      "customs": "Customs & Exceptions",
+      "lastmile": "Last Mile",
+      "dg": {
+        "review": "In Review",
+        "carrier": "With Carrier",
+        "quoted": "Awaiting Payment",
+        "booking": "To Book",
+        "live": "Booked & Moving",
+        "hold": "Declaration Hold"
+      }
+    },
+    "stages": {
+      "planning": "Planning",
+      "warehouse": "Warehouse",
+      "billing": "Billing",
+      "shipping": "Shipping",
+      "delivery": "Delivery"
+    },
+    "priority": {
+      "urgent": "Urgent",
+      "high": "High",
+      "normal": "Normal"
+    },
+    "kind": {
+      "EXPRESS": "Express",
+      "DDP": "Door to Door",
+      "LOCAL": "Local",
+      "DANGEROUS_GOODS": "Dangerous Goods"
+    },
+    "status": {
+      "awaiting_review": "Awaiting review",
+      "booked": "Booked",
+      "created": "Created",
+      "processing": "Processing",
+      "picked_up": "Picked up",
+      "in_transit": "In Transit",
+      "customs_clearance": "Customs",
+      "out_for_delivery": "Out for delivery",
+      "on_hold": "On Hold",
+      "returned": "Returned",
+      "delivered": "Delivered",
+      "carrier_error": "Carrier Error",
+      "cancelled": "Cancelled",
+      "payment_pending": "Payment pending",
+      "awaiting_payment": "Awaiting payment",
+      "supplier_pickup": "Supplier pickup",
+      "dg_review": "DG review",
+      "dg_awaiting_carrier": "Awaiting carrier quote",
+      "dg_booking": "To book"
+    },
+    "issues": {
+      "carrier_error": "Carrier error",
+      "no_recent_update": "No update >36h",
+      "no_operations_agent": "No operator assigned",
+      "no_update": "No update >24h",
+      "qc_exception": "QC issue",
+      "stage_delay": "Stage delay",
+      "repeat_update": "Repeated status",
+      "tracking_refresh_failed": "Tracking failed",
+      "carrier_pickup_failed": "Pickup failed",
+      "carrier_booking_failed": "Booking failed",
+      "carrier_tracking_failed": "Tracking failed",
+      "carrier_label_failed": "Label failed",
+      "carrier_cancellation_failed": "Cancellation failed",
+      "carrier_rating_failed": "Rate lookup failed",
+      "dangerous_goods_review_required": "DG review",
+      "express_status_stale": "Status stale",
+      "carrier_waybill_to_unwind": "Waybill to unwind"
+    },
+    "time": {
+      "justNow": "just now",
+      "hours_one": "{{count}} h",
+      "hours_other": "{{count}} h",
+      "days_one": "{{count}} d",
+      "days_other": "{{count}} d"
+    },
+    "card": {
+      "notBooked": "Not yet booked",
+      "unpaid": "Unpaid",
+      "sinceUpdate": "{{age}} since update"
+    },
+    "notes": {
+      "ddp": "Door to Door is quoted on fixed lane pricing, not a carrier API. Every stage here is moved by an ops user, so a stuck shipment stays stuck until someone touches it.",
+      "attention": "Carrier Error means the carrier refused after the client paid. These are the only shipments where a client is out of pocket with nothing moving.",
+      "dangerousGoods": "Dangerous goods are quoted by ops once the carrier confirms acceptance. A quote expires if the client doesn't pay before its validity ends."
+    },
+    "detail": {
+      "notFound": "Shipment not found",
+      "back": "Go back",
+      "currentStage": "Current stage",
+      "stage": "Stage",
+      "hoursSinceUpdate": "Hours since update",
+      "carrierAwb": "Carrier / AWB",
+      "service": "Service",
+      "payment": "Payment",
+      "assignedTo": "Assigned to",
+      "unassigned": "Unassigned",
+      "eta": "Estimated delivery",
+      "packages": "Packages",
+      "pieces": "Pieces",
+      "actualWeight": "Actual weight",
+      "dimensionalWeight": "Dimensional weight",
+      "chargeableWeight": "Billable weight",
+      "money": "Money",
+      "clientTotal": "Client total",
+      "carrierCost": "Carrier cost",
+      "extraCharges": "Extra charges",
+      "margin": "Margin",
+      "tasks": "Checklist",
+      "notes": "Notes",
+      "timeline": "Timeline",
+      "special": "Special handling · {{priority}}",
+      "visibility": {
+        "INTERNAL": "Internal",
+        "CLIENT": "Client"
+      }
+    },
+    "actions": {
+      "title": "Actions",
+      "updateStatus": "Update Status",
+      "quoteDg": "Quote dangerous goods",
+      "extraCharges": "Add Extra Charges",
+      "receivedCheck": "Received check",
+      "contactCarrier": "Contact carrier",
+      "contactClient": "Contact client",
+      "resolveAttention": "Resolve attention",
+      "escalate": "Escalate to Special Handling",
+      "resolveSpecial": "Resolve special handling",
+      "scan": "Scan waybill",
+      "addNote": "Add note",
+      "assign": "Assign to…",
+      "cancel": "Cancel shipment"
+    },
+    "cancel": {
+      "title": "Cancel shipment?",
+      "message": "{{tracking}} will be cancelled with the carrier and a refund request raised for the client. This can't be undone.",
+      "keep": "Keep",
+      "confirm": "Cancel shipment",
+      "success": "Shipment cancelled",
+      "error": "Couldn't cancel shipment"
+    },
+    "statusSheet": {
+      "title": "Update Status",
+      "subtitle": "Changes what the client sees, and emails them if the template is on.",
+      "newStatus": "New status",
+      "note": "Internal note (optional)",
+      "notePlaceholder": "Not shown to the client",
+      "emailClient": "Email the client",
+      "emailClientHint": "Sends Operations Shipment Update",
+      "submit": "Update status",
+      "success": "Status updated",
+      "error": "Couldn't update status"
+    },
+    "chargesSheet": {
+      "title": "Add Extra Charges",
+      "subtitle": "Raises an extra invoice on the client and records the cost side.",
+      "unavailable": "Extra charges can only be added to door-to-door shipments priced by weight or volume.",
+      "type": "Type",
+      "types": {
+        "weight": "Extra weight",
+        "cost": "Extra cost",
+        "combined": "Combined"
+      },
+      "description": "Charge description",
+      "descriptionPlaceholder": "e.g. Reweighed at origin — 4.6 kg over",
+      "measured": "New measured quantity ({{unit}})",
+      "measuredHint": "Currently {{current}} {{unit}} at {{rate}} SAR per unit",
+      "clientSees": "Client sees",
+      "amount": "Amount (SAR)",
+      "carrierCost": "Carrier cost (optional)",
+      "costAmount": "Cost amount (SAR)",
+      "carrierCostDefault": "Carrier extra charge",
+      "weightCharge": "Extra weight charge",
+      "customCharge": "Extra cost charge",
+      "margin": "Margin on this charge",
+      "clientPays": "Client charged",
+      "taxNote": "Amounts before VAT — the invoice applies tax.",
+      "submit": "Add charges",
+      "success": "Charges added",
+      "error": "Couldn't add charges",
+      "errors": {
+        "quantity": "Enter the new measured quantity",
+        "description": "Describe the charge (3+ characters)",
+        "amount": "Enter the amount the client pays"
+      }
+    },
+    "contactSheet": {
+      "title": "Contact client",
+      "subtitle": "Choose a channel and a message. Every send is logged on the shipment.",
+      "channel": "Channel",
+      "channels": {
+        "email": "Email",
+        "whatsapp": "WhatsApp"
+      },
+      "message": "Message",
+      "templates": {
+        "payment": {
+          "title": "Payment request",
+          "subtitle": "Asks for the unpaid balance"
+        },
+        "delay": {
+          "title": "Delay notification",
+          "subtitle": "Apologises and explains"
+        },
+        "customs": {
+          "title": "Customs required action",
+          "subtitle": "Customs follow-up"
+        },
+        "delivery": {
+          "title": "Out for delivery",
+          "subtitle": "Delivery heads-up"
+        },
+        "update": {
+          "title": "General update",
+          "subtitle": "Quick status note"
+        },
+        "custom": {
+          "title": "Custom message",
+          "subtitle": "Write your own"
+        }
+      },
+      "messages": {
+        "payment": "Hello {{name}}, shipment {{tracking}} is ready for payment. Please review the invoice and complete payment so we can move to the next operational step.",
+        "update": "Hello {{name}}, here is a quick update on your shipment {{tracking}}. Our operations team is following it closely and will keep you posted.",
+        "delay": "Hello {{name}}, we are sorry for the delay on shipment {{tracking}}. Our team is actively following up and will update you as soon as we have the next milestone.",
+        "customs": "Hello {{name}}, shipment {{tracking}} currently requires customs-related follow-up. We will notify you right away if any action is needed from your side.",
+        "delivery": "Hello {{name}}, shipment {{tracking}} is moving toward delivery. Please keep your phone available for the delivery team."
+      },
+      "messagePlaceholder": "Write the message",
+      "send": "Send",
+      "sent": "Message sent",
+      "logged": "Message logged",
+      "error": "Couldn't send message"
+    },
+    "escalateSheet": {
+      "title": "Escalate to Special Handling",
+      "subtitle": "Moves the shipment into the Special Handling queue.",
+      "priority": "Priority",
+      "reason": "Reason",
+      "reasonPlaceholder": "What needs special handling?",
+      "submit": "Escalate",
+      "success": "Escalated",
+      "error": "Couldn't escalate"
+    },
+    "textSheet": {
+      "note": {
+        "title": "Add note",
+        "subtitle": "Saved on the shipment timeline.",
+        "visibility": "Visible to",
+        "internal": "Internal",
+        "client": "Client",
+        "label": "Note",
+        "placeholder": "Write a note",
+        "submit": "Save note",
+        "success": "Note saved",
+        "error": "Couldn't save note"
+      },
+      "resolveAttention": {
+        "title": "Resolve attention",
+        "subtitle": "Clears every open flag on this shipment.",
+        "label": "Resolution note (optional)",
+        "placeholder": "What was done?",
+        "submit": "Resolve",
+        "success": "Attention resolved",
+        "error": "Couldn't resolve"
+      },
+      "resolveSpecial": {
+        "title": "Resolve special handling",
+        "subtitle": "Takes the shipment out of Special Handling.",
+        "label": "Resolution note (optional)",
+        "placeholder": "What was done?",
+        "submit": "Resolve",
+        "success": "Special handling resolved",
+        "error": "Couldn't resolve"
+      }
+    },
+    "assignSheet": {
+      "title": "Assign to…",
+      "subtitle": "Pick one or more operations agents.",
+      "empty": "No operations agents can receive assignments.",
+      "submit": "Assign",
+      "success": "Assignment updated",
+      "error": "Couldn't assign"
+    },
+    "carrierSheet": {
+      "title": "Contact {{carrier}}",
+      "none": "No carrier contact details on file.",
+      "phone": "Phone",
+      "whatsapp": "WhatsApp",
+      "email": "Email"
+    },
+    "dgSheet": {
+      "title": "Quote this shipment",
+      "subtitle": "Margin and VAT are applied by the server from the pricing rules.",
+      "carrier": "Carrier",
+      "carrierCost": "Carrier cost (SAR)",
+      "validFor": "Quote valid for",
+      "validity": {
+        "24": "24 hours",
+        "48": "48 hours",
+        "72": "72 hours",
+        "168": "7 days"
+      },
+      "note": "Note (optional)",
+      "notePlaceholder": "Shown with the quote",
+      "pricingHint": "The client price is calculated after you send the quote.",
+      "submit": "Send quote",
+      "done": "Done",
+      "success": "Quote sent",
+      "error": "Couldn't send quote",
+      "carrierCostLabel": "Carrier cost",
+      "margin": "Margin",
+      "vat": "VAT",
+      "clientTotal": "Client pays"
+    },
+    "received": {
+      "title": "Received check",
+      "documents": "Documents check",
+      "documentsOptions": {
+        "complete": "Complete",
+        "missing": "Missing",
+        "correction_needed": "Needs fix"
+      },
+      "packaging": "Packaging",
+      "packagingOptions": {
+        "sealed_good": "Sealed / good",
+        "repacked": "Repacked",
+        "damaged": "Damaged"
+      },
+      "damage": "Damage check",
+      "damageOptions": {
+        "clear": "Clear",
+        "minor": "Minor",
+        "major": "Major"
+      },
+      "quantity": "Received quantity",
+      "pieces": "pcs",
+      "piecesPlaceholder": "Pieces",
+      "quantityOptions": {
+        "matched": "Matched",
+        "mismatch": "Mismatch"
+      },
+      "photos": "Photos",
+      "photosAttached_one": "{{count}} attached",
+      "photosAttached_other": "{{count}} attached",
+      "photosHint": "Long-press a photo to remove it.",
+      "note": "Internal note",
+      "notePlaceholder": "e.g. Two cartons scuffed in transit, contents intact.",
+      "save": "Save check",
+      "success": "Received check saved",
+      "flagged": "A QC issue was raised on this shipment",
+      "error": "Couldn't save check",
+      "uploadError": "Photo upload failed",
+      "errors": {
+        "pieces": "Enter the pieces received",
+        "checks": "Complete every check before saving"
+      }
+    },
+    "scan": {
+      "title": "Scan waybill",
+      "subtitle": "Point at the carrier barcode or the EZH label",
+      "placeholder": "AWB or EZH…",
+      "notFound": "No shipment with this number",
+      "noMatch": "No match",
+      "found": "Found",
+      "open": "Open shipment",
+      "permission": "Camera access is needed to scan waybills.",
+      "allowCamera": "Allow camera",
+      "openSettings": "Open settings",
+      "enterManually": "Enter code manually",
+      "scanAgain": "Scan again"
+    },
+    "filters": {
+      "any": "Any",
+      "clear": "Clear",
+      "keys": {
+        "method": "Method",
+        "origin": "Origin",
+        "payment": "Payment",
+        "carrier": "Carrier",
+        "type": "Type",
+        "stale": "Stale"
+      },
+      "payment": {
+        "paid": "Paid",
+        "unpaid": "Unpaid"
+      },
+      "type": {
+        "import": "Import",
+        "export": "Export"
+      },
+      "methods": {
+        "door_to_door": "Door to Door",
+        "dangerous_goods": "Dangerous goods",
+        "express_export": "Express Export",
+        "express_import": "Express Import"
+      },
+      "staleHours": "{{hours}}+ hours"
+    }
   }
 }

@@ -2493,5 +2493,468 @@
       "successMessage": "تم إشعار {{name}}.",
       "errorTitle": "تعذّر رفض الطلب"
     }
+  },
+  "adminOperations": {
+    "hub": {
+      "title": "مركز العمليات",
+      "subtitle": "{{open}} مفتوحة · {{attention}} تحتاج متابعة",
+      "queues": "قوائم العمل"
+    },
+    "queues": {
+      "express": {
+        "title": "الشحنات السريعة",
+        "short": "سريع",
+        "subtitle": "مستلمة، قيد النقل، الجمارك، التوصيل"
+      },
+      "ddp": {
+        "title": "من الباب إلى الباب",
+        "short": "باب لباب",
+        "subtitle": "التخطيط، المستودع، الفوترة، الشحن"
+      },
+      "local": {
+        "title": "الشحنات المحلية",
+        "short": "محلي",
+        "subtitle": "سمسا، ناقل، J&T، ريدبوكس، زاجل"
+      },
+      "attention": {
+        "title": "تحتاج متابعة",
+        "subtitle": "معلقة، مرتجعة، خطأ الناقل"
+      },
+      "special": {
+        "title": "معالجة خاصة",
+        "subtitle": "مصعّدة من العمليات"
+      },
+      "dangerous_goods": {
+        "title": "البضائع الخطرة",
+        "subtitle": "مراجعة، عرض سعر الناقل، الحجز"
+      },
+      "delivered": {
+        "title": "تم التسليم",
+        "subtitle": "شحنات مكتملة"
+      },
+      "returned": {
+        "title": "مرتجعة",
+        "subtitle": "عائدة إلى المصدر"
+      }
+    },
+    "queue": {
+      "subtitle_one": "{{count}} في القائمة",
+      "subtitle_other": "{{count}} في القائمة",
+      "searchPlaceholder": "رقم EZH أو بوليصة الشحن أو المرسل أو المستلم",
+      "emptyTitle": "لا يوجد شيء هنا",
+      "emptyDescription": "لا توجد شحنات تطابق هذه القائمة والتصفية حالياً."
+    },
+    "sort": {
+      "title": "ترتيب القائمة",
+      "queue": "ترتيب القائمة (الأقدم أولاً)",
+      "newest": "الأحدث أولاً",
+      "updated": "آخر تحديث",
+      "stale": "الأطول دون تحديث",
+      "amount_desc": "الأعلى مبلغاً",
+      "amount_asc": "الأقل مبلغاً"
+    },
+    "tabs": {
+      "all": "الكل",
+      "received": "مستلمة",
+      "transit": "قيد النقل",
+      "customs": "الجمارك والاستثناءات",
+      "lastmile": "التوصيل النهائي",
+      "dg": {
+        "review": "قيد المراجعة",
+        "carrier": "لدى الناقل",
+        "quoted": "بانتظار الدفع",
+        "booking": "للحجز",
+        "live": "محجوزة وقيد النقل",
+        "hold": "تعليق الإقرار"
+      }
+    },
+    "stages": {
+      "planning": "التخطيط",
+      "warehouse": "المستودع",
+      "billing": "الفوترة",
+      "shipping": "الشحن",
+      "delivery": "التسليم"
+    },
+    "priority": {
+      "urgent": "عاجل",
+      "high": "مرتفع",
+      "normal": "عادي"
+    },
+    "kind": {
+      "EXPRESS": "سريع",
+      "DDP": "باب لباب",
+      "LOCAL": "محلي",
+      "DANGEROUS_GOODS": "بضائع خطرة"
+    },
+    "status": {
+      "awaiting_review": "بانتظار المراجعة",
+      "booked": "محجوزة",
+      "created": "منشأة",
+      "processing": "قيد المعالجة",
+      "picked_up": "تم الاستلام",
+      "in_transit": "قيد النقل",
+      "customs_clearance": "الجمارك",
+      "out_for_delivery": "خرجت للتوصيل",
+      "on_hold": "معلقة",
+      "returned": "مرتجعة",
+      "delivered": "تم التسليم",
+      "carrier_error": "خطأ الناقل",
+      "cancelled": "ملغاة",
+      "payment_pending": "بانتظار الدفع",
+      "awaiting_payment": "بانتظار الدفع",
+      "supplier_pickup": "استلام من المورد",
+      "dg_review": "مراجعة البضائع الخطرة",
+      "dg_awaiting_carrier": "بانتظار تسعير الناقل",
+      "dg_booking": "للحجز"
+    },
+    "issues": {
+      "carrier_error": "خطأ الناقل",
+      "no_recent_update": "لا تحديث منذ ٣٦ ساعة",
+      "no_operations_agent": "لا يوجد موظف مسؤول",
+      "no_update": "لا تحديث منذ ٢٤ ساعة",
+      "qc_exception": "مشكلة فحص الجودة",
+      "stage_delay": "تأخر المرحلة",
+      "repeat_update": "حالة مكررة",
+      "tracking_refresh_failed": "فشل التتبع",
+      "carrier_pickup_failed": "فشل الاستلام",
+      "carrier_booking_failed": "فشل الحجز",
+      "carrier_tracking_failed": "فشل التتبع",
+      "carrier_label_failed": "فشل الملصق",
+      "carrier_cancellation_failed": "فشل الإلغاء",
+      "carrier_rating_failed": "فشل التسعير",
+      "dangerous_goods_review_required": "مراجعة بضائع خطرة",
+      "express_status_stale": "حالة متوقفة",
+      "carrier_waybill_to_unwind": "بوليصة للإلغاء"
+    },
+    "time": {
+      "justNow": "الآن",
+      "hours_one": "{{count}} س",
+      "hours_other": "{{count}} س",
+      "days_one": "{{count}} ي",
+      "days_other": "{{count}} ي"
+    },
+    "card": {
+      "notBooked": "لم تُحجز بعد",
+      "unpaid": "غير مدفوعة",
+      "sinceUpdate": "{{age}} منذ آخر تحديث"
+    },
+    "notes": {
+      "ddp": "تُسعّر خدمة الباب إلى الباب وفق أسعار المسارات الثابتة وليس عبر واجهة الناقل. كل مرحلة يحرّكها موظف عمليات، لذا تبقى الشحنة المتوقفة متوقفة حتى يتابعها أحد.",
+      "attention": "خطأ الناقل يعني أن الناقل رفض الشحنة بعد دفع العميل. هذه الشحنات الوحيدة التي دفع فيها العميل دون أن يتحرك شيء.",
+      "dangerousGoods": "تُسعّر البضائع الخطرة من العمليات بعد تأكيد الناقل القبول. ينتهي العرض إذا لم يدفع العميل قبل انتهاء صلاحيته."
+    },
+    "detail": {
+      "notFound": "الشحنة غير موجودة",
+      "back": "رجوع",
+      "currentStage": "المرحلة الحالية",
+      "stage": "المرحلة",
+      "hoursSinceUpdate": "ساعات منذ آخر تحديث",
+      "carrierAwb": "الناقل / البوليصة",
+      "service": "الخدمة",
+      "payment": "الدفع",
+      "assignedTo": "المسؤول",
+      "unassigned": "غير مسندة",
+      "eta": "التسليم المتوقع",
+      "packages": "الطرود",
+      "pieces": "القطع",
+      "actualWeight": "الوزن الفعلي",
+      "dimensionalWeight": "الوزن الحجمي",
+      "chargeableWeight": "الوزن المحتسب",
+      "money": "المبالغ",
+      "clientTotal": "إجمالي العميل",
+      "carrierCost": "تكلفة الناقل",
+      "extraCharges": "رسوم إضافية",
+      "margin": "الهامش",
+      "tasks": "قائمة المهام",
+      "notes": "الملاحظات",
+      "timeline": "السجل الزمني",
+      "special": "معالجة خاصة · {{priority}}",
+      "visibility": {
+        "INTERNAL": "داخلية",
+        "CLIENT": "للعميل"
+      }
+    },
+    "actions": {
+      "title": "الإجراءات",
+      "updateStatus": "تحديث الحالة",
+      "quoteDg": "تسعير البضائع الخطرة",
+      "extraCharges": "إضافة رسوم إضافية",
+      "receivedCheck": "فحص الاستلام",
+      "contactCarrier": "التواصل مع الناقل",
+      "contactClient": "التواصل مع العميل",
+      "resolveAttention": "حل المتابعة",
+      "escalate": "تصعيد للمعالجة الخاصة",
+      "resolveSpecial": "إنهاء المعالجة الخاصة",
+      "scan": "مسح البوليصة",
+      "addNote": "إضافة ملاحظة",
+      "assign": "إسناد إلى…",
+      "cancel": "إلغاء الشحنة"
+    },
+    "cancel": {
+      "title": "إلغاء الشحنة؟",
+      "message": "سيتم إلغاء {{tracking}} لدى الناقل وإنشاء طلب استرداد للعميل. لا يمكن التراجع عن ذلك.",
+      "keep": "إبقاء",
+      "confirm": "إلغاء الشحنة",
+      "success": "تم إلغاء الشحنة",
+      "error": "تعذر إلغاء الشحنة"
+    },
+    "statusSheet": {
+      "title": "تحديث الحالة",
+      "subtitle": "يغيّر ما يراه العميل، ويرسل له بريداً إذا كان القالب مفعّلاً.",
+      "newStatus": "الحالة الجديدة",
+      "note": "ملاحظة داخلية (اختياري)",
+      "notePlaceholder": "لا تظهر للعميل",
+      "emailClient": "إرسال بريد للعميل",
+      "emailClientHint": "يرسل تحديث شحنة العمليات",
+      "submit": "تحديث الحالة",
+      "success": "تم تحديث الحالة",
+      "error": "تعذر تحديث الحالة"
+    },
+    "chargesSheet": {
+      "title": "إضافة رسوم إضافية",
+      "subtitle": "يصدر فاتورة إضافية على العميل ويسجل جانب التكلفة.",
+      "unavailable": "يمكن إضافة الرسوم فقط لشحنات الباب إلى الباب المسعّرة بالوزن أو الحجم.",
+      "type": "النوع",
+      "types": {
+        "weight": "وزن إضافي",
+        "cost": "تكلفة إضافية",
+        "combined": "مجمّع"
+      },
+      "description": "وصف الرسوم",
+      "descriptionPlaceholder": "مثال: إعادة وزن عند المصدر — زيادة ٤٫٦ كجم",
+      "measured": "الكمية المقاسة الجديدة ({{unit}})",
+      "measuredHint": "حالياً {{current}} {{unit}} بسعر {{rate}} ريال للوحدة",
+      "clientSees": "ما يراه العميل",
+      "amount": "المبلغ (ريال)",
+      "carrierCost": "تكلفة الناقل (اختياري)",
+      "costAmount": "مبلغ التكلفة (ريال)",
+      "carrierCostDefault": "رسوم إضافية من الناقل",
+      "weightCharge": "رسوم الوزن الإضافي",
+      "customCharge": "رسوم التكلفة الإضافية",
+      "margin": "الهامش على هذه الرسوم",
+      "clientPays": "المبلغ على العميل",
+      "taxNote": "المبالغ قبل الضريبة — تُطبّق الضريبة في الفاتورة.",
+      "submit": "إضافة الرسوم",
+      "success": "تمت إضافة الرسوم",
+      "error": "تعذرت إضافة الرسوم",
+      "errors": {
+        "quantity": "أدخل الكمية المقاسة الجديدة",
+        "description": "صف الرسوم (٣ أحرف على الأقل)",
+        "amount": "أدخل المبلغ الذي يدفعه العميل"
+      }
+    },
+    "contactSheet": {
+      "title": "التواصل مع العميل",
+      "subtitle": "اختر القناة والرسالة. يتم تسجيل كل إرسال على الشحنة.",
+      "channel": "القناة",
+      "channels": {
+        "email": "البريد",
+        "whatsapp": "واتساب"
+      },
+      "message": "الرسالة",
+      "templates": {
+        "payment": {
+          "title": "طلب دفع",
+          "subtitle": "يطلب الرصيد غير المدفوع"
+        },
+        "delay": {
+          "title": "إشعار تأخير",
+          "subtitle": "اعتذار وتوضيح"
+        },
+        "customs": {
+          "title": "إجراء جمركي مطلوب",
+          "subtitle": "متابعة جمركية"
+        },
+        "delivery": {
+          "title": "خرجت للتوصيل",
+          "subtitle": "تنبيه بالتوصيل"
+        },
+        "update": {
+          "title": "تحديث عام",
+          "subtitle": "ملاحظة سريعة عن الحالة"
+        },
+        "custom": {
+          "title": "رسالة مخصصة",
+          "subtitle": "اكتب رسالتك"
+        }
+      },
+      "messages": {
+        "payment": "Hello {{name}}, shipment {{tracking}} is ready for payment. Please review the invoice and complete payment so we can move to the next operational step.",
+        "update": "Hello {{name}}, here is a quick update on your shipment {{tracking}}. Our operations team is following it closely and will keep you posted.",
+        "delay": "Hello {{name}}, we are sorry for the delay on shipment {{tracking}}. Our team is actively following up and will update you as soon as we have the next milestone.",
+        "customs": "Hello {{name}}, shipment {{tracking}} currently requires customs-related follow-up. We will notify you right away if any action is needed from your side.",
+        "delivery": "Hello {{name}}, shipment {{tracking}} is moving toward delivery. Please keep your phone available for the delivery team."
+      },
+      "messagePlaceholder": "اكتب الرسالة",
+      "send": "إرسال",
+      "sent": "تم إرسال الرسالة",
+      "logged": "تم تسجيل الرسالة",
+      "error": "تعذر إرسال الرسالة"
+    },
+    "escalateSheet": {
+      "title": "تصعيد للمعالجة الخاصة",
+      "subtitle": "ينقل الشحنة إلى قائمة المعالجة الخاصة.",
+      "priority": "الأولوية",
+      "reason": "السبب",
+      "reasonPlaceholder": "ما الذي يحتاج معالجة خاصة؟",
+      "submit": "تصعيد",
+      "success": "تم التصعيد",
+      "error": "تعذر التصعيد"
+    },
+    "textSheet": {
+      "note": {
+        "title": "إضافة ملاحظة",
+        "subtitle": "تُحفظ في سجل الشحنة.",
+        "visibility": "مرئية لـ",
+        "internal": "داخلية",
+        "client": "العميل",
+        "label": "الملاحظة",
+        "placeholder": "اكتب ملاحظة",
+        "submit": "حفظ الملاحظة",
+        "success": "تم حفظ الملاحظة",
+        "error": "تعذر حفظ الملاحظة"
+      },
+      "resolveAttention": {
+        "title": "حل المتابعة",
+        "subtitle": "يغلق كل التنبيهات المفتوحة على هذه الشحنة.",
+        "label": "ملاحظة الحل (اختياري)",
+        "placeholder": "ما الذي تم؟",
+        "submit": "حل",
+        "success": "تم حل المتابعة",
+        "error": "تعذر الحل"
+      },
+      "resolveSpecial": {
+        "title": "إنهاء المعالجة الخاصة",
+        "subtitle": "يخرج الشحنة من المعالجة الخاصة.",
+        "label": "ملاحظة الحل (اختياري)",
+        "placeholder": "ما الذي تم؟",
+        "submit": "إنهاء",
+        "success": "تم إنهاء المعالجة الخاصة",
+        "error": "تعذر الإنهاء"
+      }
+    },
+    "assignSheet": {
+      "title": "إسناد إلى…",
+      "subtitle": "اختر موظف عمليات أو أكثر.",
+      "empty": "لا يوجد موظفو عمليات متاحون للإسناد.",
+      "submit": "إسناد",
+      "success": "تم تحديث الإسناد",
+      "error": "تعذر الإسناد"
+    },
+    "carrierSheet": {
+      "title": "التواصل مع {{carrier}}",
+      "none": "لا توجد بيانات تواصل للناقل.",
+      "phone": "الهاتف",
+      "whatsapp": "واتساب",
+      "email": "البريد"
+    },
+    "dgSheet": {
+      "title": "تسعير هذه الشحنة",
+      "subtitle": "يطبّق الخادم الهامش والضريبة وفق قواعد التسعير.",
+      "carrier": "الناقل",
+      "carrierCost": "تكلفة الناقل (ريال)",
+      "validFor": "صلاحية العرض",
+      "validity": {
+        "24": "٢٤ ساعة",
+        "48": "٤٨ ساعة",
+        "72": "٧٢ ساعة",
+        "168": "٧ أيام"
+      },
+      "note": "ملاحظة (اختياري)",
+      "notePlaceholder": "تظهر مع العرض",
+      "pricingHint": "يُحسب سعر العميل بعد إرسال العرض.",
+      "submit": "إرسال العرض",
+      "done": "تم",
+      "success": "تم إرسال العرض",
+      "error": "تعذر إرسال العرض",
+      "carrierCostLabel": "تكلفة الناقل",
+      "margin": "الهامش",
+      "vat": "ضريبة القيمة المضافة",
+      "clientTotal": "يدفع العميل"
+    },
+    "received": {
+      "title": "فحص الاستلام",
+      "documents": "فحص المستندات",
+      "documentsOptions": {
+        "complete": "مكتملة",
+        "missing": "ناقصة",
+        "correction_needed": "تحتاج تصحيح"
+      },
+      "packaging": "التغليف",
+      "packagingOptions": {
+        "sealed_good": "مغلق / سليم",
+        "repacked": "أعيد تغليفه",
+        "damaged": "تالف"
+      },
+      "damage": "فحص التلف",
+      "damageOptions": {
+        "clear": "سليم",
+        "minor": "بسيط",
+        "major": "كبير"
+      },
+      "quantity": "الكمية المستلمة",
+      "pieces": "قطعة",
+      "piecesPlaceholder": "القطع",
+      "quantityOptions": {
+        "matched": "مطابقة",
+        "mismatch": "غير مطابقة"
+      },
+      "photos": "الصور",
+      "photosAttached_one": "{{count}} مرفقة",
+      "photosAttached_other": "{{count}} مرفقة",
+      "photosHint": "اضغط مطولاً على الصورة لحذفها.",
+      "note": "ملاحظة داخلية",
+      "notePlaceholder": "مثال: كرتونتان متضررتان أثناء النقل، المحتويات سليمة.",
+      "save": "حفظ الفحص",
+      "success": "تم حفظ فحص الاستلام",
+      "flagged": "تم تسجيل مشكلة فحص جودة على هذه الشحنة",
+      "error": "تعذر حفظ الفحص",
+      "uploadError": "فشل رفع الصورة",
+      "errors": {
+        "pieces": "أدخل عدد القطع المستلمة",
+        "checks": "أكمل جميع الفحوصات قبل الحفظ"
+      }
+    },
+    "scan": {
+      "title": "مسح البوليصة",
+      "subtitle": "وجّه الكاميرا نحو باركود الناقل أو ملصق EZH",
+      "placeholder": "رقم البوليصة أو EZH…",
+      "notFound": "لا توجد شحنة بهذا الرقم",
+      "noMatch": "لا تطابق",
+      "found": "موجودة",
+      "open": "فتح الشحنة",
+      "permission": "نحتاج إذن الكاميرا لمسح البوالص.",
+      "allowCamera": "السماح بالكاميرا",
+      "openSettings": "فتح الإعدادات",
+      "enterManually": "إدخال الرقم يدوياً",
+      "scanAgain": "مسح مرة أخرى"
+    },
+    "filters": {
+      "any": "الكل",
+      "clear": "مسح",
+      "keys": {
+        "method": "الطريقة",
+        "origin": "المصدر",
+        "payment": "الدفع",
+        "carrier": "الناقل",
+        "type": "النوع",
+        "stale": "متوقفة"
+      },
+      "payment": {
+        "paid": "مدفوعة",
+        "unpaid": "غير مدفوعة"
+      },
+      "type": {
+        "import": "استيراد",
+        "export": "تصدير"
+      },
+      "methods": {
+        "door_to_door": "من الباب إلى الباب",
+        "dangerous_goods": "بضائع خطرة",
+        "express_export": "تصدير سريع",
+        "express_import": "استيراد سريع"
+      },
+      "staleHours": "{{hours}}+ ساعة"
+    }
   }
 }

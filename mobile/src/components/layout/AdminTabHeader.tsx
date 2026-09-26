@@ -23,9 +23,18 @@ interface AdminTabHeaderProps {
   onBackPress?: () => void;
   /** Extra screen-specific buttons (e.g. "create"), rendered before search/notifications. */
   actions?: ReactNode;
+  /** Drops the search/notifications shortcuts — for screens whose header only wants `actions`. */
+  hideShortcuts?: boolean;
 }
 
-export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress, actions }: AdminTabHeaderProps) {
+export function AdminTabHeader({
+  title,
+  subtitle,
+  onMenuPress,
+  onBackPress,
+  actions,
+  hideShortcuts,
+}: AdminTabHeaderProps) {
   const { displayName, roleLabel } = useAdminIdentity();
   const { unreadCount } = useNotifications();
   const isBack = !!onBackPress;
@@ -38,7 +47,13 @@ export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress, acti
         hitSlop={rs(8)}
       >
         <Ionicons
-          name={isBack ? (I18nManager.isRTL ? "chevron-forward" : "chevron-back") : "menu"}
+          name={
+            isBack
+              ? I18nManager.isRTL
+                ? "chevron-forward"
+                : "chevron-back"
+              : "menu"
+          }
           size={rs(20)}
           color={Colors.text}
         />
@@ -55,32 +70,40 @@ export function AdminTabHeader({ title, subtitle, onMenuPress, onBackPress, acti
 
       {actions}
 
-      <Pressable
-        style={styles.iconButton}
-        onPress={() => router.push("/(protected)/(admin)/search")}
-        hitSlop={rs(8)}
-      >
-        <Ionicons name="search" size={rs(19)} color={Colors.text} />
-      </Pressable>
+      {!hideShortcuts && (
+        <>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push("/(protected)/(admin)/search")}
+            hitSlop={rs(8)}
+          >
+            <Ionicons name="search" size={rs(19)} color={Colors.text} />
+          </Pressable>
 
-      <Pressable
-        style={styles.iconButton}
-        onPress={() => router.push("/(protected)/(admin)/notifications")}
-        hitSlop={rs(8)}
-      >
-        <Ionicons
-          name="notifications-outline"
-          size={rs(19)}
-          color={Colors.text}
-        />
-        {unreadCount > 0 && (
-          <View style={styles.notificationBadge}>
-            <Text size="xs" weight="bold" style={styles.notificationBadgeText}>
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </Text>
-          </View>
-        )}
-      </Pressable>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => router.push("/(protected)/(admin)/notifications")}
+            hitSlop={rs(8)}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={rs(19)}
+              color={Colors.text}
+            />
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text
+                  size="xs"
+                  weight="bold"
+                  style={styles.notificationBadgeText}
+                >
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }
@@ -90,6 +113,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: rvs(18),
+    paddingTop: rvs(16),
   },
   iconButton: {
     width: rs(38),

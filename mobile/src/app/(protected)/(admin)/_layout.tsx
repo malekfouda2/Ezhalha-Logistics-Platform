@@ -26,6 +26,11 @@ export default function AdminLayout() {
       <Stack.Screen name="client/account-managers" options={{ title: "Account Managers" }} />
       <Stack.Screen name="applications/index" options={{ title: "Client Applications" }} />
       <Stack.Screen name="applications/[id]" options={{ title: "Application Details" }} />
+      <Stack.Screen name="operations-hub/index" options={{ title: "Operations Hub" }} />
+      <Stack.Screen name="operations-hub/queue/[view]" options={{ title: "Operations Queue" }} />
+      <Stack.Screen name="operations-hub/shipment/[id]" options={{ title: "Operations Shipment" }} />
+      <Stack.Screen name="operations-hub/received-check/[id]" options={{ title: "Received Check" }} />
+      <Stack.Screen name="operations-hub/scan" options={{ title: "Scan Waybill" }} />
       <Stack.Screen name="performance" options={{ title: "Performance" }} />
       <Stack.Screen name="search" options={{ title: "Search" }} />
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />

@@ -19,6 +19,7 @@ import { useAdminAccess } from "@/lib/hooks/useAdminAccess";
 import { useAdminDashboard } from "@/lib/hooks/useAdminDashboard";
 import { useAdminMoreSummary } from "@/lib/hooks/useAdminMoreSummary";
 import { useAdminNavAction } from "@/lib/hooks/useAdminNavAction";
+import { useOperationsSummary } from "@/lib/hooks/useAdminOperations";
 import { useLogout } from "@/lib/hooks/useLogout";
 import { useLanguageStore } from "@/store/useLanguageStore";
 
@@ -56,6 +57,7 @@ export default function AdminMoreScreen() {
     hasAllPermissions,
     myTasksCount,
   } = useAdminMoreSummary();
+  const { data: operationsSummary } = useOperationsSummary();
   const navAction = useAdminNavAction();
   const { logout } = useLogout();
   const language = useLanguageStore((state) => state.language);
@@ -87,6 +89,13 @@ export default function AdminMoreScreen() {
       case "access-control":
         return rolesCount !== undefined && permissionsCatalogCount !== undefined
           ? t("admin.more.accessControl.subtitle", { roles: rolesCount, permissions: permissionsCatalogCount })
+          : undefined;
+      case "operations":
+        return operationsSummary
+          ? t("adminOperations.hub.subtitle", {
+              open: operationsSummary.expressCount + operationsSummary.ddpCount + operationsSummary.localCount,
+              attention: operationsSummary.attentionCount,
+            })
           : undefined;
       case "tasks":
         return myTasksCount !== undefined
